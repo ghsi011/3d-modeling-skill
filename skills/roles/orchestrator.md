@@ -70,11 +70,11 @@ A dispatch spawns a subagent and gives it three things, in this order:
    verifier told what to conclude has stopped being a verifier.
 
 If the host registers named specialist agents (`3d-verifier` and friends, generated from the
-same role sources into `.claude/agents/` and `.opencode/agents/`), dispatching by name is
-equivalent and preferred — the role file and the agent definition are two renderings of one
-source. Where the host has neither, a plain subagent pointed at the role file is the fallback,
-and the pipeline's guarantees are unchanged: they rest on fresh contexts reading contracts
-from disk, not on how the context was named.
+same role sources into `.claude/agents/`), dispatching by name is equivalent — the role file
+and the agent definition are two renderings of one source. Where the host has no such
+registry, a plain subagent pointed at the role file is the whole mechanism, and the
+pipeline's guarantees are unchanged: they rest on fresh contexts reading contracts from
+disk, not on how the context was named.
 
 ## Required reading
 

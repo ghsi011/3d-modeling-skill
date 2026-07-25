@@ -514,9 +514,7 @@ Install the MCP extra before registering the bridge:
 pip install -e ".[mcp]"
 ```
 
-OpenCode registration is generated into root `opencode.json` as the
-`3d-modeling-tools` local server. For Claude Code, register the same stdio
-server from the repository root with this one-liner:
+Register the stdio server from the repository root with this one-liner:
 
 ```bash
 claude mcp add 3d-modeling-tools -- python tools/mcp_server.py
@@ -567,9 +565,8 @@ Inputs:
 
 Outputs:
 
-* Without `--check`, writes generated Claude agent files, role skill files,
-  OpenCode agent/config files, and generic OpenAI YAML files, then prints the
-  count written.
+* Without `--check`, writes the skill tree (`skills/3d-modeling/SKILL.md` and
+  `roles/*.md`) plus the Claude agent files, then prints the count written.
 * With `--check`, writes nothing. It prints `OK` and a file count if generated
   content matches disk, or prints mismatched paths to stderr.
 

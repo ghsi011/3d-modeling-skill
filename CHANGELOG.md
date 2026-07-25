@@ -6,6 +6,19 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Removed — the per-harness packaging layer
+
+The OpenCode and generic/OpenAI outputs, their generators, their tests, and
+`docs/harness-matrix.md` are gone (−1,065 lines, 12 files). Once the pipeline
+ships as one skill whose orchestrator dispatches by pointing a subagent at
+`roles/<name>.md`, per-harness agent registration buys nothing a file read does
+not: any runtime that can spawn a subagent and read a file runs the pipeline
+unchanged. `PyYAML` went with them — nothing imports `yaml` any more.
+
+`.claude/agents/` is still generated, because it is what makes
+`claude --agent 3d-verifier` and `@`-mentioning a specialist work; the role file
+and the agent definition remain two renderings of one source in `skills/roles/`.
+
 ### Changed — one skill, not five
 
 The five role slices shipped as five installable skills that reached each other

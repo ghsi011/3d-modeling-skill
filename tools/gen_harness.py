@@ -15,14 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TypeAlias
 
-if __package__:
-    from .gen_harness_openai import render_openai_files
-    from .gen_harness_opencode import render_opencode_files
-else:
-    from gen_harness_openai import render_openai_files
-    from gen_harness_opencode import render_opencode_files
-
-
 ROOT: Final = Path(__file__).resolve().parents[1]
 ROLE_DIR: Final = ROOT / "skills" / "roles"
 
@@ -279,8 +271,6 @@ def generate(roles: tuple[Role, ...]) -> tuple[GeneratedFile, ...]:
     for role in roles:
         files.append(render_agent(role))
         files.append(render_skill(role))
-    files.extend(GeneratedFile(file.path, file.content) for file in render_opencode_files(ROOT, roles))
-    files.extend(GeneratedFile(file.path, file.content) for file in render_openai_files(ROOT, roles))
     return tuple(files)
 
 
