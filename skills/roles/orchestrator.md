@@ -4,7 +4,7 @@ source: skills/3d-modeling/SKILL.md
 agent_description: Routes 3D jobs and governs the five-role file-contract pipeline. Use as the top-level agent for fit-critical or multi-part modeling work.
 skill_description: Route and govern 3D-printable modeling jobs. Use for new modeling or print-prep requests to run the five-role file-contract pipeline, enforce phase gates, dispatch specialists, maintain job state, and deliver verified artifacts without authoring geometry.
 agent_body: |-
-  Run the `3d-orchestrator` skill exactly. Own state, gates, dispatch, user questions,
+  Load the `3d-modeling` skill and follow it exactly. Own state, gates, dispatch, user questions,
   housekeeping, and delivery; never author geometry. Require every specialist to re-read the
   contract files and source evidence from disk rather than relying on a chat summary.
 

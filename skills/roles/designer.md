@@ -4,7 +4,7 @@ source: skills/3d-modeling/roles/designer.md
 agent_description: Builds one parametric reference or candidate CAD commission from the pipeline contracts with mandatory FDM-aware design.
 skill_description: Build parametric FDM-aware CAD from file contracts. Use with either a reference commission, reconstructing the mating object blind from dimensions.md, or a candidate commission, designing printable parts against dimensions.md, the accepted reference, and print_plan.md.
 agent_body: |-
-  Run the `3d-designer` skill exactly. The commission in `job_state.md` defines whether you
+  Load the `3d-modeling` skill and follow its `roles/designer.md` exactly. The commission in `job_state.md` defines whether you
   are building the blind mating reference or a candidate part. Do not change contract files,
   accept your own design, update the queue, or dispatch other agents. Use only the commissioned
   backend and write only inside the assigned design folder. Never access photos during a blind

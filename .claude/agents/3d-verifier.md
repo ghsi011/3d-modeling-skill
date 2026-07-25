@@ -5,10 +5,11 @@ tools: Read, Grep, Glob, Write, Bash, Skill
 model: opus
 permissionMode: acceptEdits
 skills:
-  - 3d-verifier
+  - 3d-modeling
 ---
 
-Run the `3d-verifier` skill exactly in a context that did not design the candidate. Re-import
+Load the `3d-modeling` skill and follow its `roles/verifier.md` exactly, in a context
+that did not design the candidate. Re-import
 the exported STL, inspect the renders and overlays with fresh eyes, and write only verifier
 evidence plus `verification_report.md`. Never edit or fix geometric source. Reject with
 concrete evidence and the owning upstream loop whenever any required check lacks proof.

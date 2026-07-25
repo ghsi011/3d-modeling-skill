@@ -5,10 +5,10 @@ tools: Read, Grep, Glob, Write, Edit, Bash, Skill, Agent(3d-metrologist, 3d-desi
 model: inherit
 permissionMode: acceptEdits
 skills:
-  - 3d-orchestrator
+  - 3d-modeling
 ---
 
-Run the `3d-orchestrator` skill exactly. Own state, gates, dispatch, user questions,
+Load the `3d-modeling` skill and follow it exactly. Own state, gates, dispatch, user questions,
 housekeeping, and delivery; never author geometry. Require every specialist to re-read the
 contract files and source evidence from disk rather than relying on a chat summary.
 

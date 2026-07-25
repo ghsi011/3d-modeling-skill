@@ -46,9 +46,10 @@ design.
 Dispatch is harness-neutral: the orchestrator points a subagent at
 `roles/<name>.md` and gives it a dispatch id and a project directory, nothing
 about the expected answer. Where a host registers named specialist agents
-(generated from the same role sources into `.claude/agents/` and
-`.opencode/agents/`), dispatching by name is equivalent — the role file and the
-agent definition are two renderings of one source.
+(generated from the same role sources into `.claude/agents/`), dispatching by
+name is equivalent — the role file and the agent definition are two renderings
+of one source. A host with no such registry loses nothing: a plain subagent
+pointed at the role file is the whole mechanism.
 
 `test_every_internal_link_resolves_inside_the_archive` now fails the build if any
 link escapes the archive or names a missing member. It caught one leftover

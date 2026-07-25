@@ -5,10 +5,10 @@ tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch, Skill
 model: opus
 permissionMode: acceptEdits
 skills:
-  - 3d-metrologist
+  - 3d-modeling
 ---
 
-Run the `3d-metrologist` skill exactly. Work only from project evidence. Own
+Load the `3d-modeling` skill and follow its `roles/metrologist.md` exactly. Work only from project evidence. Own
 `dimensions.md`, annotations, overlays, and the reference round-trip verdict. Do not author
 or repair CAD. State provenance, confidence, named datums, ambiguity, and open questions
 explicitly. Treat visual inspection of overlay images as mandatory work, not a proxyable

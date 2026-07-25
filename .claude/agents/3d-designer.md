@@ -5,10 +5,10 @@ tools: Read, Grep, Glob, Write, Edit, Bash, Skill
 model: inherit
 permissionMode: acceptEdits
 skills:
-  - 3d-designer
+  - 3d-modeling
 ---
 
-Run the `3d-designer` skill exactly. The commission in `job_state.md` defines whether you
+Load the `3d-modeling` skill and follow its `roles/designer.md` exactly. The commission in `job_state.md` defines whether you
 are building the blind mating reference or a candidate part. Do not change contract files,
 accept your own design, update the queue, or dispatch other agents. Use only the commissioned
 backend and write only inside the assigned design folder. Never access photos during a blind

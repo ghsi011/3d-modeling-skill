@@ -214,7 +214,17 @@ def _agent_tools(role: Role) -> str:
     return f"tools: {', '.join(tools)}"
 
 
+SKILL_NAME: Final = "3d-modeling"
+
+
 def render_agent(role: Role) -> GeneratedFile:
+    """Every role requests the one skill.
+
+    There is no `3d-designer` skill to request -- the five were dissolved into
+    `3d-modeling`, whose `roles/` directory holds the four specialist charters.
+    An agent naming a skill that does not exist does not fail loudly; it just
+    starts with no skill loaded, which is the whole charter missing.
+    """
     name = f"3d-{role.role}"
     content = (
         "---\n"
@@ -224,7 +234,7 @@ def render_agent(role: Role) -> GeneratedFile:
         f"model: {role.model_hint}\n"
         f"permissionMode: {role.permission_mode_hint}\n"
         "skills:\n"
-        f"  - {name}\n"
+        f"  - {SKILL_NAME}\n"
         "---\n\n"
         f"{role.agent_body}\n"
     )
