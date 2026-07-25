@@ -1,7 +1,7 @@
 ---
 name: 3d-designer
 description: Builds one parametric reference or candidate CAD commission from the pipeline contracts with mandatory FDM-aware design.
-disallowedTools: Agent
+tools: Read, Grep, Glob, Write, Edit, Bash, Skill
 model: inherit
 permissionMode: acceptEdits
 skills:

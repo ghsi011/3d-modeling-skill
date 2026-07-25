@@ -45,8 +45,11 @@ render-over-photo overlays.
 ## Required reading
 
 1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
-   `dimensions.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+   the `dimensions.md` schema, plus the normative rules above it — the confidence-grade
+   domain (`A`/`B`/`C`/`D`) your own table needs, and the hash-binding rule. That rule is
+   why every evidence path you cite must resolve on disk and be hashed from bytes: a sheet
+   citing a file that does not exist validates clean.
+10. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
    datum discipline, render/overlay, inspection, and image-alignment patterns only.
 3. Use the shared overlay tools at
    [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
@@ -55,7 +58,21 @@ render-over-photo overlays.
 
 ## Checklist
 
-1. Preserve original images and inspect them at useful zoom; annotate which visible edge
+1. Triage before reading. One phone photograph can cost as much context as the whole
+   runtime contract, and reading a set one file at a time is the single largest cost in
+   this role. Start with a contact sheet, decide from it which images carry a readable
+   dimension, and open only those:
+
+   ```bash
+   python ../3d-modeling/scripts/crop_evidence.py contact-sheet evidence/*.jpg --out sheet.jpg
+   python ../3d-modeling/scripts/crop_evidence.py crop evidence/x.jpg --box 0.3 0.4 0.62 0.58 --out read1.jpg
+   python ../3d-modeling/scripts/crop_evidence.py rotations evidence/x.jpg --out turns.jpg   # when a display is ambiguous
+   ```
+
+   Crops are capped and saved as JPEG deliberately: images are downsampled before you see
+   them, so upscaling a crop buys no legibility and costs real tokens. `rotations` answers
+   "which way is up" in one read rather than four.
+2. Preserve the originals and inspect the crops that matter. Annotate which visible edge
    corresponds to which feature. Note **where the caliper jaws sit**: an overall-envelope
    dimension must be read clear of raised features — a read taken across or beside a button,
    camera bar, corner radius or lip is biased and is evidence for that local feature, not the

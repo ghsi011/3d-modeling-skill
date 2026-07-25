@@ -187,8 +187,14 @@ def load_roles(role_dir: Path = ROLE_DIR) -> tuple[Role, ...]:
 
 
 def _agent_tools(role: Role) -> str:
-    if role.role == "designer" and not role.can_spawn:
-        return "disallowedTools: Agent"
+    """Always an allowlist, never a deny-list.
+
+    A deny-list admits every tool it does not name, including the host's whole
+    MCP surface. The designer used to carry one, and paid ~16k tokens of unused
+    tool definitions at turn one -- re-billed on all 256 turns of its longest
+    measured run, which is more than that run spent on required reading. An
+    allowlist that omits `Agent` denies spawning just as effectively.
+    """
     tools: list[str] = []
     if role.reads_files:
         tools.extend(["Read", "Grep", "Glob"])
