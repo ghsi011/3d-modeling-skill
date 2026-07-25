@@ -262,7 +262,8 @@ class CliTest(unittest.TestCase):
             completed = subprocess.run(
                 [sys.executable, "-m", "designer_toolkit.commission",
                  "--stl", str(stl), "--plan", str(plan_path),
-                 "--out", str(work / "out"), "--no-render"],
+                 "--out", str(work / "out"), "--no-render",
+                 "--updated-utc", "2026-01-01T00:00:00Z"],
                 cwd=_SCRIPTS, capture_output=True, text=True, check=False,
             )
 

@@ -402,6 +402,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="output directory")
     parser.add_argument("--reference", help="mating reference mesh for the fit check")
     parser.add_argument("--no-render", action="store_true")
+    parser.add_argument("--job-id", default="job",
+                        help="job_id stamped into the emitted receipts")
+    parser.add_argument("--candidate-id", default="candidate-01")
+    parser.add_argument("--updated-utc", required=True,
+                        help="ISO-8601 timestamp for the receipts; passed in, never "
+                             "wall-clock, so a rerun on unchanged inputs is byte-identical")
+    parser.add_argument("--no-receipts", action="store_true",
+                        help="skip artifact_manifest.json / candidate_readiness.md")
     args = parser.parse_args(argv)
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
@@ -409,6 +417,10 @@ def main(argv: list[str] | None = None) -> int:
                      reference=args.reference, render=not args.no_render)
 
     payload = commission.as_dict()
+    if not args.no_receipts:
+        from . import receipts
+        receipts.write(payload, args.out, job_id=args.job_id,
+                       candidate_id=args.candidate_id, updated_utc=args.updated_utc)
     sys.stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
     for check in commission.failed:
         sys.stderr.write(f"FAIL {check.id}: {check.detail}\n      -> {check.action}\n")

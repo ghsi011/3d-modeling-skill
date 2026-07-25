@@ -98,25 +98,33 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 7. Verify with one call and iterate until it exits zero:
 
    ```bash
-   python -m designer_toolkit commission --model model.py --plan print_plan_checks.json        --out . [--reference mating.stl]
+   python -m designer_toolkit commission --model model.py --plan print_plan_checks.json        --out . --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
    ```
 
-   It exports, re-imports, searches every candidate orientation, and measures the whole
-   deterministic set — single watertight solid, overall size against the plan's declared
-   envelope, downward-facing area in the best placement it can find, declared interface
-   fit, and every plan-named edge — then writes `commission.json` and exits non-zero if
-   anything failed. Each failure names its next action. **Do not write a verification
-   script**: the numbers are a deterministic function of the exported mesh, and a
-   hand-rolled copy drifts from the mesh it claims to describe.
+   It exports, re-imports, and measures the whole deterministic set — single watertight
+   solid, overall size against the plan's declared envelope, downward-facing area for
+   *every* support rule in the orientation that rule declares, the seated per-side
+   clearance against each declared interface band, and every plan-named edge — then
+   writes `commission.json` and exits non-zero if anything failed. Each failure names its
+   next action. It also writes `artifact_manifest.json` and `candidate_readiness.md` from
+   those same measurements, so step 9 is a check, not an authoring job.
+
+   **Do not write a verification script**, and do not retype its numbers into a receipt:
+   they are a deterministic function of the exported mesh, and a hand-rolled copy drifts
+   from the mesh it claims to describe. That is not hypothetical — one archived run's
+   hand-written receipt described a mesh it was no longer shipping.
+
+   Pass `--updated-utc` explicitly; the receipts never read the wall clock, so a rerun on
+   unchanged inputs is byte-identical.
 8. Fix what it reports, in the geometry. Never by widening a limit: a threshold you
    authored after seeing the measurement is a receipt, not a gate. If you believe a limit
    is genuinely wrong, say so in your handoff and leave it to the print engineer — that
    number is theirs, not yours.
-9. Write `candidate_readiness.md` and `artifact_manifest.json`, then confirm the manifest
-   with `python -m team_tools.contracts validate <project-dir> --require artifact_manifest`
-   (recomputed hashes, bbox, component count, and the hard 25.4x unit-scale gate). List
-   every evidence file you produced as a manifest row — an artifact nothing hashes can
-   silently describe a mesh you no longer ship.
+9. Confirm the emitted manifest with
+   `python -m team_tools.contracts validate <project-dir> --require artifact_manifest`
+   (recomputed hashes, bbox, component count, and the hard 25.4x unit-scale gate). Add a
+   manifest row for any evidence file you produced outside the commission — an artifact
+   nothing hashes can silently describe a mesh you no longer ship.
 10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
    judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
    look) and `fit_band_ok`. Never claim the Phase-4 gate passed.
