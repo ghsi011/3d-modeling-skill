@@ -417,9 +417,9 @@ The verifier treats a failed `python -m team_tools.contracts validate` (non-zero
 reject of the candidate's exported artifacts, distinct from the seven geometric checks. In
 particular, any `UNIT_SCALE_MISMATCH` is a hard `UNIT_SCALE` reject — never downgrade it to a
 note-and-pass — recorded as a defect owned by `CANDIDATE_BUILD`. A zero exit is **not** the
-converse proof: a missing contract file is only a `MISSING_CONTRACT_FILE` warning, so an empty
-project directory validates `PASS` with exit `0` and an empty `validated_paths`. The verifier
-must therefore name what the phase requires:
+converse proof: an absent contract is silent, so an empty project directory validates `PASS`
+with exit `0` and an empty `validated_paths`. The verifier must therefore name what the phase
+requires:
 
 ```bash
 python -m team_tools.contracts validate <project-dir> --require all

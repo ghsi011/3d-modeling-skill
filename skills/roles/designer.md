@@ -58,18 +58,20 @@ the contracts.
 Read exactly one backend pattern file plus mandatory FDM guidance:
 
 1. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
-2. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-3. Always: [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
-4. Only when the part uses a standard mechanism:
+2. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
+   — read alongside the CadQuery patterns, which own everything downstream of the export.
+3. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+4. Always: [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
+5. Only when the part uses a standard mechanism:
    [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
-5. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+6. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
    `candidate_readiness.md` only.
-6. Shared deterministic gate:
+7. Shared deterministic gate:
    [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
-7. Shared artifact-manifest validator:
+8. Shared artifact-manifest validator:
    [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
-8. Shared design/verify toolkit — **call it, do not re-author the patterns**:
+9. Shared design/verify toolkit — **call it, do not re-author the patterns**:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
    (`export_and_hash`, `measure`, `datum_features`, `overhang_area`, `interference`,
    `insertion_sweep`, `fit_coupon`, `finalize`, and `python -m designer_toolkit`).
@@ -111,8 +113,8 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    `team_preflight.py support-audit` for every support rule and `validate-receipts` for the
    complete Edge ID/support-rule sets, plus `python -m team_tools.contracts validate
    <project-dir> --require artifact_manifest` for the manifest (hash/bbox/component-count
-   checks and the hard 25.4x unit-scale gate; without `--require` an absent manifest is only
-   a warning and still exits 0). Markdown readiness may say `READY` only when every shared validator exits
+   checks and the hard 25.4x unit-scale gate; without `--require` an absent manifest is
+   silent and still exits 0). Markdown readiness may say `READY` only when every shared validator exits
    zero and reports `PASS`. After a correction, rerun every row.
 10. Provide `verify.py` and `candidate_readiness.md` as useful designer evidence, but mark
    both `DESIGNER SELF-CHECK — NON-ACCEPTANCE`. Never claim the Phase-4 gate passed.
