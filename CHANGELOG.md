@@ -6,6 +6,59 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — test coverage where a promise was unverified
+
+Coverage audit found 85% over the statements the suite imported, but 2,670 lines
+across 11 modules touched by no test at all.
+
+- **`check_internal_links.py`** was a CI gate with zero tests — the same shape as
+  the drift gate that turned out to pass unconditionally. 7 tests; it also gained
+  a `root` parameter (it hardcoded the repo root, so it could not be pointed at a
+  fixture) and `.venv`/`dist`/`temp` exclusions, since a local virtualenv's package
+  READMEs are not ours to validate and can fail a run CI passes.
+- **`make_3mf.py`** writes a deliverable — a malformed 3MF is not a caught error
+  but a broken hand-off found at the printer. 5 tests over the OPC members a slicer
+  needs, the per-part component structure multi-colour depends on, geometry
+  round-tripping, and the non-watertight warning.
+- **`run_cadquery_model.py`**: 236 lines, no tests, and its published exit codes
+  (3 on timeout) were the least verified promises in the repo. 6 tests, all on the
+  core stack since the runner's logic is not CadQuery's.
+- **`python -m designer_toolkit`**: 7 smoke tests. The designer is told to call this
+  CLI rather than re-author the measurement patterns, so a broken subcommand sends
+  the role back to hand-rolling what the toolkit exists to prevent.
+- Coverage now reads 74% over 2,159 statements — a truer figure over a bigger base.
+  What remains uncovered needs a live GL context or a real Bambu Studio install.
+
+### Changed — one plan file can serve both gates
+
+`print_plan_checks.json` (team_preflight) and `print_plan.json` (team_tools) carried
+field-for-field identical edges and support rules, differing only in whether the
+version key was `schema_version` or `contract_version`. The contract asked the print
+engineer to maintain both and nothing compared them. `team_preflight` now accepts
+either name, verified by pointing it at team_tools' own example plan unmodified.
+
+### Fixed — benchmark-driven role corrections
+
+Roles were run blind against parts whose ground truth was withheld, then re-run with
+identical inputs after a single change (see AGENTS.md → *Changing a role*).
+
+- **Metrologist, rounded-edge envelopes.** It read a phone's width at "a flat region"
+  — but the widest section of a rounded part is at mid-thickness, so jaws on the
+  curved shoulder under-read width while the same curvature inflates thickness. The
+  delivered width error fell 1.66 mm → 0.36 and length 0.61 mm → 0.01, using 15%
+  fewer tokens. The re-run diagnosed the bias by name and resolved to the true
+  envelope instead of shipping the biased read.
+- **Metrologist, conflicts must ask.** The first run logged three caliper-vs-spec
+  conflicts as open questions and stalled at DRAFT without asking anyone. Both
+  sources are fallible, so neither wins on principle; a fit-critical conflict now
+  goes to the user with both values and the downstream effect. The re-run withheld
+  two ambiguous readings entirely rather than shipping one wrong by 2.84 mm.
+- **`fdm-design.md`, part-class wall thickness.** The "4 walls" structural default was
+  applied to a snap-on case, giving 2.03 mm walls where the real printed case uses
+  1.02 — +1.2 mm on width and thickness and ~46% material. That default is for a part
+  meant to be stiff and wrong for one meant to flex, and on a part that wraps a
+  mating object the wall is a dimension entering the envelope twice.
+
 ### Added — the gates enforce what the contract claims
 
 - **`R3_ACCEPTANCE_PROHIBITED`.** The contract says the pipeline must never mark a
