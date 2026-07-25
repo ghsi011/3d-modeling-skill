@@ -1,6 +1,6 @@
 """CLI for designer_toolkit.
 
-    python -m designer_toolkit doctor
+    python <skill>/scripts/dt.py doctor        # works from any directory
     python -m designer_toolkit commission --model model.py --plan plan.json --out .              --job-id <job> --updated-utc <iso8601>
     python -m designer_toolkit coupon --plan plan.json --out coupon.stl
 
@@ -52,6 +52,9 @@ def main(argv=None):
     if argv and argv[0] == "doctor":
         from .doctor import main as doctor_main
         raise SystemExit(doctor_main(argv[1:]))
+    if argv and argv[0] == "plan":
+        from .plan import main as plan_main
+        raise SystemExit(plan_main(argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="designer_toolkit",
@@ -65,6 +68,9 @@ def main(argv=None):
     sub.add_parser("doctor", add_help=False,
                    help="what this interpreter can do: backends, extras, and what "
                         "each missing one costs")
+    sub.add_parser("plan", add_help=False,
+                   help="template | check -- the built-in DIRECT plan, and the "
+                        "gate that rejects an unbuildable one before a build")
 
     c = sub.add_parser("coupon", help="multi-lane fit coupon from the plan's interfaces")
     c.add_argument("--plan", required=True)

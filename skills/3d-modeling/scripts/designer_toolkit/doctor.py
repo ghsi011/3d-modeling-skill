@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import pathlib
 import sys
 
 # module -> (what it unlocks, what stops working without it)
@@ -53,6 +54,8 @@ def report() -> dict:
     return {
         "python": sys.version.split()[0],
         "executable": sys.executable,
+        # The exact command to use, so it is never something to reconstruct.
+        "launcher": str(pathlib.Path(__file__).resolve().parent.parent / "dt.py"),
         "can_run_commission": not missing_required,
         "missing_required": missing_required,
         "cad_backends": backends,
@@ -76,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         sys.stdout.write(json.dumps(data, indent=2) + "\n")
     else:
-        sys.stdout.write(f"python {data['python']}\n{data['executable']}\n\n")
+        sys.stdout.write(f"python {data['python']}\n{data['executable']}\n")
+        sys.stdout.write(f"run the toolkit as: python {data['launcher']} <command>\n\n")
         for name, entry in data["capabilities"].items():
             mark = "yes" if entry["present"] else "NO "
             sys.stdout.write(f"  [{mark}] {name:<12} {entry['enables']}\n")

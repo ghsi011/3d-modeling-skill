@@ -43,20 +43,18 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    [`../references/mechanisms.md`](../references/mechanisms.md).
 6. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
    `candidate_readiness.md` only.
-7. Shared deterministic gate:
-   [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
-8. Shared artifact-manifest validator:
-   [`../scripts/team_tools/`](../scripts/team_tools/)
-   (`python -m team_tools.contracts validate <project-dir>`).
-9. Shared design/verify toolkit — **one call, not a menu**:
+7. Shared design/verify toolkit — **one call, not a menu**:
    [`../references/designer-toolkit.md`](../references/designer-toolkit.md).
-   `python -m designer_toolkit commission` is the deterministic gate and the only
-   entry point you need; `coupon` is the one genuinely separate deliverable.
+   `dt.py commission` is your deterministic gate and the only entry point you need;
+   `coupon` is the one genuinely separate deliverable. `team_preflight.py` and
+   `team_tools.contracts` are the **verifier's** independent cross-check, not yours —
+   running them here re-screens the mesh the gate just screened, on the same numbers,
+   and answers nothing new.
 
 ## Checklist
 
 1. Confirm commission, backend, output folder, units, named datums, tolerances, and contract
-   versions before modeling. Run `python -m designer_toolkit doctor` first: it names the
+   versions before modeling. Run `python <skill>/scripts/dt.py doctor` first: it names the
    interpreter, the CAD backends it has, and what each missing extra costs. One archived run
    spent turns discovering by trial which of several interpreters had a kernel, and another
    dropped a datum check on learning mid-build that its environment could not section.
@@ -87,8 +85,12 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 7. Verify with one call and iterate until it exits zero:
 
    ```bash
-   python -m designer_toolkit commission --model model.py --plan print_plan_checks.json        --out . --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
+   python <skill>/scripts/dt.py commission --model model.py        --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>        [--reference mating.stl]
    ```
+
+   Run it from your own project directory and give it relative paths; `dt.py` is
+   invoked by absolute path and needs no particular working directory. Ask
+   `dt.py doctor` for that path and for what this interpreter can do.
 
    It exports, re-imports, and measures the whole deterministic set — single watertight
    solid, overall size against the plan's declared envelope, downward-facing area for
@@ -109,11 +111,10 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    authored after seeing the measurement is a receipt, not a gate. If you believe a limit
    is genuinely wrong, say so in your handoff and leave it to the print engineer — that
    number is theirs, not yours.
-9. Confirm the emitted manifest with
-   `python -m team_tools.contracts validate <project-dir> --require artifact_manifest`
-   (recomputed hashes, bbox, component count, and the hard 25.4x unit-scale gate). Add a
-   manifest row for any evidence file you produced outside the commission — an artifact
-   nothing hashes can silently describe a mesh you no longer ship.
+9. Add a manifest row for any evidence file you produced outside the commission — an
+   artifact nothing hashes can silently describe a mesh you no longer ship. Do not re-validate
+   what the commission emitted: it is generated from the measurements and covered by test, and
+   the fresh verifier validates every contract anyway.
 10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
    judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
    look) and `fit_band_ok`. Never claim the Phase-4 gate passed.

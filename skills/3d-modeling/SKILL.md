@@ -138,7 +138,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    bound plan from the stated overall size (run from `skills/3d-modeling/scripts/`):
 
    ```bash
-   python -m designer_toolkit.plan template --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
+   python <skill>/scripts/dt.py plan template --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
    ```
 
    It emits `threshold_source: builtin-default`, requires self-support, declares an identity
@@ -169,7 +169,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    Whatever wrote it, gate the plan before dispatching anyone against it:
 
    ```bash
-   python -m designer_toolkit.plan check <project-dir>/print_plan_checks.json
+   python <skill>/scripts/dt.py plan check <project-dir>/print_plan_checks.json
    ```
 
    Require exit zero. It applies the conditions `validate-receipts` will apply to the finished

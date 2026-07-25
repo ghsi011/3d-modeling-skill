@@ -121,7 +121,11 @@ Exit codes:
 
 Module: [`skills/3d-modeling/scripts/team_tools/contracts.py`](../skills/3d-modeling/scripts/team_tools/contracts.py)
 
-Run from `skills/3d-modeling/scripts/`, or put that directory on `PYTHONPATH`.
+Invoke by absolute path from wherever the job is: `python <skill>/scripts/dt.py <command>`.
+It puts its own directory on `sys.path`, so command-line paths resolve against your working
+directory rather than the skill's. The module form (`python -m designer_toolkit ...`) still
+works but requires the working directory to be `skills/3d-modeling/scripts/`, which is what
+made every measured designer run write a shim instead.
 This package validates the v4 team contracts: the four Markdown ones through their
 frontmatter (identity, revision, binding hashes), and the JSON ones structurally.
 Passing it proves contract structure, identifiers, declared hashes, and revision
@@ -195,7 +199,7 @@ the output, timestamp, and `--json` flags.
 | `hash` | Contract and artifact SHA-256 values recomputed from the bytes on disk, never trusting a hash written into a contract. | A declared artifact hash differs from the bytes on disk. |
 | `status` | Each contract's revision, plus the downstream bindings that later revisions have made stale. | A row is `STALE`, `INVALIDATED`, or `UNREADABLE`. |
 
-## `python -m designer_toolkit`
+## `dt.py` — the toolkit launcher
 
 Module: [`skills/3d-modeling/scripts/designer_toolkit/__main__.py`](../skills/3d-modeling/scripts/designer_toolkit/__main__.py)
 
@@ -207,7 +211,7 @@ errors normally return `1` with a Python traceback.
 ### `commission`
 
 ```bash
-python -m designer_toolkit commission (--model model.py | --stl body.stl) --plan plan.json   --out DIR --job-id JOB --updated-utc ISO8601 [--reference ref.stl] [--no-render] [--no-receipts]
+python <skill>/scripts/dt.py commission (--model model.py | --stl body.stl) --plan plan.json   --out DIR --job-id JOB --updated-utc ISO8601 [--reference ref.stl] [--no-render] [--no-receipts]
 ```
 
 Inputs: a model module defining `part`/`build()` or an already-exported STL; the
@@ -228,7 +232,10 @@ of running the gate. The library functions remain importable for the rare direct
 ### `coupon`
 
 ```bash
-python -m designer_toolkit coupon --plan plan.json --out coupon.stl
+python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
+python <skill>/scripts/dt.py doctor
+python <skill>/scripts/dt.py plan template --bbox X Y Z --out print_plan_checks.json
+python <skill>/scripts/dt.py plan check print_plan_checks.json
 ```
 
 Inputs: plan JSON. The command accepts either a JSON object with `interfaces` or

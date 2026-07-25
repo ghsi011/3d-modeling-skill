@@ -10,17 +10,25 @@ Runs from `skills/3d-modeling/scripts/`.
 ## Before anything
 
 ```bash
-python -m designer_toolkit doctor
+python <skill>/scripts/dt.py doctor
 ```
 
-Names the interpreter, which CAD backends it has, and what each absent extra costs — a
-capability discovered by failure costs a round trip every time. Exits non-zero only when
-`commission` genuinely cannot run here.
+Names the interpreter, which CAD backends it has, what each absent extra costs, and the
+launcher's own absolute path — a capability discovered by failure costs a round trip every
+time, and so does reconstructing an invocation. Exits non-zero only when `commission`
+genuinely cannot run here.
+
+**Invoke `dt.py` by absolute path, from your project directory.** Every measured designer run
+hit the same snag — the module form only resolves when the working directory is this
+`scripts/` folder, while the job's files live elsewhere — and every one of them wrote the same
+workaround: a `verify.py` shim in the job folder that hardcodes this path, patches `sys.path`
+and calls the gate itself. Those shims added no checks. `dt.py` exists so nobody writes
+another.
 
 ## The one call
 
 ```bash
-python -m designer_toolkit commission --model model.py --plan print_plan_checks.json   --out . --job-id <job> --updated-utc <iso8601> [--reference mating.stl] [--no-render]
+python <skill>/scripts/dt.py commission --model model.py   --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>   [--reference mating.stl] [--no-render]
 ```
 
 First it checks what needs no geometry. If `model.py` exposes a module-level `PARAMS` dict,
@@ -97,7 +105,7 @@ yours to declare.
 ## The fit coupon
 
 ```bash
-python -m designer_toolkit coupon --plan print_plan_checks.json --out coupon.stl
+python <skill>/scripts/dt.py coupon --plan print_plan_checks.json --out coupon.stl
 ```
 
 A multi-lane coupon from the plan's declared interfaces. Genuinely separate work: a

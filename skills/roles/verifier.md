@@ -68,7 +68,7 @@ overlays, and issue a concrete file-contract verdict.
 9. Shared design/verify toolkit — run the same one command against the
    **delivered** STL, into your own output directory:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
-   (`python -m designer_toolkit commission --stl <canonical.stl> ...`). Recomputing
+   (`python <skill>/scripts/dt.py commission --stl <canonical.stl> ...`). Recomputing
    from the delivered bytes with the tested instrument *is* independence — it never
    reads the designer's `commission.json`, which is the one input you distrust.
    Re-authoring the predicate in a bespoke script is not independence, it is a second
@@ -93,7 +93,7 @@ overlays, and issue a concrete file-contract verdict.
    into your own output directory:
 
    ```bash
-   python -m designer_toolkit commission --stl <canonical.stl> --plan print_plan_checks.json      --out <verifier-dir> --job-id <job> --updated-utc <iso8601> --no-receipts      [--reference mating.stl]
+   python <skill>/scripts/dt.py commission --stl <canonical.stl>      --plan print_plan_checks.json --out <verifier-dir> --job-id <job>      --updated-utc <iso8601> --no-receipts [--reference mating.stl]
    ```
 
    Require exit zero. This is an independent recomputation, not a borrowed verdict: it reads
