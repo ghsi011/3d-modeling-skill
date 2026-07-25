@@ -41,7 +41,7 @@ JOB_STATE_STATES = frozenset(
 )
 MODE = frozenset({"SOLO", "PIPELINE"})
 PROFILE = frozenset({"COMPACT", "FULL"})
-BACKEND = frozenset({"cadquery", "freecad"})
+BACKEND = frozenset({"cadquery", "build123d", "freecad"})
 GATE_RESULT = frozenset({"PASS", "PENDING", "FAIL", "BLOCKED"})
 DISPATCH_STATUS = frozenset({"queued", "dispatched", "complete", "blocked"})
 

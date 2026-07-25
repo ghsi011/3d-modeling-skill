@@ -446,6 +446,17 @@ class JobStateValidatorTest(unittest.TestCase):
         issues, _ = V.validate_job_state(broken)
         self.assertIn("BAD_ENUM@job_state.state", issue_ids(issues))
 
+    def test_backend_enum_accepts_build123d_and_rejects_unknown(self) -> None:
+        accepted = clone(_JOB_STATE)
+        accepted["backend"] = "build123d"
+        accepted_issues, _ = V.validate_job_state(accepted)
+        self.assertEqual([], [i for i in accepted_issues if i.severity == "error"], accepted_issues)
+
+        broken = clone(_JOB_STATE)
+        broken["backend"] = "not-a-real-backend"
+        broken_issues, _ = V.validate_job_state(broken)
+        self.assertIn("BAD_ENUM@job_state.backend", issue_ids(broken_issues))
+
     def test_duplicate_gate_ids_rejected(self) -> None:
         broken = clone(_JOB_STATE)
         broken["gates"].append(clone(broken["gates"][0]))

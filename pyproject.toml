@@ -29,6 +29,10 @@ dependencies = [
 # and the cadquery-patterns reference. Deliberately kept out of default CI.
 cad = ["cadquery"]
 
+# Heavy OCC/OCP stack used only by build123d adapters and build123d-patterns.
+# Kept separate from `cad` so hosts can choose their Python CAD stack explicitly.
+cad-build123d = ["build123d"]
+
 # Offscreen rendering used by preview.py / render / overlay tooling.
 render = ["pyrender", "PyOpenGL"]
 
@@ -43,7 +47,7 @@ bambu = ["lxml"]
 mcp = ["mcp>=1.27,<2"]
 
 # Everything (convenience for a full local workstation).
-all = ["cadquery", "pyrender", "PyOpenGL", "scipy", "shapely", "lxml", "mcp>=1.27,<2"]
+all = ["cadquery", "build123d", "pyrender", "PyOpenGL", "scipy", "shapely", "lxml", "mcp>=1.27,<2"]
 
 [project.urls]
 Homepage = "https://github.com/Idan/3d-modeling-skill"

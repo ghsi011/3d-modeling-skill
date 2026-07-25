@@ -39,6 +39,9 @@ own numbers (`.val().Volume()` misreports on periodic splines; OCC can split one
 solid into phantom shells). `is_single_watertight_solid()` and `auto_notes` flag
 both automatically.
 
+Verification is backend-neutral after export: the CAD kernel is irrelevant once
+the exported mesh exists, because every deterministic check reads that mesh.
+
 ## Individual helpers (when you don't want the whole bundle)
 
 ```python

@@ -18,6 +18,10 @@ Rules:
 - Hashes bind agents to files. Chat is never a contract.
 - Compact means fewer repeated words and images, not fewer datums, sources, checks, or
   uncertainties.
+- Shared references and scripts stay in `skills/3d-modeling/references/` and
+  `skills/3d-modeling/scripts/`. Role slices link to them by relative path; do not copy,
+  fork, or re-author shared workflow/tooling patterns. Reading a shared reference does not
+  grant write authority over another role's contract.
 
 ## `job_state.md`
 
@@ -31,8 +35,9 @@ owner: orchestrator
 mode: SOLO | PIPELINE
 profile: COMPACT | FULL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
-backend: cadquery | freecad
+backend: cadquery | build123d | freecad
 active_candidate: <id-or-none>
+freecad_owner: none | <job_id>/<commission>/<acquired-utc>
 updated_utc: <iso-8601>
 ---
 
@@ -70,6 +75,17 @@ human reviewer requirement, and the claims the pipeline is prohibited from makin
 class. An optional `risk_class` field on the JSON mirror carries the same enum when present;
 its absence is valid (backward-compatible) and only the Markdown/JSON `## Route` record is
 required.
+
+For `freecad` backend work, the orchestrator acquires a repo-wide mutation lease at
+`.claude/3d-freecad.lock` before any FreeCAD MCP call that can mutate a document. The lock
+records `job_id`, commission, and acquisition time; `job_state.md` mirrors the same value in
+`freecad_owner` while the lease is held and resets it to `none` when released. There is exactly
+one active FreeCAD designer commission across all jobs, including reference and candidate work.
+FreeCAD reference modeling completes and passes metrologist review before candidate modeling
+continues in the same `.FCStd`. The verifier works from staged exported STL/renders in a fresh
+context and never needs the FreeCAD mutation lease. CadQuery/build123d reference work remains
+serial before print planning; after that gate, parallel candidates may run only in isolated
+folders with no shared filenames, import state, or output directories.
 
 ## `dimensions.md`
 
