@@ -711,6 +711,43 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
                 any("schema_version" in e for e in result["errors"]), result["errors"]
             )
 
+    def test_validate_receipts_accepts_contract_version_as_an_alias(self) -> None:
+        """One JSON file must be able to serve both gates.
+
+        print_plan_checks.json (this tool) and print_plan.json (team_tools)
+        carry field-for-field identical edges and support_rules and differed
+        only in the name of the version key -- two hand-maintained copies whose
+        agreement nothing checked, which is the exact failure the contract
+        exists to prevent.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            stl_path, plan_path = self.write_box_and_plan(directory)
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan.pop("schema_version")
+            plan["contract_version"] = 4  # what team_tools' copy calls it
+            plan["edges"] = []
+            plan["support_rules"] = []
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            readiness_path = self.write_json(
+                directory,
+                "candidate_preflight.json",
+                {
+                    "schema_version": 4,
+                    "candidate_stl_sha256": team_preflight.sha256_file(stl_path),
+                    "print_plan_checks_sha256": team_preflight.sha256_file(plan_path),
+                    "edges": [],
+                    "support_rules": [],
+                },
+            )
+
+            result = team_preflight.validate_receipts(
+                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
+            )
+
+            self.assertEqual(result["result"], "PASS", result["errors"])
+            self.assertFalse([e for e in result["errors"] if "schema_version" in e], result["errors"])
+
     def test_validate_receipts_rejects_stale_stl_hash(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)

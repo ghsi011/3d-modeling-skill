@@ -252,7 +252,13 @@ def validate_receipts(
     readiness = load_json(readiness_path)
     errors: list[str] = []
 
-    if plan.get("schema_version") != SCHEMA_VERSION:
+    # `contract_version` is accepted as an alias so one JSON file can serve both
+    # gates. print_plan_checks.json (this tool) and print_plan.json (team_tools)
+    # carry field-for-field identical edges and support_rules, differing only in
+    # the name of this key -- two hand-maintained copies whose agreement nothing
+    # checked, which is the failure mode the whole contract exists to prevent.
+    plan_version = plan.get("schema_version", plan.get("contract_version"))
+    if plan_version != SCHEMA_VERSION:
         errors.append(f"plan schema_version must be {SCHEMA_VERSION}")
     if readiness.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"readiness schema_version must be {SCHEMA_VERSION}")
