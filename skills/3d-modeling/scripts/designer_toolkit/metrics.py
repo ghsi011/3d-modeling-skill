@@ -6,7 +6,8 @@ Consolidates three things the designer and verifier re-derive by hand every run:
 * ``datum_features()`` — hole and outline positions from a section, taken with the
   ``plane_transform`` that keeps them in model coordinates. A bare ``to_2D()``
   re-origins on a path-dependent frame, so hole centres silently stop matching
-  the Phase-2 datums — the single most common false "placement OK".
+  the Phase-2 datums — the single most common false "placement OK". This is the
+  one helper here that needs the ``section`` extra (scipy + shapely).
 * ``overhang_area()`` — downward-facing area past the support screen, using the
   SAME threshold as the preflight gate so the designer self-check and the gate
   can never disagree.
@@ -20,6 +21,7 @@ mutation log through ``mesh_io.load_mesh_report`` directly.
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -90,13 +92,42 @@ def _ring_area(coords: np.ndarray) -> float:
     return float(0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
 
 
+# trimesh soft dependencies the section path reaches in turn: scipy (csgraph,
+# walking the cut edges), networkx (vertex graph -> closed paths), shapely (the
+# rings), rtree (the enclosure tree that decides which ring is a hole). Declared
+# together as the `section` extra in pyproject.toml.
+_SECTION_STACK = ("scipy", "networkx", "shapely", "rtree")
+
+
+def _require_section_stack() -> None:
+    """Fail fast, and legibly, when the cross-section extra is not installed.
+
+    None of these are core dependencies, and trimesh defers each ImportError
+    into an exception wrapper that only fires deep inside its own call stack --
+    as a bare ``ModuleNotFoundError: No module named 'scipy'`` several frames
+    below this function, with nothing to say which install fixes it. Checking
+    the whole set up front also means the caller learns about all four at once
+    instead of rediscovering one per run.
+    """
+    missing = [name for name in _SECTION_STACK if importlib.util.find_spec(name) is None]
+    if missing:
+        raise ImportError(
+            f"datum_features() needs {', '.join(missing)} "
+            f"(mesh cross-section + ring extraction): pip install -e \".[section]\""
+        )
+
+
 def datum_features(mesh_or_path: Any, plane_origin, plane_normal=(0, 0, 1)) -> list:
     """Return the outline and hole rings on a section plane, in model
     coordinates. For a Z-normal cut the returned ``center_mm`` (u, v) aligns
     with model (x, y); compare each hole centre to its Phase-2 datum. Mirrored
     layouts fit the same magnitudes, so also compare with u negated when
     handedness is in question.
+
+    Needs the ``section`` extra (scipy + shapely); every other helper in this
+    module runs on the core trimesh + numpy stack.
     """
+    _require_section_stack()
     m = _as_mesh(mesh_or_path)
     origin = np.asarray(plane_origin, dtype=float)
     normal = np.asarray(plane_normal, dtype=float)

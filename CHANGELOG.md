@@ -6,6 +6,30 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed
+
+- Connected-component counts are now computed in pure numpy (label propagation over
+  face adjacency) instead of `trimesh.Trimesh.split`. `split` needs scipy to label
+  components and networkx to close any component with a hole; on a core-only install
+  it raises, and both call sites swallowed that into "1 component" — so a two-body
+  export could pass `is_single_watertight_solid()` and the artifact manifest's
+  `expected_components` check silently observed nothing. Verified to match `split`
+  exactly on 50 meshes (welded, unwelded, holey, corner-touching, multi-body).
+  Affects `mesh_io.compute_integrity`, `designer_toolkit.exporter` /`metrics`, and
+  `team_tools` `COMPONENT_COUNT_MISMATCH`.
+- `designer_toolkit.metrics.datum_features` now raises a single `ImportError` naming
+  the `section` extra when its stack is absent, instead of surfacing trimesh's
+  deferred `ModuleNotFoundError` from several frames down, one missing package at a time.
+
+### Added
+
+- `section` optional extra (`scipy`, `networkx`, `shapely`, `rtree`) — the trimesh
+  soft dependencies the cross-section path needs for `datum_features` and the datum
+  blocks `bundle.finalize` derives from it. Kept separate from `visual` so the datum
+  path does not pull in pyrender/PyOpenGL and a GL context.
+- CI `section` job running the designer-toolkit suite with that extra installed. The
+  main matrix stays core-only and now also proves the tooling degrades honestly there.
+
 ### Removed
 
 - Deleted the retired historical `skills/team-design.md` design document after migrating live

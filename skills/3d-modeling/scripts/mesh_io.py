@@ -118,9 +118,50 @@ def _duplicate_vertex_count(vertices: np.ndarray) -> int:
     return int((duplicated_groups - 1).sum())
 
 
+def connected_component_count(mesh: trimesh.Trimesh) -> int:
+    """Number of connected components of ``mesh``, counted on face adjacency
+    (two faces are connected when they share an edge), matching what
+    ``trimesh.Trimesh.split(only_watertight=False)`` reports.
+
+    Deliberately NOT implemented via ``mesh.split``: that path builds a
+    submesh per component and needs scipy (``csgraph``) and, for any
+    component with a hole, networkx (``repair.fill_holes``). When either is
+    absent trimesh raises, and a caller swallowing that exception silently
+    reports "1 component" -- exactly the multi-body export the readiness gate
+    exists to catch. This is pure numpy: same answer on every install.
+
+    Label propagation with pointer jumping (Shiloach-Vishkin): each round
+    pulls both ends of every adjacency toward the smaller label, then squashes
+    label chains to their root, so it converges in O(log n) rounds rather than
+    walking the mesh diameter one face at a time.
+    """
+    face_count = int(np.asarray(mesh.faces).shape[0])
+    if face_count == 0:
+        return 0
+    adjacency = np.asarray(mesh.face_adjacency, dtype=np.int64).reshape((-1, 2))
+    if adjacency.shape[0] == 0:
+        return face_count  # no shared edges: every face is its own component
+    left = adjacency[:, 0]
+    right = adjacency[:, 1]
+    labels = np.arange(face_count, dtype=np.int64)
+    while True:
+        previous = labels
+        hooked = labels.copy()
+        np.minimum.at(hooked, left, labels[right])
+        np.minimum.at(hooked, right, labels[left])
+        while True:  # pointer jumping: labels[i] <= i, so this terminates
+            jumped = hooked[hooked]
+            if np.array_equal(jumped, hooked):
+                break
+            hooked = jumped
+        labels = hooked
+        if np.array_equal(labels, previous):
+            return int(np.unique(labels).size)
+
+
 def _components(mesh: trimesh.Trimesh) -> int:
     try:
-        return len(mesh.split(only_watertight=False))
+        return connected_component_count(mesh)
     except Exception:  # noqa: BLE001 - best-effort, never blocks a read
         return 1
 

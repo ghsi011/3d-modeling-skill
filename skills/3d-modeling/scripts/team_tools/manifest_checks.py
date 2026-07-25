@@ -24,6 +24,46 @@ _BBOX_ABS_TOL_MM = 0.05
 _BBOX_REL_TOL = 0.01
 
 
+def _connected_component_count(mesh: trimesh.Trimesh) -> int:
+    """Connected components of ``mesh`` counted on face adjacency (two faces are
+    connected when they share an edge) -- the same number
+    ``trimesh.Trimesh.split(only_watertight=False)`` reports.
+
+    Not routed through ``mesh.split``: that path builds a submesh per component
+    and needs scipy (``csgraph``), plus networkx for any component with a hole.
+    Where either is missing trimesh raises and the count degrades to "no
+    observation", so a two-body STL declared as one body would sail through this
+    check. Pure numpy keeps the answer identical on every install.
+
+    Intentionally duplicated from ``mesh_io.connected_component_count`` rather
+    than imported: this package is self-contained on stdlib + trimesh + numpy
+    and must import cleanly with only ``team_tools/`` on sys.path (see the
+    bootstrap note in ``contracts.py``). Keep the two in step.
+    """
+    face_count = int(np.asarray(mesh.faces).shape[0])
+    if face_count == 0:
+        return 0
+    adjacency = np.asarray(mesh.face_adjacency, dtype=np.int64).reshape((-1, 2))
+    if adjacency.shape[0] == 0:
+        return face_count  # no shared edges: every face is its own component
+    left = adjacency[:, 0]
+    right = adjacency[:, 1]
+    labels = np.arange(face_count, dtype=np.int64)
+    while True:
+        previous = labels
+        hooked = labels.copy()
+        np.minimum.at(hooked, left, labels[right])
+        np.minimum.at(hooked, right, labels[left])
+        while True:  # pointer jumping: labels[i] <= i, so this terminates
+            jumped = hooked[hooked]
+            if np.array_equal(jumped, hooked):
+                break
+            hooked = jumped
+        labels = hooked
+        if np.array_equal(labels, previous):
+            return int(np.unique(labels).size)
+
+
 def _load_mesh_bounds(path: Path) -> tuple[float, float, float] | None:
     """Best-effort mesh load returning (min, max) triples, or None if this file
     type/toolchain cannot be loaded (e.g. STEP without an OCC/cascadio backend).
@@ -104,8 +144,8 @@ def _check_mesh_against_declared(*, mesh: trimesh.Trimesh, artifact: dict[str, A
     expected_components = artifact.get("expected_components")
     if isinstance(expected_components, int) and not isinstance(expected_components, bool):
         try:
-            observed_components = len(mesh.split(only_watertight=False))
-        except Exception:  # noqa: BLE001 - defensive; trimesh split can raise on odd meshes
+            observed_components = _connected_component_count(mesh)
+        except Exception:  # noqa: BLE001 - defensive; odd meshes must not crash the check
             observed_components = None
         if observed_components is not None and observed_components != expected_components:
             issues.append(

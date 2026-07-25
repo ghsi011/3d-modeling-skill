@@ -1,6 +1,11 @@
-"""Tests for designer_toolkit. Mesh-based so they run in lean CI (trimesh +
-numpy + manifold3d only); the CadQuery export path is gated with skipUnless, and
+"""Tests for designer_toolkit. Mesh-based so they run on the lean stack
+(trimesh + numpy + manifold3d); the CadQuery export path and the two
+cross-section cases (datum_features, and the finalize call that derives datum
+blocks from it — both need the `section` extra) are gated with skipUnless, and
 the pyrender-backed render module is not exercised here (needs a GL context).
+CI runs this file twice: once lean, where the section cases skip and the
+missing-extra fallback is asserted instead, and once with `section` installed,
+where those cases run for real.
 """
 
 import importlib.util
@@ -27,6 +32,8 @@ from designer_toolkit import (  # noqa: E402
 )
 
 _HAS_CADQUERY = importlib.util.find_spec("cadquery") is not None
+_HAS_SECTION = all(importlib.util.find_spec(name) is not None
+                   for name in metrics._SECTION_STACK)
 
 
 def _box(size=(10, 10, 10), at=(0, 0, 0)):
@@ -92,6 +99,7 @@ class TestMeasure(unittest.TestCase):
         self.assertEqual(r.components, 1)
         self.assertAlmostEqual(r.bbox_mm["y"], 20, delta=0.1)
 
+    @unittest.skipUnless(_HAS_SECTION, "section extra not installed")
     def test_datum_features_finds_offset_hole(self):
         feats = metrics.datum_features(_plate_with_hole((3, -2), 5.0), (0, 0, 2))
         outlines = [f for f in feats if f.kind == "outline"]
@@ -104,6 +112,14 @@ class TestMeasure(unittest.TestCase):
         # centre aligns with the model offset up to frame sign/swap: {|u|,|v|}={3,2}
         got = sorted(round(abs(c), 1) for c in holes[0].center_mm)
         self.assertEqual(got, [2.0, 3.0])
+
+    @unittest.skipIf(_HAS_SECTION, "section extra installed; nothing to fall back from")
+    def test_datum_features_without_section_extra_names_the_extra(self):
+        # Without scipy/shapely trimesh raises from deep inside its own stack;
+        # the caller must instead be told which extra to install.
+        with self.assertRaises(ImportError) as caught:
+            metrics.datum_features(_box((10, 10, 10)), (0, 0, 5))
+        self.assertIn("[section]", str(caught.exception))
 
     def test_overhang_counts_downward_face_above_bed(self):
         self.assertAlmostEqual(metrics.overhang_area(_downward_quad(z=1.0)), 100.0, delta=1.0)
@@ -163,15 +179,29 @@ class TestFinalize(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             stl = os.path.join(d, "body.stl")
             _box((10, 10, 10), (0, 0, 5)).export(stl)
+            ev = bundle.finalize(stl, os.path.join(d, "body"), also_step=False)
+            self.assertTrue(ev["readiness_skeleton"]["single_watertight_solid"])
+            self.assertAlmostEqual(ev["overhang_mm2"], 0.0, delta=1e-6)
+            self.assertEqual(ev["datums"], [])
+            self.assertIsNone(ev["readiness_skeleton"]["visual_accept"])
+            self.assertEqual(ev["readiness_skeleton"]["auto_notes"], [])
+
+    @unittest.skipUnless(_HAS_SECTION, "section extra not installed")
+    def test_finalize_records_a_datum_block_per_requested_plane(self):
+        with tempfile.TemporaryDirectory() as d:
+            stl = os.path.join(d, "body.stl")
+            _box((10, 10, 10), (0, 0, 5)).export(stl)
             ev = bundle.finalize(
                 stl, os.path.join(d, "body"),
                 datums=[{"name": "mid", "plane_origin": (0, 0, 5)}],
                 also_step=False)
-            self.assertTrue(ev["readiness_skeleton"]["single_watertight_solid"])
-            self.assertAlmostEqual(ev["overhang_mm2"], 0.0, delta=1e-6)
             self.assertEqual(len(ev["datums"]), 1)
-            self.assertIsNone(ev["readiness_skeleton"]["visual_accept"])
-            self.assertEqual(ev["readiness_skeleton"]["auto_notes"], [])
+            block = ev["datums"][0]
+            self.assertEqual(block["name"], "mid")
+            self.assertEqual(block["plane_origin"], [0, 0, 5])
+            # A solid box cut at mid-height: one outline ring, no holes.
+            kinds = [f["kind"] for f in block["features"]]
+            self.assertEqual(kinds, ["outline"])
 
     def test_finalize_flags_seated_interference(self):
         with tempfile.TemporaryDirectory() as d:

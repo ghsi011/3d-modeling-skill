@@ -174,5 +174,54 @@ class MeshIoRawVsNormalizedTest(unittest.TestCase):
             self.assertEqual(report.mutation_log.vertices_after, 8)
 
 
+class ConnectedComponentCountTest(unittest.TestCase):
+    """The count must be right on a core-only install. ``mesh.split`` is not
+    usable for this: it needs scipy for the component labelling and networkx
+    to close any component with a hole, and where either is missing it raises
+    -- which historically degraded to a silent "1 component", exactly the
+    multi-body export the readiness gate exists to catch.
+    """
+
+    def test_single_solid(self) -> None:
+        self.assertEqual(mesh_io.connected_component_count(_box()), 1)
+
+    def test_disjoint_bodies_counted_separately(self) -> None:
+        second = _box()
+        second.apply_translation((10, 0, 0))
+        third = _box()
+        third.apply_translation((0, 20, 0))
+        self.assertEqual(
+            mesh_io.connected_component_count(trimesh.util.concatenate((_box(), second, third))),
+            3,
+        )
+
+    def test_bodies_touching_at_one_corner_stay_separate(self) -> None:
+        """Adjacency is by shared EDGE. Two cubes meeting at a single vertex
+        share no edge, so they are two components -- matching trimesh.
+        """
+        second = _box()
+        second.apply_translation((2, 2, 2))
+        touching = trimesh.util.concatenate((_box(), second))
+        touching.merge_vertices()
+        self.assertEqual(mesh_io.connected_component_count(touching), 2)
+
+    def test_unwelded_triangle_soup_is_one_component_per_face(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "box.stl"
+            _box().export(path)
+            raw, _ = mesh_io.load_mesh_raw(path)
+        # No shared vertex indices -> no shared edges -> 12 isolated faces.
+        self.assertEqual(mesh_io.connected_component_count(raw), 12)
+
+    def test_long_thin_mesh_converges(self) -> None:
+        """Label propagation must not need one round per face: a subdivided
+        strip has a large graph diameter and is still a single component.
+        """
+        strip = trimesh.creation.box(extents=(1000, 0.2, 0.2))
+        for _ in range(4):
+            strip = strip.subdivide()
+        self.assertEqual(mesh_io.connected_component_count(strip), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
