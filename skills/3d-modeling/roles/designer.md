@@ -21,13 +21,12 @@ the contracts.
 - FreeCAD outputs: `.FCStd` with organized parameters and hidden mating reference, per-part
   STL, combined STEP, `commission.json`, renders, and `print_notes.md`.
 - Multi-colour jobs also output the required single-file multi-body 3MF.
-- Candidate commissions also output `candidate_readiness.md` from the re-imported exported
-  STL. It is explicitly non-acceptance evidence.
-- Every commission (reference or candidate) also outputs `artifact_manifest.json`: declared
-  units plus, per produced STL/STEP/render artifact, `id`/`role`/`path`/`sha256`/
-  `expected_components`/`bbox`/`source_revisions` and an optional `transform`. See
+- `candidate_readiness.md` and `artifact_manifest.json` are **written by the commission**, from
+  the measurements it just took on the re-imported exported STL — you do not author either.
+  The readiness document is explicitly non-acceptance evidence and leaves exactly two fields
+  blank, `visual_accept` and `fit_band_ok`; fill those and nothing else. See
   [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#artifact_manifestjson)
-  for the field list and validate it with
+  for the manifest's field list, and confirm it with
   `python -m team_tools.contracts validate <project-dir> --require artifact_manifest` (from
   `skills/3d-modeling/scripts/`) before handoff.
 

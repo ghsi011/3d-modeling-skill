@@ -106,6 +106,22 @@ class ReadinessTest(unittest.TestCase):
             self.assertIn("status: NOT_READY", text)
             self.assertIn("do not widen the tolerance", text)
 
+    def test_the_frontmatter_matches_the_contract_template(self) -> None:
+        """A derived receipt that omits contract fields is still a malformed
+        receipt -- just one nobody typed."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            text = receipts.build_readiness(_run(work), job_id="t",
+                                            source_revisions={"dimensions": 3,
+                                                              "print_plan": 2},
+                                            updated_utc=_WHEN)
+
+            for field in ("contract: candidate-readiness", "contract_version: 4",
+                          "owner: cad-designer", "non_acceptance: true",
+                          "dimensions_revision: 3", "print_plan_revision: 2",
+                          "candidate_stl_sha256: "):
+                self.assertIn(field, text)
+
     def test_the_judgments_are_left_blank(self) -> None:
         """A receipt that fills itself in completely has stopped being one."""
         with tempfile.TemporaryDirectory() as raw:

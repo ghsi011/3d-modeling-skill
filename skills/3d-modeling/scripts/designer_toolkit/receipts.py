@@ -122,6 +122,7 @@ def build_readiness(
     job_id: str,
     candidate_id: str = "candidate-01",
     revision: int = 1,
+    source_revisions: dict[str, int] | None = None,
     updated_utc: str,
 ) -> str:
     """The readiness document, with the judgments left blank.
@@ -143,14 +144,18 @@ def build_readiness(
         f"| {c['id']} | {c.get('next_action', '').replace('|', '/')} |" for c in failures
     ) or "| none | commission reported no failing check |"
 
+    revisions = source_revisions or {}
     return f"""---
 contract: candidate-readiness
 contract_version: 4
 job_id: {job_id}
 revision: {revision}
-owner: designer
-status: {status}
 candidate_id: {candidate_id}
+owner: cad-designer
+status: {status}
+non_acceptance: true
+dimensions_revision: {revisions.get('dimensions', 1)}
+print_plan_revision: {revisions.get('print_plan', 1)}
 candidate_stl_sha256: {export.get('file_sha256', '')}
 commission_verdict: {verdict}
 updated_utc: {updated_utc}
@@ -203,6 +208,7 @@ def write(
     readiness_path = out_dir / "candidate_readiness.md"
     readiness_path.write_text(
         build_readiness(commission, job_id=job_id, candidate_id=candidate_id,
-                        revision=revision, updated_utc=updated_utc),
+                        revision=revision, source_revisions=source_revisions,
+                        updated_utc=updated_utc),
         encoding="utf-8")
     return [manifest_path, readiness_path]
