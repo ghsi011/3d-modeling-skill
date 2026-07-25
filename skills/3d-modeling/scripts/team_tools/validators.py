@@ -39,7 +39,7 @@ JOB_STATE_STATES = frozenset(
         "BLOCKED",
     }
 )
-MODE = frozenset({"SOLO", "PIPELINE"})
+MODE = frozenset({"PIPELINE"})
 PROFILE = frozenset({"COMPACT", "FULL"})
 BACKEND = frozenset({"cadquery", "build123d", "freecad"})
 GATE_RESULT = frozenset({"PASS", "PENDING", "FAIL", "BLOCKED"})

@@ -1,4 +1,0 @@
-interface:
-  display_name: "3D Metrologist"
-  short_description: "Turn measurements into geometric ground truth"
-  default_prompt: "Use $3d-metrologist to produce the datum-based dimensions contract."

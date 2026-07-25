@@ -1,4 +1,0 @@
-interface:
-  display_name: "3D Verifier"
-  short_description: "Independently verify exported printable geometry"
-  default_prompt: "Use $3d-verifier for a fresh-context exported-artifact audit."

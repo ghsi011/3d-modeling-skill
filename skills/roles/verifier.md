@@ -37,7 +37,7 @@ overlays, and issue a concrete file-contract verdict.
   overlays, `candidate_readiness.md`, `verify.py` output, and `print_notes.md`. A conditional
   final-prep review also reads `final_print_prep.md` and its actual contact/toolpath evidence.
 - Write: `verification_report.md` using the exact template in
-  [`../team-design.md`](../team-design.md#verification_reportmd), plus verifier-owned
+  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#verification_reportmd), plus verifier-owned
   measurements and evidence images.
 - Output is `PASS` or `REJECT`; never modified model artifacts.
 - For a conditional final-prep review, write `final_prep_review.md`; do not edit the print
@@ -127,3 +127,5 @@ overlays, and issue a concrete file-contract verdict.
 14. Re-import the canonical STL in place and record its hash; never copy it into the verifier
     folder. For a rejection, retain only the report, metrics, hashes, and defect-specific
     visual in addition to canonical artifacts.
+15. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
+    not acquire the FreeCAD mutation lease and do not mutate the `.FCStd`.

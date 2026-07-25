@@ -188,8 +188,10 @@ def test_generated_opencode_agent_body_uses_neutral_role_body() -> None:
     # When: the generated markdown body is split from OpenCode frontmatter.
     body = generated.content[generated.content.find("\n---\n", 4) + len("\n---\n") :]
 
-    # Then: OpenCode consumes the full neutral role body as its system prompt.
-    assert body == role.body
+    # Then: OpenCode consumes the full neutral role body as its system prompt,
+    # with relative paths rewritten for the .opencode/agents/ location.
+    expected = role.body.replace("../3d-modeling/", "../../skills/3d-modeling/")
+    assert body == expected
 
 
 def test_generated_openai_yaml_extends_harvested_interface_fields() -> None:

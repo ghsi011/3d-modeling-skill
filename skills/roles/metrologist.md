@@ -37,7 +37,7 @@ render-over-photo overlays.
 - Inputs: original-resolution photos, caliper readings, user answers, official product
   specifications, existing-model research, and later the blind reference renders.
 - Write: `dimensions.md` using the exact template in
-  [`../team-design.md`](../team-design.md#dimensionsmd).
+  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#dimensionsmd).
 - Write/update: annotated and overlay images with reproducible alignment notes.
 - In the reference-acceptance pass, write only the round-trip verdict and sheet corrections.
   Never repair the CAD model.

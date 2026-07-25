@@ -422,7 +422,7 @@ class JobStateValidatorTest(unittest.TestCase):
 
     def test_second_structurally_different_fixture_passes(self) -> None:
         alt = clone(_JOB_STATE)
-        alt.update({"mode": "SOLO", "profile": "FULL", "state": "BLOCKED", "backend": "freecad"})
+        alt.update({"profile": "FULL", "state": "BLOCKED", "backend": "freecad"})
         alt["dispatches"] = []
         alt["gates"] = []
         issues, _ = V.validate_job_state(alt)

@@ -1,6 +1,6 @@
 ---
 name: 3d-orchestrator
-description: Route and govern 3D-printable modeling jobs. Use for new modeling or print-prep requests to choose solo monolith versus the five-role file-contract pipeline, enforce phase gates, dispatch specialists, maintain job state, and deliver verified artifacts without authoring geometry.
+description: Route and govern 3D-printable modeling jobs. Use for new modeling or print-prep requests to run the five-role file-contract pipeline, enforce phase gates, dispatch specialists, maintain job state, and deliver verified artifacts without authoring geometry.
 ---
 
 # 3D Orchestrator
@@ -16,25 +16,23 @@ Specialists communicate through project files and source photos only, never chat
 - Inputs: the user request, photos and measurements, repository state, printer constraints,
   and every current contract artifact in the project folder.
 - Write: `job_state.md` using the exact schema in
-  [`../team-design.md`](../team-design.md#job-statemd).
+  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#job_statemd).
 - Read and gate: `dimensions.md`, `print_plan.md`, `candidate_readiness.md`,
   `verification_report.md`, designer outputs, `final_print_prep.md`, and conditional
   `final_prep_review.md`.
-- Housekeeping: optional host-integrated print queue notes and git commits required by
-  repository policy.
+- Housekeeping: optional host-integrated print queue notes and physical-change git commits
+  required by repository policy.
 - Never substitute a chat summary for a contract. Before every dispatch, tell the agent to
   read the named files from disk.
 
 ## Required reading
 
 1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md).
-2. For a solo job only, read and run [`../3d-modeling/SKILL.md`](../3d-modeling/SKILL.md)
-   unchanged.
 
 ## Consequence and escalation gate
 
-Before any solo-vs-pipeline routing decision, classify every job into exactly one consequence
-class and record the class, rationale, reviewer requirement, and prohibited claims in
+Before any pipeline profile decision, classify every job into exactly one consequence class and
+record the class, rationale, reviewer requirement, and prohibited claims in
 `job_state.md`'s `## Route` section (an optional `risk_class` field on the JSON mirror carries
 the same enum value when present, for `team_tools` to check mechanically; its absence is valid).
 Classification is a judgment call informed by the actual request, not a keyword match — when
@@ -62,27 +60,26 @@ brake lever").
   that tries to (e.g. a `verification_report.md` with `status: PASS`) as invalid for that reason
   alone.
 
-`R2`/`R3` are independent of `COMPACT`/`FULL` and of solo/pipeline mode — a decorative multi-part
-job can stay `COMPACT`/pipeline-for-fit-reasons while an `R2` single bracket still needs the
-reviewer gate.
+`R2`/`R3` are independent of `COMPACT`/`FULL` — a decorative multi-part job can stay `COMPACT`
+for fit reasons while an `R2` single bracket still needs the reviewer gate.
 
 ## Checklist
 
 1. Run the Consequence and escalation gate above and record the resulting class, rationale,
    reviewer requirement, and prohibited claims in `job_state.md` before any routing decision.
-2. Create the project folder and compact `job_state.md`; create/update the Print Queue
-   entry. Use `COMPACT` unless multi-part/moving/high-consequence work requires `FULL`.
-3. Route to **solo** only when the part is simple, single-part, non-fit-critical, has no
-   recreated mating geometry, does not merit independent visual verification, and is `R0` or
-   `R1`. Never route an `R2` or `R3` job to solo.
-4. Route to **pipeline** when any condition holds: fit or datum criticality, recreated
+2. Create the project folder and compact `job_state.md`; create/update any optional host print
+   queue note when the host provides one. Use `COMPACT` for simple single-candidate work;
+   use `FULL` when multi-part/moving/high-consequence work requires the expanded record.
+3. Keep simple jobs in the **COMPACT team pipeline** when the part is single, non-fit-critical,
+   has no recreated mating geometry, and is `R0` or `R1`.
+4. Use the **FULL team pipeline** when any condition holds: fit or datum criticality, recreated
    geometry from photos, multiple parts, mating or moving interfaces, safety/thermal/load
-   consequences, multi-colour alignment, difficult DFM, user-requested team/fresh review, or
-   the job is `R2`/`R3`. An `R2` job additionally needs the named reviewer and test plan
-   recorded before any "ready for use" claim; an `R3` job is restricted to conceptual/
-   non-operational help and is never marked accepted by this pipeline regardless of what
-   downstream gates report.
-5. In pipeline mode, advance only through:
+   consequences, multi-colour alignment, difficult DFM, user-requested fresh review, or the
+   job is `R2`/`R3`. An `R2` job additionally needs the named reviewer and test plan recorded
+   before any "ready for use" claim; an `R3` job is restricted to conceptual/non-operational
+   help and is never marked accepted by this pipeline regardless of what downstream gates
+   report.
+5. Advance only through:
    `INTAKE -> METROLOGY -> REFERENCE_BUILD -> REFERENCE_ACCEPTANCE -> PRINT_PLAN ->
    CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION -> PRINT_PREP ->
    [FINAL_PREP_REVIEW when required] -> DELIVERY`.
@@ -101,8 +98,11 @@ reviewer gate.
    before verifier dispatch, including complete edge/comfort and support-sensitivity
    preflight tables. Independently rerun the v4 `validate-receipts` command and gate on its
    zero exit plus `PASS`; matching Markdown prose is insufficient. `NOT_READY` remains inside
-   the same designer commission. Only CadQuery candidates may run in parallel. Serialize all
-   FreeCAD work through one instance.
+   the same designer commission. Only CadQuery/build123d candidates may run in parallel, and
+   only in isolated folders with no shared filenames, import state, or output directories.
+   Serialize all FreeCAD work through the repo-wide `.claude/3d-freecad.lock` mutation lease,
+   mirror the holder in `job_state.md.freecad_owner`, and allow exactly one active FreeCAD
+   designer commission across all jobs.
 10. Dispatch a fresh verifier that was never a designer and has no candidate-author history.
     Treat designer readiness as untrusted and require all seven checks. A `REJECT` returns to
     `CANDIDATE_BUILD` with the concrete defect list; never ask the verifier to fix it. For an

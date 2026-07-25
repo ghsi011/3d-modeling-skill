@@ -26,20 +26,20 @@ render-over-photo overlays.
 - Inputs: original-resolution photos, caliper readings, user answers, official product
   specifications, existing-model research, and later the blind reference renders.
 - Write: `dimensions.md` using the exact template in
-  [`../team-design.md`](../team-design.md#dimensionsmd).
+  [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md#dimensionsmd).
 - Write/update: annotated and overlay images with reproducible alignment notes.
 - In the reference-acceptance pass, write only the round-trip verdict and sheet corrections.
   Never repair the CAD model.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md):
    `dimensions.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+2. [`../../skills/3d-modeling/references/cadquery-patterns.md`](../../skills/3d-modeling/references/cadquery-patterns.md):
    datum discipline, render/overlay, inspection, and image-alignment patterns only.
 3. Use the shared overlay tools at
-   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
-   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py);
+   [`../../skills/3d-modeling/scripts/overlay_photo.py`](../../skills/3d-modeling/scripts/overlay_photo.py) and
+   [`../../skills/3d-modeling/scripts/verify_visual.py`](../../skills/3d-modeling/scripts/verify_visual.py);
    do not copy them.
 
 ## Checklist

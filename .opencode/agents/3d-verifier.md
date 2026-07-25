@@ -27,7 +27,7 @@ overlays, and issue a concrete file-contract verdict.
   overlays, `candidate_readiness.md`, `verify.py` output, and `print_notes.md`. A conditional
   final-prep review also reads `final_print_prep.md` and its actual contact/toolpath evidence.
 - Write: `verification_report.md` using the exact template in
-  [`../team-design.md`](../team-design.md#verification_reportmd), plus verifier-owned
+  [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md#verification_reportmd), plus verifier-owned
   measurements and evidence images.
 - Output is `PASS` or `REJECT`; never modified model artifacts.
 - For a conditional final-prep review, write `final_prep_review.md`; do not edit the print
@@ -35,29 +35,29 @@ overlays, and issue a concrete file-contract verdict.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md):
    `verification_report.md` and `final_prep_review.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+2. [`../../skills/3d-modeling/references/cadquery-patterns.md`](../../skills/3d-modeling/references/cadquery-patterns.md):
    re-import, interference, insertion-sweep, section, render, overlay, and datum-measurement
    patterns.
-3. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
+3. [`../../skills/3d-modeling/references/fdm-design.md`](../../skills/3d-modeling/references/fdm-design.md).
 4. For a FreeCAD candidate, also read
-   [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+   [`../../skills/3d-modeling/references/freecad-mcp-patterns.md`](../../skills/3d-modeling/references/freecad-mcp-patterns.md).
 5. Shared tools:
-   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
-   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py).
+   [`../../skills/3d-modeling/scripts/overlay_photo.py`](../../skills/3d-modeling/scripts/overlay_photo.py) and
+   [`../../skills/3d-modeling/scripts/verify_visual.py`](../../skills/3d-modeling/scripts/verify_visual.py).
 6. Shared deterministic support predicate:
-   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
+   [`../../skills/3d-modeling/scripts/team_preflight.py`](../../skills/3d-modeling/scripts/team_preflight.py).
 7. Shared artifact-manifest validator:
-   [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
+   [`../../skills/3d-modeling/scripts/team_tools/`](../../skills/3d-modeling/scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
 8. Shared raw-vs-normalized mesh loader:
-   [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py)
+   [`../../skills/3d-modeling/scripts/mesh_io.py`](../../skills/3d-modeling/scripts/mesh_io.py)
    (`load_mesh_report` / `load_mesh_raw`).
 9. Shared design/verify toolkit (measurement primitives — apply them
    **independently** to the delivered STL; the accept/reject and the visual
    judgment stay yours):
-   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
+   [`../../skills/3d-modeling/references/designer-toolkit.md`](../../skills/3d-modeling/references/designer-toolkit.md)
    (`export_and_hash`, `interference`, `insertion_sweep`, `datum_features`,
    `overhang_area`; `python -m designer_toolkit`).
 
@@ -117,3 +117,5 @@ overlays, and issue a concrete file-contract verdict.
 14. Re-import the canonical STL in place and record its hash; never copy it into the verifier
     folder. For a rejection, retain only the report, metrics, hashes, and defect-specific
     visual in addition to canonical artifacts.
+15. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
+    not acquire the FreeCAD mutation lease and do not mutate the `.FCStd`.

@@ -62,6 +62,7 @@ def render_opencode_files(root: Path, roles: tuple[OpenCodeRole, ...]) -> tuple[
 
 def render_opencode_agent(root: Path, role: OpenCodeRole) -> OpenCodeFile:
     name = f"3d-{role.role}"
+    body = role.body.replace("../3d-modeling/", "../../skills/3d-modeling/")
     content = (
         "---\n"
         f"description: {role.agent_description}\n"
@@ -69,7 +70,7 @@ def render_opencode_agent(root: Path, role: OpenCodeRole) -> OpenCodeFile:
         "permission:\n"
         f"{_permission_frontmatter(role)}"
         "---\n"
-        f"{role.body}"
+        f"{body}"
     )
     return OpenCodeFile(root / ".opencode" / "agents" / f"{name}.md", content)
 

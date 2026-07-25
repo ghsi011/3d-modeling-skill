@@ -26,7 +26,7 @@ verification.
 - Pre-design inputs: `dimensions.md`, functional/load/environment requirements, available
   machines/nozzles/materials, and reference acceptance.
 - Pre-design output: `print_plan.md` using the exact template in
-  [`../team-design.md`](../team-design.md#print_planmd).
+  [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md#print_planmd).
 - Post-verification inputs: passing `verification_report.md`, final exports, and
   `print_notes.md`.
 - Post-verification outputs: finalized `print_notes.md`, coupon source/export when
@@ -35,15 +35,15 @@ verification.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md):
    `print_plan.md` and `final_print_prep.md` only.
-2. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
-3. [`../3d-modeling/references/printers.md`](../3d-modeling/references/printers.md).
-4. [`../3d-modeling/references/materials.md`](../3d-modeling/references/materials.md).
+2. [`../../skills/3d-modeling/references/fdm-design.md`](../../skills/3d-modeling/references/fdm-design.md).
+3. [`../../skills/3d-modeling/references/printers.md`](../../skills/3d-modeling/references/printers.md).
+4. [`../../skills/3d-modeling/references/materials.md`](../../skills/3d-modeling/references/materials.md).
 5. For Bambu slicing or multi-colour:
-   [`../3d-modeling/references/bambu-3mf-authoring.md`](../3d-modeling/references/bambu-3mf-authoring.md).
+   [`../../skills/3d-modeling/references/bambu-3mf-authoring.md`](../../skills/3d-modeling/references/bambu-3mf-authoring.md).
 6. For failures:
-   [`../3d-modeling/references/troubleshooting.md`](../3d-modeling/references/troubleshooting.md).
+   [`../../skills/3d-modeling/references/troubleshooting.md`](../../skills/3d-modeling/references/troubleshooting.md).
 
 ## Checklist
 

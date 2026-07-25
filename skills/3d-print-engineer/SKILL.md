@@ -17,7 +17,7 @@ verification.
 - Pre-design inputs: `dimensions.md`, functional/load/environment requirements, available
   machines/nozzles/materials, and reference acceptance.
 - Pre-design output: `print_plan.md` using the exact template in
-  [`../team-design.md`](../team-design.md#print_planmd).
+  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#print_planmd).
 - Post-verification inputs: passing `verification_report.md`, final exports, and
   `print_notes.md`.
 - Post-verification outputs: finalized `print_notes.md`, coupon source/export when

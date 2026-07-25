@@ -38,3 +38,6 @@ jobs:
 
       - name: Generated harness is current
         run: python tools/gen_harness.py --check
+
+      - name: Internal markdown links
+        run: python tools/check_internal_links.py

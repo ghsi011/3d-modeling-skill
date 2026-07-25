@@ -4,6 +4,16 @@ All notable changes to the **3d-modeling** skill are documented here.
 This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+
+- Deleted the retired historical `skills/team-design.md` design document after migrating live
+  runtime contract language into `skills/3d-modeling/references/team-contracts-v4.md`.
+- Retired the former single-entry `skills/3d-modeling/SKILL.md`; the invocable surface is now
+  the five-role file-contract pipeline while `skills/3d-modeling/references/` and
+  `skills/3d-modeling/scripts/` remain the shared library.
+
 ## [0.1.0] — 2026-07-25
 
 Initial public import of the multi-agent 3D-modeling skill. This release is the

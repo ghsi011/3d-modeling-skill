@@ -11,13 +11,9 @@ of correctness.** Agents own the engineering judgment (interpret photos, choose
 datums, choose fit strategy, accept/reject a design); the tooling enforces the
 things a machine can actually prove.
 
-There are two ways in:
-
-- **Solo monolith** (`skills/3d-modeling/`) — a single-agent skill for simple,
-  single-part, non-fit-critical jobs. Invoke with `/3d-modeling`.
-- **Team pipeline** (five role slices + an orchestrator) — for fit-critical,
-  multi-part, or photo-reconstructed work where independent verification matters.
-  Invoke with `/3d-orchestrator` (or let the orchestrator route).
+The invocable surface is the five-role team pipeline. Start with
+`/3d-orchestrator`; it selects the compact or full file-contract profile,
+dispatches specialists, and gates delivery.
 
 ## The five-role pipeline
 
@@ -54,14 +50,12 @@ not the in-memory model.
 
 - **Normative** runtime contract + gate schema:
   [`skills/3d-modeling/references/team-contracts-v4.md`](skills/3d-modeling/references/team-contracts-v4.md)
-- Role charters + design rationale (historical):
-  [`skills/team-design.md`](skills/team-design.md)
 
 ## Repository layout
 
 ```
 skills/
-  3d-modeling/            # solo monolith skill (SKILL.md) + all shared assets
+  3d-modeling/            # shared references, scripts, and backend adapters
     references/           #   FDM design, CadQuery/FreeCAD patterns, materials, printers, contracts
     scripts/              #   deterministic tooling + backend runners + tests
       team_tools/         #     contract-automation package (validate/hash/status/render)
@@ -70,9 +64,12 @@ skills/
   3d-designer/            #  |  five team role slices (each a SKILL.md)
   3d-verifier/            #  |
   3d-print-engineer/      # /
-  team-design.md          # historical design doc
 .claude/
   agents/3d-*.md          # Claude Code agent definitions (one per role)
+.opencode/
+  agents/3d-*.md          # OpenCode agent definitions (one per role)
+dist/openai/
+  3d-*.yaml               # generic/OpenAI-style role package metadata
 ```
 
 ## Install
@@ -117,7 +114,7 @@ via the FreeCAD MCP; it is not a pip dependency.
 
   ```bash
   mkdir -p ~/.claude/skills
-  for s in 3d-modeling 3d-orchestrator 3d-metrologist 3d-designer 3d-verifier 3d-print-engineer; do
+  for s in 3d-orchestrator 3d-metrologist 3d-designer 3d-verifier 3d-print-engineer; do
     ln -s "$PWD/skills/$s" ~/.claude/skills/$s
   done
   ```
@@ -130,13 +127,12 @@ via the FreeCAD MCP; it is not a pip dependency.
 
 ```
 # In Claude Code, from a project that has a modeling job:
-/3d-orchestrator     # fit-critical / multi-part / photo-reconstructed work
-/3d-modeling         # simple single-part jobs (solo monolith)
+/3d-orchestrator     # compact/full team pipeline for verified printable parts
 ```
 
 Give the orchestrator the request plus any reference photos and caliper reads; it
-routes solo-vs-team, dispatches specialists, and gates each phase on the
-contract files.
+selects the pipeline profile, dispatches specialists, and gates each phase on
+the contract files.
 
 Run the contract-automation CLI directly on a project directory:
 

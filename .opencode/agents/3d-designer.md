@@ -37,7 +37,7 @@ the contracts.
 - Every commission (reference or candidate) also outputs `artifact_manifest.json`: declared
   units plus, per produced STL/STEP/render artifact, `id`/`role`/`path`/`sha256`/
   `expected_components`/`bbox`/`source_revisions` and an optional `transform`. See
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#artifact_manifestjson)
+  [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md#artifact_manifestjson)
   for the field list and validate it with
   `python -m team_tools.contracts validate <project-dir>` (from
   `skills/3d-modeling/scripts/`) before handoff.
@@ -46,20 +46,20 @@ the contracts.
 
 Read exactly one backend pattern file plus mandatory FDM guidance:
 
-1. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
-2. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-3. Always: [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
+1. CadQuery: [`../../skills/3d-modeling/references/cadquery-patterns.md`](../../skills/3d-modeling/references/cadquery-patterns.md).
+2. FreeCAD: [`../../skills/3d-modeling/references/freecad-mcp-patterns.md`](../../skills/3d-modeling/references/freecad-mcp-patterns.md).
+3. Always: [`../../skills/3d-modeling/references/fdm-design.md`](../../skills/3d-modeling/references/fdm-design.md).
 4. Only when the part uses a standard mechanism:
-   [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
-5. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+   [`../../skills/3d-modeling/references/mechanisms.md`](../../skills/3d-modeling/references/mechanisms.md).
+5. [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md):
    `candidate_readiness.md` only.
 6. Shared deterministic gate:
-   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
+   [`../../skills/3d-modeling/scripts/team_preflight.py`](../../skills/3d-modeling/scripts/team_preflight.py).
 7. Shared artifact-manifest validator:
-   [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
+   [`../../skills/3d-modeling/scripts/team_tools/`](../../skills/3d-modeling/scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
 8. Shared design/verify toolkit — **call it, do not re-author the patterns**:
-   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
+   [`../../skills/3d-modeling/references/designer-toolkit.md`](../../skills/3d-modeling/references/designer-toolkit.md)
    (`export_and_hash`, `measure`, `datum_features`, `overhang_area`, `interference`,
    `insertion_sweep`, `fit_coupon`, `finalize`, and `python -m designer_toolkit`).
 
@@ -108,5 +108,11 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    and coupon region in `print_notes.md`.
 12. When a verifier rejects, change only the owned geometry, regenerate every derived
     artifact, and cite each resolved defect in the next handoff.
-13. Never run two FreeCAD designer instances concurrently. Separate CadQuery candidate
-    folders may run in parallel and must not overwrite shared contracts.
+13. For FreeCAD commissions, require the orchestrator-held `.claude/3d-freecad.lock` mutation
+    lease before any MCP call that can mutate a document. Never run two FreeCAD designer
+    instances concurrently, across reference or candidate work and across jobs. Complete and
+    pass metrologist review of the FreeCAD reference before candidate modeling continues in
+    the same `.FCStd`. Plan at most eight substantive `execute_code` chunks for a job; each
+    chunk prints validity, volume, and bounding-box checks, and you inspect returned screenshots.
+    Separate CadQuery/build123d candidate folders may run in parallel and must not share
+    filenames, Python import state, output directories, or shared contract writes.

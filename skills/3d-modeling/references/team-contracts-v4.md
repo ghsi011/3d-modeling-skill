@@ -1,13 +1,10 @@
 # Team pipeline runtime contracts v4
 
 **Normative status: this file is the sole normative runtime contract and gate schema for the
-five-role pipeline.** `skills/team-design.md` is architecture rationale, historical templates,
-and migration history; where it conflicts with this file, this file governs. Do not build a
-new runtime contract from a `team-design.md` "Exact template" section — use the schemas below.
+five-role pipeline.** Do not build runtime contracts from historical design notes or copied
+templates — use the schemas below.
 
-This is the compact runtime schema for the five-role pipeline. It preserves the semantic
-fields and gates in `skills/team-design.md` while avoiding rereading the full architecture
-document on every commission.
+This is the compact runtime schema for the five-role pipeline.
 
 Rules:
 
@@ -32,7 +29,7 @@ contract_version: 4
 job_id: <slug>
 revision: <integer>
 owner: orchestrator
-mode: SOLO | PIPELINE
+mode: PIPELINE
 profile: COMPACT | FULL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
 backend: cadquery | build123d | freecad

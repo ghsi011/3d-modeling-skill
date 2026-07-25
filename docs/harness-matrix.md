@@ -55,3 +55,14 @@ Use these checks after regenerating harness files with <code>python tools/gen_ha
 The repository test <code>tools/test_gen_harness.py</code> covers the plural agent path,
 OpenCode primary and subagent modes, specialist task denial, and the <code>mcp</code>
 config key.
+
+## OpenCode verification steps
+
+1. Open this repo in OpenCode.
+2. Select primary agent <code>3d-orchestrator</code> (Tab).
+3. @-mention specialist <code>3d-metrologist</code>.
+4. Confirm MCP <code>3d-modeling-tools</code> if enabled in <code>opencode.json</code>.
+
+Agent names match <code>.opencode/agents/*.md</code>:
+<code>3d-orchestrator</code>, <code>3d-metrologist</code>, <code>3d-designer</code>,
+<code>3d-verifier</code>, <code>3d-print-engineer</code>.
