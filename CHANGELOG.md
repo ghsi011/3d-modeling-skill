@@ -108,6 +108,16 @@ identical inputs after a single change (see AGENTS.md → *Changing a role*).
   meant to be stiff and wrong for one meant to flex, and on a part that wraps a
   mating object the wall is a dimension entering the envelope twice.
 
+  Measured at n=3 (one run before the change, two after). The two post-change runs
+  agree to 0.05 mm on wall and 0.1 mm on both plan dimensions — 2.03 → 1.57 and
+  1.52 mm/side, with material down 17% — so the effect is the change and not
+  run-to-run variance. It closes about half the gap to the oracle's 1.02: both
+  runs chose 1.2 mm nominal, within the guidance, then added material elsewhere.
+  Thickness moved the *wrong* way in both (12.5 → 14.0 and 14.1 against an oracle
+  10.74) because each independently added a camera-relief boss and retention ribs
+  — a choice the wall guidance neither caused nor prevents, and one that is now
+  clearly systematic rather than a fluke. Accuracy cost about a third more tokens.
+
 ### Added — the gates enforce what the contract claims
 
 - **`R3_ACCEPTANCE_PROHIBITED`.** The contract says the pipeline must never mark a
