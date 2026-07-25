@@ -44,3 +44,15 @@ desktop.ini
 /preview*.png
 /render*.png
 /scratch/
+
+# ---------------------------------------------------------------------------
+# Agent orchestration scratch (plans, drafts, evidence, boulder/session state).
+# Local working state only - never part of the shipped skill tree.
+# ---------------------------------------------------------------------------
+.omo/
+
+# ---------------------------------------------------------------------------
+# uv lockfile. CI installs the light stack with pip and this repo ships a skill
+# tree rather than a uv-managed application, so the lock is a local artifact.
+# ---------------------------------------------------------------------------
+uv.lock
