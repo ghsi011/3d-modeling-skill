@@ -74,6 +74,26 @@ overlays, and issue a concrete file-contract verdict.
    Re-authoring the predicate in a bespoke script is not independence, it is a second
    uncalibrated instrument; the accept/reject and every visual judgment stay yours.
 
+## Scope by profile
+
+Read `job_state.md`'s profile first, because it decides which of these checks has an input at
+all — and a check with no input is not a check you owe more cheaply, it is one with nothing
+to compare against.
+
+- **`DIRECT`** — the dimensions were stated, not recovered, so there is no photograph to audit
+  a sheet against, no reference to overlay, and no metrologist judgment to re-derive. Your work
+  is step 4 (the raw-mesh read), step 5 (the one deterministic command), the render in step 7,
+  and step 8's contract validation. Steps 3 and 6 have no evidence to consult; say so in the
+  report rather than describing them as passed. Expect this to take a handful of turns; if it
+  is taking many, something is wrong with the inputs and that is itself the finding.
+- **`FITTED`** — everything above, plus the whole of steps 3, 6 and 7. This is where the folded
+  reference round trip lands: you are the one who overlays the candidate's `mating_reference`
+  on the original photographs, and handedness and feature registration are blocking.
+- **`FULL`** — every step, and the conditional final-prep review.
+
+The consequence class scales the depth of steps 6 and 7 on top of this, never the deterministic
+gate. `R3` never receives a `PASS` under any profile.
+
 ## Checklist
 
 1. Confirm you did not author or edit the candidate and re-ground from files and photos.
