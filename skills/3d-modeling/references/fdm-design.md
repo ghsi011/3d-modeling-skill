@@ -49,6 +49,16 @@ Deeper dives: [mechanisms.md](mechanisms.md) (hinges/springs/magnets),
   finish on all faces. Flatten a small land on the down edge for bed adhesion.
 - Strength budget: perimeters >> infill. Structural default: 4 walls, 5 top/bottom,
   15–20% gyroid (continuous path also relieves warp). Past that, add walls, not infill.
+- That default is for a part meant to be **stiff**. It is wrong for one meant to
+  **flex**: a snap-on shell, case, clip or living-hinged lid engages by deflecting,
+  and wall thickness is the stiffness knob — 4 perimeters can make a case that will
+  not clip on, or that cracks instead of springing. Use 2–3 perimeters (0.8–1.2 mm)
+  there, and treat the number as a fit decision, not a strength one.
+- On any part that **wraps** a mating object, the wall is also a dimension: it enters
+  the external envelope twice, and it eats the internal pocket. Going 1.6 mm instead
+  of 1.0 on a phone case adds 1.2 mm to width and thickness and ~46% to material —
+  measured against a real printed case, which uses ~1.0 mm. Declare the wall in the
+  plan alongside the clearances, not as a slicer afterthought.
 - FDM cost ≈ surface area, not volume: thick voluminous parts beat thin-walled/ribbed
   ones (weight-saving cutouts often ADD time and material). Don't model internal
   cavities — let honeycomb infill lightweight it; modeled thin shells put layer seams
