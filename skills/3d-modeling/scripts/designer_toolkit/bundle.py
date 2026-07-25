@@ -18,12 +18,9 @@ from typing import Any
 from . import exporter, fit, metrics
 from ._bootstrap import as_mesh
 
-# The tightest ``downward_normal_z_max`` a print plan can sensibly declare:
-# -sin(45deg), the bare self-supporting chamfer. The toolkit's own default sits
-# below it (-0.73, a ~47deg tessellation margin), so a self-check left on the
-# default screens strictly LESS area than such a plan and can report clean where
-# team_preflight FAILs. Used only to detect and announce that gap, never to screen.
-_TIGHTEST_PLAN_THRESHOLD = -0.70710678
+# Used only to detect and announce a gap, never to screen: see
+# metrics.BARE_45_DEG for why the two numbers differ.
+_TIGHTEST_PLAN_THRESHOLD = metrics.BARE_45_DEG
 
 
 def asdict_feature(f) -> dict:

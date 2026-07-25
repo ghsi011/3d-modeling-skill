@@ -1,13 +1,14 @@
 # designer_toolkit — call it, don't re-author it
 
 The deterministic Phase-4 work — export + re-import, measurement, datum
-extraction, overhang screening, boolean fit, coupon generation, rendered
-comparison — is a tested library. **Call it.** Do not paste the raw trimesh/OCC
-patterns into a fresh `verify.py` and re-debug them every job; that re-debugging
-(stale hashes, phantom shells, the `to_2D()` datum-frame trap, a self-check that
-disagrees with the gate) is exactly what used to make the design step take an hour.
-You still write the parametric geometry and make every judgment call — the toolkit
-does the mechanical measuring.
+extraction, orientation search, overhang screening, boolean fit, edge measurement,
+coupon generation, rendered comparison — is a tested library, and
+`python -m designer_toolkit commission` runs the whole set in one call. **Call it.**
+Re-implementing these by hand costs an hour a job and re-introduces the failures
+the library already solved: stale hashes, phantom shells, the `to_2D()` datum-frame
+trap, a measuring routine that reads high against its own nominals, and evidence
+that describes a mesh you no longer ship. You write the parametric geometry and make
+every judgment call; the toolkit does the mechanical measuring.
 
 Runs from `skills/3d-modeling/scripts/`. Import as a package, or use the CLI.
 
@@ -27,7 +28,8 @@ ev = finalize(
     orientation_transform=None,             # 4x4 model->printer for the overhang screen
 )
 # ev["export"]        watertight / components / volume / bbox / file+geometry sha256
-# ev["overhang_mm2"]  downward area past the -0.73 screen (SAME threshold as the gate)
+# ev["overhang_mm2"]  downward area past -0.73, the value the plan schema recommends;
+#                     pass overhang_threshold= to screen at a stricter plan value instead
 # ev["datums"]        hole+outline centres in MODEL coords, per datum plane
 # ev["seated_interference_mm3"], ev["insertion_sweep"]
 # ev["readiness_skeleton"]  auto_notes + the judgment fields you must fill:

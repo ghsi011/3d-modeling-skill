@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 from . import bundle, coupon, exporter, fit, metrics
 
@@ -121,7 +122,32 @@ def main(argv=None):
     f.add_argument("--plan", default="")
     f.set_defaults(fn=_cmd_finalize)
 
+    # `commission` owns its own exit code -- a failing candidate must not be
+    # handed on -- so it is dispatched before the shared print-and-return path.
+    c2 = sub.add_parser(
+        "commission",
+        help="build, run every deterministic check, write the evidence, and exit "
+             "non-zero if anything failed",
+    )
+    source = c2.add_mutually_exclusive_group(required=True)
+    source.add_argument("--model", type=Path, help="module defining `part` or `build()`")
+    source.add_argument("--stl", type=Path, help="an already-exported STL")
+    c2.add_argument("--plan", type=Path, required=True)
+    c2.add_argument("--out", type=Path, required=True)
+    c2.add_argument("--reference")
+    c2.add_argument("--no-render", action="store_true")
+    c2.set_defaults(fn=None, command="commission")
+
     args = p.parse_args(argv)
+    if getattr(args, "command", None) == "commission":
+        from .commission import main as commission_main
+        argv_out = ["--plan", str(args.plan), "--out", str(args.out)]
+        argv_out += ["--model", str(args.model)] if args.model else ["--stl", str(args.stl)]
+        if args.reference:
+            argv_out += ["--reference", args.reference]
+        if args.no_render:
+            argv_out.append("--no-render")
+        raise SystemExit(commission_main(argv_out))
     print(json.dumps(args.fn(args), indent=2))
 
 

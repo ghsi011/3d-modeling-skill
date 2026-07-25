@@ -16,10 +16,10 @@ the contracts.
 - Reference commission inputs: `dimensions.md` only.
 - Candidate commission inputs: accepted `dimensions.md`, reference source/export/renders,
   `print_plan.md`, and prior `verification_report.md` when iterating.
-- CadQuery outputs: `model.py`, `verify.py`, per-part STL, combined STEP, renders, and
-  `print_notes.md`.
-- FreeCAD outputs: `.FCStd` with organized parameters and hidden mating reference, `verify.py`
-  or verification macro, per-part STL, combined STEP, renders, and `print_notes.md`.
+- CadQuery / build123d outputs: `model.py`, per-part STL, combined STEP, `commission.json`,
+  renders, and `print_notes.md`.
+- FreeCAD outputs: `.FCStd` with organized parameters and hidden mating reference, per-part
+  STL, combined STEP, `commission.json`, renders, and `print_notes.md`.
 - Multi-colour jobs also output the required single-file multi-body 3MF.
 - Candidate commissions also output `candidate_readiness.md` from the re-imported exported
   STL. It is explicitly non-acceptance evidence.
@@ -73,29 +73,31 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    section, and print-orientation views. Use `designer_toolkit.export_and_hash` for the
    export+re-import+hash and `designer_toolkit.render.compare_views`/`section_render` for
    the views rather than re-authoring them.
-7. Before handoff, re-import the exported STL and keep iterating inside this commission
-   until the readiness receipt passes: intended body/integrity and bounds; seated
-   interference; full insertion/travel sweep; installed-coordinate section proving the
-   open/closed architecture; exact print-plan transform with named bed face at Z=0;
-   unsupported-roof and critical-wall floors; required source/STEP/renders and hashes.
-   `designer_toolkit.finalize(model, out, datums=…, reference=…, insertion=…,
-   orientation_transform=…)` produces this whole evidence bundle in one call (measured on
-   the re-imported STL); fill its judgment fields (`visual_accept`, `fit_band_ok`) yourself.
-8. Before declaring `READY`, execute the v4 edge/comfort preflight for every plan-named
-   exposed boundary and the support-sensitivity preflight for every transformed downface,
-   roof, bridge, and layer-transition rule. Measure the re-imported STL, record every
-   nonzero footprint/interval, and correct failures inside this commission. These are
-   deterministic self-checks, never acceptance.
-9. Write the machine-readable files required by the v4 contract, including
-   `artifact_manifest.json` for every produced artifact. Run shared
-   `team_preflight.py support-audit` for every support rule and `validate-receipts` for the
-   complete Edge ID/support-rule sets, plus `python -m team_tools.contracts validate
-   <project-dir> --require artifact_manifest` for the manifest (hash/bbox/component-count
-   checks and the hard 25.4x unit-scale gate; without `--require` an absent manifest is
-   silent and still exits 0). Markdown readiness may say `READY` only when every shared validator exits
-   zero and reports `PASS`. After a correction, rerun every row.
-10. Provide `verify.py` and `candidate_readiness.md` as useful designer evidence, but mark
-   both `DESIGNER SELF-CHECK — NON-ACCEPTANCE`. Never claim the Phase-4 gate passed.
+7. Verify with one call and iterate until it exits zero:
+
+   ```bash
+   python -m designer_toolkit commission --model model.py --plan print_plan_checks.json        --out . [--reference mating.stl]
+   ```
+
+   It exports, re-imports, searches every candidate orientation, and measures the whole
+   deterministic set — single watertight solid, overall size against the plan's declared
+   envelope, downward-facing area in the best placement it can find, declared interface
+   fit, and every plan-named edge — then writes `commission.json` and exits non-zero if
+   anything failed. Each failure names its next action. **Do not write a verification
+   script**: the numbers are a deterministic function of the exported mesh, and a
+   hand-rolled copy drifts from the mesh it claims to describe.
+8. Fix what it reports, in the geometry. Never by widening a limit: a threshold you
+   authored after seeing the measurement is a receipt, not a gate. If you believe a limit
+   is genuinely wrong, say so in your handoff and leave it to the print engineer — that
+   number is theirs, not yours.
+9. Write `candidate_readiness.md` and `artifact_manifest.json`, then confirm the manifest
+   with `python -m team_tools.contracts validate <project-dir> --require artifact_manifest`
+   (recomputed hashes, bbox, component count, and the hard 25.4x unit-scale gate). List
+   every evidence file you produced as a manifest row — an artifact nothing hashes can
+   silently describe a mesh you no longer ship.
+10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
+   judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
+   look) and `fit_band_ok`. Never claim the Phase-4 gate passed.
 11. Record source parameters, orientation, material assumptions, supports, weak directions,
    and coupon region in `print_notes.md`.
 12. When a verifier rejects, change only the owned geometry, regenerate every derived

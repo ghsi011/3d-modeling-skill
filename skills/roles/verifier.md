@@ -34,7 +34,7 @@ overlays, and issue a concrete file-contract verdict.
 
 - Inputs: original photos and measurements, `dimensions.md`, accepted reference artifacts,
   `print_plan.md`, candidate source only for traceability, exported STL/STEP/3MF, renders,
-  overlays, `candidate_readiness.md`, `verify.py` output, and `print_notes.md`. A conditional
+  overlays, `candidate_readiness.md`, `commission.json`, and `print_notes.md`. A conditional
   final-prep review also reads `final_print_prep.md` and its actual contact/toolpath evidence.
 - Write: `verification_report.md` using the exact template in
   [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#verification_reportmd), plus verifier-owned

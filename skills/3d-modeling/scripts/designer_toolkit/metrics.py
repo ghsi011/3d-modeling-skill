@@ -46,6 +46,14 @@ import mesh_io  # noqa: E402  (needs the sys.path insert the line above performs
 # ``bundle.finalize(..., overhang_threshold=...)``) whenever the plan is known.
 DEFAULT_DOWNWARD_NORMAL_Z_MAX = -0.73
 
+# -sin(45deg): the bare self-supporting chamfer, and the tightest value a print
+# plan can sensibly declare. A 45deg chamfer tessellates to just past it and is
+# then falsely flagged, which is why the default above carries a ~47deg margin
+# and why the contract's plan schema recommends the same -0.73. Kept named
+# because a plan MAY declare this stricter value, and a self-check left on the
+# default would then screen less area than the gate.
+BARE_45_DEG = -0.70710678
+
 
 @dataclass(frozen=True)
 class MeasureReport:
