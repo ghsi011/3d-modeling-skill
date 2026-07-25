@@ -19,6 +19,7 @@ Design rules this tool enforces (see verification_postmortem.md):
 The grader must view the composite and describe both rows before recording a score.
 """
 import glob
+import importlib.util
 import json
 import os
 import sys
@@ -68,10 +69,46 @@ def load_main(path):
     return m, kept
 
 
+# trimesh soft dependencies the cross-section path reaches in turn: scipy (csgraph,
+# walking the cut edges), networkx (vertex graph -> closed paths), rtree (the
+# enclosure tree that decides which ring is a hole). shapely is imported at module
+# scope above, so it cannot be silently missing by the time we get here. Shipped
+# with shapely as the `section` extra and folded into `visual`.
+_SECTION_STACK = ("scipy", "networkx", "rtree")
+_section_stack_ok = False
+
+
+def _require_section_stack():
+    """Fail fast, and legibly, when the cross-section stack is not installed.
+
+    ``polygons_full`` defers each ImportError into trimesh's own call stack, where
+    ``slice_union``'s catch-all below turns it into a bare ``None`` — and downstream
+    that reads as "this slice is empty", not "this install is incomplete". A part
+    sliced against ITSELF then scores IoU 0.0 instead of 1.0, so every overlay and
+    alignment number silently collapses instead of erroring. Checking up front
+    keeps the catch-all for what it is actually for (degenerate or empty sections)
+    while naming all the missing packages at once. Mirrors
+    ``designer_toolkit.metrics._require_section_stack``.
+    """
+    global _section_stack_ok
+    if _section_stack_ok:
+        return
+    missing = [n for n in _SECTION_STACK if importlib.util.find_spec(n) is None]
+    if missing:
+        raise ImportError(
+            f"slice_union() needs {', '.join(missing)} "
+            f"(mesh cross-section + ring extraction): pip install -e \".[visual]\""
+        )
+    _section_stack_ok = True
+
+
 def slice_union(m, z):
     """cross-section as shapely geometry in MODEL-FRAME XY coordinates.
     to_2D() without a transform re-origins on a path-dependent frame (varies per
-    mesh/slice!) — always pass plane_transform to stay in model coordinates."""
+    mesh/slice!) — always pass plane_transform to stay in model coordinates.
+    Returns None for a genuinely empty/degenerate section; a missing dependency
+    raises instead of masquerading as one."""
+    _require_section_stack()
     try:
         sec = m.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
         if sec is None:

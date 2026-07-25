@@ -40,14 +40,19 @@ cad-build123d = ["build123d"]
 # Needed by designer_toolkit.metrics.datum_features and the datum blocks
 # bundle.finalize derives from it. All light pure wheels — kept separate from
 # `visual` so the datum path does not drag in pyrender/PyOpenGL and a GL context.
+# `visual` below contains this same set; keep the two in lockstep.
 section = ["scipy", "networkx", "shapely", "rtree"]
 
 # Offscreen rendering used by preview.py / render / overlay tooling.
 render = ["pyrender", "PyOpenGL"]
 
 # The shared visual-verification tools (overlay_photo.py, verify_visual.py)
-# additionally need these on top of `render`.
-visual = ["pyrender", "PyOpenGL", "scipy", "shapely"]
+# additionally need the whole `section` stack on top of `render`: their
+# `slice_union` goes through `Path2D.polygons_full`, the same trimesh
+# cross-section path `datum_features` uses, so rtree and networkx are load-bearing
+# here too. Keep this in lockstep with `section` above — a partial set does not
+# fail, it makes every slice IoU / overlay metric silently empty.
+visual = ["pyrender", "PyOpenGL", "scipy", "networkx", "shapely", "rtree"]
 
 # Bambu / 3MF authoring + verification (make_bambu_3mf.py).
 bambu = ["lxml"]
@@ -59,8 +64,8 @@ mcp = ["mcp>=1.27,<2"]
 all = ["cadquery", "build123d", "scipy", "networkx", "shapely", "rtree", "pyrender", "PyOpenGL", "lxml", "mcp>=1.27,<2"]
 
 [project.urls]
-Homepage = "https://github.com/Idan/3d-modeling-skill"
-Changelog = "https://github.com/Idan/3d-modeling-skill/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ghsi011/3d-modeling-skill"
+Changelog = "https://github.com/ghsi011/3d-modeling-skill/blob/main/CHANGELOG.md"
 
 # ---------------------------------------------------------------------------
 # The Python tooling all lives under one scripts dir; treat that as the source
