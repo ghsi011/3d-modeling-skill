@@ -141,7 +141,38 @@ def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectV
         manifest_file.issues += issues
         manifest_file.index = index
 
+    files["verification_report"].issues += _check_risk_class_acceptance(files)
     return ProjectValidation(project_dir=project_dir, files=files)
+
+
+def _check_risk_class_acceptance(files: dict[str, ContractFile]) -> list[Issue]:
+    """An R3 job may never carry an acceptance verdict.
+
+    team-contracts-v4 is explicit that the pipeline must never mark a
+    life-safety / medical / load-bearing / regulated job accepted, verified or
+    ready-to-use "regardless of what any gate, checklist, or verification report
+    reports", and that a `verification_report` claiming `PASS` for such a job is
+    invalid for that reason alone. It is the highest-consequence rule in the
+    contract and was enforced nowhere: an R3 job with `status: PASS` validated
+    clean. Both fields are frontmatter, so the check is a direct comparison.
+    """
+    job_state = files["job_state"].data
+    report = files["verification_report"].data
+    if not isinstance(job_state, dict) or not isinstance(report, dict):
+        return []
+    if job_state.get("risk_class") != "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE":
+        return []
+    if report.get("status") != "PASS" and report.get("verdict") != "PASS":
+        return []
+    return [
+        error(
+            "R3_ACCEPTANCE_PROHIBITED",
+            "verification_report.status",
+            "job_state declares risk_class R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE, for which no "
+            "dispatch may output an acceptance verdict -- a PASS report is invalid for that "
+            "reason alone, whatever the individual checks report",
+        )
+    ]
 
 
 def run_manifest_checks(project: ProjectValidation) -> None:

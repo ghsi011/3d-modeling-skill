@@ -6,6 +6,26 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — the gates enforce what the contract claims
+
+- **`R3_ACCEPTANCE_PROHIBITED`.** The contract says the pipeline must never mark a
+  life-safety / medical / load-bearing / regulated job accepted "regardless of what
+  any gate, checklist, or verification report reports", and that a `PASS` report for
+  such a job is invalid for that reason alone. Nothing enforced it: an R3 job with
+  `status: PASS` validated clean. `risk_class` is now a `job_state.md` frontmatter
+  field with a checked enum, and R3 + an acceptance verdict is a hard error. Four
+  regression tests, including that lower risk classes still pass.
+- **`contracts status` is now part of the orchestrator's readiness gate.** It is the
+  only check that compares each contract's `revision` against what downstream
+  contracts bound to — a `dimensions.md` revised after the plan cited it surfaces as
+  `STALE` there and nowhere else — and no role invoked it.
+- **Evidence binding stated honestly.** Rule 15 ("hashes bind agents to files") now
+  says where binding is real: `artifact_manifest.json`, whose artifacts have their
+  SHA-256 recomputed and bbox/component count re-checked. An evidence path written
+  only as a Markdown table cell is not resolved by anything — a report citing a file
+  that does not exist validates clean — so evidence a gate rests on must also appear
+  as a manifest row.
+
 ### Changed — contracts are validated where they are actually written
 
 `team_tools` validated JSON exclusively, but v4 defines four of the five contracts

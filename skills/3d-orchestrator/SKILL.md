@@ -97,7 +97,11 @@ for fit reasons while an `R2` single bracket still needs the reviewer gate.
    Require a hash-bound `candidate_readiness.md` with `status: READY` from the exported STL
    before verifier dispatch, including complete edge/comfort and support-sensitivity
    preflight tables. Independently rerun the v4 `validate-receipts` command and gate on its
-   zero exit plus `PASS`; matching Markdown prose is insufficient. `NOT_READY` remains inside
+   zero exit plus `PASS`; matching Markdown prose is insufficient. Also run
+   `python -m team_tools.contracts status <project-dir>` and require a zero exit: it is the
+   only check that compares each contract's `revision` against what the downstream contracts
+   bound to, so a `dimensions.md` revised after the plan cited it shows up as `STALE` here and
+   nowhere else. `validate` does not do this. `NOT_READY` remains inside
    the same designer commission. Only CadQuery/build123d candidates may run in parallel, and
    only in isolated folders with no shared filenames, import state, or output directories.
    Serialize all FreeCAD work through the repo-wide `.claude/3d-freecad.lock` mutation lease,

@@ -872,6 +872,51 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             self.assertEqual([], receipt["error_ids"])
             self.assertEqual(sorted(V.CANONICAL_FILENAMES), receipt["required_contracts"])
 
+    def test_r3_job_cannot_carry_an_acceptance_verdict(self) -> None:
+        """The highest-consequence rule in the contract, and it was enforced
+        nowhere: an R3 job with a PASS report used to validate clean.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            job_state["risk_class"] = "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE"
+            _write_project(project_dir, as_markdown=True, job_state=job_state,
+                           verification_report=clone(_VERIFICATION_REPORT))
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertIn("R3_ACCEPTANCE_PROHIBITED@verification_report.status", receipt["error_ids"])
+            self.assertEqual("FAIL", receipt["results"]["overall"])
+
+    def test_r3_job_without_an_acceptance_verdict_is_fine(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            job_state["risk_class"] = "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE"
+            report = clone(_VERIFICATION_REPORT)
+            report["status"] = "REJECT"
+            report["verdict"] = "REJECT"
+            _write_project(project_dir, as_markdown=True, job_state=job_state, verification_report=report)
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertEqual([], receipt["error_ids"])
+
+    def test_lower_risk_classes_may_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            job_state["risk_class"] = "R1_LOW_CONSEQUENCE"
+            _write_project(project_dir, as_markdown=True, job_state=job_state,
+                           verification_report=clone(_VERIFICATION_REPORT))
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertEqual([], receipt["error_ids"])
+
+    def test_unknown_risk_class_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            job_state["risk_class"] = "R9_MADE_UP"
+            _write_project(project_dir, as_markdown=True, job_state=job_state)
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertIn("BAD_ENUM@job_state.risk_class", receipt["error_ids"])
+
     def test_nonexistent_project_dir_raises_instead_of_validating_green(self) -> None:
         """A typo'd path must not be indistinguishable from a clean early-phase
         project. Every canonical file is absent either way, so the directory

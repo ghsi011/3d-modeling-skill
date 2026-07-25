@@ -137,6 +137,8 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
     job_id = data.get("job_id")
     if not isinstance(job_id, str) or not job_id.strip():
         issues.append(error("MISSING_FIELD", f"{where}.job_id", "required non-empty string field is missing"))
+    if key == "job_state" and "risk_class" in data:
+        issues += check_enum(data, "risk_class", RISK_CLASS, where)
     if key != "artifact_manifest":
         revision = data.get("revision")
         if not isinstance(revision, int) or isinstance(revision, bool):

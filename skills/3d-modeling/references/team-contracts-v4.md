@@ -12,7 +12,14 @@ Rules:
 - Every contract uses millimetres unless a row says otherwise.
 - `A` = direct measurement, `B` = authoritative/corroborated, `C` = image-derived,
   `D` = assumption.
-- Hashes bind agents to files. Chat is never a contract.
+- Hashes bind agents to files. Chat is never a contract. Binding is only real where the
+  tooling recomputes it, which today means `artifact_manifest.json`: every artifact listed
+  there has its SHA-256 recomputed from the bytes on disk and its declared bbox and component
+  count checked against the re-imported mesh. An evidence path written only as a table cell in
+  a Markdown body is **not** verified — nothing resolves it, and a report citing a file that
+  does not exist validates clean. So any evidence a gate actually rests on (a render, an
+  overlay, a preflight receipt) must also appear as an artifact row in the manifest; otherwise
+  the citation is prose, and should be read as prose.
 - Compact means fewer repeated words and images, not fewer datums, sources, checks, or
   uncertainties.
 - Shared references and scripts stay in `skills/3d-modeling/references/` and
@@ -69,9 +76,12 @@ orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQ
 `R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`; see
 [`../../3d-orchestrator/SKILL.md`](../../3d-orchestrator/SKILL.md)), its rationale, any named
 human reviewer requirement, and the claims the pipeline is prohibited from making for that
-class. An optional `risk_class` field on the JSON mirror carries the same enum when present;
-its absence is valid (backward-compatible) and only the Markdown/JSON `## Route` record is
-required.
+class. Record the same enum as a `risk_class` field in `job_state.md`'s frontmatter: that is
+what makes the R3 prohibition machine-enforceable. `validate` rejects an unknown value, and
+rejects any project whose `job_state` declares `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` while its
+`verification_report` claims `PASS`, with `R3_ACCEPTANCE_PROHIBITED` — the prohibition is not
+advisory. Absence of the field remains valid for backward compatibility, but a job with no
+`risk_class` cannot be checked for it, so omit it only for work that is plainly `R0`.
 
 For `freecad` backend work, the orchestrator acquires a repo-wide mutation lease at
 `.claude/3d-freecad.lock` before any FreeCAD MCP call that can mutate a document. The lock
