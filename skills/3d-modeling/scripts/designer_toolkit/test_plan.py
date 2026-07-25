@@ -70,7 +70,7 @@ class CliTest(unittest.TestCase):
             out = Path(raw) / "print_plan_checks.json"
 
             completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit.plan",
+                [sys.executable, "-m", "designer_toolkit.plan", "template",
                  "--bbox", "40", "22", "14", "--out", str(out)],
                 cwd=_SCRIPTS, capture_output=True, text=True, check=False,
             )
@@ -79,6 +79,63 @@ class CliTest(unittest.TestCase):
             payload = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual("print-plan", payload["contract"])
             self.assertEqual(14.0, payload["expected_bbox_mm"]["z"])
+
+
+class ValidatePlanTest(unittest.TestCase):
+    """Each case is a way an archived run lost time to a plan, not to geometry."""
+
+    def test_the_builtin_template_is_buildable(self) -> None:
+        self.assertEqual([], plan.validate_plan(plan.direct_template((40.0, 22.0, 14.0))))
+
+    def test_support_allowed_without_a_contact_class_is_rejected(self) -> None:
+        """The exact defect that cost one run 39 minutes: commission passed this
+        plan, and validate-receipts rejected it only after the build."""
+        broken = plan.direct_template((40.0, 22.0, 14.0))
+        broken["support_rules"][0]["disposition"] = "SUPPORT_ALLOWED"
+
+        problems = plan.validate_plan(broken)
+
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("allowed_contact_class", problems[0])
+
+    def test_self_support_with_a_nonzero_ceiling_is_rejected(self) -> None:
+        broken = plan.direct_template((40.0, 22.0, 14.0))
+        broken["support_rules"][0]["max_out_of_limit_area_mm2"] = 2150.0
+
+        self.assertIn("zero out-of-limit area", " ".join(plan.validate_plan(broken)))
+
+    def test_a_missing_envelope_is_rejected(self) -> None:
+        broken = plan.direct_template((40.0, 22.0, 14.0))
+        del broken["expected_bbox_mm"]
+
+        self.assertIn("expected_bbox_mm", " ".join(plan.validate_plan(broken)))
+
+    def test_duplicate_rule_ids_are_rejected(self) -> None:
+        broken = plan.direct_template((40.0, 22.0, 14.0))
+        broken["support_rules"].append(dict(broken["support_rules"][0]))
+
+        self.assertIn("duplicate", " ".join(plan.validate_plan(broken)))
+
+    def test_an_out_of_range_angle_is_rejected(self) -> None:
+        broken = plan.direct_template((40.0, 22.0, 14.0))
+        broken["support_rules"][0]["downward_normal_z_max"] = -45.0
+
+        self.assertIn("[-1, 0]", " ".join(plan.validate_plan(broken)))
+
+    def test_check_exits_nonzero_on_an_unbuildable_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "plan.json"
+            broken = plan.direct_template((40.0, 22.0, 14.0))
+            broken["support_rules"][0]["disposition"] = "SUPPORT_ALLOWED"
+            path.write_text(json.dumps(broken), encoding="utf-8")
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "designer_toolkit.plan", "check", str(path)],
+                cwd=_SCRIPTS, capture_output=True, text=True, check=False,
+            )
+
+            self.assertEqual(1, completed.returncode)
+            self.assertIn("allowed_contact_class", completed.stderr)
 
 
 if __name__ == "__main__":

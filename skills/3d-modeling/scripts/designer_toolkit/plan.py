@@ -84,17 +84,63 @@ def direct_template(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--bbox", type=float, nargs=3, required=True,
-                        metavar=("X", "Y", "Z"), help="stated overall size in mm")
-    parser.add_argument("--tolerance", type=float, default=DEFAULT_BBOX_TOLERANCE_MM)
-    parser.add_argument("--job-id", default="direct")
-    parser.add_argument("--nozzle", type=float, default=0.4)
-    parser.add_argument("--material", default="PETG")
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+_DISPOSITIONS = ("SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED")
 
+
+def validate_plan(plan: dict[str, Any]) -> list[str]:
+    """Every way a plan can be unbuildable, checked before a designer reads it.
+
+    These are exactly the conditions `team_preflight validate-receipts` applies
+    to the finished candidate. Applying them only there is what cost one
+    archived run 39 minutes: `commission` passed a plan whose single support
+    rule declared `SUPPORT_ALLOWED` with no `allowed_contact_class`, and the
+    designer learned the plan was incomplete only after building against it.
+    None of these depend on the geometry, so none of them need to wait for it.
+    """
+    problems: list[str] = []
+    rules = plan.get("support_rules") or []
+    if not rules:
+        problems.append("no support_rules: nothing constrains the print orientation")
+
+    seen: set[str] = set()
+    for index, rule in enumerate(rules):
+        rule_id = str(rule.get("id") or f"support_rules[{index}]")
+        if rule_id in seen:
+            problems.append(f"{rule_id}: duplicate support rule id")
+        seen.add(rule_id)
+
+        disposition = rule.get("disposition")
+        if disposition not in _DISPOSITIONS:
+            problems.append(f"{rule_id}: disposition must be one of {', '.join(_DISPOSITIONS)}")
+        elif disposition == "SELF_SUPPORT_REQUIRED":
+            if float(rule.get("max_out_of_limit_area_mm2", 0.0)) > 0:
+                problems.append(
+                    f"{rule_id}: SELF_SUPPORT_REQUIRED means zero out-of-limit area, "
+                    f"but declares {rule['max_out_of_limit_area_mm2']} mm2"
+                )
+        elif not rule.get("allowed_contact_class"):
+            problems.append(
+                f"{rule_id}: SUPPORT_ALLOWED needs allowed_contact_class naming which "
+                "faces may take support"
+            )
+
+        angle = rule.get("downward_normal_z_max")
+        if angle is not None and not (-1.0 <= float(angle) <= 0.0):
+            problems.append(f"{rule_id}: downward_normal_z_max must lie in [-1, 0], got {angle}")
+
+    bbox = plan.get("expected_bbox_mm")
+    if bbox is None:
+        problems.append(
+            "no expected_bbox_mm: the envelope check silently skips, which is how a "
+            "candidate shipped 31% too thick"
+        )
+    elif any(float(bbox.get(axis, 0.0)) <= 0 for axis in "xyz"):
+        problems.append(f"expected_bbox_mm must be positive in every axis, got {bbox}")
+
+    return problems
+
+
+def _cmd_template(args: argparse.Namespace) -> int:
     plan = direct_template(tuple(args.bbox), tolerance_mm=args.tolerance,
                            job_id=args.job_id, nozzle_mm=args.nozzle,
                            material=args.material)
@@ -102,6 +148,39 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")
     return 0
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    problems = validate_plan(json.loads(args.path.read_text(encoding="utf-8")))
+    if not problems:
+        sys.stdout.write(f"OK: {args.path} is buildable\n")
+        return 0
+    sys.stderr.write(f"{args.path} cannot be built against:\n")
+    for problem in problems:
+        sys.stderr.write(f"  {problem}\n")
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    template = sub.add_parser("template", help="write the built-in DIRECT plan")
+    template.add_argument("--bbox", type=float, nargs=3, required=True,
+                          metavar=("X", "Y", "Z"), help="stated overall size in mm")
+    template.add_argument("--tolerance", type=float, default=DEFAULT_BBOX_TOLERANCE_MM)
+    template.add_argument("--job-id", default="direct")
+    template.add_argument("--nozzle", type=float, default=0.4)
+    template.add_argument("--material", default="PETG")
+    template.add_argument("--out", type=Path, required=True)
+    template.set_defaults(func=_cmd_template)
+
+    check = sub.add_parser("check", help="reject an unbuildable plan before a designer reads it")
+    check.add_argument("path", type=Path)
+    check.set_defaults(func=_cmd_check)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

@@ -138,7 +138,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    bound plan from the stated overall size (run from `skills/3d-modeling/scripts/`):
 
    ```bash
-   python -m designer_toolkit.plan --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
+   python -m designer_toolkit.plan template --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
    ```
 
    It emits `threshold_source: builtin-default`, requires self-support, and invents no
@@ -162,6 +162,17 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    `deferred_owner` / `final_gate` scope for every geometry rule. Under `DIRECT` the shipped
    template stands in, and it is a real plan for the same reason: written before any
    measurement existed. Never let the designer supply its own.
+
+   Whatever wrote it, gate the plan before dispatching anyone against it:
+
+   ```bash
+   python -m designer_toolkit.plan check <project-dir>/print_plan_checks.json
+   ```
+
+   Require exit zero. It applies the conditions `validate-receipts` will apply to the finished
+   candidate, none of which depend on geometry. One archived run spent 39 minutes building
+   against a plan whose only support rule declared `SUPPORT_ALLOWED` with no
+   `allowed_contact_class`, passed `commission`, and was rejected for the plan afterwards.
 8. Dispatch candidate designer(s) against the sheet, accepted reference, and print plan.
    Require a hash-bound `candidate_readiness.md` with `status: READY` from the exported STL
    before verifier dispatch, including complete edge/comfort and support-sensitivity
