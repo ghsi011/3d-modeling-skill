@@ -13,6 +13,7 @@ CLI wiring between them.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -97,3 +98,18 @@ def test_unknown_subcommand_is_a_usage_error() -> None:
 
     assert result.returncode == 2
     assert "invalid choice" in (result.stderr + result.stdout)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("pyrender") is not None,
+    reason="pyrender is installed, so there is no missing-renderer path to take",
+)
+def test_render_without_a_gl_context_names_what_is_missing(tmp_path: Path) -> None:
+    """The renderer is optional. When it is absent the caller must learn that
+    pyrender/GL is what failed, rather than an ImportError from three frames
+    down inside preview.py.
+    """
+    from designer_toolkit import render
+
+    with pytest.raises(RuntimeError, match="pyrender"):
+        render._render_view(None, None)
