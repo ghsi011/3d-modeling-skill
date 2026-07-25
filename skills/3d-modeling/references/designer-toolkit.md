@@ -13,7 +13,15 @@ Runs from `skills/3d-modeling/scripts/`.
 python -m designer_toolkit commission --model model.py --plan print_plan_checks.json   --out . --job-id <job> --updated-utc <iso8601> [--reference mating.stl] [--no-render]
 ```
 
-It exports, re-imports, and measures the whole set on the mesh that actually ships:
+First it checks what needs no geometry. If `model.py` exposes a module-level `PARAMS` dict,
+the pre-build stage reads it and stops before the first CAD call when the numbers already
+settle the question — a wall under two extrusion widths, a cavity mouth fillet larger than the
+clearance it eats (the boundary is exactly `clearance >= radius`; one run bisected four full
+build/export/measure cycles toward it), an edge treatment at half the wall or more, or a
+declared overall size that disagrees with the plan. A model with no `PARAMS` gets a visible
+`SKIPPED`, never a silent pass.
+
+Then it exports, re-imports, and measures the whole set on the mesh that actually ships:
 
 - single watertight solid, and one body rather than phantom shells
 - overall size against the plan's `expected_bbox_mm`

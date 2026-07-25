@@ -1,0 +1,167 @@
+"""Tests for the pre-build stage.
+
+Each case is a defect an archived run paid a full build/export/measure cycle to
+discover -- or, in the fillet case, four of them. The property under test is
+that the same finding now costs no geometry at all.
+"""
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+_SCRIPTS = _HERE.parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from designer_toolkit import plan, static  # noqa: E402
+
+
+def _ids(checks):
+    return {c.id: c for c in checks}
+
+
+class WallTest(unittest.TestCase):
+    def test_a_wall_under_two_extrusions_fails(self) -> None:
+        checks = _ids(static.check({"wall_mm": 0.6, "nozzle_mm": 0.4}, {}))
+
+        self.assertEqual("FAIL", checks["static-wall"].result)
+        self.assertIn("0.80 mm floor", checks["static-wall"].detail)
+
+    def test_a_one_millimetre_wall_passes_at_a_point_four_nozzle(self) -> None:
+        checks = _ids(static.check({"wall_mm": 1.0, "nozzle_mm": 0.4}, {}))
+
+        self.assertEqual("PASS", checks["static-wall"].result)
+
+    def test_the_nozzle_is_read_from_the_plan_when_the_model_is_silent(self) -> None:
+        job = {"process": [{"printer_material_nozzle": "X2D; PETG; 0.8mm"}]}
+
+        checks = _ids(static.check({"wall_mm": 1.0}, job))
+
+        self.assertEqual("FAIL", checks["static-wall"].result)
+        self.assertIn("1.60 mm floor", checks["static-wall"].detail)
+
+
+class CavityFilletTest(unittest.TestCase):
+    """The four-dispatch bisection.
+
+    One run searched 0.15 -> 0.20 -> 0.25 -> 0.28 for a cavity filleted at
+    r = 0.30, watching interference fall 0.250 -> 0.063 -> 0.0076 -> 0.00055.
+    The boundary is exactly c >= r, because a fillet's inward pull is largest
+    at the mouth plane where it equals its own radius.
+    """
+
+    def test_a_fillet_larger_than_the_clearance_fails(self) -> None:
+        checks = _ids(static.check(
+            {"cavity_mouth_fillet_mm": 0.30, "cavity_clearance_mm": 0.20}, {}))
+
+        check = checks["static-cavity-fillet"]
+        self.assertEqual("FAIL", check.result)
+        self.assertIn("0.1000 mm", check.detail)
+        self.assertIn("do not bisect", check.action.lower())
+
+    def test_clearance_equal_to_the_radius_passes(self) -> None:
+        checks = _ids(static.check(
+            {"cavity_mouth_fillet_mm": 0.30, "cavity_clearance_mm": 0.30}, {}))
+
+        self.assertEqual("PASS", checks["static-cavity-fillet"].result)
+
+    def test_every_step_of_the_archived_bisection_is_settled_without_geometry(self) -> None:
+        for clearance, expected in ((0.15, "FAIL"), (0.20, "FAIL"),
+                                    (0.25, "FAIL"), (0.28, "FAIL"), (0.30, "PASS")):
+            with self.subTest(clearance=clearance):
+                checks = _ids(static.check(
+                    {"cavity_mouth_fillet_mm": 0.30, "cavity_clearance_mm": clearance}, {}))
+                self.assertEqual(expected, checks["static-cavity-fillet"].result)
+
+
+class EdgeBudgetTest(unittest.TestCase):
+    def test_a_treatment_over_half_the_wall_fails(self) -> None:
+        """Both archived Pixel runs put 0.6 mm on a 1.2 mm wall and shipped it."""
+        checks = _ids(static.check(
+            {"wall_mm": 1.2, "edge_treatments": {"E-01": 0.6}}, {}))
+
+        check = checks["static-edge-E-01"]
+        self.assertEqual("FAIL", check.result)
+        self.assertIn("50% of a 1.2 mm wall", check.action)
+        self.assertIn("would meet and leave nothing", check.action)
+
+    def test_a_modest_treatment_passes(self) -> None:
+        checks = _ids(static.check(
+            {"wall_mm": 3.0, "edge_treatments": {"E-01": 0.4, "E-02": 0.5}}, {}))
+
+        self.assertEqual("PASS", checks["static-edge-E-01"].result)
+        self.assertEqual("PASS", checks["static-edge-E-02"].result)
+
+
+class EnvelopeArithmeticTest(unittest.TestCase):
+    def test_declared_size_disagreeing_with_the_plan_fails_before_any_build(self) -> None:
+        job = plan.direct_template((40.0, 22.0, 14.0))
+
+        checks = _ids(static.check({"overall_mm": {"x": 40.0, "y": 22.0, "z": 18.0}}, job))
+
+        self.assertEqual("FAIL", checks["static-envelope"].result)
+        self.assertIn("+4.00 mm", checks["static-envelope"].detail)
+
+    def test_matching_size_passes(self) -> None:
+        job = plan.direct_template((40.0, 22.0, 14.0))
+
+        checks = _ids(static.check({"overall_mm": {"x": 40.0, "y": 22.0, "z": 14.0}}, job))
+
+        self.assertEqual("PASS", checks["static-envelope"].result)
+
+
+class SilenceTest(unittest.TestCase):
+    def test_a_model_with_no_params_says_so_rather_than_passing_quietly(self) -> None:
+        checks = static.check(None, {})
+
+        self.assertEqual(1, len(checks))
+        self.assertEqual("SKIPPED", checks[0].result)
+        self.assertIn("PARAMS", checks[0].action)
+
+    def test_params_the_checks_cannot_read_are_also_reported(self) -> None:
+        checks = static.check({"unrelated": 3}, {})
+
+        self.assertEqual("SKIPPED", checks[0].result)
+
+    def test_a_nonfinite_number_is_ignored_rather_than_crashing(self) -> None:
+        checks = static.check({"wall_mm": float("nan"), "nozzle_mm": 0.4}, {})
+
+        self.assertEqual("SKIPPED", checks[0].result)
+
+
+class FailsBeforeTheBuildTest(unittest.TestCase):
+    def test_a_static_failure_costs_no_export(self) -> None:
+        """The whole point. If the export still runs, nothing was saved."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            model = work / "model.py"
+            model.write_text(
+                "PARAMS = {'wall_mm': 0.6, 'nozzle_mm': 0.4}\n"
+                "def build():\n"
+                "    raise AssertionError('build() must not run after a static failure')\n",
+                encoding="utf-8")
+            plan_path = work / "plan.json"
+            plan_path.write_text(json.dumps(plan.direct_template((10.0, 10.0, 10.0))),
+                                 encoding="utf-8")
+            out = work / "out"
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "designer_toolkit.commission", "--model", str(model),
+                 "--plan", str(plan_path), "--out", str(out), "--no-render",
+                 "--job-id", "t", "--updated-utc", "2026-01-01T00:00:00Z"],
+                cwd=_SCRIPTS, capture_output=True, text=True, check=False)
+
+            self.assertEqual(1, completed.returncode, completed.stderr)
+            self.assertIn("FAIL static-wall", completed.stderr)
+            self.assertFalse((out / "candidate_01.stl").exists(),
+                             "nothing should have been exported")
+            payload = json.loads((out / "commission.json").read_text(encoding="utf-8"))
+            self.assertEqual("static", payload["evidence"]["stage_reached"])
+
+
+if __name__ == "__main__":
+    unittest.main()

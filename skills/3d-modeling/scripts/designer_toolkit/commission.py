@@ -36,28 +36,13 @@ import numpy as np
 
 from ._bootstrap import as_mesh  # noqa: F401  (also puts scripts/ on sys.path)
 
-from . import edges, fit, orient  # noqa: E402
+from . import edges, fit, orient, static  # noqa: E402
 from .bundle import finalize  # noqa: E402
 from .metrics import BARE_45_DEG, measure  # noqa: E402
-
-_PASS, _FAIL, _SKIP = "PASS", "FAIL", "SKIPPED"
-
-
-@dataclass
-class Check:
-    """One deterministic verdict, with the action to take when it fails."""
-
-    id: str
-    title: str
-    result: str
-    detail: str
-    action: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        out = {"id": self.id, "title": self.title, "result": self.result, "detail": self.detail}
-        if self.action:
-            out["next_action"] = self.action
-        return out
+from .verdict import FAIL as _FAIL  # noqa: E402
+from .verdict import PASS as _PASS  # noqa: E402
+from .verdict import SKIP as _SKIP  # noqa: E402
+from .verdict import Check  # noqa: E402
 
 
 @dataclass
@@ -85,12 +70,16 @@ class Commission:
         }
 
 
-def load_part(model_path: Path) -> Any:
-    """Import a model module and take its part.
+def load_model(model_path: Path):
+    """Import a model module and return its parameters and its part.
 
     The module must expose ``part`` or a zero-argument ``build()``. Anything
     else is a contract the caller has to guess at, and guessing is what the
     hand-written scripts were doing.
+
+    ``PARAMS`` is read *before* ``build()`` runs, because the pre-build stage
+    has to be able to reject the numbers without paying for the geometry they
+    describe.
     """
     spec = importlib.util.spec_from_file_location(model_path.stem, model_path)
     if spec is None or spec.loader is None:
@@ -98,11 +87,20 @@ def load_part(model_path: Path) -> Any:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    params = getattr(module, "PARAMS", None)
+    if not isinstance(params, dict):
+        params = None
     if hasattr(module, "part"):
-        return module.part
+        return params, module.part
     if hasattr(module, "build"):
-        return module.build()
+        return params, module.build
     raise ValueError(f"{model_path.name} must define `part` or `build()`")
+
+
+def load_part(model_path: Path) -> Any:
+    """Back-compat shim for direct callers: just the part."""
+    _, part = load_model(model_path)
+    return part() if callable(part) else part
 
 
 def _plan_support_rules(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -309,10 +307,27 @@ def run(
     commission = Commission()
 
     source: Any = stl
+    params: dict[str, Any] | None = None
     if model is not None:
-        source = load_part(model)
+        params, source = load_model(model)
 
-    # Export first: every measurement below is on the re-imported mesh, never on
+        # Pre-build stage. These read declared numbers only, so they cost
+        # microseconds and, when they fail, they save the whole
+        # build/export/measure cycle that would have found the same thing.
+        # A wall thinner than two extrusions and a fillet that eats its own
+        # clearance are arithmetic, not geometry.
+        for check in static.check(params, plan):
+            commission.add(check)
+        if commission.failed:
+            commission.evidence["stage_reached"] = "static"
+            (out_dir / "commission.json").write_text(
+                json.dumps(commission.as_dict(), indent=2, default=str), encoding="utf-8")
+            return commission
+
+        if callable(source):
+            source = source()
+
+    # Export: every measurement below is on the re-imported mesh, never on
     # the in-memory model, because that is what actually ships.
     from .exporter import export_and_hash
     report = export_and_hash(source, str(out_dir / "candidate_01"), also_step=True)
@@ -405,6 +420,7 @@ def run(
         "placements_considered": [p.as_dict() for p in orient.sweep(mesh)],
         "edges": measured_edges,
         "measure": measure(mesh).__dict__,
+        "stage_reached": "complete",
         "planned_placements": [p.as_dict() for p in placements],
     })
 
