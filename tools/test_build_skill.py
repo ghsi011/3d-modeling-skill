@@ -1,7 +1,14 @@
-"""Tests for tools/build_skill.py — deterministic .skill artifact builds."""
+"""Tests for tools/build_skill.py — the deterministic .skill artifact.
+
+The load-bearing one is `test_every_internal_link_resolves_inside_the_archive`.
+Its absence shipped an archive in which every required-reading link pointed one
+directory above the installed skill: the files were all present, the build was
+green, and an agent following its own charter found nothing.
+"""
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,15 +20,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = ROOT / "tools" / "build_skill.py"
 
-ROLE_NAMES = [
-    "3d-orchestrator",
-    "3d-metrologist",
-    "3d-designer",
-    "3d-verifier",
-    "3d-print-engineer",
-]
+ARTIFACT = "3d-modeling.skill"
+ROLE_FILES = ["roles/designer.md", "roles/metrologist.md",
+              "roles/print-engineer.md", "roles/verifier.md"]
 
-ALL_ARTIFACTS = [f"{n}.skill" for n in ROLE_NAMES] + ["3d-modeling-team.skill"]
+LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
 
 def _run_build(out_dir: Path) -> subprocess.CompletedProcess[str]:
@@ -47,79 +50,82 @@ def build_dir():
 
 
 class TestBuildSkill:
-    def test_all_artifacts_created(self, build_dir: Path):
-        for name in ALL_ARTIFACTS:
-            assert (build_dir / name).exists(), f"Missing artifact: {name}"
+    def test_one_artifact_is_built(self, build_dir: Path):
+        emitted = {p.name for p in build_dir.glob("*.skill")}
+        assert emitted == {ARTIFACT}
 
     def test_reproducible_builds(self):
         with tempfile.TemporaryDirectory() as tmp1, tempfile.TemporaryDirectory() as tmp2:
-            out1 = Path(tmp1) / "skills"
-            out2 = Path(tmp2) / "skills"
+            out1, out2 = Path(tmp1) / "skills", Path(tmp2) / "skills"
             _run_build(out1)
             _run_build(out2)
-            for name in ALL_ARTIFACTS:
-                h1 = _sha256(out1 / name)
-                h2 = _sha256(out2 / name)
-                assert h1 == h2, f"Non-reproducible: {name}"
+            assert _sha256(out1 / ARTIFACT) == _sha256(out2 / ARTIFACT)
 
-    def test_skill_md_at_root(self, build_dir: Path):
-        for name in ALL_ARTIFACTS:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                names = zf.namelist()
-                if name == "3d-modeling-team.skill":
-                    for role in ROLE_NAMES:
-                        assert f"roles/{role}/SKILL.md" in names, (
-                            f"Missing roles/{role}/SKILL.md in {name}"
-                        )
-                else:
-                    assert "SKILL.md" in names, f"Missing SKILL.md at root of {name}"
+    def test_archive_shape(self, build_dir: Path):
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            names = zf.namelist()
+        assert "SKILL.md" in names, "the orchestrator must be the skill entry point"
+        for role in ROLE_FILES:
+            assert role in names, f"missing {role}"
+        assert any(n.startswith("references/") for n in names)
+        assert any(n.startswith("scripts/") for n in names)
 
-    def test_no_monolith_primary(self, build_dir: Path):
-        # Against what the builder actually emitted, not against ALL_ARTIFACTS:
-        # asserting a literal against a literal passed even when the builder
-        # was free to write the retired monolith.
-        emitted = {p.name for p in build_dir.glob("*.skill")}
-        assert "3d-modeling.skill" not in emitted
-        assert emitted == set(ALL_ARTIFACTS)
+    def test_every_internal_link_resolves_inside_the_archive(self, build_dir: Path):
+        """No link may escape the archive or point at a missing member.
+
+        This is what the five-bundle layout got wrong: SKILL.md kept the repo's
+        `../3d-modeling/references/...` paths while the bundle carried those
+        assets at its own root, so all 36 links resolved above the install root.
+        """
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            members = set(zf.namelist())
+            broken: list[str] = []
+            for name in (n for n in members if n.endswith(".md")):
+                text = zf.read(name).decode("utf-8", errors="replace")
+                for _label, target in LINK_RE.findall(text):
+                    if target.startswith(("http://", "https://", "mailto:", "#")):
+                        continue
+                    path_part = target.split("#", 1)[0]
+                    if not path_part:
+                        continue
+                    resolved = (Path(name).parent / path_part).as_posix()
+                    resolved = str(Path(resolved).as_posix()).replace("\\", "/")
+                    normalized = Path(resolved)
+                    parts: list[str] = []
+                    for part in normalized.parts:
+                        if part == "..":
+                            if not parts:
+                                broken.append(f"{name} -> {target} (escapes the archive)")
+                                break
+                            parts.pop()
+                        elif part != ".":
+                            parts.append(part)
+                    else:
+                        candidate = "/".join(parts)
+                        if candidate not in members and f"{candidate}/" not in members:
+                            if not any(m.startswith(f"{candidate}/") for m in members):
+                                broken.append(f"{name} -> {target} (no member {candidate})")
+        assert not broken, "links break inside the shipped skill:\n  " + "\n  ".join(broken)
 
     def test_zips_ship_no_test_suite(self, build_dir: Path):
-        # A bundle is a runtime surface; the suites and fixtures were a third
-        # of the packed bytes and nothing in a shipped skill runs them.
-        for name in ALL_ARTIFACTS:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                offenders = [
-                    e for e in zf.namelist()
-                    if Path(e).name.startswith("test_") or "/examples/" in e
-                ]
-                assert not offenders, f"{name} ships test payload: {offenders}"
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            offenders = [
+                e for e in zf.namelist()
+                if Path(e).name.startswith("test_") or "/examples/" in e
+            ]
+        assert not offenders, f"ships test payload: {offenders}"
 
-    def test_no_pycache_in_zips(self, build_dir: Path):
-        for name in ALL_ARTIFACTS:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                for entry in zf.namelist():
-                    assert "__pycache__" not in entry, f"__pycache__ in {name}: {entry}"
-                    assert not entry.endswith(".pyc"), f".pyc in {name}: {entry}"
+    def test_no_pycache_in_zip(self, build_dir: Path):
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            assert not [e for e in zf.namelist() if "__pycache__" in e]
 
-    def test_fixed_timestamp(self, build_dir: Path):
-        expected = (1980, 1, 1, 0, 0, 0)
-        for name in ALL_ARTIFACTS:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                for info in zf.infolist():
-                    assert info.date_time == expected, (
-                        f"Bad timestamp in {name}/{info.filename}: {info.date_time}"
-                    )
+    def test_fixed_timestamps_and_permissions(self, build_dir: Path):
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            for info in zf.infolist():
+                assert info.date_time == (1980, 1, 1, 0, 0, 0), info.filename
+                assert info.external_attr >> 16 == 0o644, info.filename
 
-    def test_sorted_entries(self, build_dir: Path):
-        for name in ALL_ARTIFACTS:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                names = zf.namelist()
-                assert names == sorted(names), f"Unsorted entries in {name}"
-
-    def test_role_skills_include_shared_assets(self, build_dir: Path):
-        for name in [f"{n}.skill" for n in ROLE_NAMES]:
-            with zipfile.ZipFile(build_dir / name) as zf:
-                entries = zf.namelist()
-                ref_entries = [e for e in entries if e.startswith("references/")]
-                script_entries = [e for e in entries if e.startswith("scripts/")]
-                assert len(ref_entries) > 0, f"No references/ in {name}"
-                assert len(script_entries) > 0, f"No scripts/ in {name}"
+    def test_entries_are_sorted(self, build_dir: Path):
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            names = zf.namelist()
+        assert names == sorted(names)

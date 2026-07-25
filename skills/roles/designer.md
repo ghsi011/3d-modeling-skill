@@ -1,6 +1,6 @@
 ---
 role: designer
-source: skills/3d-designer/SKILL.md
+source: skills/3d-modeling/roles/designer.md
 agent_description: Builds one parametric reference or candidate CAD commission from the pipeline contracts with mandatory FDM-aware design.
 skill_description: Build parametric FDM-aware CAD from file contracts. Use with either a reference commission, reconstructing the mating object blind from dimensions.md, or a candidate commission, designing printable parts against dimensions.md, the accepted reference, and print_plan.md.
 agent_body: |-

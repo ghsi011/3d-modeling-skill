@@ -1,5 +1,5 @@
 ---
-name: 3d-orchestrator
+name: 3d-modeling
 description: Route and govern 3D-printable modeling jobs. Use for new modeling or print-prep requests to run the five-role file-contract pipeline, enforce phase gates, dispatch specialists, maintain job state, and deliver verified artifacts without authoring geometry.
 ---
 
@@ -16,7 +16,7 @@ Specialists communicate through project files and source photos only, never chat
 - Inputs: the user request, photos and measurements, repository state, printer constraints,
   and every current contract artifact in the project folder.
 - Write: `job_state.md` using the exact schema in
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#job_statemd).
+  [`references/team-contracts-v4.md`](references/team-contracts-v4.md#job_statemd).
 - Read and gate: `dimensions.md`, `print_plan.md`, `candidate_readiness.md`,
   `verification_report.md`, designer outputs, `final_print_prep.md`, and conditional
   `final_prep_review.md`.
@@ -25,9 +25,33 @@ Specialists communicate through project files and source photos only, never chat
 - Never substitute a chat summary for a contract. Before every dispatch, tell the agent to
   read the named files from disk.
 
+## How to dispatch a specialist
+
+The four specialists are files beside this one, in the skill's `roles/` directory:
+`roles/metrologist.md`, `roles/designer.md`, `roles/print-engineer.md`, `roles/verifier.md`.
+(Written as paths rather than links on purpose: this text also renders into per-harness agent
+definitions that sit elsewhere in the tree, where a relative link would resolve to nothing.)
+A dispatch spawns a subagent and gives it three things, in this order:
+
+1. **Its role.** "Read `roles/verifier.md` and follow it exactly." The file is the whole
+   charter — do not paraphrase it into the prompt, and do not send a specialist a role it
+   did not ask for.
+2. **Its commission.** The dispatch row id from `job_state.md`, and the project directory.
+   Nothing else: the specialist reads its own inputs from disk, which is what makes a fresh
+   context able to disagree with you.
+3. **Nothing about the answer.** Never include your expectation of what it should find. A
+   verifier told what to conclude has stopped being a verifier.
+
+If the host registers named specialist agents (`3d-verifier` and friends, generated from the
+same role sources into `.claude/agents/` and `.opencode/agents/`), dispatching by name is
+equivalent and preferred — the role file and the agent definition are two renderings of one
+source. Where the host has neither, a plain subagent pointed at the role file is the fallback,
+and the pipeline's guarantees are unchanged: they rest on fresh contexts reading contracts
+from disk, not on how the context was named.
+
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md).
+1. [`references/team-contracts-v4.md`](references/team-contracts-v4.md).
 
 ## Consequence and escalation gate
 
@@ -119,7 +143,7 @@ for fit reasons while an `R2` single bracket still needs the reviewer gate.
     toolpaths, or another slicer-dependent visual predicate, require `READY_FOR_REVIEW` and
     dispatch the verifier to write `final_prep_review.md` before delivery.
 12. Enforce the plan-revision rule in
-    [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#plan-revision-rule).
+    [`references/team-contracts-v4.md`](references/team-contracts-v4.md#plan-revision-rule).
     Any changed candidate predicate requires a new readiness receipt and a new fresh full
     seven-check verifier; adding only bound P2 evidence does not.
 13. If plan-required native slicer evidence cannot be produced, stop at

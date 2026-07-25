@@ -233,16 +233,45 @@ def render_agent(role: Role) -> GeneratedFile:
     return GeneratedFile(ROOT / ".claude" / "agents" / f"{name}.md", content)
 
 
-def render_skill(role: Role) -> GeneratedFile:
-    name = f"3d-{role.role}"
-    content = (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {role.skill_description}\n"
-        "---\n"
-        f"{role.body}"
+SKILL_DIR = ROOT / "skills" / "3d-modeling"
+
+
+def _rewrite_shared_links(body: str, prefix: str) -> str:
+    """Repoint `../3d-modeling/...` at its place inside the single skill.
+
+    In `skills/roles/` a role sits beside `skills/3d-modeling/`, so it reaches
+    shared assets as `../3d-modeling/references/...`. Inside the skill those
+    assets are siblings (for SKILL.md) or one level up (for roles/*.md).
+    """
+    return (
+        body.replace("../3d-modeling/references/", f"{prefix}references/")
+        .replace("../3d-modeling/scripts/", f"{prefix}scripts/")
     )
-    return GeneratedFile(ROOT / "skills" / name / "SKILL.md", content)
+
+
+def render_skill(role: Role) -> GeneratedFile:
+    """The orchestrator becomes the skill; every other role becomes a file the
+    orchestrator hands to a subagent.
+
+    One installable skill rather than five: the roles are not independently
+    useful (a designer with no commission refuses to start, by design), and
+    five sibling skills that reach each other by relative path break the moment
+    a host installs one of them on its own.
+    """
+    if role.role == "orchestrator":
+        content = (
+            "---\n"
+            "name: 3d-modeling\n"
+            f"description: {role.skill_description}\n"
+            "---\n"
+            f"{_rewrite_shared_links(role.body, '')}"
+        )
+        return GeneratedFile(SKILL_DIR / "SKILL.md", content)
+    return GeneratedFile(
+        SKILL_DIR / "roles" / f"{role.role}.md",
+        f"# 3D {role.display_name.removeprefix('3D ')}\n\n"
+        f"{_rewrite_shared_links(role.body, '../')}",
+    )
 
 
 def generate(roles: tuple[Role, ...]) -> tuple[GeneratedFile, ...]:

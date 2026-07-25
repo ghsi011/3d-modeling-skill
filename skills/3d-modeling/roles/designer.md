@@ -1,7 +1,5 @@
----
-name: 3d-designer
-description: Build parametric FDM-aware CAD from file contracts. Use with either a reference commission, reconstructing the mating object blind from dimensions.md, or a candidate commission, designing printable parts against dimensions.md, the accepted reference, and print_plan.md.
----
+# 3D CAD Designer
+
 
 # 3D CAD Designer
 
@@ -28,7 +26,7 @@ the contracts.
 - Every commission (reference or candidate) also outputs `artifact_manifest.json`: declared
   units plus, per produced STL/STEP/render artifact, `id`/`role`/`path`/`sha256`/
   `expected_components`/`bbox`/`source_revisions` and an optional `transform`. See
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#artifact_manifestjson)
+  [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#artifact_manifestjson)
   for the field list and validate it with
   `python -m team_tools.contracts validate <project-dir> --require artifact_manifest` (from
   `skills/3d-modeling/scripts/`) before handoff.
@@ -37,22 +35,22 @@ the contracts.
 
 Read exactly one backend pattern file plus mandatory FDM guidance:
 
-1. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
-2. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
+1. CadQuery: [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md).
+2. build123d: [`../references/build123d-patterns.md`](../references/build123d-patterns.md)
    — read alongside the CadQuery patterns, which own everything downstream of the export.
-3. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-4. Always: [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
+3. FreeCAD: [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
+4. Always: [`../references/fdm-design.md`](../references/fdm-design.md).
 5. Only when the part uses a standard mechanism:
-   [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
-6. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+   [`../references/mechanisms.md`](../references/mechanisms.md).
+6. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
    `candidate_readiness.md` only.
 7. Shared deterministic gate:
-   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
+   [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
 8. Shared artifact-manifest validator:
-   [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
+   [`../scripts/team_tools/`](../scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
 9. Shared design/verify toolkit — **call it, do not re-author the patterns**:
-   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
+   [`../references/designer-toolkit.md`](../references/designer-toolkit.md)
    (`export_and_hash`, `measure`, `datum_features`, `overhang_area`, `interference`,
    `insertion_sweep`, `fit_coupon`, `finalize`, and `python -m designer_toolkit`).
 

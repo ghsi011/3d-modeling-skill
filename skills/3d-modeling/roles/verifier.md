@@ -1,7 +1,5 @@
----
-name: 3d-verifier
-description: Independently accept or reject fit-critical 3D designs. Use only in a fresh context that did not author the geometry, to audit dimensions.md against photos and to run all seven Phase-4 checks on re-imported exported STL plus visual renders, overlays, and print_plan.md constraints.
----
+# 3D Verifier
+
 
 # 3D Verifier
 
@@ -18,7 +16,7 @@ overlays, and issue a concrete file-contract verdict.
   overlays, `candidate_readiness.md`, `verify.py` output, and `print_notes.md`. A conditional
   final-prep review also reads `final_print_prep.md` and its actual contact/toolpath evidence.
 - Write: `verification_report.md` using the exact template in
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#verification_reportmd), plus verifier-owned
+  [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#verification_reportmd), plus verifier-owned
   measurements and evidence images.
 - Output is `PASS` or `REJECT`; never modified model artifacts.
 - For a conditional final-prep review, write `final_prep_review.md`; do not edit the print
@@ -26,29 +24,29 @@ overlays, and issue a concrete file-contract verdict.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
    `verification_report.md` and `final_prep_review.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+2. [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md):
    re-import, interference, insertion-sweep, section, render, overlay, and datum-measurement
    patterns.
-3. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
+3. [`../references/fdm-design.md`](../references/fdm-design.md).
 4. For a FreeCAD candidate, also read
-   [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+   [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
 5. Shared tools:
-   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
-   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py).
+   [`../scripts/overlay_photo.py`](../scripts/overlay_photo.py) and
+   [`../scripts/verify_visual.py`](../scripts/verify_visual.py).
 6. Shared deterministic support predicate:
-   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
+   [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
 7. Shared artifact-manifest validator:
-   [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
+   [`../scripts/team_tools/`](../scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
 8. Shared raw-vs-normalized mesh loader:
-   [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py)
+   [`../scripts/mesh_io.py`](../scripts/mesh_io.py)
    (`load_mesh_report` / `load_mesh_raw`).
 9. Shared design/verify toolkit (measurement primitives — apply them
    **independently** to the delivered STL; the accept/reject and the visual
    judgment stay yours):
-   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
+   [`../references/designer-toolkit.md`](../references/designer-toolkit.md)
    (`export_and_hash`, `interference`, `insertion_sweep`, `datum_features`,
    `overhang_area`; `python -m designer_toolkit`).
 

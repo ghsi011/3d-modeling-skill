@@ -1,6 +1,6 @@
 ---
 role: metrologist
-source: skills/3d-metrologist/SKILL.md
+source: skills/3d-modeling/roles/metrologist.md
 agent_description: Converts photos, calipers, and authoritative specs into datum-based ground truth, then visually accepts blind reference reconstructions.
 skill_description: Establish geometric ground truth for fit-critical 3D jobs. Use to turn photos, caliper readings, official specifications, and existing reference models into a datum-based dimensions.md, and to overlay-accept a blind reference reconstruction before candidate design.
 agent_body: |-

@@ -595,12 +595,11 @@ Inputs:
 
 Outputs:
 
-* Five per-role `<role>.skill` zips, each with `SKILL.md` at the archive root plus
-  the shared `references/` and `scripts/` sub-trees. A role directory may also carry
-  its own `agents/` tree, which is copied in when present; no role ships one today,
-  so the built archives hold exactly those three entries.
-* One `3d-modeling-team.skill` bundle that aggregates all five roles under
-  `roles/<role>/` alongside the shared `references/` and `scripts/`.
+* One `3d-modeling.skill` zip: `skills/3d-modeling/` packed verbatim, so the
+  orchestrator's `SKILL.md` sits at the archive root with `roles/`, `references/`
+  and `scripts/` beside it. Because the shipped shape is the repo shape, every
+  relative link inside the archive is the same link that resolves in the repo —
+  asserted by `test_every_internal_link_resolves_inside_the_archive`.
 * All entries use a fixed timestamp (1980-01-01), sorted archive order, and
   `0o644` permissions for deterministic, reproducible builds. `__pycache__/`
   and `.pyc` files are excluded.

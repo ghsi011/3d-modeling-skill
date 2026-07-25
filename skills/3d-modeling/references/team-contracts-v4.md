@@ -74,7 +74,7 @@ multi-colour alignment, or parallel candidates. Both profiles run the same gates
 `job_state.md`'s `## Route` section also records the job's consequence/risk class from the
 orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQUENCE` /
 `R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`; see
-[`../../3d-orchestrator/SKILL.md`](../../3d-orchestrator/SKILL.md)), its rationale, any named
+[`../SKILL.md`](../SKILL.md)), its rationale, any named
 human reviewer requirement, and the claims the pipeline is prohibited from making for that
 class. Record the same enum as a `risk_class` field in `job_state.md`'s frontmatter: that is
 what makes the R3 prohibition machine-enforceable. `validate` rejects an unknown value, and

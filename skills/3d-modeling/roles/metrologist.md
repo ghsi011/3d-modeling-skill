@@ -1,7 +1,5 @@
----
-name: 3d-metrologist
-description: Establish geometric ground truth for fit-critical 3D jobs. Use to turn photos, caliper readings, official specifications, and existing reference models into a datum-based dimensions.md, and to overlay-accept a blind reference reconstruction before candidate design.
----
+# 3D Metrologist
+
 
 # 3D Metrologist
 
@@ -17,20 +15,20 @@ render-over-photo overlays.
 - Inputs: original-resolution photos, caliper readings, user answers, official product
   specifications, existing-model research, and later the blind reference renders.
 - Write: `dimensions.md` using the exact template in
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#dimensionsmd).
+  [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#dimensionsmd).
 - Write/update: annotated and overlay images with reproducible alignment notes.
 - In the reference-acceptance pass, write only the round-trip verdict and sheet corrections.
   Never repair the CAD model.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
    `dimensions.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+2. [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md):
    datum discipline, render/overlay, inspection, and image-alignment patterns only.
 3. Use the shared overlay tools at
-   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
-   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py);
+   [`../scripts/overlay_photo.py`](../scripts/overlay_photo.py) and
+   [`../scripts/verify_visual.py`](../scripts/verify_visual.py);
    do not copy them.
 
 ## Checklist

@@ -1,6 +1,6 @@
 ---
 role: print-engineer
-source: skills/3d-print-engineer/SKILL.md
+source: skills/3d-modeling/roles/print-engineer.md
 agent_description: Defines the pre-design manufacturing contract and post-verification coupon, slicing, print-order, and field-test plan.
 skill_description: "Own manufacturing constraints and physical validation for 3D jobs. Use twice in the team pipeline: before CAD to issue print_plan.md, then after independent verification to define coupons, slicing, print order, and field-test or failed-print procedures."
 agent_body: |-

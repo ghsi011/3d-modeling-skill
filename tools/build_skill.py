@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Build deterministic .skill zip artifacts for the five 3D modeling roles.
+"""Build the deterministic .skill zip artifact for the 3D modeling pipeline.
+
+One archive, not five. The orchestrator is the skill; the four specialists are
+files it hands to subagents. They were never independently useful -- a designer
+with no commission refuses to start, by design -- and five sibling skills that
+reach each other by relative path break the moment a host installs one alone.
 
 Usage:
     python tools/build_skill.py [--out dist/skills]
@@ -12,15 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = ROOT / "skills"
-SHARED_DIR = SKILLS_DIR / "3d-modeling"
-
-ROLE_NAMES = [
-    "3d-orchestrator",
-    "3d-metrologist",
-    "3d-designer",
-    "3d-verifier",
-    "3d-print-engineer",
-]
+SKILL_DIR = SKILLS_DIR / "3d-modeling"
+ARTIFACT_NAME = "3d-modeling.skill"
 
 # A bundle is a runtime surface, not a dev checkout. The suites and their
 # fixtures are a third of the packed bytes, no shipped skill runs them, and no
@@ -56,50 +54,21 @@ def _write_zip(zip_path: Path, entries: list[tuple[str, bytes]]) -> None:
             zf.writestr(info, data)
 
 
-def _build_role_skill(role_name: str, out_dir: Path) -> Path:
-    role_dir = SKILLS_DIR / role_name
-    zip_path = out_dir / f"{role_name}.skill"
-    shared_refs = SHARED_DIR / "references"
-    shared_scripts = SHARED_DIR / "scripts"
+def _build_skill(out_dir: Path) -> Path:
+    """Pack `skills/3d-modeling/` verbatim.
 
-    entries: list[tuple[str, bytes]] = []
-
-    skill_md = role_dir / "SKILL.md"
-    if skill_md.exists():
-        entries.append(("SKILL.md", skill_md.read_bytes()))
-
-    for f in _collect_files(shared_refs):
-        rel = f.relative_to(shared_refs)
-        entries.append((f"references/{rel.as_posix()}", f.read_bytes()))
-
-    for f in _collect_files(shared_scripts):
-        rel = f.relative_to(shared_scripts)
-        entries.append((f"scripts/{rel.as_posix()}", f.read_bytes()))
-
-    _write_zip(zip_path, entries)
-    return zip_path
-
-
-def _build_team_bundle(out_dir: Path) -> Path:
-    zip_path = out_dir / "3d-modeling-team.skill"
-    entries: list[tuple[str, bytes]] = []
-
-    for role_name in ROLE_NAMES:
-        role_dir = SKILLS_DIR / role_name
-        skill_md = role_dir / "SKILL.md"
-        if skill_md.exists():
-            entries.append((f"roles/{role_name}/SKILL.md", skill_md.read_bytes()))
-
-    shared_refs = SHARED_DIR / "references"
-    for f in _collect_files(shared_refs):
-        rel = f.relative_to(shared_refs)
-        entries.append((f"references/{rel.as_posix()}", f.read_bytes()))
-
-    shared_scripts = SHARED_DIR / "scripts"
-    for f in _collect_files(shared_scripts):
-        rel = f.relative_to(shared_scripts)
-        entries.append((f"scripts/{rel.as_posix()}", f.read_bytes()))
-
+    The tree on disk is already the shipped shape -- SKILL.md at the root,
+    roles/ beside it, references/ and scripts/ beside those -- so every relative
+    link inside the archive is the same link that resolves in the repo. That is
+    the property `test_build_skill` asserts, and the one whose absence shipped
+    an archive whose every required-reading link pointed one directory above
+    the installed skill.
+    """
+    zip_path = out_dir / ARTIFACT_NAME
+    entries = [
+        (f.relative_to(SKILL_DIR).as_posix(), f.read_bytes())
+        for f in _collect_files(SKILL_DIR)
+    ]
     _write_zip(zip_path, entries)
     return zip_path
 
@@ -118,17 +87,9 @@ def main(argv: list[str] | None = None) -> None:
         out_dir = ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    built: list[Path] = []
-    for role_name in ROLE_NAMES:
-        p = _build_role_skill(role_name, out_dir)
-        built.append(p)
-        print(f"  built {p}")
-
-    bundle = _build_team_bundle(out_dir)
-    built.append(bundle)
-    print(f"  built {bundle}")
-
-    print(f"Done: {len(built)} artifacts in {out_dir}")
+    built = _build_skill(out_dir)
+    print(f"  built {built}")
+    print(f"Done: 1 artifact in {out_dir}")
 
 
 if __name__ == "__main__":

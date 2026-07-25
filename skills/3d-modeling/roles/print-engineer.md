@@ -1,7 +1,5 @@
----
-name: 3d-print-engineer
-description: "Own manufacturing constraints and physical validation for 3D jobs. Use twice in the team pipeline: before CAD to issue print_plan.md, then after independent verification to define coupons, slicing, print order, and field-test or failed-print procedures."
----
+# 3D Print Engineer
+
 
 # 3D Print Engineer
 
@@ -17,7 +15,7 @@ verification.
 - Pre-design inputs: `dimensions.md`, functional/load/environment requirements, available
   machines/nozzles/materials, and reference acceptance.
 - Pre-design output: `print_plan.md` using the exact template in
-  [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#print_planmd).
+  [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#print_planmd).
 - Post-verification inputs: passing `verification_report.md`, final exports, and
   `print_notes.md`.
 - Post-verification outputs: finalized `print_notes.md`, coupon source/export when
@@ -26,15 +24,15 @@ verification.
 
 ## Required reading
 
-1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
+1. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
    `print_plan.md` and `final_print_prep.md` only.
-2. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
-3. [`../3d-modeling/references/printers.md`](../3d-modeling/references/printers.md).
-4. [`../3d-modeling/references/materials.md`](../3d-modeling/references/materials.md).
+2. [`../references/fdm-design.md`](../references/fdm-design.md).
+3. [`../references/printers.md`](../references/printers.md).
+4. [`../references/materials.md`](../references/materials.md).
 5. For Bambu slicing or multi-colour:
-   [`../3d-modeling/references/bambu-3mf-authoring.md`](../3d-modeling/references/bambu-3mf-authoring.md).
+   [`../references/bambu-3mf-authoring.md`](../references/bambu-3mf-authoring.md).
 6. For failures:
-   [`../3d-modeling/references/troubleshooting.md`](../3d-modeling/references/troubleshooting.md).
+   [`../references/troubleshooting.md`](../references/troubleshooting.md).
 
 ## Checklist
 

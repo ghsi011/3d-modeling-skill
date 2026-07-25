@@ -6,6 +6,42 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — one skill, not five
+
+The five role slices shipped as five installable skills that reached each other
+by relative path. Installing them proved that broken: each archive carried the
+shared assets at its own root while every `SKILL.md` still said
+`../3d-modeling/references/...`, so **36 links across the five roles resolved one
+directory above the install** — the files were all present, the build was green,
+and an agent following its own required reading found nothing.
+
+The orchestrator is now the skill and the four specialists are files it hands to
+subagents:
+
+```
+3d-modeling.skill
+  SKILL.md          <- the orchestrator; the only invocable entry point
+  roles/{metrologist,designer,print-engineer,verifier}.md
+  references/  scripts/
+```
+
+`skills/3d-modeling/` on disk *is* the shipped tree, so every relative link in the
+archive is the same link that resolves in the repo. The roles were never
+independently useful anyway — a designer with no commission refuses to start, by
+design.
+
+Dispatch is harness-neutral: the orchestrator points a subagent at
+`roles/<name>.md` and gives it a dispatch id and a project directory, nothing
+about the expected answer. Where a host registers named specialist agents
+(generated from the same role sources into `.claude/agents/` and
+`.opencode/agents/`), dispatching by name is equivalent — the role file and the
+agent definition are two renderings of one source.
+
+`test_every_internal_link_resolves_inside_the_archive` now fails the build if any
+link escapes the archive or names a missing member. It caught one leftover
+immediately: `team-contracts-v4.md` still pointed at the deleted
+`3d-orchestrator/SKILL.md`.
+
 ### Added — test coverage where a promise was unverified
 
 Coverage audit found 85% over the statements the suite imported, but 2,670 lines

@@ -1,6 +1,6 @@
 ---
 role: verifier
-source: skills/3d-verifier/SKILL.md
+source: skills/3d-modeling/roles/verifier.md
 agent_description: Fresh independent verifier that audits upstream measurements and all seven exported-STL checks, including actual visual render and overlay inspection.
 skill_description: Independently accept or reject fit-critical 3D designs. Use only in a fresh context that did not author the geometry, to audit dimensions.md against photos and to run all seven Phase-4 checks on re-imported exported STL plus visual renders, overlays, and print_plan.md constraints.
 agent_body: |-
