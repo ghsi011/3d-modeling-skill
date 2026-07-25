@@ -7,8 +7,10 @@ real GUI; outputs save directly to the user's disk. Benchmark winner on design q
 ~10k-token screenshot, making it the most expensive backend (plan ≤8 chunks per job);
 single instance — parallel jobs serialize. No desktop connected → use CadQuery.
 
-These patterns were proven working on the user's machine through the FreeCAD MCP
-(`mcp__remote-devices__freecad__*` tools). Every `execute_code` call returns stdout plus a
+These patterns were proven working on the user's machine through the FreeCAD MCP. Tools
+are named here by their bare names (`list_documents`, `create_document`, `execute_code`,
+…); the prefix your host exposes them under is host-dependent, so match on the bare name
+rather than a literal string. Every `execute_code` call returns stdout plus a
 viewport screenshot — always print check values and look at the screenshot.
 Screenshots make each call expensive (~10k tokens): plan the job into FEW large
 execute_code chunks (aim ≤8 per job), print all check numbers in each, and never make
@@ -22,8 +24,9 @@ a call just to peek.
 - `list_documents` → `create_document` with a project name (snake_case).
 - Files save directly to the user's disk from inside FreeCAD (`doc.saveAs`, `Mesh`/`Part`
   export, `saveImage`) — no staging round-trip for outputs FreeCAD itself writes.
-  Files built in the cloud container (the 3MF, print_notes.md) must be sent back
-  explicitly: SendUserFile → `device_commit_files` into the project folder.
+  Anything built outside FreeCAD (the 3MF, print_notes.md) lands wherever the agent
+  runs, which is not necessarily the user's disk — deliver those into the project
+  folder explicitly, by whatever file-transfer path the host provides.
 - Keep each `execute_code` chunk small enough to verify: build → print `Shape.isValid()`,
   `Volume`, `BoundBox` → next chunk.
 - Hide the reference part before final renders/exports:
@@ -112,8 +115,8 @@ Gui.activeDocument().activeView().saveImage(path, 1200, 900, 'White')
 
 Note: a section cut parallel to the view plane renders as the intact silhouette — cut the
 half that faces the camera away, or orbit so the section face is visible before saving.
-Stage the saved PNGs back with `device_stage_files` and SendUserFile them so the user sees
-them in chat.
+`saveImage` writes to the user's disk, not to the conversation — surface the saved PNGs
+through whatever file-attachment path the host provides so the user actually sees them.
 
 ## Exports
 
@@ -125,11 +128,12 @@ m.write(out_stl)
 Part.export([doc.KnobBody, doc.PatternInlay], out_step)   # multi-solid STEP
 ```
 
-For the single-file multi-color 3MF, run `scripts/make_3mf.py` in the cloud container on
-the staged STLs (trimesh welds vertices; output is a core-spec 3MF with one build object
-containing one component per part — Bambu Studio imports it as one object, parts
-individually assignable to filaments). The 3MF is a container-built file — commit it back
-to the project folder (see Session setup).
+For the single-file multi-color 3MF, run `make_3mf.py` from `skills/3d-modeling/scripts/`
+(`scripts/` inside a packaged .skill bundle) on the staged STLs (trimesh welds vertices;
+output is a core-spec 3MF with one build object containing one component per part — Bambu
+Studio imports it as one object, parts individually assignable to filaments). FreeCAD does
+not write this one, so it lands wherever the agent runs — deliver it into the project
+folder explicitly (see Session setup).
 
 Slicer-facing design decisions (orientation, prime tower, materials, clearances) live in
 `fdm-design.md` — consult it, not memory.

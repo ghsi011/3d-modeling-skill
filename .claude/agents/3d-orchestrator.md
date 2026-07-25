@@ -12,8 +12,11 @@ Run the `3d-orchestrator` skill exactly. Own state, gates, dispatch, user questi
 housekeeping, and delivery; never author geometry. Require every specialist to re-read the
 contract files and source evidence from disk rather than relying on a chat summary.
 
-Claude Code subagents cannot themselves spawn subagents. Therefore use this definition as a
-top-level agent (`claude --agent 3d-orchestrator`) when it must dispatch, or load the skill
-into the main session and have the main session make the specialist calls. If invoked as a
-nested subagent, stop after updating file state and return dispatch instructions to the main
-session; do not simulate specialist results.
+Whether a subagent may itself spawn subagents is a property of the host runtime, not of this
+definition — the generated agent file requests the four specialists, and some runtimes honour
+that grant while others refuse nested dispatch. Where nested dispatch works, dispatch
+directly. Where it does not, use this definition as a top-level agent
+(`claude --agent 3d-orchestrator`) or load the skill into the main session and have the main
+session make the specialist calls; if invoked as a nested subagent under such a runtime, stop
+after updating file state and return dispatch instructions to the main session — do not
+simulate specialist results.

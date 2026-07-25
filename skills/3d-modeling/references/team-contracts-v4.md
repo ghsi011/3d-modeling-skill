@@ -406,7 +406,11 @@ deep STEP topology compare. STL bbox plus declared units is the load-bearing che
 The verifier treats a failed `python -m team_tools.contracts validate` (non-zero exit) as a hard
 reject of the candidate's exported artifacts, distinct from the seven geometric checks. In
 particular, any `UNIT_SCALE_MISMATCH` is a hard `UNIT_SCALE` reject — never downgrade it to a
-note-and-pass — recorded as a defect owned by `CANDIDATE_BUILD`.
+note-and-pass — recorded as a defect owned by `CANDIDATE_BUILD`. A zero exit is **not** the
+converse proof: a missing contract file is only a `MISSING_CONTRACT_FILE` warning, so a typo'd
+or empty project directory validates `PASS` with exit `0` and an empty `validated_paths`. The
+verifier must confirm the receipt's `validated_paths` actually names every contract the phase
+requires before reading the exit code as a pass.
 
 ## `verification_report.md`
 

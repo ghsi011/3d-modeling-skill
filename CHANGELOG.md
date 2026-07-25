@@ -20,6 +20,14 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 - `designer_toolkit.metrics.datum_features` now raises a single `ImportError` naming
   the `section` extra when its stack is absent, instead of surfacing trimesh's
   deferred `ModuleNotFoundError` from several frames down, one missing package at a time.
+- The `visual` extra was missing `networkx` and `rtree`, which `verify_visual.slice_union`
+  reaches through `Path2D.polygons_full`. Its catch-all turned the resulting ImportError
+  into `None` — read downstream as "empty slice", so a part sliced against itself scored
+  IoU 0.0 instead of 1.0 and every overlay/alignment number silently collapsed. The extra
+  is now complete and `slice_union` checks the stack before the catch-all, which keeps
+  doing its real job (genuinely degenerate sections).
+- Repository URLs in `pyproject.toml` and `CHANGELOG.md` pointed at a `github.com/Idan/…`
+  org that does not exist; they 404'd.
 
 ### Added
 
@@ -69,7 +77,9 @@ separate from the editor.
 - A **solo monolith** entry point (`skills/3d-modeling/SKILL.md` +
   `references/fdm-design.md`) for simple, single-part, non-fit-critical jobs. The
   solo skill was held byte-identical through the whole optimization program.
-- Role charters and design rationale in `skills/team-design.md` (historical);
+  (`SKILL.md` retired — see Unreleased; `references/fdm-design.md` remains.)
+- Role charters and design rationale in `skills/team-design.md` (historical; the file
+  was deleted afterwards — see Unreleased — and does not exist in any commit);
   the **normative** runtime contract and gate schema in
   `skills/3d-modeling/references/team-contracts-v4.md`.
 
@@ -107,7 +117,7 @@ separate from the editor.
   green mechanical bundle is necessary, not sufficient).
 - Mesh/fit/coupon paths are CI-safe (need `manifold3d` for booleans, no CAD
   kernel); the CadQuery export path is lazy and `render` is deferred. 14 tests;
-  full suite now **139**. Surfaced in the designer/verifier slices and
+  full suite **139** as of this release. Surfaced in the designer/verifier slices and
   `cadquery-patterns.md` via `references/designer-toolkit.md`.
 
 ### Hardened — preflight gate (Sprint 1)
@@ -157,4 +167,4 @@ the bounded-fit-band principle propagated to real Pixel-case geometry at
   contact/motion engine, a fail-closed 3MF writer, a Bambu adapter, camera
   calibration, and a golden-fixture regression suite.
 
-[0.1.0]: https://github.com/Idan/3d-modeling-skill/releases/tag/v0.1.0
+[0.1.0]: https://github.com/ghsi011/3d-modeling-skill/releases/tag/v0.1.0

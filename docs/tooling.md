@@ -12,9 +12,11 @@ pip install trimesh numpy pillow manifold3d
 ```
 
 Optional features need extras from `pyproject.toml`: `cad` for CadQuery,
-`render` for preview rendering, `visual` for photo and reference comparison,
-`bambu` for Bambu project 3MF verification, and `mcp` for the local stdio MCP
-bridge.
+`cad-build123d` for build123d, `section` for the mesh cross-section stack (scipy,
+networkx, shapely, rtree) that `designer_toolkit` needs for `datum_features` and
+the `finalize` datum blocks, `render` for preview rendering, `visual` for photo
+and reference comparison, `bambu` for Bambu project 3MF verification, and `mcp`
+for the local stdio MCP bridge.
 
 Exit code convention across these tools:
 
@@ -22,7 +24,7 @@ Exit code convention across these tools:
 | --- | --- |
 | 0 | Command completed successfully. For validation commands, the checked gate passed. |
 | 1 | The command ran but the gate failed, output verification failed, or an uncaught runtime error occurred. |
-| 2 | Command line usage failed, an input contract was malformed, a file could not be opened, or a strict preflight guard rejected the input. |
+| 2 | Command line usage failed, an input contract was malformed, a file could not be opened, or a strict preflight guard rejected the input. A file that is simply *absent* is not always an open failure: `team_tools.contracts validate` records a missing contract as a warning and still exits `0`. |
 | 3 | Timeout, only used by `run_cadquery_model.py`. |
 
 Individual tools narrow or extend this table below.
@@ -159,6 +161,15 @@ Exit codes:
 * `0`, `results.overall` is `PASS`.
 * `1`, one or more contract results failed.
 * `2`, a contract loader or filesystem error prevented validation.
+
+A contract file that is simply absent is **not** an error. Each one is recorded as a
+`MISSING_CONTRACT_FILE` issue at severity `warning`, its per-contract result stays
+`PASS`, and `results.overall` stays `PASS`. A directory holding no contracts at all —
+including a typo'd or nonexistent project path — therefore exits `0` with an empty
+`validated_paths` and five warnings. The exit code alone proves only that nothing which
+was read was rejected; it does not prove anything was read. A caller gating on this
+command must also assert that the contracts it expected appear in `validated_paths`,
+rather than treating `0` as evidence the phase's files exist and passed.
 
 ### `hash`
 
@@ -683,8 +694,10 @@ Inputs:
 
 Outputs:
 
-* Five per-role `<role>.skill` zips, each with `SKILL.md` at the archive root,
-  plus `agents/`, `references/`, and `scripts/` sub-trees.
+* Five per-role `<role>.skill` zips, each with `SKILL.md` at the archive root plus
+  the shared `references/` and `scripts/` sub-trees. A role directory may also carry
+  its own `agents/` tree, which is copied in when present; no role ships one today,
+  so the built archives hold exactly those three entries.
 * One `3d-modeling-team.skill` bundle that aggregates all five roles under
   `roles/<role>/` alongside the shared `references/` and `scripts/`.
 * All entries use a fixed timestamp (1980-01-01), sorted archive order, and

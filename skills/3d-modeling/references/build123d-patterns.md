@@ -11,8 +11,9 @@ Run exported meshes through the bundled mesh tools — verification is on the ST
 not the in-memory build123d `Part`:
 
 ```bash
-python3 scripts/preview.py body.stl preview.png --views multi
-python3 -m designer_toolkit.finalize body.stl --strict
+cd skills/3d-modeling/scripts     # or scripts/ inside a packaged .skill bundle
+python3 preview.py body.stl preview.png --views multi
+python3 -m designer_toolkit finalize body.stl --plan plan.json   # full evidence bundle as JSON
 ```
 
 Failure → read the tool output, fix the script, re-export, and always LOOK at
@@ -183,8 +184,9 @@ with BuildPart() as enclosure:
 
 ## Multi-color
 
-Export each color as its own STL from the same script (shared coordinates), then:
-`python3 scripts/make_3mf.py out.3mf "Body=body.stl" "Inlay=inlay.stl"` — one
+Export each color as its own STL from the same script (shared coordinates), then run
+this from `skills/3d-modeling/scripts/` (`scripts/` inside a packaged .skill bundle):
+`python3 make_3mf.py out.3mf "Body=body.stl" "Inlay=inlay.stl"` — one
 3MF, one build object, one component per part; Bambu/Orca import it as a single
 object with parts individually assignable to filaments. Inlay geometry rules
 (flush recess, zero clearance, stroke ≥0.8 mm) live in `fdm-design.md`.

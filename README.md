@@ -1,21 +1,42 @@
 # 3d-modeling skill
 
-A multi-agent, file-contract pipeline for designing **verified, print-ready 3D
-models** from a plain-language request plus reference photos and caliper
-measurements. It runs as [Claude Code](https://claude.com/claude-code) subagents,
-backed by deterministic Python tooling that enforces contract structure,
-artifact identity, dependency freshness, and repeatable geometric checks.
+A multi-agent, file-contract pipeline that turns a plain-language request plus
+reference photos and caliper measurements into a **verified, print-ready 3D
+model**. It runs as [Claude Code](https://claude.com/claude-code) subagents over
+deterministic Python tooling that enforces contract structure, artifact identity,
+dependency freshness, and repeatable geometric checks.
 
 The guiding principle: **a passing software gate is necessary evidence, not proof
-of correctness.** Agents own the engineering judgment (interpret photos, choose
-datums, choose fit strategy, accept/reject a design); the tooling enforces the
-things a machine can actually prove.
+of correctness.** Agents own the engineering judgment — interpret photos, choose
+datums, choose fit strategy, accept or reject a design. The tooling enforces only
+what a machine can actually prove.
 
-The invocable surface is the five-role team pipeline. Start with
-`/3d-orchestrator`; it selects the compact or full file-contract profile,
-dispatches specialists, and gates delivery.
+- **Start here:** `/3d-orchestrator` — it selects the compact or full contract
+  profile, dispatches specialists, and gates delivery.
+- **Normative contract + gate schema:**
+  [`team-contracts-v4.md`](skills/3d-modeling/references/team-contracts-v4.md)
+- **Tool reference:** [`docs/tooling.md`](docs/tooling.md) ·
+  **Harness support:** [`docs/harness-matrix.md`](docs/harness-matrix.md)
 
-## The five-role pipeline
+## Quickstart
+
+```
+# In Claude Code, from a project that has a modeling job:
+/3d-orchestrator
+```
+
+Give the orchestrator the request plus any reference photos and caliper reads. It
+picks the pipeline profile, dispatches specialists, and gates each phase on the
+contract files — see [Install](#install) if the agents are not discovered yet.
+
+The contract-automation CLI also runs standalone on any project directory:
+
+```bash
+cd skills/3d-modeling/scripts
+python -m team_tools.contracts validate ./team_tools/examples/project_ok
+```
+
+## How the pipeline works
 
 ```mermaid
 flowchart TD
@@ -43,13 +64,71 @@ flowchart TD
     G -.enforces contracts.- Pipeline
 ```
 
-Roles communicate **only** through project contract files and source evidence —
-never chat summaries. The designer and verifier are always different fresh
-contexts, and the verifier runs every check on the **exported STL re-imported**,
-not the in-memory model.
+Three properties make the verification mean something:
 
-- **Normative** runtime contract + gate schema:
-  [`skills/3d-modeling/references/team-contracts-v4.md`](skills/3d-modeling/references/team-contracts-v4.md)
+- Roles communicate **only** through project contract files and source evidence —
+  never chat summaries.
+- The designer and the verifier are always **different fresh contexts**. Nothing
+  accepts its own work.
+- The verifier runs every check on the **exported STL, re-imported** — not on the
+  in-memory model that produced it.
+
+## Install
+
+### Dependencies
+
+Core runtime — every contract and mesh tool, and all but the optional-backend
+tests (see [Running the tests](#running-the-tests) for the two extra test-only
+packages):
+
+```bash
+pip install trimesh numpy pillow manifold3d
+```
+
+Optional extras, declared in `pyproject.toml` and installed only for the
+backends you actually use:
+
+| Extra           | Pulls in                                          | Needed for                                              |
+|-----------------|---------------------------------------------------|---------------------------------------------------------|
+| `cad`           | cadquery (heavy OCP stack)                        | `run_cadquery_model.py`, CadQuery patterns              |
+| `cad-build123d` | build123d (heavy OCP stack)                       | build123d backend + patterns                            |
+| `section`       | scipy, networkx, shapely, rtree                   | `datum_features` / `finalize` datum blocks              |
+| `render`        | pyrender, PyOpenGL                                | `preview.py` offscreen renders                          |
+| `visual`        | pyrender, PyOpenGL, scipy, networkx, shapely, rtree | `overlay_photo.py`, `verify_visual.py`                |
+| `bambu`         | lxml                                              | `make_bambu_3mf.py` (3MF authoring / verify)            |
+| `mcp`           | mcp                                               | `tools/mcp_server.py` local stdio bridge                |
+
+```bash
+pip install -e ".[section]"   # or .[cad], .[visual], .[all], ...
+```
+
+The **FreeCAD** backend additionally needs a FreeCAD desktop install reachable
+via the FreeCAD MCP; it is not a pip dependency.
+
+### Making Claude Code discover the skill + agents
+
+**Agents** — Claude Code auto-discovers agent definitions in a project's
+`.claude/agents/`. Opening *this* repo as your project exposes all five
+(`3d-orchestrator`, `3d-metrologist`, `3d-designer`, `3d-verifier`,
+`3d-print-engineer`). To use them from a *different* project, copy
+`.claude/agents/3d-*.md` into that project's `.claude/agents/`, or into
+`~/.claude/agents/` for every project.
+
+**Skills** — place or symlink the skill folders under a discovered
+`.claude/skills/` directory:
+
+```bash
+mkdir -p ~/.claude/skills
+for s in 3d-modeling 3d-orchestrator 3d-metrologist 3d-designer 3d-verifier 3d-print-engineer; do
+  ln -s "$PWD/skills/$s" ~/.claude/skills/$s
+done
+```
+
+`3d-modeling` is in that list on purpose: the five role slices resolve their
+shared assets by relative path (`../3d-modeling/references/...`,
+`../3d-modeling/scripts/...`), so the shared folder has to sit beside them. It
+holds no `SKILL.md` of its own and is not separately invocable — keep the
+`skills/` subtree intact and do not flatten it.
 
 ## Repository layout
 
@@ -59,102 +138,63 @@ skills/
     references/           #   FDM design, CadQuery/FreeCAD patterns, materials, printers, contracts
     scripts/              #   deterministic tooling + backend runners + tests
       team_tools/         #     contract-automation package (validate/hash/status/render)
+      designer_toolkit/   #     export/measure/fit/coupon helpers for the designer role
   3d-orchestrator/        # \
   3d-metrologist/         #  |
   3d-designer/            #  |  five team role slices (each a SKILL.md)
   3d-verifier/            #  |
   3d-print-engineer/      # /
-.claude/
-  agents/3d-*.md          # Claude Code agent definitions (one per role)
-.opencode/
-  agents/3d-*.md          # OpenCode agent definitions (one per role)
-dist/openai/
-  3d-*.yaml               # generic/OpenAI-style role package metadata
+  roles/                  # neutral role sources — edit these, then regenerate
+.claude/agents/3d-*.md    # Claude Code agent definitions   \
+.opencode/agents/3d-*.md  # OpenCode agent definitions        > generated by tools/gen_harness.py
+dist/openai/3d-*.yaml     # generic/OpenAI-style role metadata/
+tools/                    # gen_harness · build_skill · check_internal_links · mcp_server
 ```
 
-## Install
-
-### Dependencies
-
-Core runtime (also all the tests need):
-
-```bash
-pip install trimesh numpy pillow
-```
-
-Optional extras, installed only when you use those backends (declared in
-`pyproject.toml`):
-
-| Extra     | Pulls in                         | Needed for                                   |
-|-----------|----------------------------------|----------------------------------------------|
-| `cad`     | cadquery (heavy OCP stack)       | `run_cadquery_model.py`, CadQuery patterns   |
-| `render`  | pyrender, PyOpenGL               | `preview.py` offscreen renders               |
-| `visual`  | pyrender, PyOpenGL, scipy, shapely | `overlay_photo.py`, `verify_visual.py`     |
-| `bambu`   | lxml                             | `make_bambu_3mf.py` (3MF authoring/verify)   |
-| `mcp`     | mcp                              | `tools/mcp_server.py` local stdio bridge     |
-
-```bash
-pip install -e ".[cad]"      # or .[visual], .[all], etc.
-pip install -e ".[mcp]"      # local MCP bridge only
-```
-
-The **FreeCAD** backend additionally needs a FreeCAD desktop install reachable
-via the FreeCAD MCP; it is not a pip dependency.
-
-### Making Claude Code discover the skill + agents
-
-- **Agents**: Claude Code auto-discovers agent definitions in a project's
-  `.claude/agents/`. Opening *this* repo as your project exposes all five
-  (`3d-orchestrator`, `3d-metrologist`, `3d-designer`, `3d-verifier`,
-  `3d-print-engineer`). To use them from a *different* project, copy
-  `.claude/agents/3d-*.md` into that project's `.claude/agents/` (or into
-  `~/.claude/agents/` for all projects).
-- **Skills**: place (or symlink) the skill folders under a discovered
-  `.claude/skills/` directory, e.g.:
-
-  ```bash
-  mkdir -p ~/.claude/skills
-  for s in 3d-orchestrator 3d-metrologist 3d-designer 3d-verifier 3d-print-engineer; do
-    ln -s "$PWD/skills/$s" ~/.claude/skills/$s
-  done
-  ```
-
-  The five role slices reference shared assets by relative path
-  (`../3d-modeling/references/...`, `../3d-modeling/scripts/...`), so keep the
-  `skills/` subtree intact — do not flatten it.
-
-## Quickstart
-
-```
-# In Claude Code, from a project that has a modeling job:
-/3d-orchestrator     # compact/full team pipeline for verified printable parts
-```
-
-Give the orchestrator the request plus any reference photos and caliper reads; it
-selects the pipeline profile, dispatches specialists, and gates each phase on
-the contract files.
-
-Run the contract-automation CLI directly on a project directory:
-
-```bash
-cd skills/3d-modeling/scripts
-python -m team_tools.contracts validate ./team_tools/examples/project_ok
-```
+`skills/roles/*.md` are the source of truth for all three harness formats. Edit a
+role there and run `python tools/gen_harness.py`; CI fails on drift.
 
 ## Running the tests
 
-Tests and lint run with only the **core** deps installed (no cadquery / OCP):
+Tests and lint run on the core stack — no cadquery, no OCP, no GL context:
 
 ```bash
-pip install ruff pytest trimesh numpy pillow
+pip install ruff pytest PyYAML -e ".[mcp]"
 ruff check skills/3d-modeling/scripts
 pytest
 ```
 
-`pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath` so the suites
-resolve their bare imports without an install step. Expected: **see pytest/CI**
-for the current test count and breakdown, plus ruff clean. CI runs the same on Python 3.11 and 3.12
-(`.github/workflows/ci.yml`).
+`PyYAML` is needed because `tools/test_gen_harness.py` parses the generated
+OpenAI-style YAML; the `mcp` extra adds the MCP server smoke test, which skips
+without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
+so the suites resolve their bare imports with no install step.
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
+3.11 and 3.12, then `gen_harness.py --check`, `check_internal_links.py` and
+`build_skill.py`. A second job installs `.[section]` and runs the cross-section
+tests, which skip on the core stack — so the main job is also what proves the
+tooling degrades honestly when an optional dependency is absent.
+
+## For agents
+
+Hand this to a coding agent to install the skill into a project:
+
+```text
+Set up the 3d-modeling skill (https://github.com/ghsi011/3d-modeling-skill) for this project.
+
+1. Clone it outside this project, e.g. `git clone https://github.com/ghsi011/3d-modeling-skill.git ~/src/3d-modeling-skill`. If the clone already exists, `git pull` instead.
+2. In the Python environment that will run the tooling: `pip install trimesh numpy pillow manifold3d`. Add extras only when the job needs them — `.[section]` for datum cross-sections, `.[cad]` or `.[cad-build123d]` for the OCP CAD kernels, `.[visual]` for renders and photo overlays, `.[bambu]` for 3MF, `.[mcp]` for the stdio bridge.
+3. Copy the five agent definitions into this project: `mkdir -p .claude/agents && cp ~/src/3d-modeling-skill/.claude/agents/3d-*.md .claude/agents/`.
+4. Symlink all six skill folders (the five roles plus the shared `3d-modeling`, which the roles reach via `../3d-modeling/...`) into `~/.claude/skills/`, per the README's Install section. Do not flatten the tree.
+5. Verify: `pip install pytest PyYAML` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
+
+Then tell me: what you installed, what you skipped and why, and anything that failed. Do not guess versions or invent commands that are not in the repo's README or docs/tooling.md.
+```
+
+Once installed, the entry point is `/3d-orchestrator`. Working notes for agents
+editing this repo live in [`AGENTS.md`](AGENTS.md); the deterministic tool
+surfaces, their exact flags, and their exit-code contracts are in
+[`docs/tooling.md`](docs/tooling.md).
 
 ## Changelog
 

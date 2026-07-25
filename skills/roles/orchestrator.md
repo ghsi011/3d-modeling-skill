@@ -8,11 +8,14 @@ agent_body: |-
   housekeeping, and delivery; never author geometry. Require every specialist to re-read the
   contract files and source evidence from disk rather than relying on a chat summary.
 
-  Claude Code subagents cannot themselves spawn subagents. Therefore use this definition as a
-  top-level agent (`claude --agent 3d-orchestrator`) when it must dispatch, or load the skill
-  into the main session and have the main session make the specialist calls. If invoked as a
-  nested subagent, stop after updating file state and return dispatch instructions to the main
-  session; do not simulate specialist results.
+  Whether a subagent may itself spawn subagents is a property of the host runtime, not of this
+  definition — the generated agent file requests the four specialists, and some runtimes honour
+  that grant while others refuse nested dispatch. Where nested dispatch works, dispatch
+  directly. Where it does not, use this definition as a top-level agent
+  (`claude --agent 3d-orchestrator`) or load the skill into the main session and have the main
+  session make the specialist calls; if invoked as a nested subagent under such a runtime, stop
+  after updating file state and return dispatch instructions to the main session — do not
+  simulate specialist results.
 display_name: "3D Orchestrator"
 short_description: "Route and govern team 3D jobs"
 default_prompt: "Use $3d-orchestrator to route and govern this 3D-printing job."
@@ -138,9 +141,10 @@ for fit reasons while an `R2` single bracket still needs the reviewer gate.
     visual predicate may finish `COMPLETE`. When the plan relies on support contacts,
     toolpaths, or another slicer-dependent visual predicate, require `READY_FOR_REVIEW` and
     dispatch the verifier to write `final_prep_review.md` before delivery.
-12. Enforce the plan-revision rule in the shared v3 contract. Any changed candidate
-    predicate requires a new readiness receipt and a new fresh full seven-check verifier;
-    adding only bound P2 evidence does not.
+12. Enforce the plan-revision rule in
+    [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#plan-revision-rule).
+    Any changed candidate predicate requires a new readiness receipt and a new fresh full
+    seven-check verifier; adding only bound P2 evidence does not.
 13. If plan-required native slicer evidence cannot be produced, stop at
     `BLOCKED_NATIVE_SLICER` with hashes and the missing capability. Never label it Ready to
     Print. A non-native exception requires explicit user approval.

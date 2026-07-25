@@ -38,8 +38,11 @@ This is file-contract only communication: roles write and read project files, no
 ## Tooling paths
 
 - `skills/3d-modeling/scripts`, deterministic model, mesh, preflight, preview, 3MF, and contract tooling.
+- `skills/3d-modeling/scripts/backends`, the common CAD interface and its `cadquery`, `build123d`, and `freecad` adapters.
 - `tools/gen_harness.py`, harness generator for Claude, OpenCode, and generic YAML outputs.
-- `tools/mcp_server.py`, local MCP server for contract and preflight tools. This file may be landing in the same portability work, so check the branch before relying on it.
+- `tools/mcp_server.py`, local MCP server for contract and preflight tools, wired into `opencode.json`.
+- `tools/build_skill.py`, deterministic per-role and aggregate `.skill` bundle builder. CI step.
+- `tools/check_internal_links.py`, relative-markdown-link resolver over the whole tree. CI step.
 
 See also:
 

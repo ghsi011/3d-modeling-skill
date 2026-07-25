@@ -128,9 +128,10 @@ for fit reasons while an `R2` single bracket still needs the reviewer gate.
     visual predicate may finish `COMPLETE`. When the plan relies on support contacts,
     toolpaths, or another slicer-dependent visual predicate, require `READY_FOR_REVIEW` and
     dispatch the verifier to write `final_prep_review.md` before delivery.
-12. Enforce the plan-revision rule in the shared v3 contract. Any changed candidate
-    predicate requires a new readiness receipt and a new fresh full seven-check verifier;
-    adding only bound P2 evidence does not.
+12. Enforce the plan-revision rule in
+    [`../../skills/3d-modeling/references/team-contracts-v4.md`](../../skills/3d-modeling/references/team-contracts-v4.md#plan-revision-rule).
+    Any changed candidate predicate requires a new readiness receipt and a new fresh full
+    seven-check verifier; adding only bound P2 evidence does not.
 13. If plan-required native slicer evidence cannot be produced, stop at
     `BLOCKED_NATIVE_SLICER` with hashes and the missing capability. Never label it Ready to
     Print. A non-native exception requires explicit user approval.

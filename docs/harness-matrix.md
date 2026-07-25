@@ -50,7 +50,7 @@ Use these checks after regenerating harness files with <code>python tools/gen_ha
 2. Open <code>.opencode/agents/3d-orchestrator.md</code> and confirm the frontmatter declares <code>mode: primary</code>.
 3. In that same frontmatter, confirm <code>permission.task</code> denies <code>*</code> and allows <code>3d-metrologist</code>, <code>3d-designer</code>, <code>3d-verifier</code>, and <code>3d-print-engineer</code>.
 4. Open one specialist, for example <code>.opencode/agents/3d-verifier.md</code>, and confirm it declares <code>mode: subagent</code> and <code>task: deny</code>.
-5. Parse <code>opencode.json</code> and confirm it contains <code>"mcp": {}</code>, the placeholder OpenCode uses for MCP tool servers.
+5. Parse <code>opencode.json</code> and confirm its <code>mcp</code> object declares the local deterministic-tool server <code>3d-modeling-tools</code> with <code>"type": "local"</code>, command <code>["python", "tools/mcp_server.py"]</code>, and <code>"enabled": true</code>.
 
 The repository test <code>tools/test_gen_harness.py</code> covers the plural agent path,
 OpenCode primary and subagent modes, specialist task denial, and the <code>mcp</code>

@@ -12,8 +12,9 @@ renders a multi-view preview, and returns JSON (`success`, `stderr`, `stl`, `pre
 `watertight`):
 
 ```bash
-python3 scripts/run_cadquery_model.py model.py --preview --strict   # strict: non-watertight = fail
-python3 scripts/preview.py model.stl preview.png --views multi      # render-only
+cd skills/3d-modeling/scripts     # or scripts/ inside a packaged .skill bundle
+python3 run_cadquery_model.py model.py --preview --strict   # strict: non-watertight = fail
+python3 preview.py model.stl preview.png --views multi      # render-only
 ```
 
 `success: false` → read `stderr`, fix the script, re-run. Always LOOK at the preview.
@@ -206,8 +207,9 @@ box = cq.Workplane("XY").box(60, 40, 25, centered=(True, True, False)).faces(">Z
 
 ## Multi-color
 
-Export each color as its own STL from the same script (shared coordinates), then:
-`python3 scripts/make_3mf.py out.3mf "Body=body.stl" "Inlay=inlay.stl"` — one 3MF,
+Export each color as its own STL from the same script (shared coordinates), then run
+this from `skills/3d-modeling/scripts/` (`scripts/` inside a packaged .skill bundle):
+`python3 make_3mf.py out.3mf "Body=body.stl" "Inlay=inlay.stl"` — one 3MF,
 one build object, one component per part; Bambu/Orca import it as a single object with
 parts individually assignable to filaments. Inlay geometry rules (flush recess, zero
 clearance, stroke ≥0.8 mm): fdm-design §6.
