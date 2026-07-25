@@ -1,5 +1,6 @@
 """CLI for designer_toolkit.
 
+    python -m designer_toolkit doctor
     python -m designer_toolkit commission --model model.py --plan plan.json --out .              --job-id <job> --updated-utc <iso8601>
     python -m designer_toolkit coupon --plan plan.json --out coupon.stl
 
@@ -48,6 +49,9 @@ def main(argv=None):
     if argv and argv[0] == "commission":
         from .commission import main as commission_main
         raise SystemExit(commission_main(argv[1:]))
+    if argv and argv[0] == "doctor":
+        from .doctor import main as doctor_main
+        raise SystemExit(doctor_main(argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="designer_toolkit",
@@ -58,6 +62,9 @@ def main(argv=None):
     sub.add_parser("commission", add_help=False,
                    help="build, run every deterministic check, write the receipts, "
                         "and exit non-zero if anything failed")
+    sub.add_parser("doctor", add_help=False,
+                   help="what this interpreter can do: backends, extras, and what "
+                        "each missing one costs")
 
     c = sub.add_parser("coupon", help="multi-lane fit coupon from the plan's interfaces")
     c.add_argument("--plan", required=True)

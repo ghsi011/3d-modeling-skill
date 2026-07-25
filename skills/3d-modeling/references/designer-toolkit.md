@@ -7,6 +7,16 @@ command. Run it and read what it says.
 
 Runs from `skills/3d-modeling/scripts/`.
 
+## Before anything
+
+```bash
+python -m designer_toolkit doctor
+```
+
+Names the interpreter, which CAD backends it has, and what each absent extra costs — a
+capability discovered by failure costs a round trip every time. Exits non-zero only when
+`commission` genuinely cannot run here.
+
 ## The one call
 
 ```bash

@@ -56,7 +56,10 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 ## Checklist
 
 1. Confirm commission, backend, output folder, units, named datums, tolerances, and contract
-   versions before modeling.
+   versions before modeling. Run `python -m designer_toolkit doctor` first: it names the
+   interpreter, the CAD backends it has, and what each missing extra costs. One archived run
+   spent turns discovering by trial which of several interpreters had a kernel, and another
+   dropped a datum check on learning mid-build that its environment could not section.
 2. Keep all design-driving values as named parameters derived from contracts; no unexplained
    magic numbers or scattered coordinate arithmetic. Expose them as a module-level `PARAMS`
    dict in `model.py` — `wall_mm`, `nozzle_mm`, `cavity_clearance_mm`,
