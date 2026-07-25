@@ -59,6 +59,31 @@ Every function is still importable — `export_and_hash`, `measure`, `datum_feat
 is not the normal path, and reaching for it to rebuild a check the gate already
 performs is the mistake this file exists to prevent.
 
+## Starting points that know their own topology
+
+```python
+from designer_toolkit.templates import box_shell, panel, bolt_boss, stack
+
+built = box_shell(inner=(120, 80, 60), wall=3.0, floor=3.0)   # body, enclosure, tray
+part, PARAMS = built.part, built.params
+```
+
+`box_shell`, `panel` (a plate with rectangular or round openings), `bolt_boss`, and `stack`
+(several parts laid out for one plate). Each returns geometry *and* the `PARAMS` describing it,
+computed from the same arithmetic that built the solid — so `wall_mm` is the wall that exists
+and `overall_mm` is the size the part came out, neither able to drift the way a hand-maintained
+dict can.
+
+The point is not saved typing, it is that a hand-written model cannot be *asked* anything.
+`panel` reports the narrowest material left between its openings and the panel edge, so a plate
+whose holes leave a 0.6 mm rib fails the pre-build wall check for free. Nothing downstream
+would have caught it: that plate is watertight, exactly the right size, and unprintable.
+
+They build with trimesh and manifold booleans, so they need no CAD kernel and feed `commission`
+unchanged, and they return the part seated on the bed. A part needing kernel-only features —
+true fillets, lofts, threads — is written in the commissioned backend, and then `PARAMS` is
+yours to declare.
+
 ## The fit coupon
 
 ```bash

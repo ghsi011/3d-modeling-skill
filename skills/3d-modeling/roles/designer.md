@@ -61,7 +61,9 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    magic numbers or scattered coordinate arithmetic. Expose them as a module-level `PARAMS`
    dict in `model.py` — `wall_mm`, `nozzle_mm`, `cavity_clearance_mm`,
    `cavity_mouth_fillet_mm`, `edge_treatments: {edge_id: mm}`, `overall_mm: {x,y,z}` — and the
-   commission checks them *before* it builds anything. That is not bookkeeping: a wall thinner
+   commission checks them *before* it builds anything. `designer_toolkit.templates` returns
+   both together (`box_shell`, `panel`, `bolt_boss`, `stack`) and computes them from the same
+   arithmetic that built the solid, so they cannot drift — prefer a template where one fits. That is not bookkeeping: a wall thinner
    than two extrusions, a mouth fillet larger than its own clearance, and a size that already
    disagrees with the plan are arithmetic, and arithmetic should not cost an export. One
    archived run bisected four full build/export/measure cycles toward a boundary that is
