@@ -35,11 +35,10 @@ class SweepTest(unittest.TestCase):
     def test_every_candidate_is_seated_on_the_bed(self) -> None:
         """The regression this exists for.
 
-        ``overhang_area`` skips faces below ``min_z`` so bed contact is not
-        counted as overhang. A rotated-but-untranslated part can sit entirely
-        below z=0, where that skip swallows every downward face and the worst
-        placement scores a spurious near-zero. Every returned transform must
-        therefore land the part on the bed.
+        ``overhang_area`` excludes faces resting on the bed plane so bed contact
+        is not counted as overhang. A rotated-but-untranslated part never
+        touches that plane, so it is screened in a pose it will never be printed
+        in. Every returned transform must therefore land the part on the bed.
         """
         mesh = _overhanging_part()
 

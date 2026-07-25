@@ -157,19 +157,36 @@ def datum_features(mesh_or_path: Any, plane_origin, plane_normal=(0, 0, 1)) -> l
     return features
 
 
+DEFAULT_BED_Z_MM = 0.0
+DEFAULT_BED_TOLERANCE_MM = 0.05
+
+
 def overhang_area(mesh_or_path: Any, *, threshold: float = DEFAULT_DOWNWARD_NORMAL_Z_MAX,
-                  min_z: float = 0.3, transform=None) -> float:
-    """Total downward-facing face area (mm^2) whose transformed normal Z is below
-    ``threshold`` and which sits above ``min_z`` (bed-contact faces excluded).
+                  bed_z: float = DEFAULT_BED_Z_MM,
+                  bed_tolerance: float = DEFAULT_BED_TOLERANCE_MM, transform=None) -> float:
+    """Downward-facing area (mm^2) not in contact with the bed.
+
+    This is the authoritative gate's arithmetic, and it used to be a second,
+    divergent one. The gate calls a face bed-contact when **all three vertices**
+    sit within ``bed_tolerance`` of the bed plane; this function instead
+    excluded faces whose *centroid* fell below an arbitrary ``min_z`` of 0.3 mm,
+    a height with no relation to the bed tolerance. On a real archived candidate
+    the two answered 9,888 mm2 and 10,507 mm2 for the same mesh in the same
+    frame -- and at the default ``min_z`` this function returned 0.0 mm2 for a
+    part the gate scored at 10,507, because a flat underside sits below 0.3 mm
+    everywhere. A screen that reports zero for an unsupported part is worse than
+    no screen.
+
     Pass the model-to-printer ``transform`` to screen in print orientation.
-    ~0 for a support-free print.
     """
     m = as_mesh(mesh_or_path)
     normals = m.face_normals
-    centers = m.triangles_center
+    triangles = m.vertices[m.faces]
     if transform is not None:
         transform = np.asarray(transform, dtype=float)
         normals = normals @ transform[:3, :3].T
-        centers = trimesh.transformations.transform_points(centers, transform)
-    mask = (normals[:, 2] < threshold) & (centers[:, 2] > min_z)
-    return float(m.area_faces[mask].sum())
+        triangles = trimesh.transformations.transform_points(
+            triangles.reshape(-1, 3), transform).reshape(triangles.shape)
+    downward = normals[:, 2] <= threshold
+    bed_contact = np.max(np.abs(triangles[:, :, 2] - bed_z), axis=1) <= bed_tolerance
+    return float(m.area_faces[downward & ~bed_contact].sum())

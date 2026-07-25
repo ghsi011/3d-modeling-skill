@@ -18,10 +18,6 @@ from typing import Any
 from . import exporter, fit, metrics
 from ._bootstrap import as_mesh
 
-# Used only to detect and announce a gap, never to screen: see
-# metrics.BARE_45_DEG for why the two numbers differ.
-_TIGHTEST_PLAN_THRESHOLD = metrics.BARE_45_DEG
-
 
 def asdict_feature(f) -> dict:
     return {"kind": f.kind, "center_mm": list(f.center_mm),
@@ -43,7 +39,8 @@ def _datum_block(stl_path: str, datum: dict) -> dict:
 def finalize(model: Any, out_stem: str | Path, *, datums=(), reference: Any = None,
              insertion=None, orientation_transform=None,
              overhang_threshold: float | None = None,
-             overhang_min_z: float = 0.3,
+             bed_z: float = metrics.DEFAULT_BED_Z_MM,
+             bed_tolerance: float = metrics.DEFAULT_BED_TOLERANCE_MM,
              also_step: bool = True) -> dict:
     """Export ``model``, measure it, and assemble a Phase-4 evidence bundle.
 
@@ -55,18 +52,15 @@ def finalize(model: Any, out_stem: str | Path, *, datums=(), reference: Any = No
 
     ``overhang_threshold``: the print plan's ``downward_normal_z_max`` — PASS IT.
     ``team_preflight`` is the authoritative gate and reads that value per support
-    rule from the plan; this function never sees the plan, so when the argument is
-    omitted it falls back to ``metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX`` and records
-    ``overhang_threshold_source: "toolkit_default"``. That fallback is LOOSER than
-    a plan declaring the bare 45deg value, so it can report clean where the gate
-    FAILs; whenever the two would disagree on this mesh, an ``auto_notes`` entry
-    says so and gives both areas.
+    rule from the plan; this function never sees the plan, so when the argument
+    is omitted it falls back to ``metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX`` and
+    records ``overhang_threshold_source: "toolkit_default"``. That fallback is
+    LOOSER than a plan declaring the bare 45deg value, so it can report clean
+    where the gate FAILs.
 
-    ``overhang_min_z``: faces whose centre sits at or below this Z count as bed
-    contact and are excluded. The gate's equivalent screen is ``bed_z_mm`` +/-
-    ``bed_tolerance_mm`` measured on all three vertices of a triangle; pass
-    ``bed_z_mm + bed_tolerance_mm`` to line the two up as closely as this
-    centre-based screen can.
+    ``bed_z``/``bed_tolerance``: the gate's own bed-contact test, applied to all
+    three vertices of a triangle. It used to be a centre-based ``min_z`` screen
+    that disagreed with the gate by 2x on a real candidate.
     """
     report = exporter.export_and_hash(model, out_stem, also_step=also_step)
     stl_path = report.stl_path
@@ -75,18 +69,9 @@ def finalize(model: Any, out_stem: str | Path, *, datums=(), reference: Any = No
     if overhang_threshold is None:
         overhang_threshold = metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX
 
-    # Load once: the divergence probe below screens the very same mesh again.
-    screened = as_mesh(stl_path)
     overhang = metrics.overhang_area(
-        screened, threshold=overhang_threshold, min_z=overhang_min_z,
-        transform=orientation_transform)
-    # What a plan sitting at the bare 45deg value would see. Only meaningful when
-    # the threshold in hand is the looser of the two.
-    gate_side_overhang = None
-    if overhang_threshold < _TIGHTEST_PLAN_THRESHOLD:
-        gate_side_overhang = metrics.overhang_area(
-            screened, threshold=_TIGHTEST_PLAN_THRESHOLD, min_z=overhang_min_z,
-            transform=orientation_transform)
+        as_mesh(stl_path), threshold=overhang_threshold, bed_z=bed_z,
+        bed_tolerance=bed_tolerance, transform=orientation_transform)
 
     evidence: dict = {
         "export": {
@@ -103,7 +88,8 @@ def finalize(model: Any, out_stem: str | Path, *, datums=(), reference: Any = No
         "overhang_mm2": round(overhang, 4),
         "overhang_threshold": overhang_threshold,
         "overhang_threshold_source": "caller" if threshold_from_caller else "toolkit_default",
-        "overhang_min_z": overhang_min_z,
+        "bed_z_mm": bed_z,
+        "bed_tolerance_mm": bed_tolerance,
         "datums": [_datum_block(stl_path, d) for d in datums],
     }
 
@@ -128,14 +114,6 @@ def finalize(model: Any, out_stem: str | Path, *, datums=(), reference: Any = No
         notes.append(
             f"{overhang:.1f} mm2 of downward-facing area past the support screen "
             "in the given orientation — reorient or declare SUPPORT_ALLOWED.")
-    if gate_side_overhang is not None and gate_side_overhang > overhang + 1e-9:
-        source = "caller-supplied" if threshold_from_caller else "toolkit default; no plan was consulted"
-        notes.append(
-            f"overhang screened at downward_normal_z_max={overhang_threshold} ({source}), "
-            f"which is looser than the bare 45deg value {_TIGHTEST_PLAN_THRESHOLD}: at that "
-            f"value this mesh shows {gate_side_overhang:.2f} mm2, not {overhang:.2f} mm2. "
-            "team_preflight reads the plan's own per-rule threshold and is the authority — "
-            "re-run with overhang_threshold set from the print plan before calling this clean.")
     if evidence.get("seated_interference_mm3", 0.0) > 1e-3:
         notes.append(
             f"seated interference {evidence['seated_interference_mm3']} mm3 — "

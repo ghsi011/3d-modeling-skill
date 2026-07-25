@@ -102,19 +102,134 @@ class SupportCheckTest(unittest.TestCase):
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
                                     plan=plan, render=False)
 
-            ceiling = next(c for c in result.checks if c.id == "support-ceiling")
+            ceiling = next(c for c in result.checks if c.id == "support-ceiling-S-01")
             self.assertEqual(ceiling.result, "FAIL")
 
-    def test_it_screens_in_the_best_placement_it_can_find(self) -> None:
+    def test_it_screens_the_orientation_the_plan_declares(self) -> None:
+        """Not the best one it can find. A candidate that prints cleanly in some
+        other pose tells you nothing about the pose it will actually print in.
+        """
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
-                                    plan=_plan(), render=False)
+            # Stand the box on its short end: a declared transform the sweep
+            # would never pick, so the two answers are distinguishable.
+            on_end = [[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]
+            plan = _plan(support_rules=[{
+                "id": "S-01", "disposition": "SUPPORT_ALLOWED",
+                "model_to_printer_matrix": on_end,
+                "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0,
+            }])
 
-            support = next(c for c in result.checks if c.id == "support")
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            support = next(c for c in result.checks if c.id == "support-S-01")
             self.assertEqual(support.result, "PASS")
-            self.assertIn("placement", support.detail)
-            self.assertGreater(len(result.evidence["placements_considered"]), 1)
+            self.assertIn("plan model_to_printer_matrix", support.detail)
+            self.assertEqual(on_end, result.evidence["planned_placements"][0]["transform"])
+
+    def test_every_support_rule_is_screened_not_just_the_first(self) -> None:
+        """`rules[0]` left the rest unchecked, so a plan could forbid support on
+        a face nobody ever screened and still exit zero."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(support_rules=[
+                {"id": "S-01", "disposition": "SUPPORT_ALLOWED",
+                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0},
+                {"id": "S-02", "disposition": "SELF_SUPPORT_REQUIRED",
+                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 2150.0},
+            ])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            ids = {c.id for c in result.checks}
+            self.assertIn("support-S-01", ids)
+            self.assertIn("support-S-02", ids)
+            # The second rule's contradiction must be caught, not skipped.
+            self.assertEqual("FAIL",
+                             next(c for c in result.checks
+                                  if c.id == "support-ceiling-S-02").result)
+
+
+class InterfaceCheckTest(unittest.TestCase):
+    """The check that had no coverage at all: every other fixture here sets
+    `interfaces: []`, so nothing ever exercised it and it shipped comparing a
+    mm3 volume against the plan's millimetres.
+    """
+
+    @staticmethod
+    def _shell_and_core(work: Path, gap: float):
+        """A cavity with a known per-side gap, and the block that seats in it."""
+        outer = trimesh.creation.box(extents=(30, 30, 30))
+        cavity = trimesh.creation.box(extents=(20 + 2 * gap, 20 + 2 * gap, 40))
+        shell = trimesh.boolean.difference([outer, cavity])
+        shell_path = work / "shell.stl"
+        shell.export(shell_path)
+        core_path = work / "core.stl"
+        trimesh.creation.box(extents=(20, 20, 20)).export(core_path)
+        return shell_path, str(core_path)
+
+    def _plan_with_band(self, low: float, high: float):
+        return _plan(interfaces=[{"id": "I-01", "fit_type": "clearance",
+                                  "min_mm": low, "max_mm": high}])
+
+    def test_a_correctly_clearing_part_passes(self) -> None:
+        """The regression. A 0.2 mm per-side gap against a declared [0.15, 0.30]
+        band is exactly right, and used to FAIL because its overlap volume of
+        0.0 mm3 is not >= 0.15."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, core = self._shell_and_core(work, gap=0.2)
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out",
+                                    plan=self._plan_with_band(0.15, 0.30),
+                                    reference=core, render=False)
+
+            fit_check = next(c for c in result.checks if c.id == "fit")
+            self.assertEqual("PASS", fit_check.result, fit_check.detail)
+            self.assertAlmostEqual(0.2, result.evidence["seated_clearance_mm"], delta=0.02)
+
+    def test_an_over_clearanced_part_fails(self) -> None:
+        """Over-clearance fails the fit exactly as interference does -- it is
+        what makes a captured part rattle."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, core = self._shell_and_core(work, gap=1.0)
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out",
+                                    plan=self._plan_with_band(0.15, 0.30),
+                                    reference=core, render=False)
+
+            fit_check = next(c for c in result.checks if c.id == "fit")
+            self.assertEqual("FAIL", fit_check.result)
+            self.assertIn("Too loose", fit_check.action)
+
+    def test_an_interfering_part_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, core = self._shell_and_core(work, gap=-0.5)
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out",
+                                    plan=self._plan_with_band(0.15, 0.30),
+                                    reference=core, render=False)
+
+            fit_check = next(c for c in result.checks if c.id == "fit")
+            self.assertEqual("FAIL", fit_check.result)
+            self.assertIn("Too tight", fit_check.action)
+
+    def test_a_deliberate_interference_band_accepts_overlap(self) -> None:
+        """The contract has no universal zero-interference rule: a press or
+        crush-rib interface declares a negative band on purpose."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, core = self._shell_and_core(work, gap=-0.2)
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out",
+                                    plan=self._plan_with_band(-0.30, -0.10),
+                                    reference=core, render=False)
+
+            self.assertEqual("PASS", next(c for c in result.checks if c.id == "fit").result)
 
 
 class SolidCheckTest(unittest.TestCase):

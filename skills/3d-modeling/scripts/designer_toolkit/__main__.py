@@ -30,7 +30,7 @@ def _cmd_measure(a):
 
 def _cmd_overhang(a):
     return {"overhang_mm2": metrics.overhang_area(
-        a.stl, threshold=a.threshold, min_z=a.min_z)}
+        a.stl, threshold=a.threshold, bed_tolerance=a.bed_tolerance)}
 
 
 def _cmd_datums(a):
@@ -71,7 +71,6 @@ def _cmd_finalize(a):
         # Left as None when the plan is silent, so finalize records the fallback
         # as "toolkit_default" instead of it looking like a declared plan value.
         overhang_threshold=plan.get("overhang_threshold"),
-        overhang_min_z=plan.get("overhang_min_z", 0.3),
         also_step=False)
 
 
@@ -86,7 +85,8 @@ def main(argv=None):
     o = sub.add_parser("overhang")
     o.add_argument("stl")
     o.add_argument("--threshold", type=float, default=metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX)
-    o.add_argument("--min-z", dest="min_z", type=float, default=0.3)
+    o.add_argument("--bed-tolerance", dest="bed_tolerance", type=float,
+                   default=metrics.DEFAULT_BED_TOLERANCE_MM)
     o.set_defaults(fn=_cmd_overhang)
 
     d = sub.add_parser("datums")

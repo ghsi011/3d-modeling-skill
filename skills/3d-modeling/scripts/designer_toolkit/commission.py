@@ -24,12 +24,15 @@ solves the problem.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib.util
 import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from ._bootstrap import as_mesh  # noqa: F401  (also puts scripts/ on sys.path)
 
@@ -102,9 +105,30 @@ def load_part(model_path: Path) -> Any:
     raise ValueError(f"{model_path.name} must define `part` or `build()`")
 
 
-def _plan_support_rule(plan: dict[str, Any]) -> dict[str, Any] | None:
-    rules = plan.get("support_rules") or []
-    return rules[0] if rules else None
+def _plan_support_rules(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every rule, not the first.
+
+    Returning `rules[0]` left rules 2..n unchecked, so a plan could forbid
+    support on a face nobody ever screened and still exit zero.
+    """
+    return list(plan.get("support_rules") or [])
+
+
+def planned_placement(rule: dict[str, Any], mesh, threshold: float) -> orient.Placement:
+    """The orientation the rule declares, or the best available if it declares none.
+
+    The contract check is *planned*-orientation printability. Screening in
+    `orient.best` instead answers a different question -- whether some
+    orientation exists that prints cleanly -- so a candidate could pass in an
+    orientation nobody intended to print, while the face that actually lands
+    downward went unscreened.
+    """
+    matrix = rule.get("model_to_printer_matrix")
+    if matrix is None:
+        best = orient.best(mesh, threshold=threshold)
+        return dataclasses.replace(
+            best, name=f"{best.name} (plan declared no model_to_printer_matrix)")
+    return orient.score(mesh, "plan model_to_printer_matrix", matrix, threshold=threshold)
 
 
 def _check_solid(commission: Commission, report) -> None:
@@ -152,57 +176,123 @@ def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> Non
     ))
 
 
-def _check_support(commission: Commission, mesh, plan: dict[str, Any], placement) -> None:
-    rule = _plan_support_rule(plan)
-    threshold = float(rule.get("downward_normal_z_max", BARE_45_DEG)) if rule else BARE_45_DEG
-    disposition = (rule or {}).get("disposition", "SELF_SUPPORT_REQUIRED")
-    ceiling = float((rule or {}).get("max_out_of_limit_area_mm2", 0.0))
+def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[Any]:
+    """Screen every support rule, each in the orientation it declares."""
+    rules = _plan_support_rules(plan)
+    if not rules:
+        commission.add(Check("support", "Downward-facing area within the plan limit", _SKIP,
+                             "the plan declares no support rules",
+                             "Add a support rule, or generate one with "
+                             "`python -m designer_toolkit.plan template`."))
+        return []
 
-    # The contract says SELF_SUPPORT_REQUIRED means zero out-of-limit area, and
-    # the gate accepted any non-negative ceiling. Two archived runs declared
-    # SELF_SUPPORT_REQUIRED with ceilings of 1850 and 2150 mm2 and passed.
-    if disposition == "SELF_SUPPORT_REQUIRED" and ceiling > 0:
+    placements = []
+    for rule in rules:
+        rule_id = rule.get("id", "S-01")
+        threshold = float(rule.get("downward_normal_z_max", BARE_45_DEG))
+        disposition = rule.get("disposition", "SELF_SUPPORT_REQUIRED")
+        ceiling = float(rule.get("max_out_of_limit_area_mm2", 0.0))
+
+        # The contract says SELF_SUPPORT_REQUIRED means zero out-of-limit area, and
+        # the gate accepted any non-negative ceiling. Two archived runs declared
+        # SELF_SUPPORT_REQUIRED with ceilings of 1850 and 2150 mm2 and passed.
+        if disposition == "SELF_SUPPORT_REQUIRED" and ceiling > 0:
+            commission.add(Check(
+                f"support-ceiling-{rule_id}", f"{rule_id} ceiling matches disposition", _FAIL,
+                f"SELF_SUPPORT_REQUIRED declared with a ceiling of {ceiling} mm2",
+                "SELF_SUPPORT_REQUIRED means zero out-of-limit area. Either reorient until "
+                "it is zero, or declare SUPPORT_ALLOWED and say which faces take support.",
+            ))
+            ceiling = 0.0
+
+        placement = planned_placement(rule, mesh, threshold)
+        placements.append(placement)
+        area = placement.overhang_mm2
+        ok = area <= ceiling
+        best = orient.best(mesh, threshold=threshold)
+        advice = (f"Reorient, chamfer the offending face, or declare SUPPORT_ALLOWED with a "
+                  f"contact class. The best of {len(orient._CANDIDATES)} screened placements "
+                  f"is '{best.name}' at {best.overhang_mm2:.2f} mm2"
+                  + (" -- no orientation clears this, so the fix is geometric."
+                     if best.overhang_mm2 > ceiling else "."))
         commission.add(Check(
-            "support-ceiling", "Support ceiling matches disposition", _FAIL,
-            f"SELF_SUPPORT_REQUIRED declared with a ceiling of {ceiling} mm2",
-            "SELF_SUPPORT_REQUIRED means zero out-of-limit area. Either reorient until "
-            "it is zero, or declare SUPPORT_ALLOWED and say which faces take support.",
+            f"support-{rule_id}", f"{rule_id} downward-facing area within its limit",
+            _PASS if ok else _FAIL,
+            f"{area:.2f} mm2 past {threshold} in the '{placement.name}' placement "
+            f"(limit {ceiling} mm2)",
+            "" if ok else advice,
         ))
-        ceiling = 0.0
-
-    from .metrics import overhang_area
-    area = overhang_area(mesh, threshold=threshold, transform=placement.transform)
-    ok = area <= ceiling
-    commission.add(Check(
-        "support", "Downward-facing area within the plan limit",
-        _PASS if ok else _FAIL,
-        f"{area:.2f} mm2 past {threshold} in the '{placement.name}' placement "
-        f"(limit {ceiling} mm2)",
-        "" if ok else f"Best of {len(orient._CANDIDATES)} placements still leaves "
-                      f"{area:.2f} mm2. Reorient, add a chamfer to the offending face, "
-                      "or declare SUPPORT_ALLOWED with a contact class.",
-    ))
+    return placements
 
 
-def _check_interfaces(commission: Commission, stl: Path, plan: dict[str, Any], reference) -> None:
+def seated_clearance_mm(candidate, reference) -> float:
+    """Tightest per-side gap between the seated pair, in mm.
+
+    Positive is a gap, negative is overlap depth. The plan declares `min_mm` and
+    `max_mm` as per-side *linear* clearances, so a linear measurement is the only
+    thing comparable to them. This gate used to test a boolean-intersection
+    *volume* against those millimetres, which meant a correctly clearing part --
+    0.0 mm3 of overlap -- failed a declared `[0.15, 0.30]` band, because
+    `0.15 <= 0.0` is false.
+
+    Signed distance is positive inside the solid, so a reference point sitting
+    in the cavity void reports minus its distance to the nearest wall; the
+    tightest point of the assembly is the largest such value.
+
+    `rtree` gives the fast path when it is installed, but it lives in the
+    `section` extra and this is a core fit gate -- a check that quietly stops
+    running on a lean install is the failure mode this whole module exists to
+    remove. So the fallback is exact too, just slower: nearest point by brute
+    force, and the sign from the winning face's own normal rather than a
+    ray-cast containment test.
+    """
+    points = np.asarray(reference.vertices, dtype=float)
+    try:
+        from trimesh.proximity import ProximityQuery
+
+        return -float(np.max(ProximityQuery(candidate).signed_distance(points)))
+    except ImportError:
+        from trimesh.proximity import closest_point_naive
+
+        closest, distance, face_ids = closest_point_naive(candidate, points)
+        outward = np.einsum("ij,ij->i", points - closest, candidate.face_normals[face_ids])
+        signed = np.where(outward >= 0, -distance, distance)
+        return -float(np.max(signed))
+
+
+def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], reference) -> None:
     interfaces = plan.get("interfaces") or []
     if not interfaces or reference is None:
         commission.add(Check("fit", "Declared interface fit", _SKIP,
                              "no interfaces declared, or no mating reference supplied"))
         return
-    volume = fit.interference(str(stl), reference)
+
+    reference_mesh = as_mesh(reference) if isinstance(reference, str) else reference
+    clearance = seated_clearance_mm(mesh, reference_mesh)
     bands = [(float(i.get("min_mm", 0.0)), float(i.get("max_mm", 0.0))) for i in interfaces]
-    low = min(b[0] for b in bands)
-    high = max(b[1] for b in bands)
-    ok = low <= volume <= high or (high <= 0 and volume <= 1e-2)
+    low, high = min(b[0] for b in bands), max(b[1] for b in bands)
+    ok = low - 1e-6 <= clearance <= high + 1e-6
+
+    # One reference carries no per-interface regions, so the measurement is the
+    # tightest point of the whole assembly and cannot say which interface owns
+    # it. Say so rather than implying a per-ID verdict the geometry cannot give.
+    scope = (f"tightest of {len(interfaces)} declared interfaces"
+             if len(interfaces) > 1 else interfaces[0].get("id", "I-01"))
+    if clearance < low:
+        action = ("Too tight: the seated pair overlaps or clears by less than the declared "
+                  "minimum. Open the mating geometry -- never widen the band.")
+    else:
+        action = ("Too loose: over-clearance fails the fit exactly as interference does, and "
+                  "is what makes a part rattle. Close the mating geometry.")
     commission.add(Check(
         "fit", "Declared interface fit",
         _PASS if ok else _FAIL,
-        f"seated interference {volume:.4f} mm3 against a declared band [{low}, {high}]",
-        "" if ok else "Seated interference is outside every declared band. Interference "
-                      "below ~0.01 mm3 is tessellation noise and is already zero -- do not "
-                      "tune clearance against it; find the feature that actually overlaps.",
+        f"seated clearance {clearance:.4f} mm ({scope}) against a declared band "
+        f"[{low}, {high}] mm",
+        "" if ok else action,
     ))
+    commission.evidence["seated_clearance_mm"] = clearance
+    commission.evidence["seated_interference_mm3"] = fit.interference(mesh, reference_mesh)
 
 
 def run(
@@ -232,9 +322,9 @@ def run(
     _check_solid(commission, report)
     _check_envelope(commission, report, plan)
 
-    placement = orient.best(mesh)
-    _check_support(commission, mesh, plan, placement)
-    _check_interfaces(commission, exported, plan, reference)
+    placements = _check_support(commission, mesh, plan)
+    placement = placements[0] if placements else orient.best(mesh)
+    _check_interfaces(commission, mesh, plan, reference)
 
     measured_edges = {}
     for edge in plan.get("edges") or []:
@@ -263,18 +353,19 @@ def run(
         str(exported), str(out_dir / "candidate_01"),
         reference=reference,
         orientation_transform=placement.transform,
-        overhang_threshold=float((_plan_support_rule(plan) or {}).get(
+        overhang_threshold=float((_plan_support_rules(plan) or [{}])[0].get(
             "downward_normal_z_max", BARE_45_DEG)),
         also_step=False,
     )
 
-    commission.evidence = {
+    commission.evidence.update({
         "export": bundle["export"],
         "placement": placement.as_dict(),
         "placements_considered": [p.as_dict() for p in orient.sweep(mesh)],
         "edges": measured_edges,
         "measure": measure(mesh).__dict__,
-    }
+        "planned_placements": [p.as_dict() for p in placements],
+    })
 
     if render:
         try:

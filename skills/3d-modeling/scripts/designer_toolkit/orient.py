@@ -57,11 +57,11 @@ class Placement:
 def _seat_on_bed(mesh: trimesh.Trimesh, rotation: np.ndarray) -> np.ndarray:
     """Rotation, then the translation that drops the part onto z=0.
 
-    Seating is not cosmetic. ``overhang_area`` ignores faces below ``min_z`` so
-    that bed-contact faces are not counted as overhangs; a rotated-but-unseated
-    part can sit below the bed plane entirely, and then every downward face is
-    excluded and the placement scores a spurious near-zero. Rotation without
-    translation is the wrong transform to screen with.
+    Seating is not cosmetic. ``overhang_area`` excludes faces resting on the bed
+    plane so bed contact is not counted as overhang; a rotated-but-unseated part
+    sits away from that plane entirely, so nothing is excluded and -- worse --
+    the part is being screened somewhere it will never be printed. Rotation
+    without translation is the wrong transform to screen with.
     """
     rotated = mesh.copy()
     rotated.apply_transform(rotation)
@@ -80,6 +80,26 @@ def _bed_contact_area(mesh: trimesh.Trimesh, transform: np.ndarray, tol: float =
     return float(placed.area_faces[on_bed].sum())
 
 
+def score(mesh_or_path: Any, name: str, transform: np.ndarray, *,
+          threshold: float = BARE_45_DEG) -> Placement:
+    """Score one placement.
+
+    One definition, so a plan-declared orientation and a swept candidate are
+    measured the same way and their numbers can be compared.
+    """
+    mesh = as_mesh(mesh_or_path)
+    transform = np.asarray(transform, dtype=float)
+    placed = mesh.copy()
+    placed.apply_transform(transform)
+    return Placement(
+        name=name,
+        transform=transform,
+        overhang_mm2=overhang_area(mesh, threshold=threshold, transform=transform),
+        bed_contact_mm2=_bed_contact_area(mesh, transform),
+        height_mm=float(placed.extents[2]),
+    )
+
+
 def sweep(
     mesh_or_path: Any,
     *,
@@ -95,18 +115,7 @@ def sweep(
     results: list[Placement] = []
     for name, axis, degrees in candidates:
         rotation = trimesh.transformations.rotation_matrix(np.radians(degrees), axis)
-        transform = _seat_on_bed(mesh, rotation)
-        placed = mesh.copy()
-        placed.apply_transform(transform)
-        results.append(
-            Placement(
-                name=name,
-                transform=transform,
-                overhang_mm2=overhang_area(mesh, threshold=threshold, transform=transform),
-                bed_contact_mm2=_bed_contact_area(mesh, transform),
-                height_mm=float(placed.extents[2]),
-            )
-        )
+        results.append(score(mesh, name, _seat_on_bed(mesh, rotation), threshold=threshold))
     return sorted(results, key=lambda p: (round(p.overhang_mm2, 3), -p.bed_contact_mm2))
 
 

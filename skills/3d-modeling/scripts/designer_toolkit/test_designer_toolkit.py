@@ -125,12 +125,17 @@ class TestMeasure(unittest.TestCase):
     def test_overhang_counts_downward_face_above_bed(self):
         self.assertAlmostEqual(metrics.overhang_area(_downward_quad(z=1.0)), 100.0, delta=1.0)
 
-    def test_overhang_excludes_faces_below_min_z(self):
-        self.assertAlmostEqual(metrics.overhang_area(_downward_quad(z=0.1)), 0.0, delta=1e-6)
+    def test_overhang_excludes_a_face_resting_on_the_bed(self):
+        self.assertAlmostEqual(metrics.overhang_area(_downward_quad(z=0.0)), 0.0, delta=1e-6)
+
+    def test_a_face_just_clear_of_the_bed_still_counts(self):
+        """The old centre-based screen swallowed everything under 0.3 mm, so a
+        real unsupported face 0.1 mm off the bed read as zero."""
+        self.assertAlmostEqual(metrics.overhang_area(_downward_quad(z=0.1)), 100.0, delta=1.0)
 
     def test_overhang_excludes_shallow_slopes(self):
-        # A plain box: bottom face is downward but at the bed (excluded by min_z),
-        # all other faces are not past the -0.73 screen -> zero overhang.
+        # A plain box seated on the bed: the bottom face is downward but resting
+        # on the bed, and no other face is past the -0.73 screen -> zero.
         self.assertAlmostEqual(metrics.overhang_area(_box((10, 10, 10), (0, 0, 5))),
                                0.0, delta=1e-6)
 
@@ -216,11 +221,11 @@ class TestFinalize(unittest.TestCase):
             self.assertTrue(any("interference" in n
                                 for n in ev["readiness_skeleton"]["auto_notes"]))
 
-    def test_finalize_announces_a_threshold_it_disagrees_with_the_gate_on(self):
+    def test_the_toolkit_default_is_looser_than_a_plan_at_45_degrees(self):
         # A 46deg downward face sits between the toolkit default (-sin47deg) and
         # a plan declaring the bare 45deg value: the default screens it away and
-        # reports clean, the gate FAILs. finalize must say so instead of going
-        # quiet, and must report the real area once the plan's value is passed.
+        # reports clean where the gate FAILs. That is why the threshold must come
+        # from the plan, and why the evidence records which one was used.
         with tempfile.TemporaryDirectory() as d:
             stl = os.path.join(d, "cone.stl")
             height = 20.0
@@ -234,18 +239,11 @@ class TestFinalize(unittest.TestCase):
             loose = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False)
             self.assertEqual(loose["overhang_threshold_source"], "toolkit_default")
             self.assertAlmostEqual(loose["overhang_mm2"], 0.0, delta=1e-6)
-            self.assertTrue(
-                any("team_preflight" in n for n in loose["readiness_skeleton"]["auto_notes"]),
-                loose["readiness_skeleton"]["auto_notes"])
 
             strict = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False,
                                      overhang_threshold=-0.70710678)
             self.assertEqual(strict["overhang_threshold_source"], "caller")
             self.assertGreater(strict["overhang_mm2"], 100.0)
-            # At the plan's own value there is no gap left to announce.
-            self.assertFalse(
-                any("team_preflight" in n for n in strict["readiness_skeleton"]["auto_notes"]),
-                strict["readiness_skeleton"]["auto_notes"])
 
 
 if __name__ == "__main__":
