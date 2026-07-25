@@ -53,3 +53,11 @@ Treat the backend as an explicit commission input, not an agent preference. Use 
 The discriminator is the execution environment, not the modeling feature set: `cadquery` and `build123d` are headless Python/OCP kernels that run wherever the tooling runs, while `freecad` needs a desktop FreeCAD document driven over MCP.
 
 Record the selected backend in the project contract files so downstream roles and tools can verify the same artifact chain.
+
+## Changing a role
+
+A role definition is a claim about what makes an agent design better. Test it the way the pipeline tests geometry: measure, do not assert.
+
+Run the role blind against a part whose ground truth you hold but the agent cannot see — real photographs, a terse request, and nothing else in the job folder. Score its output against the truth afterwards. Then change exactly one thing in `skills/roles/`, re-run with byte-identical inputs, and compare. Record tokens, tool calls and wall-clock alongside the geometric error: a change that improves accuracy while costing twice as much has not obviously helped.
+
+Two cautions learned from doing it. Pick a scoring datum the model cannot recall from training — a published phone dimension proves nothing about whether an agent measured, so score on a feature that appears in no spec sheet. And expect the useful failures to be reasoning failures rather than arithmetic: the run that moved the numbers most did not read its calipers differently, it stopped trusting a biased read and said why.
