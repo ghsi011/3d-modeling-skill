@@ -9,7 +9,7 @@ explicit that it does not prove geometric/manufacturing correctness.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from common import TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors, resolve_timestamp, sha256_file, sort_issues
 from project import ProjectValidation, load_project, run_manifest_checks
@@ -25,9 +25,9 @@ CONTRACT_ORDER = ("job_state", "dimensions", "print_plan", "verification_report"
 
 
 def build_validate_receipt(
-    project_dir: Path, *, timestamp: str | None, argv: list[str]
+    project_dir: Path, *, timestamp: str | None, argv: list[str], required: Sequence[str] = ()
 ) -> tuple[dict[str, Any], ProjectValidation]:
-    project = load_project(project_dir)
+    project = load_project(project_dir, required=required)
     run_manifest_checks(project)
 
     all_issues = sort_issues(project.all_issues())
@@ -70,6 +70,10 @@ def build_validate_receipt(
         "kind": "validate-receipt",
         "job_id": job_id,
         "project_dir": _display_path(project_dir),
+        # What the caller demanded be present, recorded next to what was
+        # actually read: a reviewer can tell a deliberately narrow validate
+        # from one that gated on nothing at all.
+        "required_contracts": sorted(set(required)),
         "validated_paths": validated_paths,
         "observed_revisions": {key: observed_revisions.get(key) for key in CONTRACT_ORDER if key in observed_revisions},
         "computed_sha256": dict(sorted(computed_sha256.items())),

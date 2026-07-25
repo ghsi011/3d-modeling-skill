@@ -103,8 +103,11 @@ overlays, and issue a concrete file-contract verdict.
    JSON or infer contacts from an isometric view.
 8. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
    intended bodies, units, and no missing or stray components. Independently run
-   `python -m team_tools.contracts validate <project-dir>` (from `skills/3d-modeling/scripts/`)
-   against `artifact_manifest.json`; require exit code 0. Treat any `UNIT_SCALE_MISMATCH` —
+   `python -m team_tools.contracts validate <project-dir> --require all` (from
+   `skills/3d-modeling/scripts/`) against `artifact_manifest.json`; require exit code 0.
+   `--require` is load-bearing, not decoration: without it a missing contract is only a
+   warning, so a typo'd path or a project missing the manifest entirely exits 0 and reads
+   as a pass. Confirm the receipt's `validated_paths` names every contract as well. Treat any `UNIT_SCALE_MISMATCH` —
    the hard 25.4x inch/mm bbox check between the declared manifest and the re-imported STL —
    as a hard `UNIT_SCALE` reject, never a warning to note and pass. A
    `POSSIBLE_UNIT_SCALE_MISMATCH` warning still needs an explicit agent judgment call before

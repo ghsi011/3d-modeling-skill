@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import manifest_checks as MC
 import validators as V
@@ -39,16 +39,26 @@ class ProjectValidation:
         return out
 
 
-def _load_one(project_dir: Path, key: str, filename: str) -> ContractFile:
+def _load_one(project_dir: Path, key: str, filename: str, *, required: bool) -> ContractFile:
     path = project_dir / filename
     if not path.is_file():
+        # Absence is a warning by default and an error only when the caller
+        # declared the contract required: mid-pipeline a project legitimately
+        # holds only the contracts its phase has produced so far, so a blanket
+        # error would make `validate` unusable before Phase 4.
+        detail = f"{filename} was not found in the project directory"
+        issue = (
+            error("REQUIRED_CONTRACT_MISSING", key, f"{detail} (declared required by --require)")
+            if required
+            else warning("MISSING_CONTRACT_FILE", key, detail)
+        )
         return ContractFile(
             key=key,
             filename=filename,
             path=path,
             present=False,
             data=None,
-            issues=[warning("MISSING_CONTRACT_FILE", key, f"{filename} was not found in the project directory")],
+            issues=[issue],
         )
     try:
         data = load_json_object(path, where=key)
@@ -65,13 +75,24 @@ def _load_one(project_dir: Path, key: str, filename: str) -> ContractFile:
     return ContractFile(key=key, filename=filename, path=path, present=True, data=data, issues=finite_issues)
 
 
-def load_project(project_dir: Path) -> ProjectValidation:
+def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectValidation:
     """Structural + FK validation only. No filesystem/mesh checks on artifact
     bodies -- see manifest_checks.py / run_manifest_checks() for that.
+
+    ``required`` names contract keys whose absence is an error rather than a
+    warning (see ``_load_one``).
+
+    A project directory that does not exist is a ContractError, not a project
+    with five missing contracts: every canonical file is "absent" either way,
+    so a typo'd path would otherwise be indistinguishable from a clean early-
+    phase project and would validate green.
     """
+    if not project_dir.is_dir():
+        raise ContractError(f"project directory not found: {project_dir}")
+    required_keys = set(required)
     files: dict[str, ContractFile] = {}
     for key, filename in V.CANONICAL_FILENAMES.items():
-        files[key] = _load_one(project_dir, key, filename)
+        files[key] = _load_one(project_dir, key, filename, required=key in required_keys)
 
     feature_ids: dict[str, Any] | None = None
     dimensions_file = files["dimensions"]

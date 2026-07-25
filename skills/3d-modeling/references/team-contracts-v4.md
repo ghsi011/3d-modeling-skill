@@ -407,10 +407,20 @@ The verifier treats a failed `python -m team_tools.contracts validate` (non-zero
 reject of the candidate's exported artifacts, distinct from the seven geometric checks. In
 particular, any `UNIT_SCALE_MISMATCH` is a hard `UNIT_SCALE` reject — never downgrade it to a
 note-and-pass — recorded as a defect owned by `CANDIDATE_BUILD`. A zero exit is **not** the
-converse proof: a missing contract file is only a `MISSING_CONTRACT_FILE` warning, so a typo'd
-or empty project directory validates `PASS` with exit `0` and an empty `validated_paths`. The
-verifier must confirm the receipt's `validated_paths` actually names every contract the phase
-requires before reading the exit code as a pass.
+converse proof: a missing contract file is only a `MISSING_CONTRACT_FILE` warning, so an empty
+project directory validates `PASS` with exit `0` and an empty `validated_paths`. The verifier
+must therefore name what the phase requires:
+
+```bash
+python -m team_tools.contracts validate <project-dir> --require all
+```
+
+`--require` promotes each named contract's absence to a `REQUIRED_CONTRACT_MISSING` error, so
+the exit code alone becomes a sound gate, and the names land in the receipt's
+`required_contracts` for review. Use the subset the phase actually requires when validating
+mid-pipeline; `all` is correct at Phase 4. Either way the verifier confirms the receipt's
+`validated_paths` names every contract it expected. (A project directory that does not exist is
+a hard exit `2` — a typo can never read as a pass.)
 
 ## `verification_report.md`
 

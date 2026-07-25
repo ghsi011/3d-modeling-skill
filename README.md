@@ -2,17 +2,26 @@
 
 A multi-agent, file-contract pipeline that turns a plain-language request plus
 reference photos and caliper measurements into a **verified, print-ready 3D
-model**. It runs as [Claude Code](https://claude.com/claude-code) subagents over
-deterministic Python tooling that enforces contract structure, artifact identity,
-dependency freshness, and repeatable geometric checks.
+model**. Five roles coordinate through contract files on disk, over deterministic
+Python tooling that enforces contract structure, artifact identity, dependency
+freshness, and repeatable geometric checks.
 
 The guiding principle: **a passing software gate is necessary evidence, not proof
 of correctness.** Agents own the engineering judgment — interpret photos, choose
 datums, choose fit strategy, accept or reject a design. The tooling enforces only
 what a machine can actually prove.
 
-- **Start here:** `/3d-orchestrator` — it selects the compact or full contract
-  profile, dispatches specialists, and gates delivery.
+Nothing in the pipeline is harness-specific: the roles are defined once in
+`skills/roles/` and generated into per-harness packaging, and every tool is a
+plain Python CLI. Three harnesses ship with a concrete artifact path — see
+[Harnesses](#harnesses) for what is verified versus merely documented for each.
+
+| Harness         | Role definitions                | Entry point                                     |
+|-----------------|---------------------------------|-------------------------------------------------|
+| [Claude Code](https://claude.com/claude-code) | `.claude/agents/3d-*.md`        | `/3d-orchestrator`, or `claude --agent 3d-orchestrator` |
+| [OpenCode](https://opencode.ai)               | `.opencode/agents/3d-*.md`      | select `3d-orchestrator` as the primary agent   |
+| generic / OpenAI-style                        | `dist/openai/3d-*.yaml`         | load the orchestrator manifest in your runtime  |
+
 - **Normative contract + gate schema:**
   [`team-contracts-v4.md`](skills/3d-modeling/references/team-contracts-v4.md)
 - **Tool reference:** [`docs/tooling.md`](docs/tooling.md) ·
@@ -20,10 +29,14 @@ what a machine can actually prove.
 
 ## Quickstart
 
+Start the orchestrator — in Claude Code, from a project that has a modeling job:
+
 ```
-# In Claude Code, from a project that has a modeling job:
 /3d-orchestrator
 ```
+
+In OpenCode, select `3d-orchestrator` as the primary agent (Tab) and @-mention
+specialists; in a generic runtime, load `dist/openai/3d-orchestrator.yaml`.
 
 Give the orchestrator the request plus any reference photos and caliper reads. It
 picks the pipeline profile, dispatches specialists, and gates each phase on the
@@ -105,16 +118,35 @@ pip install -e ".[section]"   # or .[cad], .[visual], .[all], ...
 The **FreeCAD** backend additionally needs a FreeCAD desktop install reachable
 via the FreeCAD MCP; it is not a pip dependency.
 
-### Making Claude Code discover the skill + agents
+### Harnesses
 
-**Agents** — Claude Code auto-discovers agent definitions in a project's
-`.claude/agents/`. Opening *this* repo as your project exposes all five
-(`3d-orchestrator`, `3d-metrologist`, `3d-designer`, `3d-verifier`,
-`3d-print-engineer`). To use them from a *different* project, copy
-`.claude/agents/3d-*.md` into that project's `.claude/agents/`, or into
-`~/.claude/agents/` for every project.
+Opening *this* repo as your project is enough for any of the three: the
+generated definitions are already in place. The rest of this section is about
+using the roles from a *different* project.
 
-**Skills** — place or symlink the skill folders under a discovered
+**Claude Code** — auto-discovers agent definitions in a project's
+`.claude/agents/`, exposing all five roles (`3d-orchestrator`, `3d-metrologist`,
+`3d-designer`, `3d-verifier`, `3d-print-engineer`). Copy `.claude/agents/3d-*.md`
+into that project's `.claude/agents/`, or into `~/.claude/agents/` for every
+project, then symlink the skill folders as below.
+
+**OpenCode** — reads `.opencode/agents/`, where `3d-orchestrator` is
+`mode: primary` and the four specialists are `mode: subagent` with `task: deny`.
+`opencode.json` attaches the deterministic tooling as the local MCP server
+`3d-modeling-tools` (`python tools/mcp_server.py`). Project guidance comes from
+the root [`AGENTS.md`](AGENTS.md), which is harness-neutral.
+
+**Generic / OpenAI-style** — `dist/openai/3d-*.yaml` carries role metadata and
+spawn capability per role. The manifests name capabilities only; the runtime
+still calls the same repository CLIs, and should load `AGENTS.md` as repository
+policy first. Bind MCP tools through your own runtime config.
+
+All three are generated from `skills/roles/*.md` by `tools/gen_harness.py`, and
+[`docs/harness-matrix.md`](docs/harness-matrix.md) records exactly what is
+verified by tests versus documented-only for each — including the OpenCode
+verification steps.
+
+**Skills (Claude Code)** — place or symlink the skill folders under a discovered
 `.claude/skills/` directory:
 
 ```bash
@@ -184,17 +216,21 @@ Set up the 3d-modeling skill (https://github.com/ghsi011/3d-modeling-skill) for 
 
 1. Clone it outside this project, e.g. `git clone https://github.com/ghsi011/3d-modeling-skill.git ~/src/3d-modeling-skill`. If the clone already exists, `git pull` instead.
 2. In the Python environment that will run the tooling: `pip install trimesh numpy pillow manifold3d`. Add extras only when the job needs them — `.[section]` for datum cross-sections, `.[cad]` or `.[cad-build123d]` for the OCP CAD kernels, `.[visual]` for renders and photo overlays, `.[bambu]` for 3MF, `.[mcp]` for the stdio bridge.
-3. Copy the five agent definitions into this project: `mkdir -p .claude/agents && cp ~/src/3d-modeling-skill/.claude/agents/3d-*.md .claude/agents/`.
-4. Symlink all six skill folders (the five roles plus the shared `3d-modeling`, which the roles reach via `../3d-modeling/...`) into `~/.claude/skills/`, per the README's Install section. Do not flatten the tree.
+3. Install the role definitions for the harness you are running under, and say which one you picked:
+   - Claude Code: `mkdir -p .claude/agents && cp ~/src/3d-modeling-skill/.claude/agents/3d-*.md .claude/agents/`, then symlink all six skill folders (the five roles plus the shared `3d-modeling`, which the roles reach via `../3d-modeling/...`) into `~/.claude/skills/` per the README's Harnesses section. Do not flatten the tree.
+   - OpenCode: copy `~/src/3d-modeling-skill/.opencode/agents/3d-*.md` into this project's `.opencode/agents/`, and merge the `3d-modeling-tools` MCP entry from the clone's `opencode.json` into this project's, fixing the command path to point at the clone.
+   - Anything else: load `~/src/3d-modeling-skill/dist/openai/3d-orchestrator.yaml` in your runtime and read the clone's `AGENTS.md` as repository policy. Do not fabricate a config format the runtime does not document.
+4. Read `docs/harness-matrix.md` in the clone and tell me which parts of your harness's support are verified by tests and which are documented-only.
 5. Verify: `pip install pytest PyYAML` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
 
 Then tell me: what you installed, what you skipped and why, and anything that failed. Do not guess versions or invent commands that are not in the repo's README or docs/tooling.md.
 ```
 
-Once installed, the entry point is `/3d-orchestrator`. Working notes for agents
-editing this repo live in [`AGENTS.md`](AGENTS.md); the deterministic tool
-surfaces, their exact flags, and their exit-code contracts are in
-[`docs/tooling.md`](docs/tooling.md).
+Once installed, the entry point is the orchestrator role — `/3d-orchestrator` in
+Claude Code, the primary agent in OpenCode, the orchestrator manifest elsewhere.
+Working notes for agents editing this repo live in [`AGENTS.md`](AGENTS.md); the
+deterministic tool surfaces, their exact flags, and their exit-code contracts are
+in [`docs/tooling.md`](docs/tooling.md).
 
 ## Changelog
 

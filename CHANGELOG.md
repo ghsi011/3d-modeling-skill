@@ -28,9 +28,22 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
   doing its real job (genuinely degenerate sections).
 - Repository URLs in `pyproject.toml` and `CHANGELOG.md` pointed at a `github.com/Idan/…`
   org that does not exist; they 404'd.
+- `team_tools.contracts` now exits `2` on a project directory that does not exist. Every
+  canonical contract is "absent" either way, so a typo'd path was indistinguishable from a
+  clean early-phase project and validated `PASS` with exit `0`.
+- The README framed the pipeline as Claude Code subagents, though the roles are generated
+  from `skills/roles/` into three harnesses. Rewritten harness-neutral, with per-harness
+  entry points and the setup prompt branching on the harness rather than assuming one.
 
 ### Added
 
+- `team_tools.contracts validate --require <contract>[,…]|all` — names contracts whose
+  absence is a `REQUIRED_CONTRACT_MISSING` **error** rather than a warning, so the exit
+  code becomes a sound gate. Absence stays a warning by default because mid-pipeline a
+  project legitimately holds only the contracts its phase has produced. The names are
+  recorded in the receipt's new `required_contracts` field; an unknown name is a usage
+  error (exit 2) rather than a silently dropped requirement. The verifier and designer
+  role definitions now pass it.
 - `section` optional extra (`scipy`, `networkx`, `shapely`, `rtree`) — the trimesh
   soft dependencies the cross-section path needs for `datum_features` and the datum
   blocks `bundle.finalize` derives from it. Kept separate from `visual` so the datum

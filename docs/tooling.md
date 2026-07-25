@@ -24,7 +24,7 @@ Exit code convention across these tools:
 | --- | --- |
 | 0 | Command completed successfully. For validation commands, the checked gate passed. |
 | 1 | The command ran but the gate failed, output verification failed, or an uncaught runtime error occurred. |
-| 2 | Command line usage failed, an input contract was malformed, a file could not be opened, or a strict preflight guard rejected the input. A file that is simply *absent* is not always an open failure: `team_tools.contracts validate` records a missing contract as a warning and still exits `0`. |
+| 2 | Command line usage failed, an input contract was malformed, a file could not be opened, or a strict preflight guard rejected the input. A file that is simply *absent* is not always an open failure: `team_tools.contracts validate` records a missing contract as a warning and still exits `0` unless the caller named it with `--require`. |
 | 3 | Timeout, only used by `run_cadquery_model.py`. |
 
 Individual tools narrow or extend this table below.
@@ -140,36 +140,51 @@ bindings only. It doesn't prove geometric or manufacturing correctness.
 
 ```bash
 cd skills/3d-modeling/scripts
-python -m team_tools.contracts validate path/to/project [--output receipt.json] [--timestamp ISO-8601]
+python -m team_tools.contracts validate path/to/project [--require CONTRACT] [--output receipt.json] [--timestamp ISO-8601]
 ```
 
 Inputs:
 
-* Project directory containing the contract JSON files.
+* Project directory containing the contract JSON files. A directory that does
+  not exist is a filesystem error (exit `2`), never a project whose contracts
+  all happen to be missing.
+* Optional `--require`, naming contracts whose absence is an **error** rather
+  than a warning: `job_state`, `dimensions`, `print_plan`,
+  `verification_report`, `artifact_manifest`, or `all`. Repeatable and
+  comma-separated. An unknown name is a usage error (exit `2`) rather than a
+  silently dropped requirement.
 * Optional `--output` receipt path.
 * Optional `--timestamp`, injected into the receipt instead of reading wall
   clock time.
 
 Outputs:
 
-* Canonical JSON receipt with tool version, schema version, job id, validated
-  paths, observed revisions, computed SHA-256 values, per-contract results,
-  warning ids, error ids, issues, timestamp, invocation, and disclaimer.
+* Canonical JSON receipt with tool version, schema version, job id, required
+  contracts, validated paths, observed revisions, computed SHA-256 values,
+  per-contract results, warning ids, error ids, issues, timestamp, invocation,
+  and disclaimer.
 
 Exit codes:
 
 * `0`, `results.overall` is `PASS`.
 * `1`, one or more contract results failed.
-* `2`, a contract loader or filesystem error prevented validation.
+* `2`, a contract loader or filesystem error prevented validation, including a
+  missing project directory or an unknown `--require` name.
 
-A contract file that is simply absent is **not** an error. Each one is recorded as a
-`MISSING_CONTRACT_FILE` issue at severity `warning`, its per-contract result stays
-`PASS`, and `results.overall` stays `PASS`. A directory holding no contracts at all —
-including a typo'd or nonexistent project path — therefore exits `0` with an empty
-`validated_paths` and five warnings. The exit code alone proves only that nothing which
-was read was rejected; it does not prove anything was read. A caller gating on this
-command must also assert that the contracts it expected appear in `validated_paths`,
-rather than treating `0` as evidence the phase's files exist and passed.
+Absence is a warning by default, on purpose: mid-pipeline a project legitimately
+holds only the contracts its phase has produced, so a blanket error would make
+`validate` unusable before Phase 4. Each missing file is recorded as a
+`MISSING_CONTRACT_FILE` warning, its per-contract result stays `PASS`, and
+`results.overall` stays `PASS` — so **a bare `validate` on a project holding no
+contracts at all exits `0`**. The exit code alone proves that nothing which was
+read was rejected; it does not prove anything was read.
+
+Anything gating on this command must therefore say what it expects, either by
+passing `--require` (absence becomes `REQUIRED_CONTRACT_MISSING`, an error, and
+the run exits `1`) or by asserting that the contracts it needs appear in the
+receipt's `validated_paths`. Prefer `--require`: it lands in the receipt's
+`required_contracts` field, so a reviewer can tell a deliberately narrow
+validate from one that gated on nothing.
 
 ### `hash`
 

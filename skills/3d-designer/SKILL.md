@@ -30,7 +30,7 @@ the contracts.
   `expected_components`/`bbox`/`source_revisions` and an optional `transform`. See
   [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#artifact_manifestjson)
   for the field list and validate it with
-  `python -m team_tools.contracts validate <project-dir>` (from
+  `python -m team_tools.contracts validate <project-dir> --require artifact_manifest` (from
   `skills/3d-modeling/scripts/`) before handoff.
 
 ## Required reading
@@ -90,8 +90,9 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    `artifact_manifest.json` for every produced artifact. Run shared
    `team_preflight.py support-audit` for every support rule and `validate-receipts` for the
    complete Edge ID/support-rule sets, plus `python -m team_tools.contracts validate
-   <project-dir>` for the manifest (hash/bbox/component-count checks and the hard 25.4x
-   unit-scale gate). Markdown readiness may say `READY` only when every shared validator exits
+   <project-dir> --require artifact_manifest` for the manifest (hash/bbox/component-count
+   checks and the hard 25.4x unit-scale gate; without `--require` an absent manifest is only
+   a warning and still exits 0). Markdown readiness may say `READY` only when every shared validator exits
    zero and reports `PASS`. After a correction, rerun every row.
 10. Provide `verify.py` and `candidate_readiness.md` as useful designer evidence, but mark
    both `DESIGNER SELF-CHECK — NON-ACCEPTANCE`. Never claim the Phase-4 gate passed.

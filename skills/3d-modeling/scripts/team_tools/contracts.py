@@ -27,6 +27,7 @@ from receipts import build_hash_receipt, build_validate_receipt  # noqa: E402
 from render import render_contract_file  # noqa: E402
 from status import compute_status, format_status_lines  # noqa: E402
 from summary import build_agent_summary  # noqa: E402
+from validators import CANONICAL_FILENAMES  # noqa: E402
 
 
 def _write(payload: str, output: Path | None) -> None:
@@ -36,9 +37,34 @@ def _write(payload: str, output: Path | None) -> None:
         output.write_text(payload, encoding="utf-8")
 
 
+def _parse_required(raw: list[str] | None) -> list[str]:
+    """Expand --require values into contract keys.
+
+    Accepts repeated flags and comma-separated lists, plus the shorthand
+    ``all``. An unknown name is a usage error rather than a silently ignored
+    requirement -- a typo here would otherwise disarm the very gate the caller
+    asked for.
+    """
+    if not raw:
+        return []
+    names: list[str] = []
+    for chunk in raw:
+        names.extend(part.strip() for part in chunk.split(",") if part.strip())
+    if "all" in names:
+        return list(CANONICAL_FILENAMES)
+    unknown = sorted(set(names) - set(CANONICAL_FILENAMES))
+    if unknown:
+        raise ContractError(
+            f"--require: unknown contract {', '.join(unknown)} "
+            f"(choose from {', '.join(CANONICAL_FILENAMES)}, or all)"
+        )
+    return names
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     receipt, _project = build_validate_receipt(
-        args.path.resolve(), timestamp=args.timestamp, argv=sys.argv[1:]
+        args.path.resolve(), timestamp=args.timestamp, argv=sys.argv[1:],
+        required=_parse_required(args.require),
     )
     _write(canonical_json(receipt), args.output.resolve() if args.output else None)
     return 0 if receipt["results"]["overall"] == "PASS" else 1
@@ -88,6 +114,17 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("path", type=Path, help="Project directory containing the contract JSON files.")
     validate.add_argument("--output", type=Path, help="Write the receipt here instead of stdout.")
     validate.add_argument("--timestamp", help="Injected timestamp for the receipt (never wall-clock).")
+    validate.add_argument(
+        "--require",
+        action="append",
+        metavar="CONTRACT",
+        help=(
+            "Contract(s) whose absence is an error, not a warning: "
+            f"{', '.join(CANONICAL_FILENAMES)}, or all. Repeatable and comma-separated. "
+            "Without this, a project missing every contract still exits 0 -- gate on the "
+            "contracts your phase actually requires."
+        ),
+    )
     validate.set_defaults(func=_cmd_validate)
 
     hash_cmd = subparsers.add_parser(

@@ -30,6 +30,7 @@ if _PACKAGE_DIR not in sys.path:
     sys.path.insert(0, _PACKAGE_DIR)
 
 import common as C  # noqa: E402  (import after sys.path bootstrap above)
+import contracts as CLI  # noqa: E402
 import manifest_checks as MC  # noqa: E402
 import receipts as R  # noqa: E402
 import render as RD  # noqa: E402
@@ -997,6 +998,58 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
             self.assertIn("MISSING_CONTRACT_FILE@dimensions", receipt["warning_ids"])
             self.assertEqual("fixed", receipt["timestamp"])
+
+    def test_required_contract_absence_is_an_error_not_a_warning(self) -> None:
+        """A caller gating on validate must be able to say which contracts its
+        phase requires; absence stays a warning for everything it did not name,
+        so an early-phase project still validates.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            _write_project(project_dir, job_state=clone(_JOB_STATE))
+            receipt, _project = R.build_validate_receipt(
+                project_dir, timestamp="fixed", argv=[], required=["dimensions"]
+            )
+            self.assertIn("REQUIRED_CONTRACT_MISSING@dimensions", receipt["error_ids"])
+            self.assertEqual("FAIL", receipt["results"]["dimensions"])
+            self.assertEqual("FAIL", receipt["results"]["overall"])
+            self.assertEqual(["dimensions"], receipt["required_contracts"])
+            # Not named -> still only a warning, and its own result stays PASS.
+            self.assertIn("MISSING_CONTRACT_FILE@print_plan", receipt["warning_ids"])
+            self.assertEqual("PASS", receipt["results"]["print_plan"])
+
+    def test_required_contract_present_validates_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            self._build_full_project(project_dir)
+            receipt, _project = R.build_validate_receipt(
+                project_dir, timestamp="fixed", argv=[], required=list(V.CANONICAL_FILENAMES)
+            )
+            self.assertEqual("PASS", receipt["results"]["overall"], receipt["issues"])
+            self.assertEqual([], receipt["error_ids"])
+            self.assertEqual(sorted(V.CANONICAL_FILENAMES), receipt["required_contracts"])
+
+    def test_nonexistent_project_dir_raises_instead_of_validating_green(self) -> None:
+        """A typo'd path must not be indistinguishable from a clean early-phase
+        project. Every canonical file is absent either way, so the directory
+        check is the only thing separating them.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            missing = Path(raw_dir) / "no-such-project"
+            with self.assertRaises(C.ContractError):
+                R.build_validate_receipt(missing, timestamp="fixed", argv=[])
+            # And it is a usage/filesystem failure (exit 2), never a gate pass.
+            self.assertEqual(2, CLI.main(["validate", str(missing)]))
+
+    def test_require_flag_parsing(self) -> None:
+        self.assertEqual([], CLI._parse_required(None))
+        self.assertEqual(["job_state", "dimensions"], CLI._parse_required(["job_state,dimensions"]))
+        self.assertEqual(["job_state", "dimensions"], CLI._parse_required(["job_state", "dimensions"]))
+        self.assertEqual(list(V.CANONICAL_FILENAMES), CLI._parse_required(["all"]))
+        # An unknown name must fail loudly: silently dropping it would disarm
+        # the gate the caller asked for.
+        with self.assertRaises(C.ContractError):
+            CLI._parse_required(["dimensionz"])
 
     def test_receipt_is_deterministic_across_runs(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
