@@ -94,9 +94,11 @@ Optional extras, installed only when you use those backends (declared in
 | `render`  | pyrender, PyOpenGL               | `preview.py` offscreen renders               |
 | `visual`  | pyrender, PyOpenGL, scipy, shapely | `overlay_photo.py`, `verify_visual.py`     |
 | `bambu`   | lxml                             | `make_bambu_3mf.py` (3MF authoring/verify)   |
+| `mcp`     | mcp                              | `tools/mcp_server.py` local stdio bridge     |
 
 ```bash
 pip install -e ".[cad]"      # or .[visual], .[all], etc.
+pip install -e ".[mcp]"      # local MCP bridge only
 ```
 
 The **FreeCAD** backend additionally needs a FreeCAD desktop install reachable
@@ -154,9 +156,8 @@ pytest
 ```
 
 `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath` so the suites
-resolve their bare imports without an install step. Expected: **125 tests pass**
-(`test_team_preflight` 49, `test_mesh_io` 5, `team_tools/test_contracts` 71) and
-ruff clean. CI runs the same on Python 3.11 and 3.12
+resolve their bare imports without an install step. Expected: **see pytest/CI**
+for the current test count and breakdown, plus ruff clean. CI runs the same on Python 3.11 and 3.12
 (`.github/workflows/ci.yml`).
 
 ## Changelog
