@@ -20,8 +20,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+# The manifest's `type` is the file format; `role` is what the file is for.
+# Conflating them emitted `type: "render"`, which is not in the schema's type
+# enum at all -- so a derived manifest had to be hand-corrected, which is the
+# entire cost deriving it was meant to remove.
 _MANIFEST_TYPES = {".stl": "stl", ".step": "step", ".stp": "step", ".3mf": "3mf",
-                   ".png": "render", ".jpg": "render", ".jpeg": "render"}
+                   ".png": "png", ".jpg": "png", ".jpeg": "png", ".svg": "svg"}
 
 
 def sha256_file(path: Path) -> str:
@@ -98,7 +102,8 @@ def build_manifest(
         if path.is_file():
             artifacts.append({
                 "id": path.stem, "role": "render", "path": relative.replace("\\", "/"),
-                "type": "render", "sha256": sha256_file(path),
+                "type": _MANIFEST_TYPES.get(path.suffix.lower(), "png"),
+                "sha256": sha256_file(path),
                 "printable_deliverable": False,
             })
 

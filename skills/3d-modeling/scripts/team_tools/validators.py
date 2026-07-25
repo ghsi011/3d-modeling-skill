@@ -112,11 +112,17 @@ CONTRACT_KIND_BY_KEY: dict[str, str] = {
     "artifact_manifest": "artifact-manifest",
 }
 
-_EXPECTED_OWNER: dict[str, str] = {
-    "job_state": "orchestrator",
-    "dimensions": "metrologist",
-    "print_plan": "print-engineer",
-    "verification_report": "verifier",
+# Who may author each contract. Sets, not scalars, because two contracts have a
+# second legitimate author under the `DIRECT` route: nothing is recovered from
+# evidence there, so the orchestrator transcribes the stated dimensions and the
+# shipped template supplies the plan. Neither is a metrologist or a print
+# engineer, and saying otherwise in the `owner` field would be a lie about
+# provenance -- which is the one thing that field exists to record.
+_EXPECTED_OWNERS: dict[str, frozenset[str]] = {
+    "job_state": frozenset({"orchestrator"}),
+    "dimensions": frozenset({"metrologist", "orchestrator"}),
+    "print_plan": frozenset({"print-engineer", "builtin-direct-template"}),
+    "verification_report": frozenset({"verifier"}),
 }
 
 
@@ -132,7 +138,7 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
     checks compare.
     """
     issues = _check_contract_header(
-        data, contract_key=CONTRACT_KIND_BY_KEY[key], expected_owner=_EXPECTED_OWNER.get(key), where=where
+        data, contract_key=CONTRACT_KIND_BY_KEY[key], expected_owners=_EXPECTED_OWNERS.get(key), where=where
     )
     job_id = data.get("job_id")
     if not isinstance(job_id, str) or not job_id.strip():
@@ -153,7 +159,7 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
 
 
 def _check_contract_header(
-    data: dict[str, Any], *, contract_key: str, expected_owner: str | None, where: str
+    data: dict[str, Any], *, contract_key: str, expected_owners: frozenset[str] | None, where: str
 ) -> list[Issue]:
     issues: list[Issue] = []
     if data.get("contract") != contract_key:
@@ -176,12 +182,12 @@ def _check_contract_header(
                 f"{version} is not a supported version {sorted(accepted)}",
             )
         )
-    if expected_owner is not None and "owner" in data and data.get("owner") != expected_owner:
+    if expected_owners is not None and "owner" in data and data.get("owner") not in expected_owners:
         issues.append(
             error(
                 "BAD_ENUM",
                 f"{where}.owner",
-                f"expected owner '{expected_owner}', got {data.get('owner')!r}",
+                f"expected owner one of {sorted(expected_owners)}, got {data.get('owner')!r}",
             )
         )
     return issues
@@ -218,7 +224,9 @@ def validate_print_plan(
     feature_ids: dict[str, Any] | None = None,
 ) -> tuple[list[Issue], dict[str, Any]]:
     issues: list[Issue] = []
-    issues += _check_contract_header(data, contract_key="print-plan", expected_owner="print-engineer", where=where)
+    issues += _check_contract_header(
+        data, contract_key="print-plan", expected_owners=_EXPECTED_OWNERS["print_plan"], where=where
+    )
     issues += check_object_fields(
         data,
         required={
@@ -418,7 +426,7 @@ def validate_artifact_manifest(
     project_dir: Path | None = None,
 ) -> tuple[list[Issue], dict[str, Any]]:
     issues: list[Issue] = []
-    issues += _check_contract_header(data, contract_key="artifact-manifest", expected_owner=None, where=where)
+    issues += _check_contract_header(data, contract_key="artifact-manifest", expected_owners=None, where=where)
     issues += check_object_fields(
         data,
         required={

@@ -470,6 +470,33 @@ class PrintPlanValidatorTest(unittest.TestCase):
         issues, _ = V.validate_print_plan(broken)
         self.assertIn("DUPLICATE_ID@print_plan.edges", issue_ids(issues))
 
+    def test_the_orchestrator_may_own_a_direct_jobs_dimensions(self) -> None:
+        """Under DIRECT nothing is recovered from evidence, so the orchestrator
+        transcribes the stated numbers. Forcing `owner: metrologist` there would
+        make the provenance field lie, which is the one thing it records."""
+        sheet = clone(_DIMENSIONS)
+        sheet["owner"] = "orchestrator"
+
+        issues = V.validate_contract_header(sheet, key="dimensions", where="dimensions")
+
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_an_unrelated_owner_is_still_rejected(self) -> None:
+        sheet = clone(_DIMENSIONS)
+        sheet["owner"] = "cad-designer"
+
+        issues = V.validate_contract_header(sheet, key="dimensions", where="dimensions")
+
+        self.assertIn("BAD_ENUM@dimensions.owner", issue_ids(issues))
+
+    def test_the_shipped_template_may_own_a_direct_jobs_plan(self) -> None:
+        built = clone(_PRINT_PLAN)
+        built["owner"] = "builtin-direct-template"
+
+        issues, _ = V.validate_print_plan(built)
+
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
     def test_stale_dimensions_revision_binding_reported_by_status(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)

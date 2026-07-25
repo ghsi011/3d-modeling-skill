@@ -69,15 +69,31 @@ class ManifestTest(unittest.TestCase):
                 self.assertGreater(high, low)
 
     def test_it_passes_the_projects_own_manifest_validator(self) -> None:
-        """The whole point of deriving it: no round trip to find out it is wrong."""
+        """The whole point of deriving it: no round trip to find out it is wrong.
+
+        Every row type is exercised, including a render. The first version of
+        this test ran with rendering off, so no render row existed and it never
+        noticed the emitter writing `type: "render"` -- a value absent from the
+        schema's type enum, which a real run then had to hand-correct.
+        """
         sys.path.insert(0, str(_SCRIPTS / "team_tools"))
         import validators  # noqa: PLC0415
 
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            manifest = receipts.build_manifest(_run(work), work / "out", job_id="t",
-                                               updated_utc=_WHEN)
+            result = _run(work)
+            out = work / "out"
+            renders = out / "renders"
+            renders.mkdir(parents=True, exist_ok=True)
+            (renders / "section_x.png").write_bytes(b"a row to hash, not a real png")
+            result["evidence"]["renders"] = ["renders/section_x.png"]
 
+            manifest = receipts.build_manifest(result, out, job_id="t", updated_utc=_WHEN)
+
+            self.assertTrue(any(a["role"] == "render" for a in manifest["artifacts"]),
+                            manifest["artifacts"])
+            for row in manifest["artifacts"]:
+                self.assertIn(row["type"], validators.ARTIFACT_TYPE, row)
             issues, _ = validators.validate_artifact_manifest(manifest)
 
             self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
