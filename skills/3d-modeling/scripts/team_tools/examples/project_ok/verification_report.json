@@ -1,0 +1,75 @@
+{
+  "candidate_id": "candidate-01",
+  "candidate_stl_sha256": "607d7d52375e6dff698d407c74734ca7340813bd31a70aed72e2989b30bd1c77",
+  "checks": [
+    {
+      "evidence": "render.png",
+      "id": "1",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "2",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "3",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "4",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "5",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "6",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    },
+    {
+      "evidence": "render.png",
+      "id": "7",
+      "method": "re-imported STL inspection",
+      "numeric_result": null,
+      "result": "PASS",
+      "visual_observation": "ok"
+    }
+  ],
+  "contract": "verification-report",
+  "contract_version": 4,
+  "defects": [],
+  "dimensions_revision": 1,
+  "fresh_context": true,
+  "job_id": "example-bar",
+  "owner": "verifier",
+  "print_plan_revision": 1,
+  "reference_sha256": "90c52df21b20c01956d04da3d5b8a3c9bd0cce6e5220e09d8f794742955cc194",
+  "revision": 1,
+  "status": "PASS",
+  "updated_utc": "2026-01-01T00:00:00Z",
+  "verdict": "PASS"
+}

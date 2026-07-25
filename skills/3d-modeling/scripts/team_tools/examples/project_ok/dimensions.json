@@ -1,0 +1,57 @@
+{
+  "contract": "dimensions",
+  "contract_version": 4,
+  "dimensions": [
+    {
+      "confidence": "B",
+      "datum_method": "D0/X",
+      "feature_id": "F01",
+      "id": "M01",
+      "source": "S1",
+      "tolerance_response": "clearance_per_end >= 0.50 mm",
+      "value": "62.0 mm length"
+    }
+  ],
+  "features": [
+    {
+      "candidate_response": "Open-bottom capture channel around this envelope.",
+      "confidence": "B",
+      "datum_value": "62.0 x 11.7 x 24.0 mm centered on D0",
+      "id": "F01",
+      "name": "Raised cross-bar",
+      "ready": true,
+      "source": "S1"
+    }
+  ],
+  "frame": [
+    {
+      "confidence": "B",
+      "definition": "Cap face is plane Z=0",
+      "id": "D0",
+      "source": "schematic"
+    }
+  ],
+  "job_id": "example-bar",
+  "open_questions": [],
+  "owner": "metrologist",
+  "reference_round_trip": [
+    {
+      "id": "RT-01",
+      "sheet_revision_required": false,
+      "verdict": "ACCEPTED",
+      "views_overlay": "top/side overlay aligned"
+    }
+  ],
+  "revision": 1,
+  "sources": [
+    {
+      "authority": "Declares purpose, material, and approximate dimensions.",
+      "evidence_path": "evidence/brief.md",
+      "id": "S1",
+      "sha256": "9da6d87dda3bba307ccc696c58870860b30f30d44422e507bfdaa7538ec3951a",
+      "variant": "participant-visible brief"
+    }
+  ],
+  "status": "ACCEPTED",
+  "updated_utc": "2026-01-01T00:00:00Z"
+}

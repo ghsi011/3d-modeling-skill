@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""CLI entry point: python -m team_tools.contracts <validate|hash|status|render|agent-summary> <path>
+
+Run from skills/3d-modeling/scripts/ (so `team_tools` is an importable package
+on sys.path), or directly as `python team_tools/contracts.py ...` from inside
+team_tools/ itself.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+# Every module in this package is imported bare (``import common``, not
+# ``import team_tools.common``) so the same source works both as
+# `python -m team_tools.contracts` (scripts/ on sys.path, team_tools is a
+# package) and as a direct script invocation (team_tools/ itself on
+# sys.path). This line makes that true in the `-m` case too, since only cwd
+# (scripts/) is added to sys.path there, not scripts/team_tools/.
+_PACKAGE_DIR = str(Path(__file__).resolve().parent)
+if _PACKAGE_DIR not in sys.path:
+    sys.path.insert(0, _PACKAGE_DIR)
+
+from common import ContractError, canonical_json  # noqa: E402
+from receipts import build_hash_receipt, build_validate_receipt  # noqa: E402
+from render import render_contract_file  # noqa: E402
+from status import compute_status, format_status_lines  # noqa: E402
+from summary import build_agent_summary  # noqa: E402
+
+
+def _write(payload: str, output: Path | None) -> None:
+    if output is None:
+        sys.stdout.write(payload)
+    else:
+        output.write_text(payload, encoding="utf-8")
+
+
+def _cmd_validate(args: argparse.Namespace) -> int:
+    receipt, _project = build_validate_receipt(
+        args.path.resolve(), timestamp=args.timestamp, argv=sys.argv[1:]
+    )
+    _write(canonical_json(receipt), args.output.resolve() if args.output else None)
+    return 0 if receipt["results"]["overall"] == "PASS" else 1
+
+
+def _cmd_hash(args: argparse.Namespace) -> int:
+    receipt = build_hash_receipt(args.path.resolve(), timestamp=args.timestamp, argv=sys.argv[1:])
+    _write(canonical_json(receipt), args.output.resolve() if args.output else None)
+    return 0 if not receipt["hash_mismatches"] else 1
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    rows = compute_status(args.path.resolve())
+    if args.json:
+        _write(canonical_json(rows), args.output.resolve() if args.output else None)
+    else:
+        text = "\n".join(format_status_lines(rows)) + "\n"
+        _write(text, args.output.resolve() if args.output else None)
+    return 1 if any(row["status"] in ("STALE", "INVALIDATED", "UNREADABLE") for row in rows) else 0
+
+
+def _cmd_render(args: argparse.Namespace) -> int:
+    markdown = render_contract_file(args.path.resolve())
+    _write(markdown, args.output.resolve() if args.output else None)
+    return 0
+
+
+def _cmd_agent_summary(args: argparse.Namespace) -> int:
+    _write(build_agent_summary(args.path.resolve()) + "\n", args.output.resolve() if args.output else None)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m team_tools.contracts",
+        description=(
+            "Deterministic contract-automation CLI for the 3D team pipeline: validate/hash/"
+            "status/render the structured-JSON mirror of the v4 contracts. Passing these "
+            "gates is necessary evidence, not proof of geometric or manufacturing correctness."
+        ),
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    validate = subparsers.add_parser(
+        "validate", help="Validate every contract JSON in a project dir, cross-check FKs, emit a receipt."
+    )
+    validate.add_argument("path", type=Path, help="Project directory containing the contract JSON files.")
+    validate.add_argument("--output", type=Path, help="Write the receipt here instead of stdout.")
+    validate.add_argument("--timestamp", help="Injected timestamp for the receipt (never wall-clock).")
+    validate.set_defaults(func=_cmd_validate)
+
+    hash_cmd = subparsers.add_parser(
+        "hash", help="Recompute SHA-256 of contracts + declared artifacts (never trusts entered hashes)."
+    )
+    hash_cmd.add_argument("path", type=Path, help="Project directory.")
+    hash_cmd.add_argument("--output", type=Path, help="Write the receipt here instead of stdout.")
+    hash_cmd.add_argument("--timestamp", help="Injected timestamp for the receipt (never wall-clock).")
+    hash_cmd.set_defaults(func=_cmd_hash)
+
+    status = subparsers.add_parser(
+        "status", help="Report each contract's revision plus stale/invalidated downstream bindings."
+    )
+    status.add_argument("path", type=Path, help="Project directory.")
+    status.add_argument("--output", type=Path, help="Write the report here instead of stdout.")
+    status.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text lines.")
+    status.set_defaults(func=_cmd_status)
+
+    render = subparsers.add_parser(
+        "render", help="Generate stable, git-diff-friendly Markdown from one structured JSON contract."
+    )
+    render.add_argument("path", type=Path, help="Path to a single contract .json file.")
+    render.add_argument("--output", type=Path, help="Write the Markdown here instead of stdout.")
+    render.set_defaults(func=_cmd_render)
+
+    agent_summary = subparsers.add_parser(
+        "agent-summary", help="Compact informational status text for an agent; points to the authoritative JSON."
+    )
+    agent_summary.add_argument("path", type=Path, help="Project directory.")
+    agent_summary.add_argument("--output", type=Path, help="Write the summary here instead of stdout.")
+    agent_summary.set_defaults(func=_cmd_agent_summary)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except ContractError as exc:
+        sys.stderr.write(f"team_tools.contracts: {exc}\n")
+        return 2
+    except OSError as exc:
+        sys.stderr.write(f"team_tools.contracts: {exc}\n")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

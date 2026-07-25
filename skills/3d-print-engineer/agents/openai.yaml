@@ -1,0 +1,4 @@
+interface:
+  display_name: "3D Print Engineer"
+  short_description: "Plan and validate the physical print process"
+  default_prompt: "Use $3d-print-engineer to issue or finalize the print process contract."

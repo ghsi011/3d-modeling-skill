@@ -1,0 +1,47 @@
+{
+  "active_candidate": "candidate-01",
+  "backend": "cadquery",
+  "bound_inputs": [
+    {
+      "id": "BI-01",
+      "label": "brief",
+      "reference": "SHA-256 9da6d87dda3bba307ccc696c58870860b30f30d44422e507bfdaa7538ec3951a",
+      "status": "bound"
+    }
+  ],
+  "contract": "job-state",
+  "contract_version": 4,
+  "dispatches": [
+    {
+      "authorized_inputs": "dimensions r1, plan r1",
+      "budget_min": 9,
+      "id": "D2",
+      "required_output": "candidate + preflight",
+      "role": "designer, candidate",
+      "status": "complete"
+    }
+  ],
+  "gates": [
+    {
+      "evidence": "dimensions.json",
+      "id": "M1",
+      "required_receipt": "complete dimensions",
+      "result": "PASS"
+    },
+    {
+      "evidence": "print_plan.json",
+      "id": "P1",
+      "required_receipt": "accepted plan",
+      "result": "PASS"
+    }
+  ],
+  "job_id": "example-bar",
+  "mode": "PIPELINE",
+  "open_questions": [],
+  "owner": "orchestrator",
+  "profile": "COMPACT",
+  "revision": 3,
+  "route": "PIPELINE / COMPACT example fixture for team_tools tests.",
+  "state": "CANDIDATE_BUILD",
+  "updated_utc": "2026-01-01T00:00:00Z"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "3D Orchestrator"
+  short_description: "Route and govern solo or team 3D jobs"
+  default_prompt: "Use $3d-orchestrator to route and govern this 3D-printing job."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "3D CAD Designer"
+  short_description: "Build FDM-aware reference and candidate CAD"
+  default_prompt: "Use $3d-designer for this file-grounded CAD commission."

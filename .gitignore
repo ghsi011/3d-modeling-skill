@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# OS cruft
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Local render / scratch / CAD outputs at the repo root.
+#
+# These patterns are anchored to the repo root (leading slash) on purpose so
+# they do NOT swallow the committed test fixtures that legitimately live under
+# skills/3d-modeling/scripts/team_tools/examples/ (candidate_01.stl,
+# reference_bar.stl). Keep generated artifacts out; keep fixtures in.
+# ---------------------------------------------------------------------------
+/*.stl
+/*.step
+/*.stp
+/*.3mf
+/*.obj
+/*.gcode
+/*.FCStd1
+/*.FCBak
+/preview*.png
+/render*.png
+/scratch/

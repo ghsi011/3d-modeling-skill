@@ -1,0 +1,59 @@
+{
+  "artifacts": [
+    {
+      "bbox": {
+        "max": [
+          31.0,
+          5.85,
+          24.0
+        ],
+        "min": [
+          -31.0,
+          -5.85,
+          0.0
+        ]
+      },
+      "expected_components": 1,
+      "id": "reference-bar",
+      "path": "reference_bar.stl",
+      "printable_deliverable": false,
+      "role": "reference",
+      "sha256": "90c52df21b20c01956d04da3d5b8a3c9bd0cce6e5220e09d8f794742955cc194",
+      "source_revisions": {
+        "dimensions": 1
+      },
+      "type": "stl"
+    },
+    {
+      "bbox": {
+        "max": [
+          31.5,
+          6.15,
+          24.6
+        ],
+        "min": [
+          -31.5,
+          -6.15,
+          0.0
+        ]
+      },
+      "expected_components": 1,
+      "id": "candidate-01",
+      "path": "candidate_01.stl",
+      "printable_deliverable": true,
+      "role": "candidate",
+      "sha256": "607d7d52375e6dff698d407c74734ca7340813bd31a70aed72e2989b30bd1c77",
+      "source_revisions": {
+        "dimensions": 1,
+        "print_plan": 1
+      },
+      "type": "stl"
+    }
+  ],
+  "candidate_id": "candidate-01",
+  "contract": "artifact-manifest",
+  "contract_version": 1,
+  "job_id": "example-bar",
+  "units": "mm",
+  "updated_utc": "2026-01-01T00:00:00Z"
+}

@@ -1,0 +1,135 @@
+{
+  "contract": "print-plan",
+  "contract_version": 4,
+  "coupon": {
+    "clearance_lanes": "production lane only",
+    "interfaces_represented": "F01 full envelope",
+    "material": "PETG",
+    "pass_fail_measurements": "hand insertion through full travel, no lift-off"
+  },
+  "dimensions_revision": 1,
+  "edges": [
+    {
+      "exposure_class": "EXPOSED_FUNCTIONAL",
+      "id": "E-01",
+      "max_radius_mm": null,
+      "min_radius_mm": 0.8,
+      "related_feature_ids": [
+        "F01"
+      ],
+      "samples_required": 3
+    },
+    {
+      "allowed_sharp": true,
+      "allowed_sharp_reason": "Nonfunctional plate-facing chamfer boundary only.",
+      "exposure_class": "BED_CONTACT",
+      "id": "E-02",
+      "max_radius_mm": null,
+      "min_radius_mm": 0.0,
+      "samples_required": 3
+    }
+  ],
+  "final_prep_notes": "P2 allowed only after a PASS verifier report bound to this plan/candidate hash.",
+  "geometry_rules": [
+    {
+      "deferred_owner": "none",
+      "final_gate": "none",
+      "id": "G-01",
+      "numeric_limit_mm": 1.2,
+      "related_feature_ids": [
+        "F01"
+      ],
+      "required_now": "candidate-readiness thickness map",
+      "rule": "shell/wall minimum thickness",
+      "verification_predicate": "re-imported STL thickness samples >= 1.2 mm"
+    }
+  ],
+  "job_id": "example-bar",
+  "owner": "print-engineer",
+  "process": [
+    {
+      "environment_load": "hand-operated tool, no load rating",
+      "layer_mm": 0.2,
+      "printer_material_nozzle": "Bambu Lab X2D; PETG; 0.4 mm nozzle",
+      "rationale": "PETG required final material; support-free side-land orientation."
+    }
+  ],
+  "reference_sha256": "90c52df21b20c01956d04da3d5b8a3c9bd0cce6e5220e09d8f794742955cc194",
+  "revision": 1,
+  "status": "ACCEPTED",
+  "support_rules": [
+    {
+      "bed_tolerance_mm": 0.05,
+      "bed_z_mm": 0.0,
+      "disposition": "SELF_SUPPORT_REQUIRED",
+      "downward_normal_z_max": -0.70710679,
+      "id": "S-01",
+      "max_out_of_limit_area_mm2": 0.0,
+      "model_to_printer_matrix": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "related_feature_ids": [
+        "F01"
+      ]
+    }
+  ],
+  "transform": {
+    "bed_contact_landmark": "P_BED",
+    "bed_normal": "+Y",
+    "coordinate_convention": "CadQuery model coordinates are the installed frame in mm.",
+    "forbidden_downward_faces": [
+      "F01"
+    ],
+    "matrix": [
+      [
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "open_direction": "-Z"
+  },
+  "updated_utc": "2026-01-01T00:00:00Z"
+}
