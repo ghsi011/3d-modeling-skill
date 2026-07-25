@@ -1,94 +1,77 @@
-# designer_toolkit — call it, don't re-author it
+# designer_toolkit — one call, not a menu
 
-The deterministic Phase-4 work — export + re-import, measurement, datum
-extraction, orientation search, overhang screening, boolean fit, edge measurement,
-coupon generation, rendered comparison — is a tested library, and
-`python -m designer_toolkit commission` runs the whole set in one call. **Call it.**
-Re-implementing these by hand costs an hour a job and re-introduces the failures
-the library already solved: stale hashes, phantom shells, the `to_2D()` datum-frame
-trap, a measuring routine that reads high against its own nominals, and evidence
-that describes a mesh you no longer ship. You write the parametric geometry and make
-every judgment call; the toolkit does the mechanical measuring.
+You write the parametric geometry and make every judgment call. The deterministic
+Phase-4 work — export, re-import, measurement, orientation screening, boolean fit,
+edge measurement, datum extraction, rendering — is a tested library behind a single
+command. Run it and read what it says.
 
-Runs from `skills/3d-modeling/scripts/`. Import as a package, or use the CLI.
+Runs from `skills/3d-modeling/scripts/`.
 
-## One call for the whole readiness bundle
-
-```python
-import sys; sys.path.insert(0, '<skill>/scripts')
-import cadquery as cq
-from designer_toolkit import finalize
-
-body = cq.Workplane("XY").box(40, 30, 20, centered=(True, True, False))  # your model
-ev = finalize(
-    body, "out/body",                       # writes out/body.stl (+ .step)
-    datums=[{"name": "camera_window", "plane_origin": (0, 0, 1.0)}],
-    reference="out/ref.stl",                # seated mating mesh (optional)
-    insertion={"travels": [5, 15, 25, 35, 45], "axis": (0, 0, -1)},
-    orientation_transform=None,             # 4x4 model->printer for the overhang screen
-)
-# ev["export"]        watertight / components / volume / bbox / file+geometry sha256
-# ev["overhang_mm2"]  downward area past -0.73, the value the plan schema recommends;
-#                     pass overhang_threshold= to screen at a stricter plan value instead
-# ev["datums"]        hole+outline centres in MODEL coords, per datum plane
-# ev["seated_interference_mm3"], ev["insertion_sweep"]
-# ev["readiness_skeleton"]  auto_notes + the judgment fields you must fill:
-#   visual_accept (LOOK at the render), fit_band_ok (print engineer / your call)
-```
-
-`finalize` re-imports the exported STL and measures THAT — never the CAD kernel's
-own numbers (`.val().Volume()` misreports on periodic splines; OCC can split one
-solid into phantom shells). `is_single_watertight_solid()` and `auto_notes` flag
-both automatically.
-
-Verification is backend-neutral after export: the CAD kernel is irrelevant once
-the exported mesh exists, because every deterministic check reads that mesh.
-
-## Individual helpers (when you don't want the whole bundle)
-
-```python
-from designer_toolkit import (
-    export_and_hash, measure, datum_features, overhang_area,
-    interference, insertion_sweep, fit_coupon,
-)
-rep  = export_and_hash(body, "out/body")            # ExportReport (re-imported, hashed)
-m    = measure("out/body.stl")                      # bbox/volume/watertight/components
-feat = datum_features("out/body.stl", (0, 0, 1.0))  # holes/outlines in MODEL coords
-over = overhang_area("out/body.stl")                # mm^2 past the -0.73 screen
-i    = interference("out/body.stl", "out/ref.stl")  # seated overlap volume (mm^3)
-sw   = insertion_sweep("out/body.stl", "out/ref.stl", [5, 15, 25], axis=(0, 0, -1))
-stl, legend = fit_coupon(                            # multi-lane coupon from the plan
-    [{"id": "bore", "nominal_mm": 12.9, "kind": "hole"}], "out/coupon.stl")
-```
-
-`datum_features` already passes `plane_transform`, so hole centres come back in
-model X/Y — compare each to its Phase-2 datum. A mirrored layout fits the same
-magnitudes, so also compare with the u-coordinate negated when handedness is open.
-
-## Rendered comparison (needs a pyrender/GL context)
-
-```python
-from designer_toolkit.render import compare_views, section_render
-compare_views("out/ref.stl", "out/body.stl", "out/compare.png")  # ref row over cand row
-section_render("out/body.stl", "out/section.png", plane_normal=(1, 0, 0))
-```
-Then LOOK at the image — silhouette, feature shapes, counts, positions — before
-trusting any single number.
-
-## CLI (run checks from a shell, no Python file)
+## The one call
 
 ```bash
-python -m designer_toolkit measure body.stl
-python -m designer_toolkit overhang body.stl --threshold -0.73
-python -m designer_toolkit datums body.stl --z 1.0
-python -m designer_toolkit interference body.stl ref.stl
-python -m designer_toolkit sweep body.stl ref.stl --travels 5,15,25,35
-python -m designer_toolkit finalize body.stl --plan plan.json     # full evidence bundle as JSON
+python -m designer_toolkit commission --model model.py --plan print_plan_checks.json   --out . --job-id <job> --updated-utc <iso8601> [--reference mating.stl] [--no-render]
 ```
 
-## What is still yours (the toolkit will not do it)
+It exports, re-imports, and measures the whole set on the mesh that actually ships:
 
-Interpreting photos, choosing datums and geometry, choosing the fit/manufacturing
-strategy, and the accept/reject decision. `finalize` leaves `visual_accept` and
-`fit_band_ok` as `None` on purpose — a green mechanical bundle is **necessary, not
-sufficient**; the gate (`team_preflight`) and the human still decide acceptance.
+- single watertight solid, and one body rather than phantom shells
+- overall size against the plan's `expected_bbox_mm`
+- downward-facing area for **every** support rule, each screened in the orientation
+  that rule declares via `model_to_printer_matrix` — not in whichever orientation
+  happens to look best
+- seated per-side clearance against each declared interface band, in millimetres,
+  which is the unit the band is written in; over-clearance fails exactly as
+  interference does
+- every plan-named edge, against both ends of its band
+
+Then it writes `commission.json`, `artifact_manifest.json` and
+`candidate_readiness.md`, and exits non-zero if any check failed. Each failure names
+the action to take. Iterate until it exits zero.
+
+A verifier runs the same command with `--stl` against the delivered file, into its own
+output directory. That is an independent recomputation: the input it distrusts is the
+designer's `commission.json`, and this never reads it.
+
+## Do not hand-roll it
+
+Re-implementing these by hand costs about an hour a job and re-introduces the exact
+failures the library already solved: stale hashes, phantom shells, the `to_2D()`
+datum-frame trap, a measuring routine that reads high against its own nominals, and
+evidence describing a mesh you no longer ship. One archived run widened its own
+acceptance bands until its hand-written sampler's wrong numbers passed.
+
+The same applies to the receipts. `artifact_manifest.json` and
+`candidate_readiness.md` are generated from the measurements above; retyping those
+numbers is how a receipt starts describing a different mesh.
+
+Every function is still importable — `export_and_hash`, `measure`, `datum_features`,
+`overhang_area`, `interference`, `insertion_sweep`, `fit_coupon`, and
+`designer_toolkit.render` — for the rare case that genuinely needs one directly. That
+is not the normal path, and reaching for it to rebuild a check the gate already
+performs is the mistake this file exists to prevent.
+
+## The fit coupon
+
+```bash
+python -m designer_toolkit coupon --plan print_plan_checks.json --out coupon.stl
+```
+
+A multi-lane coupon from the plan's declared interfaces. Genuinely separate work: a
+physical test artifact, not a check on the candidate.
+
+## Verification is backend-neutral
+
+Once the exported mesh exists the CAD kernel is irrelevant, because every
+deterministic check reads that mesh. `commission` never trusts the kernel's own
+numbers — `.val().Volume()` misreports on periodic splines, and OCC can split one
+solid into phantom shells.
+
+## What is still yours
+
+Interpreting photos, choosing datums and geometry, choosing the fit and manufacturing
+strategy, and the accept/reject decision. `commission.json` leaves `visual_accept` and
+`fit_band_ok` null on purpose, and `candidate_readiness.md` leaves them blank: a green
+mechanical bundle is **necessary, not sufficient**. No number in it distinguishes a
+correct part from a plausible wrong one — look at the renders before trusting any
+single scalar.

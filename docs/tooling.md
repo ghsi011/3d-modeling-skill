@@ -204,71 +204,26 @@ Every subcommand prints indented JSON to stdout. The CLI doesn't catch toolkit
 exceptions, so success returns `0`, argparse usage errors return `2`, and runtime
 errors normally return `1` with a Python traceback.
 
-### `measure`
+### `commission`
 
 ```bash
-python -m designer_toolkit measure body.stl
+python -m designer_toolkit commission (--model model.py | --stl body.stl) --plan plan.json   --out DIR --job-id JOB --updated-utc ISO8601 [--reference ref.stl] [--no-render] [--no-receipts]
 ```
 
-Inputs: one STL path.
+Inputs: a model module defining `part`/`build()` or an already-exported STL; the
+bound `print_plan_checks.json`; an output directory; an injected timestamp.
 
-Outputs: JSON measurement report from the re-imported mesh, including bounding
-box, volume, watertightness, component count, and related mesh metrics.
+Outputs: `commission.json` with every deterministic verdict and the next action for
+each failure, plus `artifact_manifest.json` and `candidate_readiness.md` derived from
+the same measurements. Exit `0` when every check passed, `1` when any failed, so a
+failing candidate cannot be handed on.
 
-### `overhang`
-
-```bash
-python -m designer_toolkit overhang body.stl [--threshold -0.73] [--min-z 0.3]
-```
-
-Inputs: STL path, optional downward normal threshold, optional minimum z cutoff.
-
-Outputs: JSON object with `overhang_mm2`.
-
-### `datums`
-
-```bash
-python -m designer_toolkit datums body.stl --z 1.0 [--normal 0,0,1]
-```
-
-Inputs: STL path, required datum plane z value, optional comma-separated normal.
-
-Outputs: JSON object with `features`, each serialized from the datum feature
-extractor.
-
-### `interference`
-
-```bash
-python -m designer_toolkit interference part.stl ref.stl
-```
-
-Inputs: candidate STL and reference or mating STL.
-
-Outputs: JSON object with `interference_mm3`.
-
-### `sweep`
-
-```bash
-python -m designer_toolkit sweep part.stl ref.stl --travels 5,15,25,35 [--axis 0,0,-1]
-```
-
-Inputs: candidate STL, reference STL, required comma-separated travel distances,
-and optional comma-separated axis.
-
-Outputs: JSON object with `steps`, one serialized insertion sweep result per
-travel distance.
-
-### `export`
-
-```bash
-python -m designer_toolkit export body.stl [--out out/body.stl]
-```
-
-Inputs: source STL path and optional output path. If `--out` is omitted, the
-source path is reused.
-
-Outputs: JSON export report with hash and re-import facts. The internal
-`integrity` object is omitted from CLI output.
+This subsumes the former `measure`, `overhang`, `datums`, `interference`, `sweep`,
+`export` and `finalize` subcommands, which are gone. Each was a separate process
+paying interpreter and CAD-library startup, re-parsing the same STL, and costing an
+agent round trip repeated after every edit — and offering the pieces individually is
+what led three measured runs to assemble a hand-written verification script instead
+of running the gate. The library functions remain importable for the rare direct use.
 
 ### `coupon`
 
@@ -281,21 +236,6 @@ a raw interface list. `--out` is required.
 
 Outputs: JSON object with written `stl` path and `legend` rows. The command also
 writes the coupon STL.
-
-### `finalize`
-
-```bash
-python -m designer_toolkit finalize body.stl [--plan plan.json]
-```
-
-Inputs: STL path and optional plan JSON. Plan keys can include `out_stem`,
-`datums`, `reference`, `insertion`, `orientation_transform`, and
-`overhang_threshold`.
-
-Outputs: JSON readiness bundle from `designer_toolkit.bundle.finalize`, including
-export and hash facts, overhang area, datum features, optional seated
-interference, optional insertion sweep, and readiness skeleton fields that still
-need human judgment.
 
 ## `preview.py`
 

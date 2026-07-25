@@ -1,14 +1,13 @@
 """Smoke tests for `python -m designer_toolkit`.
 
-The designer's required reading tells it to call this CLI rather than
-re-author the measurement patterns, so a broken subcommand sends the role
-back to hand-rolling the thing the toolkit exists to prevent. These check the
-contract each subcommand advertises: that it runs, emits parseable JSON, and
-reports a usage error rather than a traceback on bad input.
+The designer's required reading tells it to run this CLI rather than re-author
+the measurement patterns, so broken wiring sends the role back to hand-rolling
+the thing the toolkit exists to prevent -- which is exactly what three measured
+runs did.
 
-Deliberately thin. The measurement logic itself is covered against known
-geometry in test_designer_toolkit.py; what is unproven without these is the
-CLI wiring between them.
+The surface is deliberately two subcommands. These check that `commission`
+reaches the gate with its flags intact, that `coupon` still works, and that a
+bad invocation is a usage error rather than a traceback.
 """
 
 from __future__ import annotations
@@ -32,6 +31,12 @@ def _run(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _plan_for(x: float, y: float, z: float) -> dict:
+    from designer_toolkit import plan
+
+    return plan.direct_template((x, y, z), job_id="t")
+
+
 @pytest.fixture(scope="module")
 def box_stl(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("cli") / "box.stl"
@@ -41,54 +46,54 @@ def box_stl(tmp_path_factory) -> Path:
     return path
 
 
-def test_help_lists_every_subcommand() -> None:
+def test_the_surface_is_the_gate_and_the_coupon() -> None:
+    """Offering the checks individually is what taught three runs to assemble
+    their own verification script instead of running the gate."""
     result = _run("--help")
 
     assert result.returncode == 0, result.stderr
-    for subcommand in ("measure", "overhang", "datums", "interference", "sweep",
-                       "export", "coupon", "finalize"):
-        assert subcommand in result.stdout
+    assert "commission" in result.stdout
+    assert "coupon" in result.stdout
+    for retired in ("measure", "overhang", "datums", "sweep", "finalize"):
+        assert retired not in result.stdout
 
 
-def test_measure_emits_the_dimensions_it_documents(box_stl: Path) -> None:
-    result = _run("measure", str(box_stl))
+def test_commission_reaches_the_gate_with_its_flags_intact(box_stl: Path, tmp_path: Path) -> None:
+    """The wrapper forwards argv verbatim rather than re-declaring the flags, so
+    this is what proves it has not drifted from the gate it fronts."""
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan_for(10, 20, 30)), encoding="utf-8")
+    out = tmp_path / "out"
 
-    assert result.returncode == 0, result.stderr
-    report = json.loads(result.stdout)
-    assert report["bbox_mm"]["x"] == pytest.approx(10, abs=0.1)
-    assert report["bbox_mm"]["z"] == pytest.approx(30, abs=0.1)
-    assert report["watertight"] is True
-    assert report["components"] == 1
-
-
-def test_overhang_reports_zero_for_a_box_on_the_bed(box_stl: Path) -> None:
-    result = _run("overhang", str(box_stl))
+    result = _run("commission", "--stl", str(box_stl), "--plan", str(plan_path),
+                  "--out", str(out), "--no-render", "--job-id", "t",
+                  "--updated-utc", "2026-01-01T00:00:00Z")
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["overhang_mm2"] == pytest.approx(0.0, abs=1e-6)
+    assert json.loads(result.stdout)["verdict"] == "PASS"
+    assert (out / "candidate_readiness.md").is_file()
 
 
-def test_interference_of_a_mesh_with_itself_is_its_volume(box_stl: Path) -> None:
-    result = _run("interference", str(box_stl), str(box_stl))
+def test_a_failing_candidate_exits_nonzero_through_the_wrapper(box_stl: Path,
+                                                               tmp_path: Path) -> None:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan_for(10, 20, 99)), encoding="utf-8")
 
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["interference_mm3"] == pytest.approx(10 * 20 * 30, rel=0.01)
+    result = _run("commission", "--stl", str(box_stl), "--plan", str(plan_path),
+                  "--out", str(tmp_path / "out"), "--no-render", "--job-id", "t",
+                  "--updated-utc", "2026-01-01T00:00:00Z")
 
-
-def test_export_writes_an_stl_and_hashes_it(box_stl: Path, tmp_path: Path) -> None:
-    stem = tmp_path / "out"
-
-    result = _run("export", str(box_stl), "--out", str(stem))
-
-    assert result.returncode == 0, result.stderr
-    report = json.loads(result.stdout)
-    assert Path(report["stl_path"]).is_file()
-    assert len(report["file_sha256"]) == 64
-    assert len(report["geometry_sha256"]) == 64
+    assert result.returncode == 1
+    assert "FAIL envelope" in result.stderr
 
 
 def test_missing_file_is_an_error_not_a_silent_zero(tmp_path: Path) -> None:
-    result = _run("measure", str(tmp_path / "does_not_exist.stl"))
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan_for(10, 20, 30)), encoding="utf-8")
+
+    result = _run("commission", "--stl", str(tmp_path / "does_not_exist.stl"),
+                  "--plan", str(plan_path), "--out", str(tmp_path / "out"),
+                  "--no-render", "--job-id", "t", "--updated-utc", "2026-01-01T00:00:00Z")
 
     assert result.returncode != 0
 

@@ -65,12 +65,14 @@ overlays, and issue a concrete file-contract verdict.
 8. Shared raw-vs-normalized mesh loader:
    [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py)
    (`load_mesh_report` / `load_mesh_raw`).
-9. Shared design/verify toolkit (measurement primitives — apply them
-   **independently** to the delivered STL; the accept/reject and the visual
-   judgment stay yours):
+9. Shared design/verify toolkit — run the same one command against the
+   **delivered** STL, into your own output directory:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
-   (`export_and_hash`, `interference`, `insertion_sweep`, `datum_features`,
-   `overhang_area`; `python -m designer_toolkit`).
+   (`python -m designer_toolkit commission --stl <canonical.stl> ...`). Recomputing
+   from the delivered bytes with the tested instrument *is* independence — it never
+   reads the designer's `commission.json`, which is the one input you distrust.
+   Re-authoring the predicate in a bespoke script is not independence, it is a second
+   uncalibrated instrument; the accept/reject and every visual judgment stay yours.
 
 ## Checklist
 

@@ -71,10 +71,10 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 8. Shared artifact-manifest validator:
    [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
-9. Shared design/verify toolkit — **call it, do not re-author the patterns**:
-   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
-   (`export_and_hash`, `measure`, `datum_features`, `overhang_area`, `interference`,
-   `insertion_sweep`, `fit_coupon`, `finalize`, and `python -m designer_toolkit`).
+9. Shared design/verify toolkit — **one call, not a menu**:
+   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md).
+   `python -m designer_toolkit commission` is the deterministic gate and the only
+   entry point you need; `coupon` is the one genuinely separate deliverable.
 
 ## Checklist
 
