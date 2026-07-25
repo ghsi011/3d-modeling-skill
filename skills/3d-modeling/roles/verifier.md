@@ -67,21 +67,57 @@ overlays, and issue a concrete file-contract verdict.
    acceptance check. A repaired mesh must never stand in for the raw read: a genuine export
    defect has to show up on the raw side before any repair runs, and the mutation log records
    exactly what normalization changed.
-5. Run all seven checks: interference; full-travel insertion sweep; section render; visual
-   side-by-side; feature positions from named datums; measurement audit; printability and
-   face audit.
-6. Actually inspect renders and overlay composites. Do not replace visual evidence with
-   bounding-box or scalar checks; note occluded or misleading views.
-7. Audit against `print_plan.md`: planned orientation, overhangs/support budget,
-   wall/feature sizes versus the planned nozzle, bed chamfers, material/load direction, and
-   colour/process constraints. For every declared interface, check the built geometry against
-   its declared fit type, contact state, and range, using its declared acceptance method — the
-   verifier checks the designer's *implementation* of the print engineer's fit strategy, it
-   does not redeclare the strategy. Independently repeat declared edge sections in check 6. In
-   check 7, recompute every `SELF_SUPPORT_REQUIRED` predicate and each
-   `SUPPORT_ALLOWED` footprint/classification. Rerun shared `team_preflight.py
-   support-audit` into verifier-owned JSON for every support rule; never trust the designer's
-   JSON or infer contacts from an isometric view.
+5. Recompute the deterministic set yourself, in one call, against the **delivered** STL and
+   into your own output directory:
+
+   ```bash
+   python -m designer_toolkit commission --stl <canonical.stl> --plan print_plan_checks.json      --out <verifier-dir> --job-id <job> --updated-utc <iso8601> --no-receipts      [--reference mating.stl]
+   ```
+
+   Require exit zero. This is an independent recomputation, not a borrowed verdict: it reads
+   the delivered bytes and never reads the designer's `commission.json` — the one input this
+   step exists to distrust. Do not open that file until you have your own; comparing
+   afterwards is free. Point at the canonical STL in place and never copy it.
+
+   **Do not hand-write a replacement.** Independence is a property of which inputs you
+   consult, not of who wrote the code. A bespoke re-implementation is a second uncalibrated
+   instrument, and that is not hypothetical — one archived run's hand-rolled sampler read up
+   to 137% high against known nominals and the run widened its acceptance bands until its own
+   wrong numbers passed.
+
+   It settles report checks **1** (interference, as a seated per-side clearance against each
+   declared band), **3** (section render), the geometric half of **6** (envelope against the
+   plan, and every plan-named edge against both ends of its band), and **7** (downward-facing
+   area for every support rule, each in that rule's own declared orientation).
+
+6. Cover the rest by hand, per plan: check **2**, the full-travel insertion sweep, for any
+   interface declaring a motion path; check **5**, feature positions and handedness from named
+   datums (a mirrored layout fits the same magnitudes — compare with the datum coordinate
+   negated); and the sheet half of check **6**, comparing `dimensions.md` values back to the
+   built geometry. Then, for a `SUPPORT_ALLOWED` rule, whether the permitted contact class actually
+   lands where the plan says and on genuinely nonfunctional faces. Also audit what no tool
+   reads: wall and feature sizes against the planned nozzle, bed chamfers, material and load
+   direction, colour and process constraints. Run `team_preflight.py support-audit` into
+   verifier-owned JSON per support rule — it implements the bed/downward predicate
+   independently of the toolkit's, so a silent disagreement between them is the cheapest bug
+   detector available and costs one command.
+7. Check **4**, and it is yours alone: look at the images. The tool renders sections; it
+   cannot read them. Judge silhouette,
+   feature shape, count, position, and handedness against the reference and the original
+   photographs, and say what each view actually shows. A green scalar bundle is necessary,
+   never sufficient — no number in it distinguishes a correct part from a plausible wrong one.
+   Note occluded or misleading views and demand another camera when a view cannot settle the
+   question. Then judge what no number decides: is the declared fit *strategy* implemented
+   rather than merely inside its band, and does the part solve the stated problem? The print
+   engineer owns fit strategy; you check the designer's implementation of it and never
+   redeclare it.
+
+   Scale this judgment by consequence class, never the deterministic gate above. `R0` needs
+   the visual call and little fit reasoning; `R1` adds the fit-band judgment; `R2` needs the
+   whole of this step with every occluded view resolved and the `SUPPORT_ALLOWED` contact
+   inspection written out. What never scales down is that this step happens at all: a purely
+   numeric `PASS` reintroduces the exact failure this role exists to catch, a part that
+   satisfies every scalar and is the wrong object.
 8. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
    intended bodies, units, and no missing or stray components. Independently run
    `python -m team_tools.contracts validate <project-dir> --require all` (from
