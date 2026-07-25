@@ -412,15 +412,17 @@ project directory validates `PASS` with exit `0` and an empty `validated_paths`.
 must therefore name what the phase requires:
 
 ```bash
-python -m team_tools.contracts validate <project-dir> --require all
+python -m team_tools.contracts validate <project-dir> --require artifact_manifest
 ```
 
 `--require` promotes each named contract's absence to a `REQUIRED_CONTRACT_MISSING` error, so
 the exit code alone becomes a sound gate, and the names land in the receipt's
-`required_contracts` for review. Use the subset the phase actually requires when validating
-mid-pipeline; `all` is correct at Phase 4. Either way the verifier confirms the receipt's
-`validated_paths` names every contract it expected. (A project directory that does not exist is
-a hard exit `2` — a typo can never read as a pass.)
+`required_contracts` for review. Require `artifact_manifest` — the one contract this document
+defines as JSON-authoritative. The other four are authored as Markdown; their JSON mirrors are
+optional, so `--require all` rejects a project built exactly to this contract. Name a wider
+subset only in a project that does maintain the mirrors. Either way the verifier confirms the
+receipt's `validated_paths` names every contract it expected. (A project directory that does
+not exist is a hard exit `2` — a typo can never read as a pass.)
 
 ## `verification_report.md`
 
