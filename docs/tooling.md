@@ -665,27 +665,34 @@ Exit codes:
 
 ## `tools/build_skill.py`
 
-Current status: builder command not yet present in this branch. `EXCLUDED.md`
-mentions this name for a live tree, but there is no `tools/build_skill.py` file
-to document or link here yet.
-
-Expected command once present:
+Script: [`tools/build_skill.py`](../tools/build_skill.py)
 
 ```bash
-python tools/build_skill.py
+python tools/build_skill.py [--out dist/skills]
 ```
 
-Planned inputs:
+Inputs:
 
-* Repository skill tree and packaging options defined by the future builder.
+* Repository `skills/` tree. Each role directory (`3d-orchestrator`,
+  `3d-metrologist`, `3d-designer`, `3d-verifier`, `3d-print-engineer`) must
+  contain a `SKILL.md` at its root. Shared references and scripts under
+  `skills/3d-modeling/references/` and `skills/3d-modeling/scripts/` are
+  included in every per-role bundle.
+* `--out`, output directory for the generated `.skill` zip artifacts. Defaults
+  to `dist/skills`.
 
-Planned outputs:
+Outputs:
 
-* Installable or copyable skill bundle artifacts, exact paths pending the
-  builder implementation.
+* Five per-role `<role>.skill` zips, each with `SKILL.md` at the archive root,
+  plus `agents/`, `references/`, and `scripts/` sub-trees.
+* One `3d-modeling-team.skill` bundle that aggregates all five roles under
+  `roles/<role>/` alongside the shared `references/` and `scripts/`.
+* All entries use a fixed timestamp (1980-01-01), sorted archive order, and
+  `0o644` permissions for deterministic, reproducible builds. `__pycache__/`
+  and `.pyc` files are excluded.
 
-Exit codes today:
+Exit codes:
 
-* Running `python tools/build_skill.py` in this branch fails before repository
-  code runs because the file is missing. CPython normally exits non-zero with a
-  missing-file error.
+* `0`, all artifacts were written.
+* `1`, an uncaught runtime error occurred.
+* `2`, argparse usage failed.

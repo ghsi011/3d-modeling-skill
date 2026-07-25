@@ -41,3 +41,6 @@ jobs:
 
       - name: Internal markdown links
         run: python tools/check_internal_links.py
+
+      - name: Build skill bundles
+        run: python tools/build_skill.py --out dist/skills
