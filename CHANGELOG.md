@@ -6,6 +6,87 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — the pipeline runs the phases a job actually has
+
+`profile: COMPACT | FULL` decided how verbose the record was and nothing else —
+the contract said outright that "both profiles run the same gates" — so a job
+whose every dimension the user stated still paid all seven dispatches. It also
+contradicted itself: `COMPACT` was defined as having "no recreated mating
+geometry", while `REFERENCE_BUILD` exists to reconstruct exactly that.
+
+The profile is now decided by one question, what must be recovered from
+evidence, and it decides which phases run. `DIRECT` (dimensions stated, nothing
+recreated) is two dispatches; `FITTED` (one measured object) is four, with the
+blind rebuild folded into the candidate build and its overlay into
+verification; `FULL` is every phase. `PRINT_PREP` became conditional on what
+`commission.json` reports rather than on the profile.
+
+Two rules survive every profile because the archive shows what happens without
+them: the plan is never authored by whoever builds the geometry — with no plan
+bound, all four archived runs set their own support ceiling *after* reading
+their own measurement — and verification is never folded into the build.
+
+So `DIRECT` needs a plan it did not write. `designer_toolkit.plan` supplies one,
+with conservative numbers fixed ahead of any part and stamped
+`threshold_source: builtin-default`, and `plan check` rejects an unbuildable
+plan at authoring time instead of after a 39-minute build.
+
+### Removed — the tool surface that taught designers to hand-roll the gate
+
+Three measured runs, and none executed `commission`; each hand-wrote a
+verification script. They were following the documentation, whose headline
+section documented `finalize` and offered a menu of seven individual
+subcommands. A tool surface that offers the pieces gets the pieces assembled by
+hand.
+
+`measure`, `overhang`, `datums`, `interference`, `sweep`, `export` and
+`finalize` are gone from the CLI; `commission` and `coupon` remain. Every
+library function stays importable. The verifier now recomputes with the same one
+command against the delivered STL — independence is a property of which inputs
+you consult, and it never reads the designer's `commission.json`.
+
+### Added — checks that cost no build, and templates that can be asked
+
+`commission` runs a pre-build stage over a module-level `PARAMS` dict and
+returns before the first CAD call when the declared numbers already settle the
+question: a wall under two extrusion widths, an edge treatment at half the wall
+or more, a declared size that disagrees with the plan, and a cavity mouth fillet
+larger than its clearance. That last one is closed form — a fillet pulls the
+wall in by its own radius at the mouth, so clearance must be ≥ radius. One
+archived run bisected four full build/export/measure cycles toward it.
+
+`designer_toolkit.templates` (`box_shell`, `panel`, `bolt_boss`, `stack`)
+returns geometry together with the `PARAMS` describing it, computed from the
+same arithmetic that built the solid, so the two cannot drift. `panel` reports
+the narrowest material left between its openings — a plate whose holes leave a
+0.6 mm rib is watertight, the right size, and unprintable, and every other gate
+passes it.
+
+`artifact_manifest.json` and `candidate_readiness.md` are now derived from those
+measurements rather than retyped, with `visual_accept` and `fit_band_ok` left
+blank on purpose.
+
+### Fixed — gate defects that passed bad parts
+
+The fit check compared a boolean intersection *volume* against the plan's
+per-side *millimetres*, so a part built exactly to a declared `[0.15, 0.30]`
+band failed; nothing caught it because every fixture set `interfaces: []`. The
+support screen used the best orientation it could find rather than the plan's
+declared `model_to_printer_matrix`. Only `support_rules[0]` was checked. Every
+edge check was silently skipped on any contract-conformant plan, because the
+loop required a `corner_xy` field that appears nowhere in the contract. And
+`metrics.overhang_area` disagreed with the authoritative gate by 2× on a real
+candidate — returning 0.0 mm² for a part the gate scored at 10,507 — because it
+excluded faces by an arbitrary centroid height rather than the gate's
+three-vertex bed test.
+
+Also: `status` answered the reference-freshness question from whichever
+reference happened to be listed first, so a multi-part job could change its lid
+and read as clean; and all five agent definitions requested skills
+(`3d-designer` and friends) that stopped existing at the single-skill
+restructure, which fails silently and left every specialist starting with no
+charter loaded.
+
 ### Removed — the per-harness packaging layer
 
 The OpenCode and generic/OpenAI outputs, their generators, their tests, and
