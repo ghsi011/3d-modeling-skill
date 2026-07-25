@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point: python -m team_tools.contracts <validate|hash|status|render|agent-summary> <path>
+"""CLI entry point: python -m team_tools.contracts <validate|hash|status> <path>
 
 Run from skills/3d-modeling/scripts/ (so `team_tools` is an importable package
 on sys.path), or directly as `python team_tools/contracts.py ...` from inside
@@ -24,9 +24,7 @@ if _PACKAGE_DIR not in sys.path:
 
 from common import ContractError, canonical_json  # noqa: E402
 from receipts import build_hash_receipt, build_validate_receipt  # noqa: E402
-from render import render_contract_file  # noqa: E402
 from status import compute_status, format_status_lines  # noqa: E402
-from summary import build_agent_summary  # noqa: E402
 from validators import CANONICAL_FILENAMES  # noqa: E402
 
 
@@ -86,23 +84,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 1 if any(row["status"] in ("STALE", "INVALIDATED", "UNREADABLE") for row in rows) else 0
 
 
-def _cmd_render(args: argparse.Namespace) -> int:
-    markdown = render_contract_file(args.path.resolve())
-    _write(markdown, args.output.resolve() if args.output else None)
-    return 0
-
-
-def _cmd_agent_summary(args: argparse.Namespace) -> int:
-    _write(build_agent_summary(args.path.resolve()) + "\n", args.output.resolve() if args.output else None)
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m team_tools.contracts",
         description=(
             "Deterministic contract-automation CLI for the 3D team pipeline: validate/hash/"
-            "status/render the structured-JSON mirror of the v4 contracts. Passing these "
+            "status over the structured-JSON contracts. Passing these "
             "gates is necessary evidence, not proof of geometric or manufacturing correctness."
         ),
     )
@@ -142,20 +129,6 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--output", type=Path, help="Write the report here instead of stdout.")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text lines.")
     status.set_defaults(func=_cmd_status)
-
-    render = subparsers.add_parser(
-        "render", help="Generate stable, git-diff-friendly Markdown from one structured JSON contract."
-    )
-    render.add_argument("path", type=Path, help="Path to a single contract .json file.")
-    render.add_argument("--output", type=Path, help="Write the Markdown here instead of stdout.")
-    render.set_defaults(func=_cmd_render)
-
-    agent_summary = subparsers.add_parser(
-        "agent-summary", help="Compact informational status text for an agent; points to the authoritative JSON."
-    )
-    agent_summary.add_argument("path", type=Path, help="Project directory.")
-    agent_summary.add_argument("--output", type=Path, help="Write the summary here instead of stdout.")
-    agent_summary.set_defaults(func=_cmd_agent_summary)
 
     return parser
 

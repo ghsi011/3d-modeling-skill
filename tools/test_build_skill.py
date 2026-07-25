@@ -75,8 +75,23 @@ class TestBuildSkill:
                     assert "SKILL.md" in names, f"Missing SKILL.md at root of {name}"
 
     def test_no_monolith_primary(self, build_dir: Path):
-        standalone = [n for n in ALL_ARTIFACTS if n != "3d-modeling-team.skill"]
-        assert "3d-modeling.skill" not in standalone
+        # Against what the builder actually emitted, not against ALL_ARTIFACTS:
+        # asserting a literal against a literal passed even when the builder
+        # was free to write the retired monolith.
+        emitted = {p.name for p in build_dir.glob("*.skill")}
+        assert "3d-modeling.skill" not in emitted
+        assert emitted == set(ALL_ARTIFACTS)
+
+    def test_zips_ship_no_test_suite(self, build_dir: Path):
+        # A bundle is a runtime surface; the suites and fixtures were a third
+        # of the packed bytes and nothing in a shipped skill runs them.
+        for name in ALL_ARTIFACTS:
+            with zipfile.ZipFile(build_dir / name) as zf:
+                offenders = [
+                    e for e in zf.namelist()
+                    if Path(e).name.startswith("test_") or "/examples/" in e
+                ]
+                assert not offenders, f"{name} ships test payload: {offenders}"
 
     def test_no_pycache_in_zips(self, build_dir: Path):
         for name in ALL_ARTIFACTS:

@@ -8,9 +8,10 @@ Consolidates three things the designer and verifier re-derive by hand every run:
   re-origins on a path-dependent frame, so hole centres silently stop matching
   the Phase-2 datums — the single most common false "placement OK". This is the
   one helper here that needs the ``section`` extra (scipy + shapely).
-* ``overhang_area()`` — downward-facing area past the support screen, using the
-  SAME threshold as the preflight gate so the designer self-check and the gate
-  can never disagree.
+* ``overhang_area()`` — downward-facing area past the support screen. The
+  threshold is a caller argument, defaulting to this module's constant; it agrees
+  with the preflight gate only when the caller passes the plan's own
+  ``downward_normal_z_max`` (see ``DEFAULT_DOWNWARD_NORMAL_Z_MAX`` below).
 
 STL is a vertex soup with no connectivity, so watertightness and component count
 are only meaningful after coincident vertices are merged. These helpers load via
@@ -23,20 +24,26 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import trimesh
 
-from . import _bootstrap  # noqa: F401  (puts scripts/ on sys.path; keep first)
+from ._bootstrap import as_mesh  # (also puts scripts/ on sys.path; keep first)
 
-import mesh_io
+import mesh_io  # noqa: E402  (needs the sys.path insert the line above performs)
 
-# Matches the validated preflight support-screen margin (-sin(47deg)): an
-# intended self-supporting 45deg chamfer tessellates to ~-0.7071 and must NOT be
-# flagged; only overhangs steeper than ~47deg are counted. Keep in lockstep with
-# team_preflight's downward_normal_z_max default.
+# Support-screen margin (-sin(47deg)): an intended self-supporting 45deg chamfer
+# tessellates to ~-0.7071 and must NOT be flagged, so only overhangs steeper than
+# ~47deg are counted.
+#
+# This is a TOOLKIT default only. ``team_preflight`` has no default at all: every
+# support rule in the print plan must carry its own ``downward_normal_z_max``,
+# which the authoritative gate reads per-rule. A plan shipping the bare 45deg
+# value (-0.7071) therefore screens strictly MORE area than this constant does,
+# so a self-check run at this default can read clean where the gate FAILs. Pass
+# the plan's value explicitly (``overhang_area(..., threshold=...)`` /
+# ``bundle.finalize(..., overhang_threshold=...)``) whenever the plan is known.
 DEFAULT_DOWNWARD_NORMAL_Z_MAX = -0.73
 
 
@@ -58,14 +65,8 @@ class Feature:
     area_mm2: float
 
 
-def _as_mesh(mesh_or_path: Any) -> trimesh.Trimesh:
-    if isinstance(mesh_or_path, (str, Path)):
-        return mesh_io.load_mesh(mesh_or_path)
-    return mesh_or_path
-
-
 def measure(mesh_or_path: Any) -> MeasureReport:
-    m = _as_mesh(mesh_or_path)
+    m = as_mesh(mesh_or_path)
     ext = m.bounding_box.extents
     ctr = m.bounding_box.centroid
     integ = mesh_io.compute_integrity(m)
@@ -128,7 +129,7 @@ def datum_features(mesh_or_path: Any, plane_origin, plane_normal=(0, 0, 1)) -> l
     module runs on the core trimesh + numpy stack.
     """
     _require_section_stack()
-    m = _as_mesh(mesh_or_path)
+    m = as_mesh(mesh_or_path)
     origin = np.asarray(plane_origin, dtype=float)
     normal = np.asarray(plane_normal, dtype=float)
     section = m.section(plane_origin=origin, plane_normal=normal)
@@ -155,7 +156,7 @@ def overhang_area(mesh_or_path: Any, *, threshold: float = DEFAULT_DOWNWARD_NORM
     Pass the model-to-printer ``transform`` to screen in print orientation.
     ~0 for a support-free print.
     """
-    m = _as_mesh(mesh_or_path)
+    m = as_mesh(mesh_or_path)
     normals = m.face_normals
     centers = m.triangles_center
     if transform is not None:

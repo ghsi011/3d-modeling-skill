@@ -67,8 +67,10 @@ def _cmd_finalize(a):
         datums=plan.get("datums", ()), reference=plan.get("reference"),
         insertion=plan.get("insertion"),
         orientation_transform=plan.get("orientation_transform"),
-        overhang_threshold=plan.get(
-            "overhang_threshold", metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX),
+        # Left as None when the plan is silent, so finalize records the fallback
+        # as "toolkit_default" instead of it looking like a declared plan value.
+        overhang_threshold=plan.get("overhang_threshold"),
+        overhang_min_z=plan.get("overhang_min_z", 0.3),
         also_step=False)
 
 

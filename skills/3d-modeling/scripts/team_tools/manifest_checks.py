@@ -161,34 +161,38 @@ def _check_mesh_against_declared(*, mesh: trimesh.Trimesh, artifact: dict[str, A
 def _compare_extents(*, declared_extent: np.ndarray, actual_extent: np.ndarray, where: str) -> list[Issue]:
     issues: list[Issue] = []
     scale_flags: list[str] = []
+    tight_scale = False
     mismatched_axes: list[int] = []
     for axis in range(3):
         declared = float(declared_extent[axis])
         actual = float(actual_extent[axis])
         if actual <= 0:
             continue
-        ratio = declared / actual if actual != 0 else float("inf")
+        ratio = declared / actual
         for candidate_ratio, direction in ((INCH_TO_MM, "declared looks like inches, actual mesh is mm"), (1.0 / INCH_TO_MM, "declared looks like mm, actual mesh is inches")):
             relative_error = abs(ratio - candidate_ratio) / candidate_ratio
             if relative_error <= _SCALE_WARN_TOL:
                 scale_flags.append(f"axis {axis}: {direction} (ratio {ratio:.4f})")
+                # Promotion to a hard error is decided from the ratio of the SAME
+                # axis that raised the flag. Deciding it from a separate sweep over
+                # all three axes lets an unrelated axis that happens to sit near
+                # 25.4x turn another axis's loose warning into a block.
+                tight_scale = tight_scale or relative_error <= _SCALE_BLOCK_TOL
         absolute_diff = abs(declared - actual)
         if absolute_diff > max(_BBOX_ABS_TOL_MM, _BBOX_REL_TOL * actual):
             mismatched_axes.append(axis)
 
     if scale_flags:
-        tight = any(
-            abs(float(declared_extent[axis]) / float(actual_extent[axis]) - candidate) / candidate <= _SCALE_BLOCK_TOL
-            for axis in range(3)
-            if float(actual_extent[axis]) > 0
-            for candidate in (INCH_TO_MM, 1.0 / INCH_TO_MM)
-        )
         detail = "; ".join(scale_flags)
-        if tight:
+        if tight_scale:
             issues.append(error("UNIT_SCALE_MISMATCH", where, f"obvious inch/mm (25.4x) mismatch: {detail}"))
         else:
             issues.append(warning("POSSIBLE_UNIT_SCALE_MISMATCH", where, f"possible inch/mm (25.4x) mismatch: {detail}"))
-    elif mismatched_axes:
+    # Unconditional, NOT an elif on the scale flag: a near-25.4x ratio on one axis
+    # used to suppress the bbox error on every other axis, so a declared extent
+    # that was 5x wrong on axis 1 shipped with nothing but a scale warning. The
+    # two findings are independent -- a mesh can be both mis-scaled and wrong.
+    if mismatched_axes:
         issues.append(
             error(
                 "BBOX_MISMATCH",

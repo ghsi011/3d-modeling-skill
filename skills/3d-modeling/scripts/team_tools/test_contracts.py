@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import trimesh
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
@@ -33,9 +34,7 @@ import common as C  # noqa: E402  (import after sys.path bootstrap above)
 import contracts as CLI  # noqa: E402
 import manifest_checks as MC  # noqa: E402
 import receipts as R  # noqa: E402
-import render as RD  # noqa: E402
 import status as S  # noqa: E402
-import summary as SUM  # noqa: E402
 import validators as V  # noqa: E402
 
 HASH_A = "a" * 64
@@ -417,6 +416,8 @@ class HashFormatTest(unittest.TestCase):
 
 class JobStateValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
+        # _JOB_STATE carries no risk_class, so this is also the backward-compat
+        # proof that the field stays optional -- keep it out of the fixture.
         issues, index = V.validate_job_state(clone(_JOB_STATE))
         self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
         self.assertIn("M1", index["gate_ids"])
@@ -477,13 +478,6 @@ class JobStateValidatorTest(unittest.TestCase):
         broken["contract_version"] = 99
         issues, _ = V.validate_job_state(broken)
         self.assertIn("UNSUPPORTED_CONTRACT_VERSION@job_state.contract_version", issue_ids(issues))
-
-    def test_risk_class_is_optional_absence_passes(self) -> None:
-        # Backward compatibility: existing job_state.json files with no risk_class
-        # (as in _JOB_STATE) must still pass.
-        self.assertNotIn("risk_class", _JOB_STATE)
-        issues, _ = V.validate_job_state(clone(_JOB_STATE))
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
 
     def test_risk_class_valid_value_passes(self) -> None:
         for value in sorted(V.RISK_CLASS):
@@ -908,6 +902,45 @@ class ArtifactManifestFileChecksTest(unittest.TestCase):
             issues = MC.check_artifact_files(artifact=artifact, artifact_id="A1", project_dir=project_dir, where="w")
             self.assertIn("BBOX_MISMATCH@w.bbox", issue_ids(issues))
 
+    def test_scale_flag_on_one_axis_does_not_hide_bbox_mismatch_on_another(self) -> None:
+        # Regression: the bbox check used to be an `elif` on the scale flag, so a
+        # near-25.4x ratio on axis 0 suppressed BBOX_MISMATCH on EVERY axis --
+        # axis 1 here is declared 5x too large and shipped as a warning only.
+        issues = MC._compare_extents(
+            declared_extent=np.array([25.9, 50.0, 10.0]),
+            actual_extent=np.array([1.0, 10.0, 10.0]),
+            where="w.bbox",
+        )
+        ids = issue_ids(issues)
+        self.assertIn("POSSIBLE_UNIT_SCALE_MISMATCH@w.bbox", ids)
+        self.assertIn("BBOX_MISMATCH@w.bbox", ids)
+        bbox_issue = next(i for i in issues if i.code == "BBOX_MISMATCH")
+        self.assertIn("[0, 1]", bbox_issue.message)  # axis 1 is the one that used to vanish
+
+    def test_loose_scale_flag_is_not_promoted_by_an_unrelated_axis(self) -> None:
+        # The other direction: promotion to a hard UNIT_SCALE_MISMATCH must come
+        # from the flagged axis's own ratio. Axis 0 is 1.97% off 25.4x (warning
+        # band, outside the 0.5% block band); no axis may raise it to an error.
+        issues = MC._compare_extents(
+            declared_extent=np.array([25.9, 50.0, 10.0]),
+            actual_extent=np.array([1.0, 10.0, 10.0]),
+            where="w.bbox",
+        )
+        scale_issues = [i for i in issues if i.code.endswith("UNIT_SCALE_MISMATCH")]
+        self.assertEqual(["warning"], [i.severity for i in scale_issues])
+
+    def test_exact_25_4x_still_blocks_and_still_reports_the_bbox(self) -> None:
+        # An exact 25.4x ratio stays a hard error, and now also emits the bbox
+        # finding it previously swallowed -- both facts are true of this mesh.
+        issues = MC._compare_extents(
+            declared_extent=np.array([25.4, 50.8, 76.2]),
+            actual_extent=np.array([1.0, 2.0, 3.0]),
+            where="w.bbox",
+        )
+        ids = issue_ids(issues)
+        self.assertIn("UNIT_SCALE_MISMATCH@w.bbox", ids)
+        self.assertIn("BBOX_MISMATCH@w.bbox", ids)
+
     def test_component_count_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
@@ -1081,49 +1114,6 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             plan_after = json.loads((project_dir / "print_plan.json").read_text())
             self.assertEqual(hashes["reference_hash"], plan_after["reference_sha256"])
 
-    def test_agent_summary_mentions_key_facts(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            self._build_full_project(project_dir)
-            text = SUM.build_agent_summary(project_dir)
-            self.assertIn("mode=PIPELINE", text)
-            self.assertIn("job_state=r1", text)
-            self.assertIn("informational only", text)
-
-
-# ---------------------------------------------------------------------------
-# render.py
-# ---------------------------------------------------------------------------
-
-
-class RenderTest(unittest.TestCase):
-    def test_render_each_contract_type_is_deterministic_and_bannered(self) -> None:
-        fixtures = {
-            V.CANONICAL_FILENAMES["job_state"]: _JOB_STATE,
-            V.CANONICAL_FILENAMES["dimensions"]: _DIMENSIONS,
-            V.CANONICAL_FILENAMES["print_plan"]: _PRINT_PLAN,
-            V.CANONICAL_FILENAMES["verification_report"]: _VERIFICATION_REPORT,
-            V.CANONICAL_FILENAMES["artifact_manifest"]: _ARTIFACT_MANIFEST,
-        }
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            for filename, data in fixtures.items():
-                path = project_dir / filename
-                path.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
-                first = RD.render_contract_file(path)
-                second = RD.render_contract_file(path)
-                self.assertEqual(first, second, filename)
-                self.assertTrue(first.startswith(RD.BANNER), filename)
-                self.assertIn(str(data["job_id"]) if "job_id" in data else data.get("candidate_id", ""), first)
-
-    def test_render_unknown_contract_kind_raises_named_error(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            path = Path(raw_dir) / "weird.json"
-            path.write_text(json.dumps({"contract": "not-a-real-contract"}), encoding="utf-8")
-            with self.assertRaises(C.ContractError) as ctx:
-                RD.render_contract_file(path)
-            self.assertIn("not-a-real-contract", str(ctx.exception))
-
 
 # ---------------------------------------------------------------------------
 # CLI subprocess tests (matches the invocation style in the implementation
@@ -1147,7 +1137,7 @@ class CliTest(unittest.TestCase):
         completed = self._run("--help")
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertIn("validate", completed.stdout)
-        self.assertIn("agent-summary", completed.stdout)
+        self.assertIn("status", completed.stdout)
 
     def test_validate_cli_end_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

@@ -6,6 +6,38 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Removed — streamlining pass (net −1,534 lines, 16,767 → 15,237)
+
+A six-axis review (docs prose, skill/role text, Python, gate value, repo hygiene,
+FDM domain content) looking for duplication, dead weight, and instructions that
+cost tokens without changing an outcome.
+
+- `skills/3d-modeling/scripts/backends/` — a `ModelBackend` ABC with cadquery /
+  build123d / freecad adapters and a test-only `FakeBackend`. Zero importers: the
+  real export path is `designer_toolkit.exporter._write_solid`, which does its own
+  dispatch and never knew the package existed.
+- `team_tools` `render` and `agent-summary` subcommands (`render.py`, `summary.py`).
+  No role, agent definition or reference ever invoked them, and no rendered output
+  is committed anywhere. `render` generated Markdown *from* JSON, inverting a
+  pipeline whose Markdown is the authored side.
+- `references/preflight-checklist.md` — 135 lines with zero inbound references,
+  contradicting `fdm-design.md` on chamfer size and `troubleshooting.md` on
+  calibration order. Its correct thread number and its six-step calibration order
+  (which included the max-volumetric-speed step the live file omitted) were
+  harvested into the files that are actually loaded.
+- Half of `references/build123d-patterns.md` (192 → 84): unreferenced, and the
+  backend-neutral half was a verbatim clone of `cadquery-patterns.md`. Its sample
+  called a `finalize(strict=True)` signature that does not exist.
+- Dead Python: `verify_visual.footprint_iou` (superseded by `pose_score`),
+  `MeshIntegrity.non_manifold_edge_count` (computed on every export, read by
+  nothing), an `engine=` parameter no caller passes, a `team_tools/__init__`
+  re-export nothing imports, and three copies of the same `_as_mesh` coercion.
+- Repeated exit-code blocks, harness invocation stated in three files, a hand-run
+  OpenCode checklist duplicating what `test_gen_harness.py` asserts, and per-extra
+  `pyproject` comments duplicating the README table.
+- `.skill` bundles no longer ship the test suite and fixtures — 412 KB → 141 KB per
+  artifact, across six artifacts. Nothing in a shipped skill ran them.
+
 ### Fixed
 
 - Connected-component counts are now computed in pure numpy (label propagation over
@@ -28,6 +60,34 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
   doing its real job (genuinely degenerate sections).
 - Repository URLs in `pyproject.toml` and `CHANGELOG.md` pointed at a `github.com/Idan/…`
   org that does not exist; they 404'd.
+- The generated-harness drift gate never fired. CI ran `pytest` before
+  `gen_harness.py --check`, and a test shelled out to the generator *without*
+  `--check`, rewriting the working tree — so the check compared regenerated files
+  against themselves and passed unconditionally. Reproduced by drifting a role
+  source: `--check` alone exited 1, after `pytest` it exited 0. The test now
+  compares in memory and writes nothing, and `--check` runs before `pytest`.
+- `manifest_checks._compare_extents` used `elif`, so a near-25.4× scale flag on any
+  one axis suppressed `BBOX_MISMATCH` on every axis — a declared bbox 5× wrong on
+  another axis was reported as a warning, not an error. The 25.4× promotion also
+  swept all axes, so an unrelated axis landing near 25.4× could promote a warning
+  to a hard error. Both fixed, with regression tests in both directions.
+- `mesh_io._components` swallowed every failure into "1 component", the exact
+  silent multi-body pass `connected_component_count` was written to prevent. It now
+  raises a `ValueError` naming the vertex/face counts; the CLI callers already
+  surface `ValueError` cleanly.
+- `designer_toolkit`'s overhang self-check could report clean where the authoritative
+  gate FAILs — measured at 0.00 mm² vs 1873.15 mm² on a 46° face — while a comment
+  claimed lockstep with a `team_preflight` default that does not exist (the field is
+  required per-rule). `finalize` now records whether the threshold came from the
+  caller or the toolkit default, and re-screens at the bare 45° value to announce
+  the gap when they differ.
+- FDM guidance corrected against the source corpus, all five independently
+  re-confirmed: printed threads floored at `M8 (≥1/8")` — 8 mm glossed as 3.175 mm,
+  which forced heat-set inserts onto every M4–M6 boss the sources say prints fine;
+  30–40% infill against a documented 15–20%; warp-relief cuts specified at 1 mm deep
+  where deeper *increases* warp (0.5 mm); bottom chamfer stated three
+  incompatible ways across two files; and a 0.8 mm wall rule where 0.8 mm is the
+  geometric floor and 1 mm is the design rule.
 - `team_tools.contracts` now exits `2` on a project directory that does not exist. Every
   canonical contract is "absent" either way, so a typo'd path was indistinguishable from a
   clean early-phase project and validated `PASS` with exit `0`.

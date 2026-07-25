@@ -283,133 +283,43 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
 
     # -- Bug A: non-finite / malformed samples_mm must FAIL, not PASS -------
 
-    def test_validate_receipts_rejects_nan_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[0.5, float("nan"), 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-            # Support rules empty here, drop them from plan+readiness intersection check by
-            # keeping both empty lists so only the edge under test is exercised.
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    def test_validate_receipts_rejects_malformed_samples(self) -> None:
+        # Every way a samples_mm list can be unusable, each asserting the error
+        # names the edge AND says which rule it broke -- a FAIL alone would also
+        # be produced by an unrelated defect, so the substring is the real check.
+        cases = (
+            ([0.5, float("nan"), 0.6], "finite"),
+            ([0.5, float("inf"), 0.6], "finite"),
+            ([0.5, float("-inf"), 0.6], "finite"),
+            (["oops", 0.5, 0.6], "finite"),
+            # bool is an int subclass in Python: True must not pass as 1.0.
+            ([0.5, True, 0.6], "finite"),
+            ([], "non-empty"),
+            ([-0.1, 0.5, 0.6], "non-negative"),
+        )
+        for samples, expected in cases:
+            with self.subTest(samples=samples):
+                with tempfile.TemporaryDirectory() as raw:
+                    directory = Path(raw)
+                    stl_path, plan_path = self.write_box_and_plan(directory)
+                    # Empty the plan's support rules BEFORE hashing it into the
+                    # readiness receipt, so only the edge under test can fail.
+                    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                    plan["support_rules"] = []
+                    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+                    readiness = self.base_readiness(stl_path, plan_path, samples_mm=samples)
+                    readiness_path = self.write_json(
+                        directory, "candidate_preflight.json", readiness
+                    )
 
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "finite" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_positive_infinity_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[0.5, float("inf"), 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "finite" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_negative_infinity_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[0.5, float("-inf"), 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "finite" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_empty_samples(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "non-empty" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_non_numeric_string_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=["oops", 0.5, 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "finite" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_boolean_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[0.5, True, 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "finite" in e for e in result["errors"]), result["errors"]
-            )
-
-    def test_validate_receipts_rejects_negative_sample(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            stl_path, plan_path = self.write_box_and_plan(directory)
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            plan["support_rules"] = []
-            plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            readiness = self.base_readiness(stl_path, plan_path, samples_mm=[-0.1, 0.5, 0.6])
-            readiness_path = self.write_json(directory, "candidate_preflight.json", readiness)
-
-            result = team_preflight.validate_receipts(
-                stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
-            )
-            self.assertEqual(result["result"], "FAIL")
-            self.assertTrue(
-                any("E-01" in e and "non-negative" in e for e in result["errors"]), result["errors"]
-            )
+                    result = team_preflight.validate_receipts(
+                        stl_path=stl_path, plan_path=plan_path, readiness_path=readiness_path
+                    )
+                    self.assertEqual(result["result"], "FAIL")
+                    self.assertTrue(
+                        any("E-01" in e and expected in e for e in result["errors"]),
+                        result["errors"],
+                    )
 
     def test_validate_receipts_rejects_max_radius_below_min_radius(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -568,26 +478,21 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
     def test_is_finite_rigid_accepts_identity(self) -> None:
         self.assertTrue(team_preflight.is_finite_rigid(IDENTITY_MATRIX))
 
-    def test_is_finite_rigid_rejects_singular(self) -> None:
-        self.assertFalse(team_preflight.is_finite_rigid(SINGULAR_MATRIX))
-
-    def test_is_finite_rigid_rejects_reflection(self) -> None:
-        self.assertFalse(team_preflight.is_finite_rigid(REFLECTED_MATRIX))
-
-    def test_is_finite_rigid_rejects_scale(self) -> None:
-        self.assertFalse(team_preflight.is_finite_rigid(SCALED_MATRIX))
-
-    def test_is_finite_rigid_rejects_shear(self) -> None:
-        self.assertFalse(team_preflight.is_finite_rigid(SHEARED_MATRIX))
-
-    def test_is_finite_rigid_rejects_nan_entry(self) -> None:
-        bad = _matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]], (float("nan"), 0, 0))
-        self.assertFalse(team_preflight.is_finite_rigid(bad))
-
-    def test_is_finite_rigid_rejects_non_matrix(self) -> None:
-        self.assertFalse(team_preflight.is_finite_rigid(None))
-        self.assertFalse(team_preflight.is_finite_rigid("not a matrix"))
-        self.assertFalse(team_preflight.is_finite_rigid([[1, 0], [0, 1]]))
+    def test_is_finite_rigid_rejects_non_rigid_and_malformed(self) -> None:
+        # Anything that is not a finite rotation+translation: a rigid transform
+        # is what makes the printer-frame normals comparable to the model's.
+        for label, bad in (
+            ("singular", SINGULAR_MATRIX),
+            ("reflection", REFLECTED_MATRIX),
+            ("scale", SCALED_MATRIX),
+            ("shear", SHEARED_MATRIX),
+            ("nan entry", _matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]], (float("nan"), 0, 0))),
+            ("none", None),
+            ("string", "not a matrix"),
+            ("wrong shape", [[1, 0], [0, 1]]),
+        ):
+            with self.subTest(matrix=label):
+                self.assertFalse(team_preflight.is_finite_rigid(bad))
 
     def test_support_audit_rejects_singular_transform(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -39,7 +39,7 @@ def _cylinder(diameter: float, height: float, at):
 def fit_coupon(interfaces, out_path, *, plate_thickness: float = 4.0,
                feature_pitch: float = 12.0, lane_pitch: float = 14.0,
                margin: float = 6.0, peg_height: float = 6.0,
-               offsets_mm=DEFAULT_OFFSETS_MM, engine=None):
+               offsets_mm=DEFAULT_OFFSETS_MM):
     """Build a multi-lane fit coupon STL and return ``(stl_path, legend)``.
 
     One lane (row along +Y) per interface; one feature per declared offset. Holes
@@ -78,10 +78,9 @@ def fit_coupon(interfaces, out_path, *, plate_thickness: float = 4.0,
             legend.append(CouponLane(str(iface.get("id", f"iface{li}")), kind,
                                      float(off), float(d), float(x), float(y)))
 
-    kw = {} if engine is None else {"engine": engine}
     body = plate
     if holes:
-        body = trimesh.boolean.difference([body, *holes], **kw)
+        body = trimesh.boolean.difference([body, *holes])
     parts = [body] + pegs
     coupon = trimesh.util.concatenate(parts) if len(parts) > 1 else body
 

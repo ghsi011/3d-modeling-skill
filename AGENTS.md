@@ -16,29 +16,13 @@ This is file-contract only communication: roles write and read project files, no
 
 ## Invocation by harness
 
-### Claude Code
+Claude Code, OpenCode, and generic OpenAI-style YAML each have a generated entry point. [`docs/harness-matrix.md`](docs/harness-matrix.md) is the single record of where each harness's definitions live and what is verified by tests versus documented-only; start with the orchestrator under any of them and require all follow-up work to happen through contract files.
 
-- Agent definitions live in `.claude/agents/`.
-- Skill folders live under `skills/` and can be copied or linked into a discovered Claude skills directory.
-- Keep the `skills/` tree intact so role files can resolve shared references and scripts by relative path.
-- Start with the orchestrator role for a commission, then let it dispatch the other four roles through file contracts.
-
-### OpenCode
-
-- Agent definitions live in `.opencode/agents/`. Use the plural `agents` directory.
-- `opencode.json` is the harness entry point for generated OpenCode wiring, including agents, skills, and local MCP tooling when present.
-- Start with the orchestrator agent and pass the commission plus the project workspace path. Require all follow-up work to happen through contract files.
-
-### Generic OpenAI style YAML
-
-- Generated YAML agents live in `dist/openai/`.
-- Load the five role YAML files as separate agents in the host harness.
-- Provide the same project directory to every role, and require the orchestrator to issue commissions that name the authorized input files, required outputs, backend, and gate expected for that phase.
+`skills/roles/*.md` are the source for all three formats. After editing a role file, run `python tools/gen_harness.py`; CI fails on drift.
 
 ## Tooling paths
 
 - `skills/3d-modeling/scripts`, deterministic model, mesh, preflight, preview, 3MF, and contract tooling.
-- `skills/3d-modeling/scripts/backends`, the common CAD interface and its `cadquery`, `build123d`, and `freecad` adapters.
 - `tools/gen_harness.py`, harness generator for Claude, OpenCode, and generic YAML outputs.
 - `tools/mcp_server.py`, local MCP server for contract and preflight tools, wired into `opencode.json`.
 - `tools/build_skill.py`, deterministic per-role and aggregate `.skill` bundle builder. CI step.
@@ -66,8 +50,6 @@ Every commission should state:
 
 Treat the backend as an explicit commission input, not an agent preference. Use one backend per part unless the orchestrator records a new revision that changes the route.
 
-- `cadquery`, Python-first parametric CAD for headless generation and repeatable checks.
-- `build123d`, Python-first parametric CAD for hosts that standardize on build123d scripts.
-- `freecad`, desktop-backed parametric CAD when a FreeCAD document or MCP-connected workstation is required.
+The discriminator is the execution environment, not the modeling feature set: `cadquery` and `build123d` are headless Python/OCP kernels that run wherever the tooling runs, while `freecad` needs a desktop FreeCAD document driven over MCP.
 
 Record the selected backend in the project contract files so downstream roles and tools can verify the same artifact chain.

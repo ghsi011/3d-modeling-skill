@@ -44,25 +44,9 @@ harness. Verified means tests or source artifacts confirm the generated shape.
 
 ## OpenCode verification
 
-Use these checks after regenerating harness files with <code>python tools/gen_harness.py</code>:
-
-1. Confirm agent discovery uses the plural path by listing <code>.opencode/agents/</code> and checking for all five <code>3d-*.md</code> files.
-2. Open <code>.opencode/agents/3d-orchestrator.md</code> and confirm the frontmatter declares <code>mode: primary</code>.
-3. In that same frontmatter, confirm <code>permission.task</code> denies <code>*</code> and allows <code>3d-metrologist</code>, <code>3d-designer</code>, <code>3d-verifier</code>, and <code>3d-print-engineer</code>.
-4. Open one specialist, for example <code>.opencode/agents/3d-verifier.md</code>, and confirm it declares <code>mode: subagent</code> and <code>task: deny</code>.
-5. Parse <code>opencode.json</code> and confirm its <code>mcp</code> object declares the local deterministic-tool server <code>3d-modeling-tools</code> with <code>"type": "local"</code>, command <code>["python", "tools/mcp_server.py"]</code>, and <code>"enabled": true</code>.
-
-The repository test <code>tools/test_gen_harness.py</code> covers the plural agent path,
+Regenerate with <code>python tools/gen_harness.py</code>; CI is the check. The
+repository test <code>tools/test_gen_harness.py</code> covers the plural agent path,
 OpenCode primary and subagent modes, specialist task denial, and the <code>mcp</code>
-config key.
-
-## OpenCode verification steps
-
-1. Open this repo in OpenCode.
-2. Select primary agent <code>3d-orchestrator</code> (Tab).
-3. @-mention specialist <code>3d-metrologist</code>.
-4. Confirm MCP <code>3d-modeling-tools</code> if enabled in <code>opencode.json</code>.
-
-Agent names match <code>.opencode/agents/*.md</code>:
-<code>3d-orchestrator</code>, <code>3d-metrologist</code>, <code>3d-designer</code>,
-<code>3d-verifier</code>, <code>3d-print-engineer</code>.
+config key — <code>opencode.json</code> must declare the local deterministic-tool
+server <code>3d-modeling-tools</code> with <code>"type": "local"</code>, command
+<code>["python", "tools/mcp_server.py"]</code>, and <code>"enabled": true</code>.

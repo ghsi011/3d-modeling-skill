@@ -28,8 +28,6 @@ from .metrics import (
     overhang_area,
 )
 
-__version__ = "0.1.0"
-
 __all__ = [
     "DEFAULT_DOWNWARD_NORMAL_Z_MAX",
     "CouponLane",
@@ -46,5 +44,4 @@ __all__ = [
     "legend_to_rows",
     "measure",
     "overhang_area",
-    "__version__",
 ]

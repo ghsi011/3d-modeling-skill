@@ -63,9 +63,6 @@ class Issue:
             "message": self.message,
         }
 
-    def __repr__(self) -> str:  # pragma: no cover - debug aid
-        return f"<{self.severity} {self.id}>"
-
 
 def error(code: str, where: str, detail: str) -> Issue:
     return Issue("error", code, where, detail)

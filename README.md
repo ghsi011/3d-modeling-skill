@@ -13,8 +13,7 @@ what a machine can actually prove.
 
 Nothing in the pipeline is harness-specific: the roles are defined once in
 `skills/roles/` and generated into per-harness packaging, and every tool is a
-plain Python CLI. Three harnesses ship with a concrete artifact path — see
-[Harnesses](#harnesses) for what is verified versus merely documented for each.
+plain Python CLI.
 
 | Harness         | Role definitions                | Entry point                                     |
 |-----------------|---------------------------------|-------------------------------------------------|
@@ -169,7 +168,7 @@ skills/
   3d-modeling/            # shared references, scripts, and backend adapters
     references/           #   FDM design, CadQuery/FreeCAD patterns, materials, printers, contracts
     scripts/              #   deterministic tooling + backend runners + tests
-      team_tools/         #     contract-automation package (validate/hash/status/render)
+      team_tools/         #     contract-automation package (validate/hash/status)
       designer_toolkit/   #     export/measure/fit/coupon helpers for the designer role
   3d-orchestrator/        # \
   3d-metrologist/         #  |
@@ -204,8 +203,7 @@ so the suites resolve their bare imports with no install step.
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
 3.11 and 3.12, then `gen_harness.py --check`, `check_internal_links.py` and
 `build_skill.py`. A second job installs `.[section]` and runs the cross-section
-tests, which skip on the core stack — so the main job is also what proves the
-tooling degrades honestly when an optional dependency is absent.
+tests, which skip on the core stack.
 
 ## For agents
 
@@ -215,11 +213,8 @@ Hand this to a coding agent to install the skill into a project:
 Set up the 3d-modeling skill (https://github.com/ghsi011/3d-modeling-skill) for this project.
 
 1. Clone it outside this project, e.g. `git clone https://github.com/ghsi011/3d-modeling-skill.git ~/src/3d-modeling-skill`. If the clone already exists, `git pull` instead.
-2. In the Python environment that will run the tooling: `pip install trimesh numpy pillow manifold3d`. Add extras only when the job needs them — `.[section]` for datum cross-sections, `.[cad]` or `.[cad-build123d]` for the OCP CAD kernels, `.[visual]` for renders and photo overlays, `.[bambu]` for 3MF, `.[mcp]` for the stdio bridge.
-3. Install the role definitions for the harness you are running under, and say which one you picked:
-   - Claude Code: `mkdir -p .claude/agents && cp ~/src/3d-modeling-skill/.claude/agents/3d-*.md .claude/agents/`, then symlink all six skill folders (the five roles plus the shared `3d-modeling`, which the roles reach via `../3d-modeling/...`) into `~/.claude/skills/` per the README's Harnesses section. Do not flatten the tree.
-   - OpenCode: copy `~/src/3d-modeling-skill/.opencode/agents/3d-*.md` into this project's `.opencode/agents/`, and merge the `3d-modeling-tools` MCP entry from the clone's `opencode.json` into this project's, fixing the command path to point at the clone.
-   - Anything else: load `~/src/3d-modeling-skill/dist/openai/3d-orchestrator.yaml` in your runtime and read the clone's `AGENTS.md` as repository policy. Do not fabricate a config format the runtime does not document.
+2. Install the tooling dependencies as the clone's README "Dependencies" section specifies: the core install first, extras only for what this job actually needs.
+3. Install the role definitions for the harness you are running under as the clone's README "Harnesses" section specifies, and say which harness you picked. Do not fabricate a config format the runtime does not document.
 4. Read `docs/harness-matrix.md` in the clone and tell me which parts of your harness's support are verified by tests and which are documented-only.
 5. Verify: `pip install pytest PyYAML` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
 
@@ -234,10 +229,7 @@ in [`docs/tooling.md`](docs/tooling.md).
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md). The `0.1.0` entry summarizes the real-part
-optimization program that produced this skill (blind agents, held-out oracles,
-anti-overfit gates), the gate hardening, the contract-automation layer, the
-H-03 fit-ownership change, and the two validated spec fixes.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

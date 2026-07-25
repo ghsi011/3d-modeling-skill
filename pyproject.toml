@@ -24,40 +24,30 @@ dependencies = [
     "manifold3d",
 ]
 
+# What each extra is FOR is tabled in README.md#dependencies; the comments here
+# only carry what the table cannot -- why a set is shaped the way it is.
 [project.optional-dependencies]
-# Heavy OCC/OCP stack used only by the CadQuery runner (run_cadquery_model.py)
-# and the cadquery-patterns reference. Deliberately kept out of default CI.
+# Two separate heavy OCC/OCP stacks so a host picks its Python CAD kernel
+# explicitly rather than getting both.
 cad = ["cadquery"]
-
-# Heavy OCC/OCP stack used only by build123d adapters and build123d-patterns.
-# Kept separate from `cad` so hosts can choose their Python CAD stack explicitly.
 cad-build123d = ["build123d"]
 
-# Mesh cross-sectioning. Every one of these is a trimesh soft dependency the
-# section path reaches in turn: scipy (csgraph, walking the cut edges),
-# networkx (vertex-graph traversal into closed paths), shapely (the rings
-# themselves), rtree (the enclosure tree that decides which ring is a hole).
-# Needed by designer_toolkit.metrics.datum_features and the datum blocks
-# bundle.finalize derives from it. All light pure wheels — kept separate from
-# `visual` so the datum path does not drag in pyrender/PyOpenGL and a GL context.
-# `visual` below contains this same set; keep the two in lockstep.
+# Mesh cross-sectioning. Not a grab bag: these are the trimesh soft
+# dependencies the section path reaches in turn -- scipy (csgraph, walking the
+# cut edges), networkx (vertex graph -> closed paths), shapely (the rings),
+# rtree (the enclosure tree deciding which ring is a hole). Kept out of
+# `visual` so the datum path needs no pyrender/PyOpenGL or GL context.
 section = ["scipy", "networkx", "shapely", "rtree"]
 
-# Offscreen rendering used by preview.py / render / overlay tooling.
 render = ["pyrender", "PyOpenGL"]
 
-# The shared visual-verification tools (overlay_photo.py, verify_visual.py)
-# additionally need the whole `section` stack on top of `render`: their
-# `slice_union` goes through `Path2D.polygons_full`, the same trimesh
-# cross-section path `datum_features` uses, so rtree and networkx are load-bearing
-# here too. Keep this in lockstep with `section` above — a partial set does not
-# fail, it makes every slice IoU / overlay metric silently empty.
+# `render` plus the whole `section` stack: verify_visual's slice_union goes
+# through the same `Path2D.polygons_full` path datum_features uses. Keep in
+# lockstep with `section` -- a partial set does not fail, it makes every slice
+# IoU / overlay metric silently empty.
 visual = ["pyrender", "PyOpenGL", "scipy", "networkx", "shapely", "rtree"]
 
-# Bambu / 3MF authoring + verification (make_bambu_3mf.py).
 bambu = ["lxml"]
-
-# Local MCP stdio server for deterministic team tooling (tools/mcp_server.py).
 mcp = ["mcp>=1.27,<2"]
 
 # Everything (convenience for a full local workstation).
@@ -79,12 +69,6 @@ py-modules = []
 
 [tool.ruff]
 target-version = "py311"
-# The heavy visual tools carry an intentional sys.path bootstrap before their
-# sibling imports; those lines are annotated with `# noqa: E402` inline.
-extend-exclude = [
-    "**/__pycache__",
-    "**/.pytest_cache",
-]
 
 [tool.ruff.lint]
 # Ruff's default rule set (pyflakes F + pycodestyle E4/E7/E9). Line length

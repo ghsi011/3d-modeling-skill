@@ -16,21 +16,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import trimesh
 
-from . import _bootstrap  # noqa: F401  (puts scripts/ on sys.path; keep first)
-
-import mesh_io
+from ._bootstrap import as_mesh  # (also puts scripts/ on sys.path; keep first)
 
 DEFAULT_VIEWS = ((89, -90), (5, -90), (25, -60))  # top, front, iso
 _TILE = 420
-
-
-def _as_render_mesh(mesh_or_path: Any) -> trimesh.Trimesh:
-    # Rendering wants the repaired/normalized mesh, not the raw acceptance parse.
-    if isinstance(mesh_or_path, (str, Path)):
-        return mesh_io.load_mesh(mesh_or_path)
-    return mesh_or_path
 
 
 def _render_view(*args, **kwargs):
@@ -52,8 +42,8 @@ def compare_views(reference: Any, candidate: Any, out_path: str | Path, *,
     """
     from PIL import Image
 
-    ref_m = _as_render_mesh(reference)
-    cand_m = _as_render_mesh(candidate)
+    ref_m = as_mesh(reference)
+    cand_m = as_mesh(candidate)
     row_r = [_render_view(ref_m, e, a, tile, tile) for e, a in views]
     row_c = [_render_view(cand_m, e, a, tile, tile) for e, a in views]
     canvas = Image.new("RGB", (len(views) * tile, 2 * tile), "white")
@@ -71,7 +61,7 @@ def section_render(mesh_or_path: Any, out_path: str | Path, *,
     """Cap-slice the mesh at a plane and render the cut half from one iso camera,
     so internal walls/bores are visible.
     """
-    m = _as_render_mesh(mesh_or_path)
+    m = as_mesh(mesh_or_path)
     half = m.slice_plane(np.asarray(plane_origin, dtype=float),
                          np.asarray(plane_normal, dtype=float), cap=True)
     if half is None or len(half.faces) == 0:

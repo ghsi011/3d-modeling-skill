@@ -22,13 +22,17 @@ ROLE_NAMES = [
     "3d-print-engineer",
 ]
 
-EXCLUDE_DIRS = {"__pycache__", ".ruff_cache", ".pytest_cache"}
+# A bundle is a runtime surface, not a dev checkout. The suites and their
+# fixtures are a third of the packed bytes, no shipped skill runs them, and no
+# role or reference tells an agent to. They stay in the repo, where CI runs them.
+EXCLUDE_DIRS = {"__pycache__", ".ruff_cache", ".pytest_cache", "examples"}
 EXCLUDE_EXTS = {".pyc"}
+EXCLUDE_PREFIXES = ("test_",)
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def _should_include(path: Path) -> bool:
-    if path.suffix in EXCLUDE_EXTS:
+    if path.suffix in EXCLUDE_EXTS or path.name.startswith(EXCLUDE_PREFIXES):
         return False
     for part in path.parts:
         if part in EXCLUDE_DIRS:
@@ -64,10 +68,6 @@ def _build_role_skill(role_name: str, out_dir: Path) -> Path:
     if skill_md.exists():
         entries.append(("SKILL.md", skill_md.read_bytes()))
 
-    for f in _collect_files(role_dir / "agents"):
-        rel = f.relative_to(role_dir / "agents")
-        entries.append((f"agents/{rel.as_posix()}", f.read_bytes()))
-
     for f in _collect_files(shared_refs):
         rel = f.relative_to(shared_refs)
         entries.append((f"references/{rel.as_posix()}", f.read_bytes()))
@@ -89,11 +89,6 @@ def _build_team_bundle(out_dir: Path) -> Path:
         skill_md = role_dir / "SKILL.md"
         if skill_md.exists():
             entries.append((f"roles/{role_name}/SKILL.md", skill_md.read_bytes()))
-
-        agents_dir = role_dir / "agents"
-        for f in _collect_files(agents_dir):
-            rel = f.relative_to(agents_dir)
-            entries.append((f"roles/{role_name}/agents/{rel.as_posix()}", f.read_bytes()))
 
     shared_refs = SHARED_DIR / "references"
     for f in _collect_files(shared_refs):

@@ -159,23 +159,6 @@ def mirror_x(m):
     return mm
 
 
-def footprint_iou(a, b):
-    """alignment score: material IoU + cavity IoU at mid height (cavity carries the
-    pocket layout — outline alone is too symmetric to resolve rotation/mirror)"""
-    ua = slice_union(a, a.bounds[1][2] * 0.5)
-    ub = slice_union(b, b.bounds[1][2] * 0.5)
-    if ua is None or ub is None:
-        return 0.0
-    inter = ua.intersection(ub).area
-    union = ua.union(ub).area
-    mat = inter / union if union else 0.0
-    ca = ua.convex_hull.difference(ua)
-    cb = ub.convex_hull.difference(ub)
-    cuni = ca.union(cb).area
-    cav = ca.intersection(cb).area / cuni if cuni else 1.0
-    return 0.4 * mat + 0.6 * cav
-
-
 def pose_score(ref, cand):
     """alignment score = full-height projected-cavity IoU on a coarse grid.
     Mid-slice sampling misses features that exist only near a face (e.g. a camera

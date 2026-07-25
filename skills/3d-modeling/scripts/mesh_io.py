@@ -24,7 +24,7 @@ Two views of the same file are available:
 Caveat: the STL format stores every triangle as three independent (x, y, z)
 triples -- it has no shared-vertex indices at all. So for an STL source,
 ``MeshIntegrity.duplicate_vertex_count`` will be close to the full vertex
-count, and ``watertight``/``components``/``non_manifold_edge_count`` reflect
+count, and ``watertight``/``components`` reflect
 that raw triangle-soup structure rather than a real defect -- that is simply
 the honest raw truth of what an unwelded STL contains before any repair.
 Formats that store shared vertex indices (OBJ, PLY, glTF, ...) report
@@ -54,7 +54,6 @@ class MeshIntegrity:
     components: int
     degenerate_face_count: int
     duplicate_vertex_count: int
-    non_manifold_edge_count: int | None  # None only if the cheap check could not run
 
 
 @dataclass(frozen=True)
@@ -159,37 +158,32 @@ def connected_component_count(mesh: trimesh.Trimesh) -> int:
             return int(np.unique(labels).size)
 
 
-def _components(mesh: trimesh.Trimesh) -> int:
-    try:
-        return connected_component_count(mesh)
-    except Exception:  # noqa: BLE001 - best-effort, never blocks a read
-        return 1
-
-
-def _non_manifold_edge_count(mesh: trimesh.Trimesh) -> int | None:
-    try:
-        edges = mesh.edges_sorted
-        if edges.shape[0] == 0:
-            return 0
-        _, counts = np.unique(edges, axis=0, return_counts=True)
-        return int((counts > 2).sum())
-    except Exception:  # noqa: BLE001 - "if cheap": skip rather than block a read
-        return None
-
-
 def compute_integrity(mesh: trimesh.Trimesh) -> MeshIntegrity:
     """Compute ``MeshIntegrity`` for ``mesh`` exactly as it stands -- every
     check here is read-only and does not call ``update_faces``,
     ``merge_vertices``, or any other topology-changing method.
+
+    Raises ValueError when the component count cannot be established. A
+    swallowed failure here would report "1 component" for a mesh nobody
+    counted -- precisely the multi-body export the readiness gate exists to
+    catch -- so the failure is re-raised with the mesh's shape attached
+    instead. Callers that already handle a bad mesh (run_cadquery_model,
+    preview) catch ValueError and surface the message.
     """
+    try:
+        components = connected_component_count(mesh)
+    except Exception as exc:  # noqa: BLE001 - re-raised with context, never swallowed
+        raise ValueError(
+            f"connected-component count failed on this mesh "
+            f"({int(mesh.vertices.shape[0])} vertices, {int(mesh.faces.shape[0])} faces): {exc}"
+        ) from exc
     return MeshIntegrity(
         vertex_count=int(mesh.vertices.shape[0]),
         face_count=int(mesh.faces.shape[0]),
         watertight=bool(mesh.is_watertight),
-        components=_components(mesh),
+        components=components,
         degenerate_face_count=_degenerate_face_count(mesh),
         duplicate_vertex_count=_duplicate_vertex_count(mesh.vertices),
-        non_manifold_edge_count=_non_manifold_edge_count(mesh),
     )
 
 

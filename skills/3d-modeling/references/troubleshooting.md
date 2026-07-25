@@ -3,9 +3,12 @@
 Rule out mechanical causes before touching slicer settings.
 
 ## Calibration order for every new filament
-Temperature tower → pressure advance (PA depends on temp) → flow rate → retraction →
-shrinkage cube (measure, store compensation) → save custom profile.
-Shrinkage: scale per fdm-design §8's per-material table, or measure a test cube.
+Temperature tower → **max volumetric speed** → pressure advance → flow ratio → retraction →
+shrinkage cube (measure, store compensation) → save custom profile. Volumetric speed goes
+second: it hard-caps every later speed, so tuning speeds before it means redoing them.
+Two gotchas that invalidate most calibrations — run the PA test at the **actual outer-wall
+speed AND acceleration** you will print at, and never judge flow with calipers; read the top
+surface (no gaps between lines). Shrinkage: scale per fdm-design §8, or measure a test cube.
 
 ## First layer & adhesion
 - Wash plate with degreasing dish soap — no aloe/moisturizer soaps.

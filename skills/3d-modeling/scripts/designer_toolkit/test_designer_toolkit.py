@@ -9,6 +9,7 @@ where those cases run for real.
 """
 
 import importlib.util
+import math
 import os
 import sys
 import tempfile
@@ -166,8 +167,9 @@ class TestCoupon(unittest.TestCase):
             self.assertEqual(len(legend), 2 * 3)
             rows = coupon.legend_to_rows(legend)
             self.assertEqual({r["interface_id"] for r in rows}, {"bore", "post"})
-            self.assertTrue(trimesh.load(path).is_watertight
-                            or len(trimesh.load(path).faces) > 0)
+            # The coupon is a bored plate plus pegs: it must come back as a
+            # solid, not just as some non-empty triangle soup.
+            self.assertTrue(trimesh.load(path).is_watertight)
 
     def test_coupon_requires_an_interface(self):
         with self.assertRaises(ValueError):
@@ -213,6 +215,37 @@ class TestFinalize(unittest.TestCase):
             self.assertGreater(ev["seated_interference_mm3"], 1.0)
             self.assertTrue(any("interference" in n
                                 for n in ev["readiness_skeleton"]["auto_notes"]))
+
+    def test_finalize_announces_a_threshold_it_disagrees_with_the_gate_on(self):
+        # A 46deg downward face sits between the toolkit default (-sin47deg) and
+        # a plan declaring the bare 45deg value: the default screens it away and
+        # reports clean, the gate FAILs. finalize must say so instead of going
+        # quiet, and must report the real area once the plan's value is passed.
+        with tempfile.TemporaryDirectory() as d:
+            stl = os.path.join(d, "cone.stl")
+            height = 20.0
+            cone = trimesh.creation.cone(
+                radius=height * math.tan(math.radians(46)), height=height, sections=128)
+            cone.apply_transform(
+                trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+            cone.apply_translation((0, 0, height + 1))
+            cone.export(stl)
+
+            loose = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False)
+            self.assertEqual(loose["overhang_threshold_source"], "toolkit_default")
+            self.assertAlmostEqual(loose["overhang_mm2"], 0.0, delta=1e-6)
+            self.assertTrue(
+                any("team_preflight" in n for n in loose["readiness_skeleton"]["auto_notes"]),
+                loose["readiness_skeleton"]["auto_notes"])
+
+            strict = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False,
+                                     overhang_threshold=-0.70710678)
+            self.assertEqual(strict["overhang_threshold_source"], "caller")
+            self.assertGreater(strict["overhang_mm2"], 100.0)
+            # At the plan's own value there is no gap left to announce.
+            self.assertFalse(
+                any("team_preflight" in n for n in strict["readiness_skeleton"]["auto_notes"]),
+                strict["readiness_skeleton"]["auto_notes"])
 
 
 if __name__ == "__main__":

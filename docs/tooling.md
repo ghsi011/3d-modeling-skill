@@ -5,18 +5,8 @@ team pipeline. Run repository tools from the repo root unless a command says
 otherwise. The shared modeling scripts live in
 [`skills/3d-modeling/scripts/`](../skills/3d-modeling/scripts/).
 
-Install the core dependencies before using the contract and mesh tools:
-
-```bash
-pip install trimesh numpy pillow manifold3d
-```
-
-Optional features need extras from `pyproject.toml`: `cad` for CadQuery,
-`cad-build123d` for build123d, `section` for the mesh cross-section stack (scipy,
-networkx, shapely, rtree) that `designer_toolkit` needs for `datum_features` and
-the `finalize` datum blocks, `render` for preview rendering, `visual` for photo
-and reference comparison, `bambu` for Bambu project 3MF verification, and `mcp`
-for the local stdio MCP bridge.
+For the core runtime and the optional extras each tool needs, see
+[Dependencies](../README.md#dependencies) in the README.
 
 Exit code convention across these tools:
 
@@ -186,96 +176,21 @@ receipt's `validated_paths`. Prefer `--require`: it lands in the receipt's
 `required_contracts` field, so a reviewer can tell a deliberately narrow
 validate from one that gated on nothing.
 
-### `hash`
+### `hash` and `status`
 
 ```bash
 cd skills/3d-modeling/scripts
-python -m team_tools.contracts hash path/to/project [--output hashes.json] [--timestamp ISO-8601]
+python -m team_tools.contracts hash path/to/project
+python -m team_tools.contracts status path/to/project
 ```
 
-Inputs:
+Both take a project directory and print to stdout by default; run `--help` for
+the output, timestamp, and `--json` flags.
 
-* Project directory.
-* Optional output path and injected timestamp.
-
-Outputs:
-
-* Canonical JSON receipt with recomputed contract SHA-256 values, recomputed
-  artifact SHA-256 values, `hash_mismatches`, timestamp, invocation, and note.
-
-Exit codes:
-
-* `0`, no declared artifact hash mismatches were found.
-* `1`, one or more declared artifact hashes differ from bytes on disk.
-* `2`, project loading or filesystem access failed.
-
-### `status`
-
-```bash
-cd skills/3d-modeling/scripts
-python -m team_tools.contracts status path/to/project [--json] [--output status.txt]
-```
-
-Inputs:
-
-* Project directory.
-* `--json` for machine-readable rows. Without it, output is aligned text.
-* Optional output path.
-
-Outputs:
-
-* Text or canonical JSON rows for each contract and stale or invalidated
-  downstream binding. Rows include `contract`, `status`, and `detail`.
-
-Exit codes:
-
-* `0`, no row has `STALE`, `INVALIDATED`, or `UNREADABLE`.
-* `1`, at least one such row is present.
-* `2`, project loading or filesystem access failed.
-
-### `render`
-
-```bash
-cd skills/3d-modeling/scripts
-python -m team_tools.contracts render path/to/contract.json [--output contract.md]
-```
-
-Inputs:
-
-* Path to one structured contract JSON file.
-* Optional Markdown output path.
-
-Outputs:
-
-* Stable, git-diff-friendly Markdown rendering of the contract.
-
-Exit codes:
-
-* `0`, Markdown was written or printed.
-* `2`, the file cannot be read, parsed, or rendered.
-
-### `agent-summary`
-
-```bash
-cd skills/3d-modeling/scripts
-python -m team_tools.contracts agent-summary path/to/project [--output summary.txt]
-```
-
-Inputs:
-
-* Project directory.
-* Optional output path.
-
-Outputs:
-
-* Compact informational text: mode, state, contract revisions, artifact counts,
-  stale or invalidated binding count, blocking error count, warning count, and a
-  pointer back to the authoritative JSON contracts and validation receipt.
-
-Exit codes:
-
-* `0`, summary was written or printed.
-* `2`, project loading or filesystem access failed.
+| Command | What it proves | Exits `1` when |
+| --- | --- | --- |
+| `hash` | Contract and artifact SHA-256 values recomputed from the bytes on disk, never trusting a hash written into a contract. | A declared artifact hash differs from the bytes on disk. |
+| `status` | Each contract's revision, plus the downstream bindings that later revisions have made stale. | A row is `STALE`, `INVALIDATED`, or `UNREADABLE`. |
 
 ## `python -m designer_toolkit`
 
@@ -297,9 +212,6 @@ Inputs: one STL path.
 Outputs: JSON measurement report from the re-imported mesh, including bounding
 box, volume, watertightness, component count, and related mesh metrics.
 
-Exit codes: `0` on measurement success, `1` on load or metric failure, `2` for
-usage errors.
-
 ### `overhang`
 
 ```bash
@@ -309,8 +221,6 @@ python -m designer_toolkit overhang body.stl [--threshold -0.73] [--min-z 0.3]
 Inputs: STL path, optional downward normal threshold, optional minimum z cutoff.
 
 Outputs: JSON object with `overhang_mm2`.
-
-Exit codes: `0` on success, `1` on mesh or metric failure, `2` for usage errors.
 
 ### `datums`
 
@@ -323,9 +233,6 @@ Inputs: STL path, required datum plane z value, optional comma-separated normal.
 Outputs: JSON object with `features`, each serialized from the datum feature
 extractor.
 
-Exit codes: `0` on success, `1` on load or extraction failure, `2` for missing
-or invalid arguments.
-
 ### `interference`
 
 ```bash
@@ -335,9 +242,6 @@ python -m designer_toolkit interference part.stl ref.stl
 Inputs: candidate STL and reference or mating STL.
 
 Outputs: JSON object with `interference_mm3`.
-
-Exit codes: `0` on success, `1` on mesh or boolean failure, `2` for usage
-errors.
 
 ### `sweep`
 
@@ -351,9 +255,6 @@ and optional comma-separated axis.
 Outputs: JSON object with `steps`, one serialized insertion sweep result per
 travel distance.
 
-Exit codes: `0` on success, `1` on mesh or boolean failure, `2` for usage
-errors.
-
 ### `export`
 
 ```bash
@@ -366,9 +267,6 @@ source path is reused.
 Outputs: JSON export report with hash and re-import facts. The internal
 `integrity` object is omitted from CLI output.
 
-Exit codes: `0` on success, `1` on export or re-import failure, `2` for usage
-errors.
-
 ### `coupon`
 
 ```bash
@@ -380,9 +278,6 @@ a raw interface list. `--out` is required.
 
 Outputs: JSON object with written `stl` path and `legend` rows. The command also
 writes the coupon STL.
-
-Exit codes: `0` on success, `1` on bad plan content or coupon generation
-failure, `2` for missing arguments.
 
 ### `finalize`
 
@@ -398,9 +293,6 @@ Outputs: JSON readiness bundle from `designer_toolkit.bundle.finalize`, includin
 export and hash facts, overhang area, datum features, optional seated
 interference, optional insertion sweep, and readiness skeleton fields that still
 need human judgment.
-
-Exit codes: `0` on success, `1` on bundle generation failure, `2` for usage
-errors.
 
 ## `preview.py`
 
@@ -426,11 +318,8 @@ Outputs:
   if present, and final preview path.
 * PNG preview image.
 
-Exit codes:
-
-* `0`, preview image was written.
-* `1`, mesh loading failed or rendering raised an uncaught exception.
-* `2`, argparse usage failed or `--strict` rejected a non-watertight mesh.
+Exit codes: the convention above, with `--strict` rejecting a non-watertight
+mesh as a `2` rather than a `1`.
 
 ## `run_cadquery_model.py`
 
@@ -681,13 +570,7 @@ Outputs:
 * With `--check`, writes nothing. It prints `OK` and a file count if generated
   content matches disk, or prints mismatched paths to stderr.
 
-Exit codes:
-
-* `0`, files were written successfully, or `--check` found no mismatches.
-* `1`, `--check` found mismatches, role parsing failed, required role metadata
-  was missing, generated file reads failed, or another uncaught runtime error
-  occurred.
-* `2`, argparse usage failed.
+Exit codes: the convention above, with a `--check` mismatch reported as a `1`.
 
 ## `tools/build_skill.py`
 
@@ -718,9 +601,3 @@ Outputs:
 * All entries use a fixed timestamp (1980-01-01), sorted archive order, and
   `0o644` permissions for deterministic, reproducible builds. `__pycache__/`
   and `.pyc` files are excluded.
-
-Exit codes:
-
-* `0`, all artifacts were written.
-* `1`, an uncaught runtime error occurred.
-* `2`, argparse usage failed.

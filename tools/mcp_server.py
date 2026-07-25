@@ -119,10 +119,10 @@ def designer_finalize(stl_path: str, plan_path: str | None = None) -> dict[str, 
             reference=plan.get("reference"),
             insertion=plan.get("insertion"),
             orientation_transform=plan.get("orientation_transform"),
-            overhang_threshold=plan.get(
-                "overhang_threshold",
-                metrics.DEFAULT_DOWNWARD_NORMAL_Z_MAX,
-            ),
+            # Pass None through when the plan is silent, so finalize records
+            # the threshold's provenance as "toolkit_default" rather than
+            # mislabelling our substituted constant as a caller's choice.
+            overhang_threshold=plan.get("overhang_threshold"),
             also_step=False,
         )
     )

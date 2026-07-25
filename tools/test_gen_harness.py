@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -86,31 +85,26 @@ def test_parse_all_neutral_roles_when_metadata_is_complete() -> None:
         assert REQUIRED_METADATA <= frontmatter.keys()
 
 
-def test_generated_claude_agents_match_current_golden_bytes() -> None:
-    # Given: generated Claude agent files from neutral roles.
-    generated = [file for file in gen_harness.generate(gen_harness.load_roles()) if ".claude" in file.path.parts]
+def test_generation_is_idempotent_and_matches_committed_bytes() -> None:
+    """The drift gate. Covers all 21 generated files at once -- Claude agents,
+    role SKILL.md, OpenCode agents and config, OpenAI YAML -- rather than three
+    per-format subsets.
 
-    # When: the current committed agent files are read from disk.
-    expected = {path: path.read_text(encoding="utf-8") for path in (ROOT / ".claude" / "agents").glob("3d-*.md")}
+    Reads the committed bytes from disk and never writes: a test that
+    regenerates into the working tree would repair the very drift the next
+    check is meant to catch, and CI runs pytest before
+    ``gen_harness.py --check``.
+    """
+    # Given: two independent generation passes over the same neutral roles.
+    first = {file.path: file.content for file in gen_harness.generate(gen_harness.load_roles())}
+    second = {file.path: file.content for file in gen_harness.generate(gen_harness.load_roles())}
 
-    # Then: generated content is byte-for-byte identical to today's Claude packaging.
-    assert {file.path: file.content for file in generated} == expected
+    # Then: generation is deterministic ...
+    assert first == second
 
-
-def test_generated_role_skills_match_current_golden_bytes() -> None:
-    # Given: generated role SKILL.md files from neutral roles.
-    generated = [file for file in gen_harness.generate(gen_harness.load_roles()) if file.path.name == "SKILL.md"]
-
-    # When: the current role SKILL.md files are read from disk.
-    expected = {
-        ROOT / "skills" / f"3d-{role.role}" / "SKILL.md": (ROOT / "skills" / f"3d-{role.role}" / "SKILL.md").read_text(
-            encoding="utf-8",
-        )
-        for role in gen_harness.load_roles()
-    }
-
-    # Then: generated content is byte-for-byte identical to today's role skill packaging.
-    assert {file.path: file.content for file in generated} == expected
+    # ... and every committed artifact is what the current roles produce.
+    on_disk = {path: path.read_text(encoding="utf-8") for path in first}
+    assert first == on_disk
 
 
 def test_generated_opencode_packaging_uses_plural_agents_path() -> None:
@@ -242,36 +236,6 @@ def test_gitignore_force_includes_openai_dist_packaging() -> None:
     # Then: the path is force-included by the dist/openai negation rule.
     assert result.returncode == 0, result.stderr
     assert "!dist/openai/**" in result.stdout
-
-
-def test_generated_opencode_agents_match_current_golden_bytes() -> None:
-    # Given: generated OpenCode agent files from neutral roles.
-    generated = [
-        file
-        for file in gen_harness.generate(gen_harness.load_roles())
-        if file.path.parent == ROOT / ".opencode" / "agents"
-    ]
-
-    # When: the current OpenCode agent files are read from disk.
-    expected = {path: path.read_text(encoding="utf-8") for path in (ROOT / ".opencode" / "agents").glob("3d-*.md")}
-
-    # Then: generated content is byte-for-byte identical to committed OpenCode packaging.
-    assert {file.path: file.content for file in generated} == expected
-
-
-def test_check_is_clean_after_two_generations() -> None:
-    # Given: the generator CLI and current repository packaging.
-    command = [sys.executable, "tools/gen_harness.py"]
-
-    # When: generation runs twice and --check reads the resulting files.
-    first = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=10, check=False)
-    second = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=10, check=False)
-    checked = subprocess.run([*command, "--check"], cwd=ROOT, text=True, capture_output=True, timeout=10, check=False)
-
-    # Then: both writes and the final idempotency check succeed.
-    assert first.returncode == 0, first.stderr
-    assert second.returncode == 0, second.stderr
-    assert checked.returncode == 0, checked.stderr
 
 
 def test_check_reports_mismatch_when_generated_file_differs(tmp_path: Path) -> None:

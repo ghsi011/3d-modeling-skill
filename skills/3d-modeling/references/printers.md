@@ -24,8 +24,7 @@ TPU through AMS. Ships with textured PEI only. No LiDAR.
 volume and visible surface quality on **main** (TPU always), the small-volume second
 color/support material on **auxiliary** — CF/GF is acceptable there too as long as its
 volume stays small. Chamber+bed+300 °C = reliable ABS/ASA/PA-CF/PC.
-Tested support-interface winners per model material: materials.md §2 (short version:
-Support-for-ABS for most nylons/ASA/ABS/PC-ABS, but ASA for PA6-CF; PETG for TPU).
+Tested support-interface winners per model material: materials.md §2.
 Auto flow/motion/nozzle-offset calibration — trust it, but run offset cal with dry filament.
 
 **Material-by-region (dual-nozzle)**: when the 2-material boundary is a REGION (translucent
