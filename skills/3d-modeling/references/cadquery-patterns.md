@@ -66,6 +66,14 @@ print("volume", body.val().Volume(), "bbox", body.val().BoundingBox().xlen)
 
 ## Phase-4 verification patterns
 
+**First reach for the toolkit, not this code.** These checks are packaged and
+tested in [`designer-toolkit.md`](designer-toolkit.md) — `export_and_hash`,
+`interference`, `insertion_sweep`, `datum_features`, `overhang_area`, and a
+one-call `finalize`. Call those; they already handle the traps below (the
+`plane_transform` datum frame, the -0.73 overhang screen, watertight-on-the-
+normalized-mesh). The raw patterns here are the under-the-hood explanation and a
+fallback when you need a bespoke check the toolkit does not cover.
+
 ```python
 # 1. seated interference (must be ~0)
 inter = body.intersect(ref_part)

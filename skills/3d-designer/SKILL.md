@@ -49,6 +49,10 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 7. Shared artifact-manifest validator:
    [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
    (`python -m team_tools.contracts validate <project-dir>`).
+8. Shared design/verify toolkit — **call it, do not re-author the patterns**:
+   [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
+   (`export_and_hash`, `measure`, `datum_features`, `overhang_area`, `interference`,
+   `insertion_sweep`, `fit_coupon`, `finalize`, and `python -m designer_toolkit`).
 
 ## Checklist
 
@@ -66,12 +70,17 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    `dimensions.md`. The designer implements the declared fit intent; it does not choose it.
 5. Organize boolean operations robustly; preserve editable source; label bodies and exports.
 6. Generate deterministic exports from the source and render useful exterior, mating,
-   section, and print-orientation views.
+   section, and print-orientation views. Use `designer_toolkit.export_and_hash` for the
+   export+re-import+hash and `designer_toolkit.render.compare_views`/`section_render` for
+   the views rather than re-authoring them.
 7. Before handoff, re-import the exported STL and keep iterating inside this commission
    until the readiness receipt passes: intended body/integrity and bounds; seated
    interference; full insertion/travel sweep; installed-coordinate section proving the
    open/closed architecture; exact print-plan transform with named bed face at Z=0;
    unsupported-roof and critical-wall floors; required source/STEP/renders and hashes.
+   `designer_toolkit.finalize(model, out, datums=…, reference=…, insertion=…,
+   orientation_transform=…)` produces this whole evidence bundle in one call (measured on
+   the re-imported STL); fill its judgment fields (`visual_accept`, `fit_band_ok`) yourself.
 8. Before declaring `READY`, execute the v4 edge/comfort preflight for every plan-named
    exposed boundary and the support-sensitivity preflight for every transformed downface,
    roof, bridge, and layer-transition rule. Measure the re-imported STL, record every

@@ -23,13 +23,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Only the light stack. The three test suites
-      # (test_team_preflight, test_mesh_io, team_tools/test_contracts)
-      # import only trimesh + numpy (+ stdlib); pillow rounds out the core
-      # runtime deps. cadquery / OCP / pyrender / scipy / shapely are heavy
-      # optional extras and are deliberately NOT installed here.
+      # Only the light stack. The test suites import trimesh + numpy (+ stdlib);
+      # pillow rounds out the core runtime deps and manifold3d is the boolean
+      # engine designer_toolkit's fit/coupon tests need (a light pure wheel).
+      # cadquery / OCP / pyrender / scipy / shapely are heavy optional extras and
+      # are deliberately NOT installed here.
       - name: Install dependencies
-        run: python -m pip install --upgrade pip ruff pytest trimesh numpy pillow
+        run: python -m pip install --upgrade pip ruff pytest trimesh numpy pillow manifold3d
 
       - name: Ruff (lint)
         run: ruff check skills/3d-modeling/scripts

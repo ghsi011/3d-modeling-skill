@@ -54,6 +54,28 @@ separate from the editor.
   `make_3mf.py`, `make_bambu_3mf.py`, and the shared visual tools
   `overlay_photo.py` / `verify_visual.py`.
 
+### Added — `designer_toolkit` (Phase-4 tooling, agentic→code speedup)
+
+- **`designer_toolkit/`** — the deterministic Phase-4 work the designer and
+  verifier used to re-author (and re-debug) every job, now a tested library they
+  **call**: `export_and_hash` (export + re-import + hash — measures the REAL
+  delivered geometry on the normalized mesh, killing stale-hash and phantom-shell
+  bugs), `measure` / `datum_features` / `overhang_area` (bbox/volume/integrity;
+  section holes in MODEL coordinates via `plane_transform`; overhang at the SAME
+  −0.73 screen as the gate), `interference` / `insertion_sweep` (boolean fit on
+  the exported mesh), `fit_coupon` (parametric multi-lane coupon from the plan's
+  interfaces), `render` (ref-vs-candidate view grid + section, pyrender-gated),
+  and a one-call `finalize` that assembles the whole evidence bundle. Also a CLI
+  (`python -m designer_toolkit …`).
+- **Why:** move the mechanical measuring out of per-job agent code to shorten the
+  design step; the agent writes only the parametric geometry and the judgment
+  calls (`finalize` leaves `visual_accept` / `fit_band_ok` unset on purpose — a
+  green mechanical bundle is necessary, not sufficient).
+- Mesh/fit/coupon paths are CI-safe (need `manifold3d` for booleans, no CAD
+  kernel); the CadQuery export path is lazy and `render` is deferred. 14 tests;
+  full suite now **139**. Surfaced in the designer/verifier slices and
+  `cadquery-patterns.md` via `references/designer-toolkit.md`.
+
 ### Hardened — preflight gate (Sprint 1)
 
 - Reject **non-finite / NaN / ±Inf / None / bool / malformed** numeric samples
