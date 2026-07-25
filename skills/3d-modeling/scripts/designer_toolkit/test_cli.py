@@ -54,8 +54,13 @@ def test_the_surface_is_the_gate_and_the_coupon() -> None:
     assert result.returncode == 0, result.stderr
     assert "commission" in result.stdout
     assert "coupon" in result.stdout
+    # Absence from --help would also hold for a hidden-but-working subcommand,
+    # so invoke one and require the parser to reject it outright.
     for retired in ("measure", "overhang", "datums", "sweep", "finalize"):
         assert retired not in result.stdout
+        rejected = _run(retired, "anything.stl")
+        assert rejected.returncode == 2, retired
+        assert "invalid choice" in (rejected.stderr + rejected.stdout), retired
 
 
 def test_commission_reaches_the_gate_with_its_flags_intact(box_stl: Path, tmp_path: Path) -> None:
@@ -95,7 +100,11 @@ def test_missing_file_is_an_error_not_a_silent_zero(tmp_path: Path) -> None:
                   "--plan", str(plan_path), "--out", str(tmp_path / "out"),
                   "--no-render", "--job-id", "t", "--updated-utc", "2026-01-01T00:00:00Z")
 
+    # `returncode != 0` alone would also be satisfied by an unrelated import
+    # error, so require the message to name the missing file.
     assert result.returncode != 0
+    combined = result.stderr + result.stdout
+    assert "does_not_exist" in combined, combined[-2000:]
 
 
 def test_unknown_subcommand_is_a_usage_error() -> None:

@@ -150,6 +150,12 @@ def build_readiness(
     ) or "| none | commission reported no failing check |"
 
     revisions = source_revisions or {}
+    # No default of 1. A binding invented here is worse than an absent one: it
+    # asserts a revision nobody checked, and `contracts status` -- the only
+    # check that compares a binding against the current revision -- then reports
+    # a clean match against a number this file made up.
+    dimensions_revision = revisions.get("dimensions", "UNBOUND")
+    print_plan_revision = revisions.get("print_plan", "UNBOUND")
     return f"""---
 contract: candidate-readiness
 contract_version: 4
@@ -159,8 +165,8 @@ candidate_id: {candidate_id}
 owner: cad-designer
 status: {status}
 non_acceptance: true
-dimensions_revision: {revisions.get('dimensions', 1)}
-print_plan_revision: {revisions.get('print_plan', 1)}
+dimensions_revision: {dimensions_revision}
+print_plan_revision: {print_plan_revision}
 candidate_stl_sha256: {export.get('file_sha256', '')}
 commission_verdict: {verdict}
 updated_utc: {updated_utc}

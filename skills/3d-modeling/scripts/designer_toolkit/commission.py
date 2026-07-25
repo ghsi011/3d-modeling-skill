@@ -149,20 +149,33 @@ def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> Non
     expected = plan.get("expected_bbox_mm")
     if not expected:
         commission.add(Check(
-            "envelope", "Overall size vs plan", _SKIP,
+            "envelope", "Overall size vs plan", _FAIL,
             "the plan declares no expected_bbox_mm",
-            "Declare expected_bbox_mm {x,y,z} and tolerance_mm in the plan. Without "
-            "it nothing checks the part's own size, and a part can pass every other "
-            "gate while being wholly the wrong size.",
+            "Declare expected_bbox_mm {x,y,z} and bbox_tolerance_mm in the plan. This "
+            "is a FAIL and not a skip on purpose: without it nothing checks the part's "
+            "own size, and a candidate once shipped 31% too thick while passing every "
+            "other gate. Generate a plan with `designer_toolkit.plan template` if none "
+            "was bound.",
         ))
         return
     tolerance = float(plan.get("bbox_tolerance_mm", 1.0))
-    worst_axis, worst = "", 0.0
+    # `None` rather than 0.0: a zero start is indistinguishable from "no
+    # comparison ran", so an expected_bbox_mm with unreadable keys used to
+    # report `worst axis n/a off by +0.00 mm` and PASS whatever the part's size.
+    worst_axis, worst = "", None
     for axis in ("x", "y", "z"):
         if axis in expected:
             delta = report.bbox_mm[axis] - float(expected[axis])
-            if abs(delta) > abs(worst):
+            if worst is None or abs(delta) > abs(worst):
                 worst_axis, worst = axis, delta
+    if worst is None:
+        commission.add(Check(
+            "envelope", "Overall size vs plan", _FAIL,
+            f"expected_bbox_mm declares no readable x/y/z axis: {expected!r}",
+            "Give expected_bbox_mm numeric `x`, `y` and `z` in millimetres. A key the "
+            "check cannot read is not a looser check, it is no check.",
+        ))
+        return
     ok = abs(worst) <= tolerance
     commission.add(Check(
         "envelope", "Overall size vs plan",
@@ -178,9 +191,10 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
     """Screen every support rule, each in the orientation it declares."""
     rules = _plan_support_rules(plan)
     if not rules:
-        commission.add(Check("support", "Downward-facing area within the plan limit", _SKIP,
+        commission.add(Check("support", "Downward-facing area within the plan limit", _FAIL,
                              "the plan declares no support rules",
-                             "Add a support rule, or generate one with "
+                             "Nothing constrains the print orientation, so this cannot "
+                             "pass. Add a support rule, or generate a plan with "
                              "`python -m designer_toolkit.plan template`."))
         return []
 
@@ -260,15 +274,28 @@ def seated_clearance_mm(candidate, reference) -> float:
 
 def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], reference) -> None:
     interfaces = plan.get("interfaces") or []
-    if not interfaces or reference is None:
+    if not interfaces:
         commission.add(Check("fit", "Declared interface fit", _SKIP,
-                             "no interfaces declared, or no mating reference supplied"))
+                             "the plan declares no mating interfaces, so there is no "
+                             "fit to measure"))
+        return
+    if reference is None:
+        commission.add(Check(
+            "fit", "Declared interface fit", _FAIL,
+            f"{len(interfaces)} interface(s) declared but no mating reference was supplied",
+            "Pass --reference <mating.stl>. Forgetting it used to read as a skip, so a "
+            "part with declared fit bands could pass without any of them being measured.",
+        ))
         return
 
     reference_mesh = as_mesh(reference) if isinstance(reference, str) else reference
     clearance = seated_clearance_mm(mesh, reference_mesh)
     bands = [(float(i.get("min_mm", 0.0)), float(i.get("max_mm", 0.0))) for i in interfaces]
-    low, high = min(b[0] for b in bands), max(b[1] for b in bands)
+    # Intersection, not union. One reference yields one measurement -- the
+    # tightest point of the assembly -- and it has to satisfy every declared
+    # band, so the admissible window is [max(mins), min(maxes)]. Taking the
+    # union instead admitted 0.30 mm against an interface capped at 0.10.
+    low, high = max(b[0] for b in bands), min(b[1] for b in bands)
     ok = low - 1e-6 <= clearance <= high + 1e-6
 
     # One reference carries no per-interface regions, so the measurement is the
@@ -308,7 +335,14 @@ def run(
 
     source: Any = stl
     params: dict[str, Any] | None = None
+    if stl is not None and not Path(stl).is_file():
+        # Without this the path falls through to the exporter's CAD-kernel
+        # branch and the caller is told "No module named 'cadquery'" -- which
+        # sends them installing a kernel to fix a typo.
+        raise FileNotFoundError(f"no such STL: {stl}")
     if model is not None:
+        if not Path(model).is_file():
+            raise FileNotFoundError(f"no such model module: {model}")
         params, source = load_model(model)
 
         # Pre-build stage. These read declared numbers only, so they cost
@@ -353,11 +387,11 @@ def run(
             # measured, which is exactly the defect a fresh verifier caught by
             # hand once already.
             commission.add(Check(
-                f"edge-{edge_id}", f"Edge {edge_id} treatment", _SKIP,
+                f"edge-{edge_id}", f"Edge {edge_id} treatment", _FAIL,
                 "the plan declares no corner_xy for this edge, so nothing was measured",
                 f"Add `corner_xy` (and optionally `section_origin`, `window_mm`) to edge "
-                f"{edge_id} so the section has somewhere to cut. Until then this edge's "
-                "declared radius is unverified -- do not treat it as met.",
+                f"{edge_id} so the section has somewhere to cut. A declared radius that "
+                "nothing measured is not a met radius.",
             ))
             continue
         try:
@@ -462,6 +496,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", default="job",
                         help="job_id stamped into the emitted receipts")
     parser.add_argument("--candidate-id", default="candidate-01")
+    parser.add_argument("--dimensions-revision", type=int,
+                        help="the dimensions.md revision this candidate was built against; "
+                             "recorded in the receipts so `contracts status` can see it go "
+                             "stale. Omitted, the receipts say UNBOUND rather than guessing.")
     parser.add_argument("--updated-utc", required=True,
                         help="ISO-8601 timestamp for the receipts; passed in, never "
                              "wall-clock, so a rerun on unchanged inputs is byte-identical")
@@ -470,14 +508,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
-    commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
-                     reference=args.reference, render=not args.no_render)
+    try:
+        commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
+                         reference=args.reference, render=not args.no_render)
+    except (FileNotFoundError, ValueError) as exc:
+        sys.stderr.write("commission: " + str(exc) + "\n")
+        return 2
 
     payload = commission.as_dict()
     if not args.no_receipts:
         from . import receipts
+        source_revisions = {}
+        if args.dimensions_revision is not None:
+            source_revisions["dimensions"] = args.dimensions_revision
+        # The plan states its own revision, so that binding needs no flag.
+        if isinstance(plan.get("revision"), int):
+            source_revisions["print_plan"] = plan["revision"]
         receipts.write(payload, args.out, job_id=args.job_id,
-                       candidate_id=args.candidate_id, updated_utc=args.updated_utc)
+                       candidate_id=args.candidate_id,
+                       source_revisions=source_revisions or None,
+                       updated_utc=args.updated_utc)
     sys.stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
     for check in commission.failed:
         sys.stderr.write(f"FAIL {check.id}: {check.detail}\n      -> {check.action}\n")

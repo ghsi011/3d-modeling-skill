@@ -25,13 +25,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .metrics import BARE_45_DEG, DEFAULT_BED_TOLERANCE_MM, DEFAULT_BED_Z_MM
+from .metrics import DEFAULT_BED_TOLERANCE_MM, DEFAULT_BED_Z_MM
+from .metrics import DEFAULT_DOWNWARD_NORMAL_Z_MAX as _SCREEN
 
-# 45 deg from vertical is the angle that always prints clean on a tuned 0.4 mm
-# nozzle (fdm-design.md section 1). The toolkit's other constant, -0.73, is
-# *steeper*, so it flags fewer faces; the more permissive angle is the wrong
-# default for a gate nobody reviewed.
-DEFAULT_DOWNWARD_NORMAL_Z_MAX = BARE_45_DEG
+# -0.73, not the bare 45 deg value. A self-supporting 45 deg chamfer -- the
+# standard fix for an overhang, and the one this template's own failure advice
+# recommends -- tessellates to normal_z = -0.70710678118, which is *below* the
+# bare value of -0.70710678 and so gets flagged by it. Screening at the bare
+# angle therefore rejects correct geometry and sends the designer to add the
+# very feature that caused the failure. The margin is what -0.73 exists for.
+DEFAULT_DOWNWARD_NORMAL_Z_MAX = _SCREEN
 
 # Zero, and not a small allowance. A `DIRECT` part is simple and its dimensions
 # are stated, so "prints without support" is a bar it should clear by

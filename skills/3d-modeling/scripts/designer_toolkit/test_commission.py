@@ -75,16 +75,29 @@ class EnvelopeCheckTest(unittest.TestCase):
 
             self.assertEqual(next(c for c in result.checks if c.id == "envelope").result, "PASS")
 
-    def test_a_plan_with_no_expected_size_says_so_loudly(self) -> None:
-        """Skipping silently is how the 31% error passed. It must be visible."""
+    def test_a_plan_with_no_expected_size_fails_rather_than_skipping(self) -> None:
+        """Skipping is how the 31% error passed: three checks reported SKIPPED,
+        nothing counted them, and the gate exited zero with status READY."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
                                     plan=_plan(), render=False)
 
             envelope = next(c for c in result.checks if c.id == "envelope")
-            self.assertEqual(envelope.result, "SKIPPED")
+            self.assertEqual("FAIL", envelope.result)
             self.assertIn("expected_bbox_mm", envelope.action)
+            self.assertTrue(result.failed, "an ungateable plan must not exit zero")
+
+    def test_an_unreadable_expected_bbox_is_not_a_passed_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work / "out",
+                plan=_plan(expected_bbox_mm={"X": 30, "Y": 20, "Z": 10}), render=False)
+
+            envelope = next(c for c in result.checks if c.id == "envelope")
+            self.assertEqual("FAIL", envelope.result)
+            self.assertIn("no readable", envelope.detail)
 
 
 class SupportCheckTest(unittest.TestCase):
@@ -245,9 +258,9 @@ class EdgeCheckTest(unittest.TestCase):
                                     plan=plan, render=False)
 
             edge = next(c for c in result.checks if c.id == "edge-E-01")
-            self.assertEqual("SKIPPED", edge.result)
+            self.assertEqual("FAIL", edge.result)
             self.assertIn("corner_xy", edge.action)
-            self.assertIn("do not treat it as met", edge.action)
+            self.assertIn("not a met radius", edge.action)
 
     def test_a_missing_section_extra_reports_instead_of_taking_the_gate_down(self) -> None:
         """One optional dependency used to raise straight out of `run`, losing
@@ -261,13 +274,15 @@ class EdgeCheckTest(unittest.TestCase):
                                     plan=plan, render=False)
 
             edge = next(c for c in result.checks if c.id == "edge-E-01")
-            self.assertIn(edge.result, ("PASS", "FAIL", "SKIPPED"))
+            # Not `assertIn(result, (PASS, FAIL, SKIPPED))` -- those are the only
+            # three values the field can hold, so that assertion cannot fail.
             if edge.result == "SKIPPED":
                 self.assertIn("section", edge.action)
                 self.assertIn("do not treat it as met", edge.action)
             else:
-                # `max_radius_mm` was read from the contract and never compared.
-                self.assertIn("band [0.0, 0.1]", edge.detail)
+                self.assertEqual("FAIL", edge.result,
+                                 "a sharp corner is outside the declared [0.0, 0.1] band "
+                                 "only if measured; a PASS here would mean nothing ran")
             # Whatever happened to the edge, the rest of the gate still ran.
             self.assertTrue(any(c.id == "solid" for c in result.checks))
 
@@ -315,7 +330,8 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
-                           plan=_plan(), render=False)
+                           plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}),
+                           render=False)
 
             payload = json.loads((work / "out" / "commission.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["verdict"], "PASS")

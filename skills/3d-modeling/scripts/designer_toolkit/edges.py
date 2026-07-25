@@ -36,6 +36,28 @@ _STRAIGHT_TURN_DEG = 1.5
 # A single vertex taking this much of the turn is a hard corner, not an arc.
 _HARD_CORNER_DEG = 20.0
 
+# A finely tessellated fillet puts less than the straight-run threshold on every
+# vertex -- at 64 segments per quadrant each turns about 1.4 deg -- so the strict
+# pass finds nothing and the outline reads as straight. When the run as a whole
+# clearly turns, retry at a threshold that admits those vertices.
+_ARC_TOTAL_TURN_DEG = 30.0
+_FINE_TURN_DEG = 0.2
+
+# A circle fitted through points that are not an arc still returns a radius. On
+# a 1.2 mm rib carrying two 0.4 mm fillets inside one window the fit reported
+# 1.2888 mm -- 222% high -- with a residual of 0.0681 mm against about 0.004 for
+# a clean fit. The residual is the evidence the points really were an arc, so a
+# measurement that fails it is reported as untrustworthy rather than as a number.
+_MAX_RESIDUAL_FRACTION = 0.05
+_MAX_RESIDUAL_FLOOR_MM = 0.01
+
+# One treatment on one corner turns at most about 90 deg. A window covering two
+# of them turns about 180. That total is a far stronger discriminator than the
+# fit residual, which stayed inside tolerance on a two-fillet window whose
+# fitted radius was 63% high -- the fit is genuinely good, it is just a circle
+# through the wrong points.
+_MAX_ARC_TURN_DEG = 140.0
+
 
 @dataclass(frozen=True)
 class EdgeMeasurement:
@@ -153,10 +175,19 @@ def measure_edge(
     turns = _turn_angles_deg(run)
     turning = np.flatnonzero(turns > _STRAIGHT_TURN_DEG)
     if turning.size == 0:
-        return EdgeMeasurement("indeterminate", None, None, len(run),
-                               "outline is straight through the window: the corner is elsewhere")
+        if float(turns.sum()) >= _ARC_TOTAL_TURN_DEG:
+            turning = np.flatnonzero(turns > _FINE_TURN_DEG)
+        if turning.size == 0:
+            return EdgeMeasurement(
+                "indeterminate", None, None, len(run),
+                "outline is straight through the window: the corner is elsewhere")
 
     hard = np.flatnonzero(turns > _HARD_CORNER_DEG)
+    if hard.size >= 3:
+        return EdgeMeasurement(
+            "indeterminate", None, None, len(run),
+            f"{hard.size} hard corners inside the window: it spans more than one edge "
+            "treatment, so no single measurement describes it")
     if hard.size == 1:
         return EdgeMeasurement("sharp", 0.0, None, len(run),
                                f"a single vertex turns {turns[hard[0]]:.1f} deg: no material removed")
@@ -172,7 +203,20 @@ def measure_edge(
     if len(arc) < 4:
         return EdgeMeasurement("indeterminate", None, None, len(run),
                                "too few points on the corner run to fit an arc")
+    total_turn = float(turns[turning].sum())
+    if total_turn > _MAX_ARC_TURN_DEG:
+        return EdgeMeasurement(
+            "indeterminate", None, None, len(arc),
+            f"the run turns {total_turn:.0f} deg in total, more than one corner can: the "
+            "window spans several treatments. Narrow window_mm until it covers one.")
     _cx, _cy, radius, rms = fit_circle(arc)
+    tolerance = max(_MAX_RESIDUAL_FLOOR_MM, _MAX_RESIDUAL_FRACTION * radius)
+    if rms > tolerance:
+        return EdgeMeasurement(
+            "indeterminate", None, rms, len(arc),
+            f"circle fit residual {rms:.4f} mm exceeds {tolerance:.4f} mm: these points "
+            "are not one arc, so the fitted radius describes nothing. Narrow window_mm "
+            "until it covers a single treatment.")
     return EdgeMeasurement(
         "fillet", radius, rms, len(arc),
         f"{len(arc)} points turning {turns[turning].sum():.0f} deg in total, "

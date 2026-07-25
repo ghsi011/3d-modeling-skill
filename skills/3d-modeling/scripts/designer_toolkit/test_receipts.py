@@ -134,9 +134,22 @@ class ReadinessTest(unittest.TestCase):
 
             for field in ("contract: candidate-readiness", "contract_version: 4",
                           "owner: cad-designer", "non_acceptance: true",
-                          "dimensions_revision: 3", "print_plan_revision: 2",
-                          "candidate_stl_sha256: "):
+                          "dimensions_revision: 3", "print_plan_revision: 2"):
                 self.assertIn(field, text)
+            # A 64-hex hash, not merely the label: the empty field matched too.
+            line = next(ln for ln in text.splitlines()
+                        if ln.startswith("candidate_stl_sha256:"))
+            self.assertRegex(line, r"^candidate_stl_sha256: [0-9a-f]{64}$")
+
+    def test_an_unsupplied_revision_says_unbound_rather_than_guessing(self) -> None:
+        """Defaulting to 1 asserts a binding nobody checked, and `contracts
+        status` then reports a clean match against an invented number."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            text = receipts.build_readiness(_run(work), job_id="t", updated_utc=_WHEN)
+
+            self.assertIn("dimensions_revision: UNBOUND", text)
+            self.assertIn("print_plan_revision: UNBOUND", text)
 
     def test_the_judgments_are_left_blank(self) -> None:
         """A receipt that fills itself in completely has stopped being one."""

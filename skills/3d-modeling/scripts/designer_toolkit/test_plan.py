@@ -41,13 +41,19 @@ class DirectTemplateTest(unittest.TestCase):
         self.assertEqual("SELF_SUPPORT_REQUIRED", rule["disposition"])
         self.assertEqual(0.0, rule["max_out_of_limit_area_mm2"])
 
-    def test_the_overhang_angle_is_the_conservative_one(self) -> None:
-        """-0.73 is steeper than 45 deg, so it flags fewer faces. An unreviewed
-        default must not be the more permissive of the two constants."""
-        rule = plan.direct_template((10.0, 10.0, 10.0))["support_rules"][0]
+    def test_a_correct_45_degree_chamfer_is_not_flagged(self) -> None:
+        """The bare 45 deg value rejects the standard fix for an overhang. A
+        self-supporting chamfer tessellates to -0.70710678118, below the bare
+        -0.70710678, so screening there fails correct geometry and the advice
+        tells the designer to add the feature that caused the failure."""
+        import math
 
-        self.assertAlmostEqual(-0.70710678, rule["downward_normal_z_max"], places=6)
-        self.assertGreater(rule["downward_normal_z_max"], -0.73)
+        rule = plan.direct_template((10.0, 10.0, 10.0))["support_rules"][0]
+        chamfer_normal_z = -math.cos(math.radians(45.0))
+
+        self.assertGreater(chamfer_normal_z, rule["downward_normal_z_max"],
+                           "a 45 deg chamfer must sit above the screen, not on it")
+        self.assertAlmostEqual(-0.73, rule["downward_normal_z_max"], places=6)
 
     def test_no_interfaces_or_edges_are_invented(self) -> None:
         built = plan.direct_template((10.0, 10.0, 10.0))
