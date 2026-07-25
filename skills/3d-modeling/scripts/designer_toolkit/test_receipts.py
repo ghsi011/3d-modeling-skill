@@ -24,9 +24,21 @@ from designer_toolkit import commission, plan, receipts  # noqa: E402
 _WHEN = "2026-01-01T00:00:00Z"
 
 
+def _seated_box(path: Path, extents) -> Path:
+    """A box resting on the bed, which is how a DIRECT part is authored.
+
+    `trimesh.creation.box` centres on the origin, so an unseated one hangs half
+    below z=0 and every downward face reads as unsupported -- correctly, since
+    the template declares an identity model-to-printer transform.
+    """
+    box = trimesh.creation.box(extents=extents)
+    box.apply_translation((0.0, 0.0, extents[2] / 2.0))
+    box.export(path)
+    return path
+
+
 def _run(work: Path, extents=(30.0, 20.0, 10.0)):
-    stl = work / "box.stl"
-    trimesh.creation.box(extents=extents).export(stl)
+    stl = _seated_box(work / "box.stl", extents)
     built = plan.direct_template(extents, job_id="t")
     return commission.run(model=None, stl=stl, out_dir=work / "out",
                           plan=built, render=False).as_dict()
@@ -84,8 +96,7 @@ class ReadinessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             # Build a box that is not the size the plan declares.
-            stl = work / "box.stl"
-            trimesh.creation.box(extents=(30.0, 20.0, 14.0)).export(stl)
+            stl = _seated_box(work / "box.stl", (30.0, 20.0, 14.0))
             built = plan.direct_template((30.0, 20.0, 10.0), job_id="t")
             result = commission.run(model=None, stl=stl, out_dir=work / "out",
                                     plan=built, render=False).as_dict()
@@ -109,8 +120,7 @@ class CliTest(unittest.TestCase):
     def test_the_command_emits_both_receipts(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            stl = work / "box.stl"
-            trimesh.creation.box(extents=(30.0, 20.0, 10.0)).export(stl)
+            stl = _seated_box(work / "box.stl", (30.0, 20.0, 10.0))
             plan_path = work / "plan.json"
             plan_path.write_text(json.dumps(plan.direct_template((30.0, 20.0, 10.0))),
                                  encoding="utf-8")

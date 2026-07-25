@@ -15,7 +15,7 @@ of any part. That is also the whole constraint on what may live in this file --
 a default may depend on the printer and the stated envelope, never on the
 geometry being judged.
 
-    python -m designer_toolkit plan-template --bbox 40 22 14 --out print_plan_checks.json
+    python -m designer_toolkit.plan template --bbox 40 22 14 --out print_plan_checks.json
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .metrics import BARE_45_DEG
+from .metrics import BARE_45_DEG, DEFAULT_BED_TOLERANCE_MM, DEFAULT_BED_Z_MM
 
 # 45 deg from vertical is the angle that always prints clean on a tuned 0.4 mm
 # nozzle (fdm-design.md section 1). The toolkit's other constant, -0.73, is
@@ -41,6 +41,13 @@ DEFAULT_DOWNWARD_NORMAL_Z_MAX = BARE_45_DEG
 DEFAULT_MAX_OUT_OF_LIMIT_AREA_MM2 = 0.0
 
 DEFAULT_BBOX_TOLERANCE_MM = 0.5
+
+# A DIRECT part is modelled in its print orientation -- seated on the bed, so
+# its minimum Z is 0 -- which makes model and printer frames coincide. Declaring
+# the identity explicitly still matters: the audit reads the matrix rather than
+# assuming one. A model centred on the origin instead will read as unsupported
+# across its whole underside, correctly: half of it is below the bed.
+IDENTITY_TRANSFORM = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 
 
 def direct_template(
@@ -72,6 +79,13 @@ def direct_template(
             {
                 "id": "S-01",
                 "disposition": "SELF_SUPPORT_REQUIRED",
+                # `support_audit` requires all three unconditionally and raises
+                # before it ever reads the mesh. A template that omits them
+                # produces a plan no candidate can satisfy -- which is what one
+                # measured run spent 55 minutes discovering.
+                "model_to_printer_matrix": IDENTITY_TRANSFORM,
+                "bed_z_mm": DEFAULT_BED_Z_MM,
+                "bed_tolerance_mm": DEFAULT_BED_TOLERANCE_MM,
                 "downward_normal_z_max": DEFAULT_DOWNWARD_NORMAL_Z_MAX,
                 "max_out_of_limit_area_mm2": DEFAULT_MAX_OUT_OF_LIMIT_AREA_MM2,
             }
@@ -123,6 +137,19 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
                 f"{rule_id}: SUPPORT_ALLOWED needs allowed_contact_class naming which "
                 "faces may take support"
             )
+
+        # Required by `team_preflight.support_audit` unconditionally -- it raises
+        # on the plan before reading any mesh, so their absence is a plan defect
+        # that no geometry can work around.
+        for field in ("model_to_printer_matrix", "bed_z_mm", "bed_tolerance_mm"):
+            if rule.get(field) is None:
+                problems.append(
+                    f"{rule_id}: missing {field}, which support_audit requires before it "
+                    "reads the candidate at all"
+                )
+        tolerance = rule.get("bed_tolerance_mm")
+        if tolerance is not None and float(tolerance) < 0:
+            problems.append(f"{rule_id}: bed_tolerance_mm must be >= 0, got {tolerance}")
 
         angle = rule.get("downward_normal_z_max")
         if angle is not None and not (-1.0 <= float(angle) <= 0.0):

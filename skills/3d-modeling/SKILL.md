@@ -141,8 +141,11 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    python -m designer_toolkit.plan template --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
    ```
 
-   It emits `threshold_source: builtin-default`, requires self-support, and invents no
-   interface or edge band. A part that cannot clear a zero support ceiling by reorienting or
+   It emits `threshold_source: builtin-default`, requires self-support, declares an identity
+   model-to-printer transform, and invents no interface or edge band. Tell the designer the
+   part must therefore be modelled **seated on the bed**, minimum Z at zero — a model centred
+   on the origin has half of itself under the bed and reads as unsupported across its whole
+   underside. A part that cannot clear a zero support ceiling by reorienting or
    chamfering is not a `DIRECT` part: re-route it to `FITTED`/`FULL` and dispatch a print
    engineer rather than relaxing the number. Ask every disambiguating question at `INTAKE`; a
    unit or radius-vs-diameter ambiguity resolved here costs one question, and resolved after

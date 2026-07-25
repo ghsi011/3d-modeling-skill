@@ -81,6 +81,44 @@ class CliTest(unittest.TestCase):
             self.assertEqual(14.0, payload["expected_bbox_mm"]["z"])
 
 
+class AgainstTheRealAuditTest(unittest.TestCase):
+    """Checked against the tool itself, not against a list I wrote from memory.
+
+    The first version of this template enumerated the fields I believed
+    `support_audit` needed and shipped without three of them. It raises on the
+    plan before reading any mesh, so the plan was unsatisfiable by any geometry
+    -- and a measured run spent 55 minutes finding that out.
+    """
+
+    def test_the_template_survives_team_preflight_support_audit(self) -> None:
+        import trimesh
+
+        sys.path.insert(0, str(_SCRIPTS))
+        import team_preflight  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl = work / "box.stl"
+            trimesh.creation.box(extents=(40.0, 22.0, 14.0)).export(stl)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(plan.direct_template((40.0, 22.0, 14.0))),
+                                 encoding="utf-8")
+
+            # The assertion is simply that this does not raise.
+            audit, _ = team_preflight.support_audit(
+                stl_path=stl, plan_path=plan_path, rule_id="S-01")
+
+            self.assertIn("out_of_limit_area_mm2", audit)
+
+    def test_validate_plan_rejects_what_the_audit_would_reject(self) -> None:
+        for field in ("model_to_printer_matrix", "bed_z_mm", "bed_tolerance_mm"):
+            with self.subTest(field=field):
+                broken = plan.direct_template((40.0, 22.0, 14.0))
+                del broken["support_rules"][0][field]
+
+                self.assertIn(field, " ".join(plan.validate_plan(broken)))
+
+
 class ValidatePlanTest(unittest.TestCase):
     """Each case is a way an archived run lost time to a plan, not to geometry."""
 
