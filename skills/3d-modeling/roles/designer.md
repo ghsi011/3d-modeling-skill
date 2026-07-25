@@ -118,8 +118,13 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
    judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
    look) and `fit_band_ok`. Never claim the Phase-4 gate passed.
-11. Record source parameters, orientation, material assumptions, supports, weak directions,
-   and coupon region in `print_notes.md`.
+11. In `print_notes.md`, record **only what nothing else captures**: the choices no contract
+   fixed and no measurement holds — where you put a feature the sheet did not locate, which
+   way round an ambiguous datum was read, why this orientation over the alternative, which
+   direction the part is weak in, and what a coupon should test. Parameters, orientation,
+   overhang areas and hashes are already in `commission.json` and the emitted receipts;
+   restating them is how a 131-line note grew beside a 131-line model, and a restated number
+   is one more place for the record to disagree with the mesh.
 12. When a verifier rejects, change only the owned geometry, regenerate every derived
     artifact, and cite each resolved defect in the next handoff.
 13. For FreeCAD commissions, require the orchestrator-held `.claude/3d-freecad.lock` mutation
