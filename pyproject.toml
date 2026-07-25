@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "3d-modeling-skill"
 version = "0.1.0"
-description = "A five-role, file-contract 3D-modeling pipeline for Claude Code, plus deterministic Python tooling (preflight gate, contract automation, mesh I/O, CAD runner)."
+description = "A five-role, file-contract 3D-modeling pipeline with deterministic Python tooling (preflight gate, contract automation, mesh I/O, CAD runner) for verification-driven modeling workflows."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Idan" }]
-keywords = ["3d-printing", "cad", "fdm", "claude-code", "agents", "trimesh"]
+keywords = ["3d-modeling", "3d-printing", "cad", "fdm", "agents", "trimesh", "verification", "automation"]
 
 # Core runtime deps derived from actual imports across
 # skills/3d-modeling/scripts/**/*.py. team_preflight.py, mesh_io.py, and the
@@ -39,8 +39,11 @@ visual = ["pyrender", "PyOpenGL", "scipy", "shapely"]
 # Bambu / 3MF authoring + verification (make_bambu_3mf.py).
 bambu = ["lxml"]
 
+# Local MCP stdio server for deterministic team tooling (tools/mcp_server.py).
+mcp = ["mcp>=1.27,<2"]
+
 # Everything (convenience for a full local workstation).
-all = ["cadquery", "pyrender", "PyOpenGL", "scipy", "shapely", "lxml"]
+all = ["cadquery", "pyrender", "PyOpenGL", "scipy", "shapely", "lxml", "mcp>=1.27,<2"]
 
 [project.urls]
 Homepage = "https://github.com/Idan/3d-modeling-skill"

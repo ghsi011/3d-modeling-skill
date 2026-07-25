@@ -158,16 +158,22 @@ def test_generated_opencode_frontmatter_maps_modes_and_permissions() -> None:
     assert verifier["permission.edit"] == "deny"
 
 
-def test_generated_opencode_config_has_schema_and_mcp_placeholder() -> None:
+def test_generated_opencode_config_has_schema_and_mcp_server() -> None:
     # Given: generated OpenCode root config.
     config = next(file for file in gen_harness.generate(gen_harness.load_roles()) if file.path.name == "opencode.json")
 
     # When: the JSON content is parsed.
     parsed = json.loads(config.content)
 
-    # Then: schema and MCP placeholder keys are ready for OpenCode without wiring a real server.
+    # Then: schema and the local deterministic-tool MCP server are ready for OpenCode.
     assert parsed["$schema"] == "https://opencode.ai/config.json"
-    assert parsed["mcp"] == {}
+    assert parsed["mcp"] == {
+        "3d-modeling-tools": {
+            "type": "local",
+            "command": ["python", "tools/mcp_server.py"],
+            "enabled": True,
+        }
+    }
 
 
 def test_generated_opencode_agent_body_uses_neutral_role_body() -> None:

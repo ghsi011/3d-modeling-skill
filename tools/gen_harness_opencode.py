@@ -7,6 +7,13 @@ from typing import Final, Protocol
 
 
 OPENCODE_SCHEMA: Final = "https://opencode.ai/config.json"
+OPENCODE_MCP_CONFIG: Final = {
+    "3d-modeling-tools": {
+        "type": "local",
+        "command": ["python", "tools/mcp_server.py"],
+        "enabled": True,
+    }
+}
 
 
 class OpenCodeRole(Protocol):
@@ -68,7 +75,7 @@ def render_opencode_agent(root: Path, role: OpenCodeRole) -> OpenCodeFile:
 
 
 def render_opencode_config(root: Path) -> OpenCodeFile:
-    content = json.dumps({"$schema": OPENCODE_SCHEMA, "mcp": {}}, indent=2)
+    content = json.dumps({"$schema": OPENCODE_SCHEMA, "mcp": OPENCODE_MCP_CONFIG}, indent=2)
     return OpenCodeFile(root / "opencode.json", f"{content}\n")
 
 

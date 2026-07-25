@@ -23,13 +23,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Only the light stack. The test suites import trimesh + numpy (+ stdlib);
-      # pillow rounds out the core runtime deps and manifold3d is the boolean
-      # engine designer_toolkit's fit/coupon tests need (a light pure wheel).
-      # cadquery / OCP / pyrender / scipy / shapely are heavy optional extras and
-      # are deliberately NOT installed here.
+      # Only the light stack. The editable install pulls core runtime deps plus
+      # the MCP extra for tools/mcp_server.py smoke coverage. cadquery / OCP /
+      # pyrender / scipy / shapely are heavy optional extras and are deliberately
+      # NOT installed here.
       - name: Install dependencies
-        run: python -m pip install --upgrade pip ruff pytest PyYAML trimesh numpy pillow manifold3d
+        run: python -m pip install --upgrade pip ruff pytest PyYAML -e ".[mcp]"
 
       - name: Ruff (lint)
         run: ruff check skills/3d-modeling/scripts
