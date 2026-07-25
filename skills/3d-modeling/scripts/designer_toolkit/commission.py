@@ -328,26 +328,67 @@ def run(
 
     measured_edges = {}
     for edge in plan.get("edges") or []:
+        edge_id = edge.get("id", "E-??")
         corner = edge.get("corner_xy")
         if corner is None:
-            continue
-        result = edges.measure_edge(
-            mesh, tuple(corner),
-            section_origin=tuple(edge.get("section_origin", (0, 0, 0))),
-            window_mm=float(edge.get("window_mm", 4.0)),
-        )
-        measured_edges[edge["id"]] = result.as_dict()
-        nominal = edge.get("min_radius_mm")
-        if nominal is not None and result.value_mm is not None:
-            ok = result.value_mm + 1e-9 >= float(nominal)
+            # Never `continue`. The contract's edge row is {id, min_radius_mm,
+            # max_radius_mm, samples_required} and says nothing about
+            # `corner_xy`, so on a conformant plan this used to skip every edge
+            # in silence and still exit zero -- a declared radius nobody
+            # measured, which is exactly the defect a fresh verifier caught by
+            # hand once already.
             commission.add(Check(
-                f"edge-{edge['id']}", f"Edge {edge['id']} treatment",
-                _PASS if ok else _FAIL,
-                f"measured {result.kind} {result.value_mm:.3f} mm against a "
-                f"{nominal} mm minimum",
-                "" if ok else "Increase the radius or declare the edge sharp with a reason. "
-                              "Do not widen the band to fit the measurement.",
+                f"edge-{edge_id}", f"Edge {edge_id} treatment", _SKIP,
+                "the plan declares no corner_xy for this edge, so nothing was measured",
+                f"Add `corner_xy` (and optionally `section_origin`, `window_mm`) to edge "
+                f"{edge_id} so the section has somewhere to cut. Until then this edge's "
+                "declared radius is unverified -- do not treat it as met.",
             ))
+            continue
+        try:
+            result = edges.measure_edge(
+                mesh, tuple(corner),
+                section_origin=tuple(edge.get("section_origin", (0, 0, 0))),
+                window_mm=float(edge.get("window_mm", 4.0)),
+            )
+        except ImportError as exc:
+            # Sectioning needs the `section` extra. Letting this propagate took
+            # the whole gate down over one optional dependency; reporting it
+            # keeps every other check's verdict, and keeps the gap visible.
+            commission.add(Check(
+                f"edge-{edge_id}", f"Edge {edge_id} treatment", _SKIP,
+                f"cannot section without the `section` extra: {exc}",
+                "Install the `section` extra (scipy, networkx, shapely, rtree). Until then "
+                f"edge {edge_id}'s declared band is unverified -- do not treat it as met.",
+            ))
+            continue
+        measured_edges[edge_id] = result.as_dict()
+        if result.value_mm is None:
+            commission.add(Check(
+                f"edge-{edge_id}", f"Edge {edge_id} treatment", _FAIL,
+                f"no {result.kind or 'treatment'} could be measured at {tuple(corner)}",
+                "The section found nothing to measure there. Check corner_xy against the "
+                "part's own frame -- a band that passes because its sampler returned null "
+                "is not a passing band.",
+            ))
+            continue
+
+        low = edge.get("min_radius_mm")
+        high = edge.get("max_radius_mm")
+        too_small = low is not None and result.value_mm + 1e-9 < float(low)
+        too_large = high is not None and result.value_mm - 1e-9 > float(high)
+        band = f"[{low if low is not None else '-'}, {high if high is not None else '-'}]"
+        commission.add(Check(
+            f"edge-{edge_id}", f"Edge {edge_id} treatment",
+            _FAIL if (too_small or too_large) else _PASS,
+            f"measured {result.kind} {result.value_mm:.3f} mm against band {band} mm",
+            "" if not (too_small or too_large) else (
+                "Increase the radius or declare the edge sharp with a reason. "
+                if too_small else
+                "The treatment is larger than the plan allows; an oversized fillet on a thin "
+                "wall eats the wall. "
+            ) + "Do not widen the band to fit the measurement.",
+        ))
 
     bundle = finalize(
         str(exported), str(out_dir / "candidate_01"),

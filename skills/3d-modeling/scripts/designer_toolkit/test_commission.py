@@ -232,6 +232,46 @@ class InterfaceCheckTest(unittest.TestCase):
             self.assertEqual("PASS", next(c for c in result.checks if c.id == "fit").result)
 
 
+class EdgeCheckTest(unittest.TestCase):
+    def test_an_edge_the_plan_cannot_locate_is_reported_not_skipped(self) -> None:
+        """The contract's edge row has no `corner_xy`, so on a conformant plan
+        every edge used to be skipped in silence and the gate still exited zero.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(edges=[{"id": "E-01", "min_radius_mm": 0.4, "samples_required": 3}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            edge = next(c for c in result.checks if c.id == "edge-E-01")
+            self.assertEqual("SKIPPED", edge.result)
+            self.assertIn("corner_xy", edge.action)
+            self.assertIn("do not treat it as met", edge.action)
+
+    def test_a_missing_section_extra_reports_instead_of_taking_the_gate_down(self) -> None:
+        """One optional dependency used to raise straight out of `run`, losing
+        every other check's verdict along with it."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(edges=[{"id": "E-01", "corner_xy": [15.0, 10.0],
+                                 "min_radius_mm": 0.0, "max_radius_mm": 0.1}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            edge = next(c for c in result.checks if c.id == "edge-E-01")
+            self.assertIn(edge.result, ("PASS", "FAIL", "SKIPPED"))
+            if edge.result == "SKIPPED":
+                self.assertIn("section", edge.action)
+                self.assertIn("do not treat it as met", edge.action)
+            else:
+                # `max_radius_mm` was read from the contract and never compared.
+                self.assertIn("band [0.0, 0.1]", edge.detail)
+            # Whatever happened to the edge, the rest of the gate still ran.
+            self.assertTrue(any(c.id == "solid" for c in result.checks))
+
+
 class SolidCheckTest(unittest.TestCase):
     def test_a_two_body_export_fails(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
