@@ -24,7 +24,7 @@ if _PACKAGE_DIR not in sys.path:
 
 from common import ContractError, canonical_json  # noqa: E402
 from receipts import build_hash_receipt, build_validate_receipt  # noqa: E402
-from status import compute_status, format_status_lines  # noqa: E402
+from status import compute_status, exit_code, format_status_lines  # noqa: E402
 from validators import CANONICAL_FILENAMES  # noqa: E402
 
 
@@ -81,7 +81,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     else:
         text = "\n".join(format_status_lines(rows)) + "\n"
         _write(text, args.output.resolve() if args.output else None)
-    return 1 if any(row["status"] in ("STALE", "INVALIDATED", "UNREADABLE") for row in rows) else 0
+    return exit_code(rows)
 
 
 def build_parser() -> argparse.ArgumentParser:

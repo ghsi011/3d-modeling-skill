@@ -482,6 +482,38 @@ class PrintPlanValidatorTest(unittest.TestCase):
             stale = [r for r in rows if r["contract"] == "PRINT_PLAN" and r["status"] == "STALE"]
             self.assertEqual(1, len(stale), rows)
             self.assertIn("bound to dimensions r2, current r7", stale[0]["detail"])
+
+    def test_two_references_report_ambiguity_instead_of_binding_the_first(self) -> None:
+        """A multi-part job has several references; `reference_sha256` is one
+        hash. Answering the freshness question from whichever happened to be
+        first would pass a job whose *other* reference changed.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            # The first reference still matches what the plan bound. The second
+            # does not -- so scanning for the first match reports a clean pass.
+            body_hash, _, _ = _write_box_stl(project_dir / "reference_bar.stl", (62.0, 11.7, 24.0))
+            _write_box_stl(project_dir / "reference_lid.stl", (62.0, 11.7, 3.0))
+
+            manifest = clone(_ARTIFACT_MANIFEST)
+            lid = clone(manifest["artifacts"][0])
+            lid["id"] = "reference-lid"
+            lid["path"] = "reference_lid.stl"
+            manifest["artifacts"].append(lid)
+            print_plan = clone(_PRINT_PLAN)
+            print_plan["reference_sha256"] = body_hash
+            _write_project(project_dir, print_plan=print_plan, artifact_manifest=manifest)
+
+            rows = S.compute_status(project_dir)
+
+            ambiguous = [r for r in rows if r["status"] == "AMBIGUOUS"]
+            self.assertEqual(1, len(ambiguous), rows)
+            self.assertIn("reference-lid", ambiguous[0]["detail"])
+            self.assertEqual(
+                1,
+                S.exit_code(rows),
+                "an unbindable reference must stop the pipeline, not read as OK",
+            )
 # ---------------------------------------------------------------------------
 # Project fixtures
 # ---------------------------------------------------------------------------

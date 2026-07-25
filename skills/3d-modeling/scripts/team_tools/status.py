@@ -15,18 +15,29 @@ from project import load_project
 
 CONTRACT_ORDER = ("job_state", "dimensions", "print_plan", "verification_report", "artifact_manifest")
 
+# A row with one of these statuses means the project may not advance. `MISSING`
+# is deliberately absent: an early-phase project is legitimately missing the
+# contracts later phases write, and `validate --require` is what names the ones
+# a given phase must have.
+BLOCKING_STATUSES = frozenset({"STALE", "INVALIDATED", "UNREADABLE", "AMBIGUOUS"})
+
+
+def exit_code(rows: list[dict[str, Any]]) -> int:
+    return 1 if any(row["status"] in BLOCKING_STATUSES for row in rows) else 0
+
 
 def _hash_prefix(value: Any) -> str:
     return value[:12] if isinstance(value, str) and value else "<missing>"
 
 
-def _artifact_by_role(manifest: dict[str, Any] | None, role: str) -> dict[str, Any] | None:
+def _artifacts_by_role(manifest: dict[str, Any] | None, role: str) -> list[dict[str, Any]]:
     if not manifest:
-        return None
-    for artifact in manifest.get("artifacts") or []:
-        if isinstance(artifact, dict) and artifact.get("role") == role:
-            return artifact
-    return None
+        return []
+    return [
+        artifact
+        for artifact in manifest.get("artifacts") or []
+        if isinstance(artifact, dict) and artifact.get("role") == role
+    ]
 
 
 def _artifact_by_id(manifest: dict[str, Any] | None, artifact_id: Any) -> dict[str, Any] | None:
@@ -85,8 +96,27 @@ def compute_status(project_dir: Path) -> list[dict[str, Any]]:
                 }
             )
 
-    reference_artifact = _artifact_by_role(artifact_manifest, "reference")
-    current_reference_hash = _current_hash_of(reference_artifact, project_dir)
+    # `reference_sha256` is one scalar on the plan and on the report, so it can
+    # bind exactly one reference. A multi-part job has several, and picking the
+    # first would answer "is the reference current?" from an arbitrary member of
+    # the set -- a change to any other reference would read as OK. Report the
+    # ambiguity instead of guessing which one the binding meant.
+    reference_artifacts = _artifacts_by_role(artifact_manifest, "reference")
+    if len(reference_artifacts) > 1:
+        rows.append(
+            {
+                "contract": "ARTIFACT_MANIFEST",
+                "status": "AMBIGUOUS",
+                "detail": (
+                    f"{len(reference_artifacts)} artifacts have role 'reference' "
+                    f"({', '.join(str(a.get('id')) for a in reference_artifacts)}); "
+                    "reference_sha256 is a single hash and cannot bind them all"
+                ),
+            }
+        )
+    current_reference_hash = (
+        _current_hash_of(reference_artifacts[0], project_dir) if len(reference_artifacts) == 1 else None
+    )
     if print_plan and current_reference_hash is not None:
         bound = print_plan.get("reference_sha256")
         if bound != current_reference_hash:
