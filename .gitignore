@@ -10,7 +10,9 @@ env/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-dist/
+/dist/*
+!dist/openai/
+!dist/openai/**
 build/
 *.egg-info/
 .coverage

@@ -73,6 +73,6 @@ select = ["E4", "E7", "E9", "F"]
 [tool.pytest.ini_options]
 # All three suites live under the scripts dir and import their modules by bare
 # name; put that dir on sys.path so collection resolves without an install.
-pythonpath = ["skills/3d-modeling/scripts"]
-testpaths = ["skills/3d-modeling/scripts"]
+pythonpath = [".", "skills/3d-modeling/scripts"]
+testpaths = ["skills/3d-modeling/scripts", "tools"]
 python_files = ["test_*.py"]

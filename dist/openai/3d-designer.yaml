@@ -1,0 +1,15 @@
+interface:
+  display_name: "3D CAD Designer"
+  short_description: "Build FDM-aware reference and candidate CAD"
+  default_prompt: "Use $3d-designer for this file-grounded CAD commission."
+role: designer
+description: "Build parametric FDM-aware CAD from file contracts. Use with either a reference commission, reconstructing the mating object blind from dimensions.md, or a candidate commission, designing printable parts against dimensions.md, the accepted reference, and print_plan.md."
+capabilities:
+  reads_files: true
+  edits_files: true
+  writes_files: true
+  runs_shell: true
+  web: false
+  loads_skill: true
+  can_spawn: []
+source: skills/roles/designer.md

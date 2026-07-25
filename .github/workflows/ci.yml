@@ -29,10 +29,13 @@ jobs:
       # cadquery / OCP / pyrender / scipy / shapely are heavy optional extras and
       # are deliberately NOT installed here.
       - name: Install dependencies
-        run: python -m pip install --upgrade pip ruff pytest trimesh numpy pillow manifold3d
+        run: python -m pip install --upgrade pip ruff pytest PyYAML trimesh numpy pillow manifold3d
 
       - name: Ruff (lint)
         run: ruff check skills/3d-modeling/scripts
 
       - name: Pytest
         run: pytest
+
+      - name: Generated harness is current
+        run: python tools/gen_harness.py --check

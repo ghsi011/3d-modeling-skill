@@ -1,0 +1,15 @@
+interface:
+  display_name: "3D Print Engineer"
+  short_description: "Plan and validate the physical print process"
+  default_prompt: "Use $3d-print-engineer to issue or finalize the print process contract."
+role: print-engineer
+description: "Own manufacturing constraints and physical validation for 3D jobs. Use twice in the team pipeline: before CAD to issue print_plan.md, then after independent verification to define coupons, slicing, print order, and field-test or failed-print procedures."
+capabilities:
+  reads_files: true
+  edits_files: true
+  writes_files: true
+  runs_shell: true
+  web: true
+  loads_skill: true
+  can_spawn: []
+source: skills/roles/print-engineer.md
