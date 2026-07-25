@@ -84,40 +84,85 @@ brake lever").
   that tries to (e.g. a `verification_report.md` with `status: PASS`) as invalid for that reason
   alone.
 
-`R2`/`R3` are independent of `COMPACT`/`FULL` — a decorative multi-part job can stay `COMPACT`
-for fit reasons while an `R2` single bracket still needs the reviewer gate.
+## Route profiles
+
+A phase whose input does not exist cannot check anything, and every dispatch costs minutes.
+So the profile is decided by one question — **what has to be recovered from evidence?** —
+and it decides which phases run, not how verbose the record is.
+
+- **`DIRECT`** — every design-driving dimension is stated by the user or a cited spec, and no
+  real-world object is being recreated. Single part, `R0`/`R1`.
+  `INTAKE -> PRINT_PLAN -> CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION -> DELIVERY`,
+  and `PRINT_PLAN` is you instantiating the shipped template, not a dispatch. Two dispatches.
+  `REFERENCE_BUILD` reconstructs the mating object from `dimensions.md`; with no mating
+  object it has nothing to build, and `REFERENCE_ACCEPTANCE` has nothing to overlay.
+  `METROLOGY`'s own load-bearing check is reconciling disagreeing sources, and a stated
+  dimension has one source. Write the sheet yourself from the user's numbers, and ask the
+  disambiguating question (units, ID vs OD, radius vs diameter) at `INTAKE` where it is cheap.
+- **`FITTED`** — one real object is measured or photographed and the part must fit it.
+  Single candidate.
+  `INTAKE -> METROLOGY -> PRINT_PLAN -> CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION ->
+  DELIVERY`. Four dispatches. The blind rebuild still happens — the candidate designer builds
+  the mating object from the sheet alone and exports it as a `mating_reference` manifest row —
+  but the fresh verifier is who overlays it on the photos, so the round trip costs no dispatch
+  of its own. The cost of folding it in is lateness, not blindness: a sheet defect now surfaces
+  against a built candidate, so budget the rework as a candidate rebuild.
+- **`FULL`** — multiple parts, moving or mating interfaces between printed parts, `R2`/`R3`,
+  multi-colour alignment, or parallel candidates. Every phase, plus `FINAL_PREP_REVIEW` when
+  required. Buy the time back with parallel candidate builds, not by skipping gates.
+
+Classify toward the more complete profile when genuinely torn, and re-classify upward the
+moment new evidence changes the answer. The consequence class is independent: an `R2` single
+bracket with fully stated dimensions is still `DIRECT` in shape, but `R2` adds the named
+reviewer and physical proof before any "ready for use" claim, and an `R3` job never reaches
+`DELIVERY` at all.
+
+Two rules survive every profile, because the benchmark runs show what happens without them.
+**The print plan is never authored by whoever builds the geometry** — across four archived
+runs with no plan bound, every designer set its own support ceiling *after* reading its own
+measurement (2034 mm² observed, 2150 declared), which is a receipt, not a gate. A shipped
+template is a legitimate plan precisely because it was written before any measurement existed.
+**Verification is never folded into the build** — a designer self-waived one of the seven
+checks as "n/a for this interface type", and only a fresh context catches that.
 
 ## Checklist
 
 1. Run the Consequence and escalation gate above and record the resulting class, rationale,
    reviewer requirement, and prohibited claims in `job_state.md` before any routing decision.
-2. Create the project folder and compact `job_state.md`; create/update any optional host print
-   queue note when the host provides one. Use `COMPACT` for simple single-candidate work;
-   use `FULL` when multi-part/moving/high-consequence work requires the expanded record.
-3. Keep simple jobs in the **COMPACT team pipeline** when the part is single, non-fit-critical,
-   has no recreated mating geometry, and is `R0` or `R1`.
-4. Use the **FULL team pipeline** when any condition holds: fit or datum criticality, recreated
-   geometry from photos, multiple parts, mating or moving interfaces, safety/thermal/load
-   consequences, multi-colour alignment, difficult DFM, user-requested fresh review, or the
-   job is `R2`/`R3`. An `R2` job additionally needs the named reviewer and test plan recorded
-   before any "ready for use" claim; an `R3` job is restricted to conceptual/non-operational
-   help and is never marked accepted by this pipeline regardless of what downstream gates
-   report.
-5. Advance only through:
-   `INTAKE -> METROLOGY -> REFERENCE_BUILD -> REFERENCE_ACCEPTANCE -> PRINT_PLAN ->
-   CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION -> PRINT_PREP ->
-   [FINAL_PREP_REVIEW when required] -> DELIVERY`.
-6. Dispatch the metrologist to create `dimensions.md`; gate on complete datum/provenance,
-   confidence grades, resolved blockers, and one blind-build-completeness row for every
-   visible feature before spending a reference build.
-7. Dispatch one designer with the **reference** commission. Then dispatch the metrologist
-   again to overlay-accept it. A failure returns to `METROLOGY`: fix the sheet, not the
-   reference model.
-8. Dispatch the print engineer for the pre-design `print_plan.md`; gate on orientation,
-   material, nozzle-linked limits, support budget, chamfers, colour constraints, a complete
-   per-interface fit-strategy declaration, and a frozen `required_now` / `deferred_owner` /
-   `final_gate` scope for every geometry rule.
-9. Dispatch candidate designer(s) against the sheet, accepted reference, and print plan.
+2. Pick the profile with the Route profiles section above, record it and the deciding fact in
+   `job_state.md`, then create the project folder and `job_state.md`; create/update any
+   optional host print queue note when the host provides one.
+3. Advance only through the phase sequence that profile names. A phase the profile omits is
+   not skipped work you owe later — its input does not exist for this job.
+4. `DIRECT` only: write `dimensions.md` yourself from the stated numbers, and generate the
+   bound plan from the stated overall size (run from `skills/3d-modeling/scripts/`):
+
+   ```bash
+   python -m designer_toolkit.plan --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
+   ```
+
+   It emits `threshold_source: builtin-default`, requires self-support, and invents no
+   interface or edge band. A part that cannot clear a zero support ceiling by reorienting or
+   chamfering is not a `DIRECT` part: re-route it to `FITTED`/`FULL` and dispatch a print
+   engineer rather than relaxing the number. Ask every disambiguating question at `INTAKE`; a
+   unit or radius-vs-diameter ambiguity resolved here costs one question, and resolved after
+   the build costs a rebuild.
+5. `FITTED`/`FULL` only: dispatch the metrologist to create `dimensions.md`; gate on complete
+   datum/provenance, confidence grades, resolved blockers, and one blind-build-completeness row
+   for every visible feature. That table is what stops a sealed brick: a sheet declaring "all
+   fit-critical dimensions resolved" while silently omitting every port produced exactly that
+   in four archived runs.
+6. `FULL` only: dispatch one designer with the **reference** commission, then dispatch the
+   metrologist again to overlay-accept it. A failure returns to `METROLOGY`: fix the sheet,
+   not the reference model. Under `FITTED` this loop still runs, but inside the candidate
+   build and the verification — see the profile description.
+7. `FITTED`/`FULL`: dispatch the print engineer for the pre-design `print_plan.md`; gate on
+   orientation, material, nozzle-linked limits, support budget, chamfers, colour constraints, a
+   complete per-interface fit-strategy declaration, and a frozen `required_now` /
+   `deferred_owner` / `final_gate` scope for every geometry rule. Under `DIRECT` the shipped
+   template stands in, and it is a real plan for the same reason: written before any
+   measurement existed. Never let the designer supply its own.
+8. Dispatch candidate designer(s) against the sheet, accepted reference, and print plan.
    Require a hash-bound `candidate_readiness.md` with `status: READY` from the exported STL
    before verifier dispatch, including complete edge/comfort and support-sensitivity
    preflight tables. Independently rerun the v4 `validate-receipts` command and gate on its
@@ -131,32 +176,34 @@ for fit reasons while an `R2` single bracket still needs the reviewer gate.
    Serialize all FreeCAD work through the repo-wide `.claude/3d-freecad.lock` mutation lease,
    mirror the holder in `job_state.md.freecad_owner`, and allow exactly one active FreeCAD
    designer commission across all jobs.
-10. Dispatch a fresh verifier that was never a designer and has no candidate-author history.
+9. Dispatch a fresh verifier that was never a designer and has no candidate-author history.
     Treat designer readiness as untrusted and require all seven checks. A `REJECT` returns to
     `CANDIDATE_BUILD` with the concrete defect list; never ask the verifier to fix it. For an
     `R2` job, a `PASS` is not itself the "ready for use" claim — that still needs the named
     reviewer's sign-off and physical proof. For an `R3` job, the verifier must never issue
     `PASS`/accepted at all.
-11. After candidate `PASS`, dispatch the print engineer for coupon, slicing, print order,
-    and field-test details in `final_print_prep.md`. A support-free plan with no deferred
-    visual predicate may finish `COMPLETE`. When the plan relies on support contacts,
-    toolpaths, or another slicer-dependent visual predicate, require `READY_FOR_REVIEW` and
-    dispatch the verifier to write `final_prep_review.md` before delivery.
-12. Enforce the plan-revision rule in
+10. `PRINT_PREP` is conditional, and `commission.json` decides it, not the profile: when the
+    verified candidate needs support contacts, toolpaths, or another slicer-dependent visual
+    predicate, dispatch the print engineer for coupon, slicing, print order, and field-test
+    details in `final_print_prep.md`, require `READY_FOR_REVIEW`, and dispatch the verifier to
+    write `final_prep_review.md` before delivery. A support-free candidate with no deferred
+    visual predicate finishes on the plan's own final-prep placeholders -- do not spend a
+    dispatch producing a native project for ceremony.
+11. Enforce the plan-revision rule in
     [`references/team-contracts-v4.md`](references/team-contracts-v4.md#plan-revision-rule).
     Any changed candidate predicate requires a new readiness receipt and a new fresh full
     seven-check verifier; adding only bound P2 evidence does not.
-13. If plan-required native slicer evidence cannot be produced, stop at
+12. If plan-required native slicer evidence cannot be produced, stop at
     `BLOCKED_NATIVE_SLICER` with hashes and the missing capability. Never label it Ready to
     Print. A non-native exception requires explicit user approval.
-14. Deliver only when the exported/re-imported artifacts pass all gates, final print prep is
+13. Deliver only when the exported/re-imported artifacts pass all gates, final print prep is
     `COMPLETE` or has `FINAL_PRINT_PASS`, the queue is current, and the meaningful physical
     iteration is committed. For `R2`, deliver only after the named reviewer's sign-off and
     physical proof are recorded. For `R3`, this pipeline never reaches `DELIVERY`.
-15. Advance from a commission as soon as its required file receipt is complete and valid;
+14. Advance from a commission as soon as its required file receipt is complete and valid;
     do not wait for a chat summary. Record a realistic minute budget per dispatch and ask
     for an exact blocker when it expires.
-16. Keep evidence differential. Never copy a canonical STL into a verifier folder. Preserve
+15. Keep evidence differential. Never copy a canonical STL into a verifier folder. Preserve
     hashes, reports, metrics, and the decisive defect visual; do not fan out unchanged exports
     or full render sets per rejection.
 

@@ -54,7 +54,7 @@ _JOB_STATE = {
     "revision": 1,
     "owner": "orchestrator",
     "mode": "PIPELINE",
-    "profile": "COMPACT",
+    "profile": "FITTED",
     "state": "CANDIDATE_BUILD",
     "backend": "cadquery",
     "active_candidate": "none",

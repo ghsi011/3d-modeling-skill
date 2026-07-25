@@ -39,9 +39,9 @@
   "mode": "PIPELINE",
   "open_questions": [],
   "owner": "orchestrator",
-  "profile": "COMPACT",
+  "profile": "FITTED",
   "revision": 3,
-  "route": "PIPELINE / COMPACT example fixture for team_tools tests.",
+  "route": "PIPELINE / FITTED example fixture for team_tools tests.",
   "state": "CANDIDATE_BUILD",
   "updated_utc": "2026-01-01T00:00:00Z"
 }

@@ -37,7 +37,7 @@ job_id: <slug>
 revision: <integer>
 owner: orchestrator
 mode: PIPELINE
-profile: COMPACT | FULL
+profile: DIRECT | FITTED | FULL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
 backend: cadquery | build123d | freecad
 active_candidate: <id-or-none>
@@ -67,9 +67,14 @@ updated_utc: <iso-8601>
 |---|---|---|
 ```
 
-Use `COMPACT` for a single candidate and one uncomplicated mating envelope. Use `FULL` for
-multi-part/moving mechanisms, safety/load consequences, several independent interfaces,
-multi-colour alignment, or parallel candidates. Both profiles run the same gates.
+The profile decides which phases run. `DIRECT`: every design-driving dimension is stated and
+nothing is recreated from evidence, so `METROLOGY`, `REFERENCE_BUILD` and
+`REFERENCE_ACCEPTANCE` have no input and the orchestrator writes the sheet from the shipped
+plan template. `FITTED`: one measured real object, so the blind rebuild happens inside the
+candidate build and its overlay inside verification. `FULL`: multi-part/moving mechanisms,
+safety/load consequences, several independent interfaces, multi-colour alignment, or parallel
+candidates -- every phase runs. See [`../SKILL.md`](../SKILL.md) for the deciding question and
+the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run under every profile.
 
 `job_state.md`'s `## Route` section also records the job's consequence/risk class from the
 orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQUENCE` /
