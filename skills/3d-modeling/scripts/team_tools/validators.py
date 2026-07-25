@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from common import Issue, error, is_hash_format, normalize_project_path
-from schemas import CONFIDENCE, NUMBER, check_enum, check_fk, check_object_fields, check_rows
+from schemas import NUMBER, check_enum, check_fk, check_object_fields, check_rows
 
 NULLABLE_NUMBER = (int, float, type(None))
 STRLIST = list
@@ -88,13 +88,66 @@ ACCEPTED_CONTRACT_VERSIONS: dict[str, frozenset[int]] = {
     "artifact-manifest": frozenset({1}),
 }
 
-CANONICAL_FILENAMES: dict[str, str] = {
-    "job_state": "job_state.json",
-    "dimensions": "dimensions.json",
-    "print_plan": "print_plan.json",
-    "verification_report": "verification_report.json",
-    "artifact_manifest": "artifact_manifest.json",
+# Each contract is looked up in order: the Markdown the roles actually author
+# first, then a JSON mirror if one exists. `artifact_manifest` is JSON-only --
+# team-contracts-v4 calls it machine-authoritative with no Markdown mirror.
+CANONICAL_FILENAMES: dict[str, tuple[str, ...]] = {
+    "job_state": ("job_state.md", "job_state.json"),
+    "dimensions": ("dimensions.md", "dimensions.json"),
+    "print_plan": ("print_plan.md", "print_plan.json"),
+    "verification_report": ("verification_report.md", "verification_report.json"),
+    "artifact_manifest": ("artifact_manifest.json",),
 }
+
+# Contracts with a full structural validator, which only runs on a JSON source.
+# A Markdown contract is header-validated instead: its body is prose for an
+# agent, and schema-checking prose reports nothing a reader could act on.
+DEEP_VALIDATED: frozenset[str] = frozenset({"print_plan", "artifact_manifest"})
+
+CONTRACT_KIND_BY_KEY: dict[str, str] = {
+    "job_state": "job-state",
+    "dimensions": "dimensions",
+    "print_plan": "print-plan",
+    "verification_report": "verification-report",
+    "artifact_manifest": "artifact-manifest",
+}
+
+_EXPECTED_OWNER: dict[str, str] = {
+    "job_state": "orchestrator",
+    "dimensions": "metrologist",
+    "print_plan": "print-engineer",
+    "verification_report": "verifier",
+}
+
+
+def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> list[Issue]:
+    """Validate the fields every contract carries and the tooling binds on.
+
+    This is the whole check for a Markdown contract. It deliberately says
+    nothing about the body: `dimensions.md` states how a number was obtained,
+    what it conflicts with, and how confident the metrologist is, and a
+    validator that walked those rows would only ever confirm that prose is
+    prose. What must hold is that the header identifies the contract and
+    carries an integer revision, because that is what staleness and binding
+    checks compare.
+    """
+    issues = _check_contract_header(
+        data, contract_key=CONTRACT_KIND_BY_KEY[key], expected_owner=_EXPECTED_OWNER.get(key), where=where
+    )
+    job_id = data.get("job_id")
+    if not isinstance(job_id, str) or not job_id.strip():
+        issues.append(error("MISSING_FIELD", f"{where}.job_id", "required non-empty string field is missing"))
+    if key != "artifact_manifest":
+        revision = data.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool):
+            issues.append(
+                error(
+                    "MISSING_FIELD",
+                    f"{where}.revision",
+                    "required integer field is missing -- staleness and revision binding compare it",
+                )
+            )
+    return issues
 
 
 def _check_contract_header(
@@ -132,272 +185,6 @@ def _check_contract_header(
     return issues
 
 
-# =============================================================================
-# job_state
-# =============================================================================
-
-
-def validate_job_state(data: dict[str, Any], *, where: str = "job_state") -> tuple[list[Issue], dict[str, Any]]:
-    issues: list[Issue] = []
-    issues += _check_contract_header(data, contract_key="job-state", expected_owner="orchestrator", where=where)
-    issues += check_object_fields(
-        data,
-        required={
-            "contract": str,
-            "contract_version": int,
-            "job_id": str,
-            "revision": int,
-            "owner": str,
-            "mode": str,
-            "profile": str,
-            "state": str,
-            "backend": str,
-            "active_candidate": str,
-            "updated_utc": str,
-        },
-        optional={
-            "route": str,
-            "risk_class": str,
-            "risk_class_rationale": str,
-            "bound_inputs": list,
-            "gates": list,
-            "dispatches": list,
-            "open_questions": list,
-        },
-        where=where,
-    )
-    if isinstance(data.get("revision"), int) and not isinstance(data.get("revision"), bool):
-        if data["revision"] < 1:
-            issues.append(error("BAD_REVISION", f"{where}.revision", "revision must be >= 1"))
-    issues += check_enum(data, "mode", MODE, where)
-    issues += check_enum(data, "profile", PROFILE, where)
-    issues += check_enum(data, "state", JOB_STATE_STATES, where)
-    issues += check_enum(data, "backend", BACKEND, where)
-    issues += check_enum(data, "risk_class", RISK_CLASS, where)
-
-    def bound_input_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        return check_object_fields(
-            row,
-            required={"id": str, "label": str, "reference": str, "status": str},
-            optional={},
-            where=row_where,
-        )
-
-    def gate_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={"id": str, "required_receipt": str, "result": str, "evidence": str},
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "result", GATE_RESULT, row_where)
-        return found
-
-    def dispatch_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={
-                "id": str,
-                "role": str,
-                "authorized_inputs": str,
-                "required_output": str,
-                "budget_min": NUMBER,
-                "status": str,
-            },
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "status", DISPATCH_STATUS, row_where)
-        return found
-
-    def question_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        return check_object_fields(
-            row,
-            required={"id": str, "question": str, "blocks": str},
-            optional={},
-            where=row_where,
-        )
-
-    gate_ids: dict[str, Any] = {}
-    dispatch_ids: dict[str, Any] = {}
-    if "bound_inputs" in data:
-        found, _ = check_rows(data["bound_inputs"], where=f"{where}.bound_inputs", row_validator=bound_input_row)
-        issues += found
-    if "gates" in data:
-        found, gate_ids = check_rows(data["gates"], where=f"{where}.gates", row_validator=gate_row)
-        issues += found
-    if "dispatches" in data:
-        found, dispatch_ids = check_rows(data["dispatches"], where=f"{where}.dispatches", row_validator=dispatch_row)
-        issues += found
-    if "open_questions" in data:
-        found, _ = check_rows(data["open_questions"], where=f"{where}.open_questions", row_validator=question_row)
-        issues += found
-
-    index = {"gate_ids": gate_ids, "dispatch_ids": dispatch_ids}
-    return issues, index
-
-
-# =============================================================================
-# dimensions
-# =============================================================================
-
-
-def validate_dimensions(
-    data: dict[str, Any], *, where: str = "dimensions", project_dir: Path | None = None
-) -> tuple[list[Issue], dict[str, Any]]:
-    issues: list[Issue] = []
-    issues += _check_contract_header(data, contract_key="dimensions", expected_owner="metrologist", where=where)
-    issues += check_object_fields(
-        data,
-        required={
-            "contract": str,
-            "contract_version": int,
-            "job_id": str,
-            "revision": int,
-            "owner": str,
-            "status": str,
-            "updated_utc": str,
-        },
-        optional={
-            "frame": list,
-            "sources": list,
-            "features": list,
-            "dimensions": list,
-            "open_questions": list,
-            "reference_round_trip": list,
-        },
-        where=where,
-    )
-    issues += check_enum(data, "status", DIMENSIONS_STATUS, where)
-
-    def frame_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={"id": str, "definition": str, "source": str, "confidence": str},
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "confidence", CONFIDENCE, row_where)
-        return found
-
-    def source_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={"id": str, "evidence_path": str, "variant": str, "authority": str},
-            optional={"sha256": str, "access_date": str},
-            where=row_where,
-        )
-        if "sha256" in row and row["sha256"] is not None and not is_hash_format(row["sha256"]):
-            found.append(error("BAD_HASH", f"{row_where}.sha256", "must be 64 lowercase hex characters"))
-        if "sha256" not in row and "access_date" not in row:
-            found.append(
-                error(
-                    "MISSING_FIELD",
-                    f"{row_where}.sha256",
-                    "a source needs either 'sha256' or 'access_date'",
-                )
-            )
-        if project_dir is not None and "evidence_path" in row:
-            path_issues, _ = normalize_project_path(
-                row.get("evidence_path"), field="evidence_path", where=row_where, project_dir=project_dir
-            )
-            found += path_issues
-        return found
-
-    def feature_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={
-                "id": str,
-                "name": str,
-                "datum_value": str,
-                "source": str,
-                "confidence": str,
-                "candidate_response": str,
-                "ready": bool,
-            },
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "confidence", CONFIDENCE, row_where)
-        return found
-
-    def dimension_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={
-                "id": str,
-                "feature_id": str,
-                "value": str,
-                "datum_method": str,
-                "source": str,
-                "confidence": str,
-                "tolerance_response": str,
-            },
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "confidence", CONFIDENCE, row_where)
-        return found
-
-    def question_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        return check_object_fields(
-            row,
-            required={"id": str, "unknown": str, "risk": str, "bound": str, "blocks": str},
-            optional={},
-            where=row_where,
-        )
-
-    def round_trip_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={"id": str, "views_overlay": str, "verdict": str, "sheet_revision_required": bool},
-            optional={},
-            where=row_where,
-        )
-        found += check_enum(row, "verdict", REF_VERDICT, row_where)
-        return found
-
-    feature_ids: dict[str, Any] = {}
-    dimension_ids: dict[str, Any] = {}
-    datum_ids: dict[str, Any] = {}
-    source_ids: dict[str, Any] = {}
-    if "frame" in data:
-        found, datum_ids = check_rows(data["frame"], where=f"{where}.frame", row_validator=frame_row)
-        issues += found
-    if "sources" in data:
-        found, source_ids = check_rows(data["sources"], where=f"{where}.sources", row_validator=source_row)
-        issues += found
-    if "features" in data:
-        found, feature_ids = check_rows(data["features"], where=f"{where}.features", row_validator=feature_row)
-        issues += found
-    if "dimensions" in data:
-        found, dimension_ids = check_rows(data["dimensions"], where=f"{where}.dimensions", row_validator=dimension_row)
-        issues += found
-        for dimension_id, row in dimension_ids.items():
-            issues += check_fk(
-                [row.get("feature_id")] if isinstance(row.get("feature_id"), str) else None,
-                field="feature_id",
-                where=f"{where}.dimensions[{dimension_id}]",
-                known=feature_ids,
-                known_label="feature",
-            )
-    if "open_questions" in data:
-        found, _ = check_rows(data["open_questions"], where=f"{where}.open_questions", row_validator=question_row)
-        issues += found
-    if "reference_round_trip" in data:
-        found, _ = check_rows(
-            data["reference_round_trip"], where=f"{where}.reference_round_trip", row_validator=round_trip_row
-        )
-        issues += found
-
-    index = {
-        "feature_ids": feature_ids,
-        "dimension_ids": dimension_ids,
-        "datum_ids": datum_ids,
-        "source_ids": source_ids,
-    }
-    return issues, index
 
 
 # =============================================================================
@@ -615,130 +402,6 @@ def validate_print_plan(
     }
     return issues, index
 
-
-# =============================================================================
-# verification_report
-# =============================================================================
-
-
-def validate_verification_report(
-    data: dict[str, Any],
-    *,
-    where: str = "verification_report",
-    feature_ids: dict[str, Any] | None = None,
-) -> tuple[list[Issue], dict[str, Any]]:
-    issues: list[Issue] = []
-    issues += _check_contract_header(
-        data, contract_key="verification-report", expected_owner="verifier", where=where
-    )
-    issues += check_object_fields(
-        data,
-        required={
-            "contract": str,
-            "contract_version": int,
-            "job_id": str,
-            "revision": int,
-            "owner": str,
-            "status": str,
-            "candidate_id": str,
-            "candidate_stl_sha256": str,
-            "dimensions_revision": int,
-            "print_plan_revision": int,
-            "reference_sha256": str,
-            "fresh_context": bool,
-            "updated_utc": str,
-        },
-        optional={"checks": list, "defects": list, "verdict": str},
-        where=where,
-    )
-    issues += check_enum(data, "status", VERIFICATION_STATUS, where)
-    if data.get("fresh_context") is False:
-        issues.append(
-            error(
-                "STALE_VERIFIER_CONTEXT",
-                f"{where}.fresh_context",
-                "fresh_context must be true: a verifier must not reuse a prior context",
-            )
-        )
-    for hash_field in ("candidate_stl_sha256", "reference_sha256"):
-        if isinstance(data.get(hash_field), str) and not is_hash_format(data[hash_field]):
-            issues.append(error("BAD_HASH", f"{where}.{hash_field}", "must be 64 lowercase hex characters"))
-
-    def check_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={"id": str, "method": str, "result": str},
-            optional={"numeric_result": NULLABLE_NUMBER, "visual_observation": str, "evidence": str},
-            where=row_where,
-        )
-        if row.get("id") is not None and row.get("id") not in CHECK_IDS:
-            found.append(error("BAD_ENUM", f"{row_where}.id", f"must be one of {sorted(CHECK_IDS)}"))
-        found += check_enum(row, "result", CHECK_RESULT, row_where)
-        return found
-
-    def defect_row(row: dict[str, Any], row_where: str) -> list[Issue]:
-        found = check_object_fields(
-            row,
-            required={
-                "id": str,
-                "owning_loop": str,
-                "expected_vs_observed": str,
-                "evidence": str,
-                "required_acceptance_condition": str,
-            },
-            optional={"feature_ids": list, "check_ids": list},
-            where=row_where,
-        )
-        if feature_ids is not None:
-            found += check_fk(
-                row.get("feature_ids"), field="feature_ids", where=row_where, known=feature_ids, known_label="feature"
-            )
-        check_ids_dict = {check_id: None for check_id in CHECK_IDS}
-        found += check_fk(
-            row.get("check_ids"), field="check_ids", where=row_where, known=check_ids_dict, known_label="check"
-        )
-        return found
-
-    checks_ids: dict[str, Any] = {}
-    defect_ids: dict[str, Any] = {}
-    if "checks" in data:
-        found, checks_ids = check_rows(data["checks"], where=f"{where}.checks", row_validator=check_row)
-        issues += found
-    if "defects" in data:
-        found, defect_ids = check_rows(data["defects"], where=f"{where}.defects", row_validator=defect_row)
-        issues += found
-
-    if data.get("status") == "PASS" and "checks" in data:
-        present = {check.get("id") for check in data["checks"] if isinstance(check, dict)}
-        missing = sorted(CHECK_IDS - present)
-        if missing:
-            issues.append(
-                error(
-                    "INCOMPLETE_SEVEN_CHECKS",
-                    f"{where}.checks",
-                    f"status is PASS but checks {missing} are missing",
-                )
-            )
-        failing = sorted(
-            check.get("id")
-            for check in data["checks"]
-            if isinstance(check, dict) and check.get("result") == "FAIL"
-        )
-        if failing:
-            issues.append(
-                error(
-                    "INCOMPLETE_SEVEN_CHECKS",
-                    f"{where}.checks",
-                    f"status is PASS but checks {failing} recorded FAIL",
-                )
-            )
-    if data.get("status") == "REJECT" and not data.get("defects"):
-        issues.append(
-            error("REJECT_NEEDS_DEFECTS", f"{where}.defects", "status is REJECT but no defects were recorded")
-        )
-
-    index = {"check_ids": checks_ids, "defect_ids": defect_ids}
-    return issues, index
 
 
 # =============================================================================

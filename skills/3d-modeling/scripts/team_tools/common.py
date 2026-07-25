@@ -147,6 +147,60 @@ def _check_finite_inner(value: Any, where: str, issues: list[Issue]) -> None:
         return
 
 
+_FRONTMATTER_TRUE = {"true", "yes"}
+_FRONTMATTER_FALSE = {"false", "no"}
+
+
+def _coerce_scalar(raw: str) -> Any:
+    lowered = raw.lower()
+    if lowered in _FRONTMATTER_TRUE:
+        return True
+    if lowered in _FRONTMATTER_FALSE:
+        return False
+    for cast in (int, float):
+        try:
+            return cast(raw)
+        except ValueError:
+            continue
+    return raw
+
+
+def load_markdown_contract(path: Path, *, where: str) -> dict[str, Any]:
+    """Load the YAML frontmatter of a Markdown contract as a flat mapping.
+
+    Four of the five v4 contracts are authored as Markdown -- the body is
+    provenance, uncertainty and open questions written for the next agent to
+    read, which no schema can usefully check. But every field the tooling
+    *binds* on already sits in the frontmatter: ``revision``,
+    ``dimensions_revision``, ``print_plan_revision``, ``reference_sha256``,
+    ``candidate_stl_sha256``. Reading it here is what lets the revision- and
+    hash-binding checks run against the files the pipeline actually writes,
+    instead of a JSON mirror no role is told to author.
+
+    Flat scalars only, deliberately: no lists, no nesting, no YAML dependency
+    (this package stays on stdlib + trimesh + numpy). Anything structured
+    belongs either in the body as prose or in one of the JSON contracts.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContractError(f"{where}: cannot read {path}: {exc}") from exc
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ContractError(f"{where}: {path} has no frontmatter block (expected '---' on line 1)")
+    data: dict[str, Any] = {}
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
+            return data
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, separator, raw = stripped.partition(":")
+        if separator:
+            data[key.strip()] = _coerce_scalar(raw.strip())
+    raise ContractError(f"{where}: {path} frontmatter block is not terminated by '---'")
+
+
 def load_json_object(path: Path, *, where: str) -> Any:
     """Load a JSON file. Raises ContractError for anything that is not readable,
     parseable JSON, or is not a JSON object at the top level. Individual field

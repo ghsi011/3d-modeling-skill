@@ -412,17 +412,20 @@ project directory validates `PASS` with exit `0` and an empty `validated_paths`.
 must therefore name what the phase requires:
 
 ```bash
-python -m team_tools.contracts validate <project-dir> --require artifact_manifest
+python -m team_tools.contracts validate <project-dir> --require all
 ```
 
 `--require` promotes each named contract's absence to a `REQUIRED_CONTRACT_MISSING` error, so
 the exit code alone becomes a sound gate, and the names land in the receipt's
-`required_contracts` for review. Require `artifact_manifest` — the one contract this document
-defines as JSON-authoritative. The other four are authored as Markdown; their JSON mirrors are
-optional, so `--require all` rejects a project built exactly to this contract. Name a wider
-subset only in a project that does maintain the mirrors. Either way the verifier confirms the
+`required_contracts` for review. At Phase 4 every contract should exist, so name them all;
+earlier phases name the subset that phase requires. Either way the verifier confirms the
 receipt's `validated_paths` names every contract it expected. (A project directory that does
 not exist is a hard exit `2` — a typo can never read as a pass.)
+
+The four Markdown contracts are read through their **frontmatter**, which is where identity,
+`revision`, and the binding hashes live; the body is provenance and open questions written for
+the next agent, and is deliberately not schema-checked. `artifact_manifest.json` and a JSON
+`print_plan.json`, being machine-authored, additionally get a full structural validator.
 
 ## `verification_report.md`
 

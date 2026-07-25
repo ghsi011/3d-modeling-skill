@@ -407,164 +407,6 @@ class HashFormatTest(unittest.TestCase):
             self.assertTrue(C.is_hash_format(value), value)
         for value in bad:
             self.assertFalse(C.is_hash_format(value), value)
-
-
-# ---------------------------------------------------------------------------
-# validators.py: job_state
-# ---------------------------------------------------------------------------
-
-
-class JobStateValidatorTest(unittest.TestCase):
-    def test_normal_pass(self) -> None:
-        # _JOB_STATE carries no risk_class, so this is also the backward-compat
-        # proof that the field stays optional -- keep it out of the fixture.
-        issues, index = V.validate_job_state(clone(_JOB_STATE))
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-        self.assertIn("M1", index["gate_ids"])
-
-    def test_second_structurally_different_fixture_passes(self) -> None:
-        alt = clone(_JOB_STATE)
-        alt.update({"profile": "FULL", "state": "BLOCKED", "backend": "freecad"})
-        alt["dispatches"] = []
-        alt["gates"] = []
-        issues, _ = V.validate_job_state(alt)
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-
-    def test_malformed_missing_required_field(self) -> None:
-        broken = clone(_JOB_STATE)
-        del broken["backend"]
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("MISSING_FIELD@job_state.backend", issue_ids(issues))
-
-    def test_malformed_wrong_type(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["revision"] = "five"
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("BAD_TYPE@job_state.revision", issue_ids(issues))
-
-    def test_bad_enum_named_exactly(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["state"] = "NOT_A_REAL_STATE"
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("BAD_ENUM@job_state.state", issue_ids(issues))
-
-    def test_backend_enum_accepts_build123d_and_rejects_unknown(self) -> None:
-        accepted = clone(_JOB_STATE)
-        accepted["backend"] = "build123d"
-        accepted_issues, _ = V.validate_job_state(accepted)
-        self.assertEqual([], [i for i in accepted_issues if i.severity == "error"], accepted_issues)
-
-        broken = clone(_JOB_STATE)
-        broken["backend"] = "not-a-real-backend"
-        broken_issues, _ = V.validate_job_state(broken)
-        self.assertIn("BAD_ENUM@job_state.backend", issue_ids(broken_issues))
-
-    def test_duplicate_gate_ids_rejected(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["gates"].append(clone(broken["gates"][0]))
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("DUPLICATE_ID@job_state.gates", issue_ids(issues))
-
-    def test_unknown_field_warns_not_errors(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["totally_unrecognized_field"] = "surprise"
-        issues, _ = V.validate_job_state(broken)
-        matching = [i for i in issues if i.id == "UNKNOWN_FIELD@job_state.totally_unrecognized_field"]
-        self.assertEqual(1, len(matching))
-        self.assertEqual("warning", matching[0].severity)
-
-    def test_unsupported_contract_version_rejected(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["contract_version"] = 99
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("UNSUPPORTED_CONTRACT_VERSION@job_state.contract_version", issue_ids(issues))
-
-    def test_risk_class_valid_value_passes(self) -> None:
-        for value in sorted(V.RISK_CLASS):
-            with_class = clone(_JOB_STATE)
-            with_class["risk_class"] = value
-            with_class["risk_class_rationale"] = "sustained load on a printed bracket"
-            issues, _ = V.validate_job_state(with_class)
-            self.assertEqual([], [i for i in issues if i.severity == "error"], (value, issues))
-
-    def test_risk_class_bad_value_rejected(self) -> None:
-        broken = clone(_JOB_STATE)
-        broken["risk_class"] = "R4_MADE_UP"
-        issues, _ = V.validate_job_state(broken)
-        self.assertIn("BAD_ENUM@job_state.risk_class", issue_ids(issues))
-
-
-# ---------------------------------------------------------------------------
-# validators.py: dimensions
-# ---------------------------------------------------------------------------
-
-
-class DimensionsValidatorTest(unittest.TestCase):
-    def test_normal_pass(self) -> None:
-        issues, index = V.validate_dimensions(clone(_DIMENSIONS))
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-        self.assertIn("F01", index["feature_ids"])
-
-    def test_second_structurally_different_fixture_passes(self) -> None:
-        alt = clone(_DIMENSIONS)
-        alt["status"] = "DRAFT"
-        alt["features"][0]["confidence"] = "D"
-        alt["reference_round_trip"] = []
-        issues, _ = V.validate_dimensions(alt)
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-
-    def test_malformed_missing_tolerance_response(self) -> None:
-        broken = clone(_DIMENSIONS)
-        del broken["dimensions"][0]["tolerance_response"]
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("MISSING_FIELD@dimensions.dimensions[M01].tolerance_response", issue_ids(issues))
-
-    def test_fk_missing_feature_named_exactly(self) -> None:
-        broken = clone(_DIMENSIONS)
-        broken["dimensions"][0]["feature_id"] = "F99-does-not-exist"
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("FK_MISSING@dimensions.dimensions[M01].feature_id[0]", issue_ids(issues))
-        matching = [i for i in issues if i.code == "FK_MISSING"][0]
-        self.assertIn("F99-does-not-exist", matching.message)
-
-    def test_source_needs_sha256_or_access_date(self) -> None:
-        broken = clone(_DIMENSIONS)
-        del broken["sources"][0]["sha256"]
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("MISSING_FIELD@dimensions.sources[S1].sha256", issue_ids(issues))
-
-    def test_bad_hash_format_named_exactly(self) -> None:
-        broken = clone(_DIMENSIONS)
-        broken["sources"][0]["sha256"] = "not-64-hex-chars"
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("BAD_HASH@dimensions.sources[S1].sha256", issue_ids(issues))
-
-    def test_evidence_path_traversal_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            broken = clone(_DIMENSIONS)
-            broken["sources"][0]["evidence_path"] = "../outside.md"
-            issues, _ = V.validate_dimensions(broken, project_dir=project_dir)
-            self.assertIn("BAD_PATH@dimensions.sources[S1].evidence_path", issue_ids(issues))
-
-    def test_duplicate_feature_ids_rejected(self) -> None:
-        broken = clone(_DIMENSIONS)
-        broken["features"].append(clone(broken["features"][0]))
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("DUPLICATE_ID@dimensions.features", issue_ids(issues))
-
-    def test_bad_confidence_enum(self) -> None:
-        broken = clone(_DIMENSIONS)
-        broken["features"][0]["confidence"] = "Z"
-        issues, _ = V.validate_dimensions(broken)
-        self.assertIn("BAD_ENUM@dimensions.features[F01].confidence", issue_ids(issues))
-
-
-# ---------------------------------------------------------------------------
-# validators.py: print_plan
-# ---------------------------------------------------------------------------
-
-
 class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
         issues, index = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
@@ -640,100 +482,34 @@ class PrintPlanValidatorTest(unittest.TestCase):
             stale = [r for r in rows if r["contract"] == "PRINT_PLAN" and r["status"] == "STALE"]
             self.assertEqual(1, len(stale), rows)
             self.assertIn("bound to dimensions r2, current r7", stale[0]["detail"])
-
-
 # ---------------------------------------------------------------------------
-# validators.py: verification_report
+# Project fixtures
 # ---------------------------------------------------------------------------
 
 
-class VerificationReportValidatorTest(unittest.TestCase):
-    def test_normal_pass(self) -> None:
-        issues, index = V.validate_verification_report(clone(_VERIFICATION_REPORT), feature_ids={"F01": {}})
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-        self.assertEqual(7, len(index["check_ids"]))
-
-    def test_second_structurally_different_fixture_reject_with_defect(self) -> None:
-        alt = clone(_VERIFICATION_REPORT)
-        alt["status"] = "REJECT"
-        alt["verdict"] = "REJECT to CANDIDATE_BUILD"
-        alt["checks"][6]["result"] = "FAIL"
-        alt["defects"] = [
-            {
-                "id": "DEF-01",
-                "owning_loop": "CANDIDATE_BUILD",
-                "feature_ids": ["F01"],
-                "check_ids": ["7"],
-                "expected_vs_observed": "expected zero out-of-limit area; observed 4.2mm2",
-                "evidence": "support_audit.json",
-                "required_acceptance_condition": "zero out-of-limit area on rerun",
-            }
-        ]
-        issues, _ = V.validate_verification_report(alt, feature_ids={"F01": {}})
-        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-
-    def test_malformed_missing_fresh_context(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        del broken["fresh_context"]
-        issues, _ = V.validate_verification_report(broken)
-        self.assertIn("MISSING_FIELD@verification_report.fresh_context", issue_ids(issues))
-
-    def test_stale_verifier_context_rejected(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        broken["fresh_context"] = False
-        issues, _ = V.validate_verification_report(broken)
-        self.assertIn("STALE_VERIFIER_CONTEXT@verification_report.fresh_context", issue_ids(issues))
-
-    def test_adversarial_non_finite_numeric_result(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        broken["checks"][0]["numeric_result"] = float("nan")
-        finite_issues = C.check_finite(broken, "verification_report")
-        self.assertIn(
-            "NON_FINITE@verification_report.checks[0].numeric_result", issue_ids(finite_issues)
-        )
-
-    def test_pass_status_requires_all_seven_checks(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        broken["checks"] = broken["checks"][:6]  # drop check 7
-        issues, _ = V.validate_verification_report(broken)
-        self.assertIn("INCOMPLETE_SEVEN_CHECKS@verification_report.checks", issue_ids(issues))
-
-    def test_reject_status_requires_defects(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        broken["status"] = "REJECT"
-        issues, _ = V.validate_verification_report(broken)
-        self.assertIn("REJECT_NEEDS_DEFECTS@verification_report.defects", issue_ids(issues))
-
-    def test_defect_fk_missing_feature_and_check(self) -> None:
-        broken = clone(_VERIFICATION_REPORT)
-        broken["status"] = "REJECT"
-        broken["defects"] = [
-            {
-                "id": "DEF-01",
-                "owning_loop": "x",
-                "feature_ids": ["F-GHOST"],
-                "check_ids": ["9"],
-                "expected_vs_observed": "x",
-                "evidence": "x",
-                "required_acceptance_condition": "x",
-            }
-        ]
-        issues, _ = V.validate_verification_report(broken, feature_ids={"F01": {}})
-        self.assertIn("FK_MISSING@verification_report.defects[DEF-01].feature_ids[0]", issue_ids(issues))
-        self.assertIn("FK_MISSING@verification_report.defects[DEF-01].check_ids[0]", issue_ids(issues))
-
-
-# ---------------------------------------------------------------------------
-# validators.py + manifest_checks.py: artifact_manifest
-# ---------------------------------------------------------------------------
-
-
-def _write_project(project_dir: Path, **contracts) -> None:
+def _write_project(project_dir: Path, *, as_markdown: bool = False, **contracts) -> None:
+    """Write contract fixtures as the JSON mirror, or (``as_markdown``) as the
+    Markdown the roles actually author, with the fixture's scalars as
+    frontmatter. Both are legal sources; the tests exercise each.
+    """
     project_dir.mkdir(parents=True, exist_ok=True)
-    for key, filename in V.CANONICAL_FILENAMES.items():
-        if key in contracts and contracts[key] is not None:
-            (project_dir / filename).write_text(
-                json.dumps(contracts[key], sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    for key, filenames in V.CANONICAL_FILENAMES.items():
+        if key not in contracts or contracts[key] is None:
+            continue
+        data = contracts[key]
+        markdown_name = next((n for n in filenames if n.endswith(".md")), None)
+        if as_markdown and markdown_name:
+            scalars = "\n".join(
+                f"{k}: {'true' if v is True else 'false' if v is False else v}"
+                for k, v in data.items()
+                if isinstance(v, (str, int, float, bool))
+            )
+            body = f"---\n{scalars}\n---\n\n# {key}\n\nBody prose is not schema-checked.\n"
+            (project_dir / markdown_name).write_text(body, encoding="utf-8")
+        else:
+            json_name = next(n for n in filenames if n.endswith(".json"))
+            (project_dir / json_name).write_text(
+                json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8"
             )
 
 
@@ -1024,18 +800,51 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             self.assertIn("does NOT prove geometric or manufacturing correctness", receipt["disclaimer"])
             self.assertEqual(C.DEFAULT_TIMESTAMP, receipt["timestamp"])
 
-    def test_missing_contract_file_is_a_warning_not_a_crash(self) -> None:
+    def test_absent_contract_is_silent_and_recorded_in_validated_paths(self) -> None:
+        """An early-phase project holds only what its phase produced, so absence
+        is not a finding. It used to raise four warnings on every correct run --
+        on the same channel that carries POSSIBLE_UNIT_SCALE_MISMATCH, which the
+        verifier must actually read. What was read is recorded instead.
+        """
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
             _write_project(project_dir, job_state=clone(_JOB_STATE))
             receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
-            self.assertIn("MISSING_CONTRACT_FILE@dimensions", receipt["warning_ids"])
+            self.assertEqual([], receipt["warning_ids"])
+            self.assertEqual([], receipt["error_ids"])
+            self.assertEqual(["job_state.json"], receipt["validated_paths"])
             self.assertEqual("fixed", receipt["timestamp"])
+
+    def test_markdown_contract_is_read_from_frontmatter(self) -> None:
+        """The roles author Markdown. Its frontmatter carries identity, revision
+        and the binding hashes, so it validates like the JSON mirror does.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            _write_project(project_dir, as_markdown=True, job_state=clone(_JOB_STATE),
+                           dimensions=clone(_DIMENSIONS))
+            receipt, project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertEqual("PASS", receipt["results"]["overall"], receipt["issues"])
+            self.assertEqual([], receipt["error_ids"])
+            self.assertEqual(["dimensions.md", "job_state.md"], receipt["validated_paths"])
+            self.assertEqual("markdown", project.files["dimensions"].source_format)
+            # The binding field the staleness checks compare survived the parse.
+            self.assertEqual(1, project.files["dimensions"].data["revision"])
+
+    def test_markdown_contract_with_a_bad_header_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            broken = clone(_DIMENSIONS)
+            del broken["revision"]
+            _write_project(project_dir, as_markdown=True, dimensions=broken)
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertIn("MISSING_FIELD@dimensions.revision", receipt["error_ids"])
+            self.assertEqual("FAIL", receipt["results"]["overall"])
 
     def test_required_contract_absence_is_an_error_not_a_warning(self) -> None:
         """A caller gating on validate must be able to say which contracts its
-        phase requires; absence stays a warning for everything it did not name,
-        so an early-phase project still validates.
+        phase requires; everything it did not name stays silent, so an
+        early-phase project still validates.
         """
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
@@ -1047,9 +856,10 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             self.assertEqual("FAIL", receipt["results"]["dimensions"])
             self.assertEqual("FAIL", receipt["results"]["overall"])
             self.assertEqual(["dimensions"], receipt["required_contracts"])
-            # Not named -> still only a warning, and its own result stays PASS.
-            self.assertIn("MISSING_CONTRACT_FILE@print_plan", receipt["warning_ids"])
+            # A contract the caller did not name is simply absent: no issue at
+            # all, and its own result stays PASS.
             self.assertEqual("PASS", receipt["results"]["print_plan"])
+            self.assertEqual([], receipt["warning_ids"])
 
     def test_required_contract_present_validates_clean(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

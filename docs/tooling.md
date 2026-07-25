@@ -122,7 +122,8 @@ Exit codes:
 Module: [`skills/3d-modeling/scripts/team_tools/contracts.py`](../skills/3d-modeling/scripts/team_tools/contracts.py)
 
 Run from `skills/3d-modeling/scripts/`, or put that directory on `PYTHONPATH`.
-This package validates the structured JSON mirror of the v4 team contracts.
+This package validates the v4 team contracts: the four Markdown ones through their
+frontmatter (identity, revision, binding hashes), and the JSON ones structurally.
 Passing it proves contract structure, identifiers, declared hashes, and revision
 bindings only. It doesn't prove geometric or manufacturing correctness.
 
@@ -135,9 +136,11 @@ python -m team_tools.contracts validate path/to/project [--require CONTRACT] [--
 
 Inputs:
 
-* Project directory containing the contract JSON files. A directory that does
-  not exist is a filesystem error (exit `2`), never a project whose contracts
-  all happen to be missing.
+* Project directory containing the contracts. Each is looked up as Markdown
+  first (`dimensions.md`), then a JSON mirror (`dimensions.json`) if one
+  exists; `artifact_manifest.json` is JSON-only. A directory that does not
+  exist is a filesystem error (exit `2`), never a project whose contracts all
+  happen to be missing.
 * Optional `--require`, naming contracts whose absence is an **error** rather
   than a warning: `job_state`, `dimensions`, `print_plan`,
   `verification_report`, `artifact_manifest`, or `all`. Repeatable and
@@ -161,13 +164,13 @@ Exit codes:
 * `2`, a contract loader or filesystem error prevented validation, including a
   missing project directory or an unknown `--require` name.
 
-Absence is a warning by default, on purpose: mid-pipeline a project legitimately
+Absence is silent by default, on purpose: mid-pipeline a project legitimately
 holds only the contracts its phase has produced, so a blanket error would make
-`validate` unusable before Phase 4. Each missing file is recorded as a
-`MISSING_CONTRACT_FILE` warning, its per-contract result stays `PASS`, and
-`results.overall` stays `PASS` — so **a bare `validate` on a project holding no
-contracts at all exits `0`**. The exit code alone proves that nothing which was
-read was rejected; it does not prove anything was read.
+`validate` unusable before Phase 4 — and a warning on every correct run trains
+its reader to skim the channel that also carries `POSSIBLE_UNIT_SCALE_MISMATCH`.
+So **a bare `validate` on a project holding no contracts at all exits `0`**. The
+exit code alone proves that nothing which was read was rejected; it does not
+prove anything was read. `validated_paths` records exactly what was.
 
 Anything gating on this command must therefore say what it expects, either by
 passing `--require` (absence becomes `REQUIRED_CONTRACT_MISSING`, an error, and

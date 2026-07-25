@@ -6,6 +6,38 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — contracts are validated where they are actually written
+
+`team_tools` validated JSON exclusively, but v4 defines four of the five contracts
+as Markdown and no role is told anywhere to author a JSON mirror. So 393 lines of
+validator schema-checked files the pipeline never creates, `validate` reported
+four `MISSING_CONTRACT_FILE` warnings on every correct run, and `--require all`
+rejected a project built exactly to the contract.
+
+The binding fields were in the Markdown all along: `revision`,
+`dimensions_revision`, `print_plan_revision`, `reference_sha256`,
+`candidate_stl_sha256` all live in the frontmatter. Each contract is now looked up
+as Markdown first, then a JSON mirror if one exists, and:
+
+- **Markdown** gets `validate_contract_header` — identity, version, owner, `job_id`,
+  and the integer `revision` the staleness and binding checks compare. Its body is
+  provenance, uncertainty and open questions written for the next agent to read;
+  a validator walking those rows could only ever confirm that prose is prose.
+- **JSON** (`artifact_manifest.json`, a machine-authored `print_plan.json`)
+  additionally gets its full structural validator, unchanged.
+- `validate_job_state`, `validate_dimensions` and `validate_verification_report`
+  are deleted (−393 lines, plus their tests).
+- `MISSING_CONTRACT_FILE` is gone. It fired on every correct run, on the same
+  `warning_ids` channel that carries `POSSIBLE_UNIT_SCALE_MISMATCH` — which the
+  verifier is required to act on. A benchmark designer run called those warnings
+  "expected", which is precisely the habit worth not teaching. `validated_paths`
+  already records what was read.
+
+Verified against a real agent-produced project: `validate` now reads
+`dimensions.md`, `job_state.md` and `artifact_manifest.json` with zero warnings,
+`status` reports revisions from the Markdown, and `--require all` passes a
+five-contract Markdown project. The verifier role is back to `--require all`.
+
 ### Removed — streamlining pass (net −1,534 lines, 16,767 → 15,237)
 
 A six-axis review (docs prose, skill/role text, Python, gate value, repo hygiene,

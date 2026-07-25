@@ -93,12 +93,11 @@ overlays, and issue a concrete file-contract verdict.
    JSON or infer contacts from an isometric view.
 8. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
    intended bodies, units, and no missing or stray components. Independently run
-   `python -m team_tools.contracts validate <project-dir> --require artifact_manifest` (from
+   `python -m team_tools.contracts validate <project-dir> --require all` (from
    `skills/3d-modeling/scripts/`); require exit code 0. `--require` is load-bearing, not
-   decoration: without it a missing contract is only a warning, so a typo'd path or a project
-   with no manifest at all exits 0 and reads as a pass. Require only `artifact_manifest` —
-   it is the one contract v4 defines as JSON-authoritative; the other four are Markdown and
-   their JSON mirrors are optional, so `--require all` rejects a correctly built project. Treat any `UNIT_SCALE_MISMATCH` —
+   decoration: without it an absent contract is silent, so a typo'd path or a project missing
+   the manifest entirely exits 0 and reads as a pass. At Phase 4 every contract should exist,
+   so name them all; earlier phases name the subset that phase requires. Treat any `UNIT_SCALE_MISMATCH` —
    the hard 25.4x inch/mm bbox check between the declared manifest and the re-imported STL —
    as a hard `UNIT_SCALE` reject, never a warning to note and pass. A
    `POSSIBLE_UNIT_SCALE_MISMATCH` warning still needs an explicit agent judgment call before
