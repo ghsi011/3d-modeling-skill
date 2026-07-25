@@ -37,10 +37,15 @@ render-over-photo overlays.
 
 1. Preserve original images and inspect them at useful zoom; annotate which visible edge
    corresponds to which feature. Note **where the caliper jaws sit**: an overall-envelope
-   dimension must be read at a flat, representative region — a read taken across or beside a
-   raised feature (button, camera bar, corner radius, lip) is biased and is evidence for that
-   local feature, not the envelope. Prefer the flat-region read as nominal and flag near-feature
-   reads; corroborate against an official spec when the product is known.
+   dimension must be read clear of raised features — a read taken across or beside a button,
+   camera bar, corner radius or lip is biased and is evidence for that local feature, not the
+   envelope. **On a rounded-edge part the envelope is not at a flat face.** A phone, a knob, a
+   bottle: the widest section sits part-way through the thickness, and jaws seated on the
+   curved shoulder read *under* the true width while the same curvature inflates the thickness
+   read. Take each envelope dimension at two or more heights through the part and record the
+   largest, saying at what height it occurred; a monotonic drift across those reads means the
+   jaws were on the curve, not the envelope. Corroborate against an official spec when the
+   product is known.
 2. For a known product, search official specifications and existing 3D models first, then
    reconcile them with the supplied photos and calipers.
 3. Define axis directions, named primary/secondary/tertiary datums, and the zero origin.
@@ -57,6 +62,14 @@ render-over-photo overlays.
    metrologist does not choose clearance, interference, or contact intent.
 6. Never silently average conflicts or convert an assumed visual proportion into a measured
    fact. Put unresolved conflicts in open questions with their downstream effect.
+   **A caliper read and a published spec are both fallible** — the part may not be the exact
+   variant, may carry a film or case, or may be measured off-axis; the spec may be nominal,
+   rounded, or for a different revision. So a conflict on a fit-critical dimension is never
+   resolved by preferring one source on principle. Report it to the user and ask: state both
+   values, which datum each was taken from, the size and direction of the gap, and what it
+   changes downstream. Say what you would use absent an answer and why. Do not hand the sheet
+   on as ACCEPTED with a fit-critical conflict open — a DRAFT that stalls the pipeline in
+   silence costs more than one question.
 7. Mark the minimum set of blocking unknowns that prevents reference construction.
 8. After the designer builds the mating reference blind from the sheet, render matching
    photo viewpoints, make one decisive crop/overlay per fit-critical view, and inspect each
