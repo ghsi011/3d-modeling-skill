@@ -114,8 +114,19 @@ and it decides which phases run, not how verbose the record is.
 
   Calling a template with numbers off the sheet is not authoring geometry, so the charter's
   rule still holds: you are choosing parameters, and the template owns the shape. The moment
-  that stops being true — no template fits, a backend kernel is needed, anything mates, or the
-  class is above `R1` — it is not a `DIRECT` job. Re-route to `FITTED` and dispatch properly.
+  that stops being true — no template fits, a backend kernel is needed, or the class is above
+  `R1` — it is not a `DIRECT` job. Re-route to `FITTED` and dispatch properly.
+
+  **"It touches something" is not the test.** Almost every part touches something, and reading
+  contact as mating sends every job to `FITTED`; one run spent 6.65 minutes reaching "blocked"
+  on exactly that reading of a cable clip. The question is narrower: **does acceptance depend
+  on a dimension you do not get to choose?** A clip closing over a cable bundle does not — you
+  pick the mouth gap, and a gap that grips is correct by construction whatever the bundle
+  measures. A cradle for a specific phone does — the phone's width is what it is, and a part
+  that disagrees with it is scrap. The first is `DIRECT`; the second is `FITTED` and needs a
+  measured band, a coupon and an acceptance method, none of which the built-in plan carries.
+  When the answer is genuinely unclear, route to `FITTED`: a wasted dispatch costs minutes,
+  and an unbanded fit costs a reprint.
 
   **What this route does not have, said plainly.** No fresh context ever looks at the part.
   That has caught two candidates which passed every deterministic check and were still wrong:
@@ -137,6 +148,17 @@ and it decides which phases run, not how verbose the record is.
 - **`FULL`** — multiple parts, moving or mating interfaces between printed parts, `R2`/`R3`,
   multi-colour alignment, or parallel candidates. Every phase, plus `FINAL_PREP_REVIEW` when
   required. Buy the time back with parallel candidate builds, not by skipping gates.
+
+  **`METROLOGY` is skipped when there is no evidence to reconcile** — no photographs, no
+  measurements, no real object, every design-driving dimension stated by the user or chosen by
+  the design itself. The metrologist's product is a reconciliation of sources; given one
+  source it can only transcribe, and a transcription dispatch costs the same four to six
+  minutes as a real one. Write `dimensions.md` yourself, with every row's provenance recorded
+  as stated-by-user or chosen-by-design and confidence graded accordingly, and say in
+  `job_state.md` that no metrologist was dispatched and why. A multi-part job with printed
+  parts mating *each other* is still this case: those interfaces are yours to choose, and the
+  print engineer bands them. The moment one photograph or one caliper reading enters the job,
+  dispatch — reconciling two sources is the work, and you are one of the sources.
 
 Classify toward the more complete profile when genuinely torn, and re-classify upward the
 moment new evidence changes the answer. The consequence class is independent: an `R2` single

@@ -74,8 +74,12 @@ no input and the orchestrator does the whole job in its own turns without dispat
 verification". `FITTED`: one measured real object, so the blind rebuild happens inside the
 candidate build and its overlay inside verification. `FULL`: multi-part/moving mechanisms,
 safety/load consequences, several independent interfaces, multi-colour alignment, or parallel
-candidates -- every phase runs. See [`../SKILL.md`](../SKILL.md) for the deciding question and
-the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run under every profile.
+candidates -- every phase runs, except that `METROLOGY` is skipped when the job carries no
+photographs, measurements or real object: the metrologist reconciles sources, and given one
+source it can only transcribe. The orchestrator then writes `dimensions.md` itself and records
+in `job_state.md` that no metrologist was dispatched. See [`../SKILL.md`](../SKILL.md) for the
+deciding question and the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run
+under every profile.
 
 `job_state.md`'s `## Route` section also records the job's consequence/risk class from the
 orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQUENCE` /
