@@ -234,3 +234,65 @@ def l_bracket_profile_marks(p: dict[str, Any]) -> dict[str, list[float]]:
     hole_r = float(p["hole_d"]) / 2.0
     centre = leg_a - float(p["hole_inset"])
     return {"z": [0.0, t, centre - hole_r, centre, centre + hole_r, leg_a]}
+
+
+# ---------------------------------------------------------------------------
+# Expected solid volume, per template, from the parameters alone
+# ---------------------------------------------------------------------------
+#
+# One scalar for the whole part, and the only screen here that does not need to
+# know *where* a defect is. A profile compares neighbouring samples, so a ledge
+# that lifts the level across twenty millimetres shows no step at all and walks
+# past it -- that is measured: a 24.9% ledge and a 45.8% rib both screened CLEAR.
+#
+# Volume is weak where the repo already knew it was weak: a deleted countersink
+# moves it 0.9%, under any usable band. It is strong exactly where the profile is
+# blind, which is why both exist.
+
+def c_clip_volume(p: dict[str, Any]) -> float:
+    flange_w, flange_d = float(p["flange_w"]), float(p["flange_d"])
+    flange_t, height = float(p["flange_t"]), float(p["height"])
+    bore_d, wall, gap = float(p["bore_d"]), float(p["wall"]), float(p["mouth_gap"])
+    screw_r = float(p["screw_d"]) / 2.0
+
+    outer_r, inner_r = bore_d / 2.0 + wall, bore_d / 2.0
+    annulus = math.pi * (outer_r ** 2 - inner_r ** 2)
+    mouth = _strip_of_disk(outer_r, gap) - _strip_of_disk(inner_r, gap)
+    flange = flange_w * flange_d - math.pi * screw_r ** 2
+    return flange * flange_t + (annulus - mouth) * height
+
+
+def box_shell_volume(p: dict[str, Any]) -> float:
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    ow, od = iw + 2.0 * wall, id_ + 2.0 * wall
+    return ow * od * floor + (ow * od - iw * id_) * ih
+
+
+def l_bracket_volume(p: dict[str, Any]) -> float:
+    width = float(p["width"])
+    leg_a, leg_b, t = float(p["leg_a"]), float(p["leg_b"]), float(p["thickness"])
+    hole_r = float(p["hole_d"]) / 2.0
+    # The two legs share the corner block, so the upright is counted above the
+    # flat leg only. Each loses one fastener hole: the flat one a cylinder through
+    # its thickness, the upright one a cylinder across its own.
+    flat = width * leg_b * t
+    upright = width * t * (leg_a - t)
+    holes = math.pi * hole_r ** 2 * t + math.pi * hole_r ** 2 * t
+    return flat + upright - holes
+
+
+def trim_ring_volume(p: dict[str, Any]) -> float:
+    hole_d, lip_w = float(p["hole_d"]), float(p["lip_w"])
+    panel_t, lip_t = float(p["panel_t"]), float(p["lip_t"])
+    wall, cham = float(p["wall"]), float(p["chamfer"])
+    bore_d, lip_outer = hole_d - 2.0 * wall, hole_d + 2.0 * lip_w
+
+    skirt = math.pi / 4.0 * (hole_d ** 2 - bore_d ** 2) * panel_t
+    lip = math.pi / 4.0 * (lip_outer ** 2 - bore_d ** 2) * lip_t
+    # A chamfer of side c around a circle of radius r removes the solid of
+    # revolution of a right triangle: Pappus gives area * 2*pi*centroid_radius.
+    outer_r = lip_outer / 2.0
+    chamfer_area = cham * cham / 2.0
+    centroid_r = outer_r - cham / 3.0
+    return skirt + lip - chamfer_area * 2.0 * math.pi * centroid_r

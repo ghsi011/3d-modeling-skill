@@ -74,10 +74,26 @@ class MeshAnalysisContext:
         window = trimesh.creation.box(extents=(span, span, SLAB_MM))
         centre = self.normalized.centroid
         window.apply_translation([float(centre[0]), float(centre[1]), float(z)])
-        solid = trimesh.boolean.intersection([self.normalized, window], engine="manifold")
-        if solid is None or solid.is_empty:
-            return 0.0
-        return float(solid.volume) / SLAB_MM
+        solid = self._intersect(window, where=f"the plane z={z:.3f}")
+        return 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+
+    def _intersect(self, window, *, where: str):
+        """Intersect, turning an engine refusal into a measurement failure.
+
+        manifold3d raises `Not all meshes are volumes!` on a mesh it cannot treat
+        as a solid. Left uncaught that ends the job in a traceback out of the CLI
+        -- no receipt, no final status, and a half-written project directory. A
+        part the engine cannot measure is a finding, and findings are written
+        down.
+        """
+        try:
+            return trimesh.boolean.intersection([self.normalized, window],
+                                                engine="manifold")
+        except ValueError as exc:
+            raise MeasurementFailed(
+                f"the boolean engine could not measure {where}: {exc}. The mesh is "
+                "not a closed solid, so nothing sectioned from it means anything."
+            ) from exc
 
     def window_area(self, *, z: float, at: tuple[float, float],
                     size: tuple[float, float]) -> float:
@@ -86,7 +102,7 @@ class MeshAnalysisContext:
         if key not in self._windows:
             window = trimesh.creation.box(extents=(float(size[0]), float(size[1]), SLAB_MM))
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
-            solid = trimesh.boolean.intersection([self.normalized, window], engine="manifold")
+            solid = self._intersect(window, where=f"the window at z={z:.3f}")
             if solid is None:
                 # Not "no material" -- "no answer". For a void check the two have
                 # the same numeric signature and opposite meanings, so returning
@@ -106,7 +122,7 @@ class MeshAnalysisContext:
             window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,
                                                height=SLAB_MM, sections=192)
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
-            solid = trimesh.boolean.intersection([self.normalized, window], engine="manifold")
+            solid = self._intersect(window, where=f"the disc at z={z:.3f}")
             self._windows[key] = (0.0 if solid is None or solid.is_empty
                                   else float(solid.volume) / SLAB_MM)
         return self._windows[key]
@@ -140,10 +156,8 @@ class MeshAnalysisContext:
         centre = list(self.normalized.centroid)
         centre[axis] = at
         window.apply_translation([float(v) for v in centre])
-        solid = trimesh.boolean.intersection([self.normalized, window], engine="manifold")
-        if solid is None or solid.is_empty:
-            return 0.0
-        return float(solid.volume) / SLAB_MM
+        solid = self._intersect(window, where=f"axis {axis} at {at:.3f}")
+        return 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
 
 
 def load(path: Path) -> MeshAnalysisContext:

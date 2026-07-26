@@ -63,6 +63,9 @@ class CertifiedTemplate:
     # otherwise have to guess, and guessing is how a broad screen becomes either
     # toothless or a nuisance.
     profile_marks: Callable[[dict[str, Any]], dict[str, list[float]]] = lambda p: {"z": []}
+    # Expected solid volume from the parameters. The one screen that does not
+    # need to know where a defect is.
+    volume: Callable[[dict[str, Any]], float] | None = None
     bodies: int = 1
 
     def rejects(self, params: dict[str, Any]) -> list[str]:
@@ -163,7 +166,7 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        "the screw would break out of the flange"),
         ),
         build=_clip_build, expectations=X.c_clip_expectations, bbox=X.c_clip_bbox,
-        profile_marks=X.c_clip_profile_marks,
+        profile_marks=X.c_clip_profile_marks, volume=X.c_clip_volume,
     )
 
     trim_ring = CertifiedTemplate(
@@ -188,7 +191,7 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        "the skirt would close the hole it lines"),
         ),
         build=_ring_build, expectations=X.trim_ring_expectations, bbox=X.trim_ring_bbox,
-        profile_marks=X.trim_ring_profile_marks,
+        profile_marks=X.trim_ring_profile_marks, volume=X.trim_ring_volume,
     )
     box_shell = CertifiedTemplate(
         name="box_shell", version="1.0.0", domain_id="box_shell@1.0.0/d1",
@@ -211,7 +214,7 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        "the walls would consume the cavity across"),
         ),
         build=_box_build, expectations=X.box_shell_expectations, bbox=X.box_shell_bbox,
-        profile_marks=X.box_shell_profile_marks,
+        profile_marks=X.box_shell_profile_marks, volume=X.box_shell_volume,
     )
 
     l_bracket = CertifiedTemplate(
@@ -247,7 +250,7 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        "a leg barely longer than it is thick is a block, not a bracket"),
         ),
         build=_bracket_build, expectations=X.l_bracket_expectations, bbox=X.l_bracket_bbox,
-        profile_marks=X.l_bracket_profile_marks,
+        profile_marks=X.l_bracket_profile_marks, volume=X.l_bracket_volume,
     )
 
     return {t.name: t for t in (c_clip, box_shell, l_bracket, trim_ring)}

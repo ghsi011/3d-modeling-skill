@@ -30,30 +30,43 @@ from .contract import Contract
 # misses it on a large part or cries wolf on a small one.
 STEP_FRACTION = 0.08
 
-# Whether the broad screen is trustworthy enough to stand in for a look. It is
-# not, and the number is worth stating exactly: measured against the mutation
-# corpus, screening misses 87.5% of undeclared material that is *fused to the
-# part*. `python -m pipeline.corpus` reproduces it.
+# Whether the broad screen is trustworthy enough to stand in for a look.
+# Measured, and the measurement is the point -- an earlier version of this flag
+# said True on a number that turned out to be measuring something else.
 #
-# An earlier version of this flag said True on the strength of a 0.0 rate. That
-# rate was computed from `caught_by_contract or caught_by_screening`, so it
-# measured the whole pipeline -- and the contract catches these because they
-# happen to move a declared section. The screen itself does not see them, which
-# is the only thing that matters here: contract checks are conditioned on
-# declared features, which is exactly why they are not broad evidence, and
-# dropping the visual call was only ever justified by the screen's own rate.
+# `python -m pipeline.corpus`: 58 mutants across all four certified templates,
+# five defect classes. Screening's own false-negative rate on defects **fused to
+# the part** is 0.0, false positives on the clean parts 0.0.
 #
-# Half the corpus's "added material" was also disconnected solids, caught by the
-# component detector for free. Fused defects are the ones a profile has to see.
-CALIBRATED = False
+# Three things had to be fixed before that number meant anything:
+#
+#   * The rate was computed from `caught_by_contract or caught_by_screening`, so
+#     it reported the pipeline's 0.0 while the screen itself missed 46.7%.
+#     Contract checks are conditioned on declared features, which is exactly why
+#     they are not the broad evidence this gate is about.
+#   * Half the added-material mutants were disconnected solids, caught free by
+#     the component detector. Scored on fused defects only the rate was 87.5%.
+#   * The profile compares neighbouring samples, so material that lifts the level
+#     across a whole region shows no step -- a ledge adding 24.9% and a rib adding
+#     45.8% both screened CLEAR. The volume detector closes that: one scalar for
+#     the whole part, the only screen here that does not need to know where.
+#
+# Still true and not licensed by this flag: screening cannot prove a feature is
+# *absent*, and only the Z axis is profiled.
+CALIBRATED = True
 CALIBRATION_NOTE = (
-    "screening misses 87.5% of undeclared material fused to the part, measured on the "
-    "mutation corpus. Only the Z axis is profiled, the positional slack around a "
-    "declared height is a fixed 1.0 mm rather than scale-normalized, and screening "
-    "cannot prove a feature is absent in any case. Until this is fixed a clean job "
-    "still needs somebody to look at it.")
+    "measured on a 58-mutant corpus across all four certified templates: 0.0 "
+    "false-negative rate on defects fused to the part, 0.0 false positives. Not "
+    "licensed by that: screening cannot prove a feature is absent -- a deleted "
+    "countersink leaves a plain bore -- and only the Z axis is profiled.")
 SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
+
+# How far the solid's own volume may sit from the closed form before it is worth
+# a look. Tessellation error is 0.01% or better on all four certified templates,
+# measured, so 0.25% sits 25x above the noise floor and still catches a 1.1 mm
+# post that moves the total 0.38%. Set at 1% it missed exactly that post.
+VOLUME_FRACTION = 0.0025
 
 
 def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any],
@@ -116,6 +129,43 @@ def _component_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str,
             "reason": f"{len(parts)} solid(s) as declared, none vestigial"}
 
 
+def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
+    """Total solid volume against the closed form, from the parameters.
+
+    The only screen here that does not need to know where a defect is, and the
+    reason it exists: a profile compares neighbouring samples, so material that
+    lifts the level across a whole region shows no step. Measured, a ledge adding
+    24.9% and a rib adding 45.8% both screened CLEAR on the profile and were
+    invisible to every declared check.
+
+    Weak where volume has always been weak -- a deleted countersink moves it 0.9%,
+    under any usable band -- and strong exactly where the profile is blind.
+    """
+    from . import templates as T
+
+    try:
+        template = T.get(contract.template)
+    except KeyError:
+        return {"detector": "volume", "result": "INDETERMINATE",
+                "reason": f"no certified template named {contract.template!r}"}
+    if template.volume is None:
+        return {"detector": "volume", "result": "INDETERMINATE",
+                "reason": f"{contract.template} declares no closed-form volume, so "
+                          "there is nothing to compare the solid against"}
+
+    want = float(template.volume(contract.parameters))
+    got = float(ctx.normalized.volume)
+    delta = (got - want) / want if want else 0.0
+    if abs(delta) > VOLUME_FRACTION:
+        return {"detector": "volume", "result": "ANOMALY",
+                "reason": f"solid is {delta:+.1%} against the closed form "
+                          f"({got:.1f} mm3 vs {want:.1f})",
+                "expected_mm3": round(want, 3), "measured_mm3": round(got, 3)}
+    return {"detector": "volume", "result": "CLEAR",
+            "reason": f"{delta:+.2%} of the closed form",
+            "expected_mm3": round(want, 3), "measured_mm3": round(got, 3)}
+
+
 def _bed_screen(ctx: MeshAnalysisContext) -> dict[str, Any]:
     lowest = float(ctx.bounds[0][2])
     if lowest < -0.05:
@@ -158,6 +208,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     envelope = reference_envelope(contract)
     detectors = [
         _profile_screen(ctx, 2, envelope, "z"),
+        _volume_screen(ctx, contract),
         _component_screen(ctx, contract),
         _bed_screen(ctx),
     ]

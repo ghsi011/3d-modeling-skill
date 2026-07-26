@@ -207,24 +207,34 @@ def run(request: JobRequest) -> JobResult:
     }
 
     # ---- one load, then everything reads it -------------------------------
-    mark = time.perf_counter()
-    ctx = analysis.load(built.stl_path)
-    timings["mesh_load"] = time.perf_counter() - mark
-    artifact["bbox_mm"] = {k: round(float(ctx.extents[i]), 4) for i, k in enumerate("xyz")}
+    # Wrapped as a whole. Only the build used to be, so a mesh the boolean engine
+    # refuses -- "Not all meshes are volumes!" -- ended the run in a traceback out
+    # of the CLI: no receipt, no final status, and a half-written directory. A
+    # part that cannot be measured is a finding, and findings get written down.
+    try:
+        mark = time.perf_counter()
+        ctx = analysis.load(built.stl_path)
+        timings["mesh_load"] = time.perf_counter() - mark
+        artifact["bbox_mm"] = {k: round(float(ctx.extents[i]), 4)
+                               for i, k in enumerate("xyz")}
 
-    mark = time.perf_counter()
-    report = commission.run(ctx, model_contract)
-    timings["commission"] = time.perf_counter() - mark
+        mark = time.perf_counter()
+        report = commission.run(ctx, model_contract)
+        timings["commission"] = time.perf_counter() - mark
 
-    mark = time.perf_counter()
-    screen = screening.run(ctx, model_contract)
-    report["screening"] = screen
-    timings["screening"] = time.perf_counter() - mark
+        mark = time.perf_counter()
+        screen = screening.run(ctx, model_contract)
+        report["screening"] = screen
+        timings["screening"] = time.perf_counter() - mark
 
-    mark = time.perf_counter()
-    witness = W.generate(ctx, model_contract, out / "witness", render=request.render)
-    report["witness"] = witness.as_dict()
-    timings["witness"] = time.perf_counter() - mark
+        mark = time.perf_counter()
+        witness = W.generate(ctx, model_contract, out / "witness", render=request.render)
+        report["witness"] = witness.as_dict()
+        timings["witness"] = time.perf_counter() - mark
+    except Exception as exc:                        # noqa: BLE001 - see above
+        written["artifact_manifest"] = _write(out / "artifact_manifest.json", artifact)
+        return JobResult(False, "measurement", f"{type(exc).__name__}: {exc}",
+                         written, timings, llm_calls, None)
 
     # Durations live in their own file, deliberately unhashed. Serializing them
     # into the manifest made every artifact byte-unstable, which broke the one

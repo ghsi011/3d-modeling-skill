@@ -45,7 +45,9 @@ SCREENING_CLASSES = frozenset({ADDED, DEBRIS})
 
 MAX_FALSE_NEGATIVE = 0.05
 MAX_FALSE_POSITIVE = 0.02
-MIN_TEMPLATES = 3
+# Every certified template, not a sample. A global flag covering a template the
+# corpus never saw is the same stale-True problem one level up.
+MIN_TEMPLATES = 4
 
 
 @dataclasses.dataclass
@@ -176,11 +178,25 @@ def c_clip_mutants(params: dict[str, Any], clean: trimesh.Trimesh) -> list[Mutan
 
 
 def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
-    """Defects any part can have, derived from its own bounding box.
+    """Defects any part can have, built to be hard rather than convenient.
 
-    Template-agnostic on purpose. The calibration gate asks whether the screens
-    work across templates, and a corpus hand-written per template measures how
-    well its author imagined that template's failures instead.
+    The first version of this corpus reported a 0.0 miss rate and a review broke
+    it in minutes. Three construction errors made the mutants easy, and all three
+    are corrected here:
+
+    * **Fused, not floating.** Bosses were placed at `hi[0] - r*0.5`, which on
+      two of three templates landed in empty space -- so they were separate
+      solids and the component detector caught them for free. Every added-material
+      mutant here is unioned into the part and asserted to leave one body.
+    * **Inside the envelope.** They protruded past the bounding box and tripped
+      the envelope check, which is a contract check, not a screen. These stay
+      within it.
+    * **Off the declared marks.** They sat exactly on a declared section plane,
+      so a `feature-*` row caught them. These are placed deliberately *between*
+      declared heights, where only a profile can see them.
+
+    A corpus whose defects are visible to the checks you are not measuring tells
+    you nothing about the check you are.
     """
     lo, hi = clean.bounds[0], clean.bounds[1]
     span = hi - lo
@@ -188,14 +204,26 @@ def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
     scale = float(min(span[0], span[1]))
     out: list[Mutant] = []
 
-    for frac in (0.04, 0.08, 0.16):
-        r = max(scale * frac, 0.5)
-        z = float(lo[2] + span[2] * 0.55)
-        boss = _cyl(r, float(span[2]) * 0.3, (float(hi[0]) - r * 0.5, cy, z))
-        out.append(Mutant("boss-%.0f%%-on-the-side" % (frac * 100), ADDED,
-                          _union(clean, boss),
-                          "r=%.2f mm of material nobody declared, on the outside" % r))
+    # Added material: a ledge grown inward from a wall, and a post standing in
+    # the middle. Both inside the bbox, both spanning a band between marks.
+    for frac in (0.03, 0.06, 0.12):
+        thickness = max(float(span[2]) * frac, 0.8)
+        z0 = float(lo[2]) + float(span[2]) * 0.35
+        ledge = _box((float(span[0]) * 0.5, float(span[1]) * 0.5, thickness),
+                     (cx, cy, z0 + thickness / 2.0))
+        out.append(Mutant("ledge-%.0f%%-mid-height" % (frac * 100), ADDED,
+                          _union(clean, ledge),
+                          "a ledge between declared heights, wholly inside the envelope"))
 
+    for frac in (0.05, 0.10, 0.20):
+        r = max(scale * frac, 0.6)
+        post = _cyl(r, float(span[2]) * 0.5,
+                    (cx, cy, float(lo[2]) + float(span[2]) * 0.5))
+        out.append(Mutant("post-%.0f%%-through-the-middle" % (frac * 100), ADDED,
+                          _union(clean, post),
+                          "a post standing through the part, inside the envelope"))
+
+    # Debris stays disconnected -- that is what makes it debris.
     for frac in (0.01, 0.03, 0.08):
         side = max(scale * frac, 0.4)
         speck = _box((side, side, side),
@@ -212,6 +240,22 @@ def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
                           _diff(clean, slot),
                           "a cut open to the edge, low on the part"))
     return out
+
+
+def _as_mesh(solid, tmp: Path) -> trimesh.Trimesh:
+    """A trimesh, whichever backend produced the solid.
+
+    A build123d template hands back a B-rep `Part`, which has no `.export`
+    trimesh understands. Mutating one means mutating its tessellation, which is
+    also what the pipeline actually measures -- so the corpus works on the
+    exported mesh for every backend, exactly as commissioning does.
+    """
+    if isinstance(solid, trimesh.Trimesh):
+        return solid
+    from build123d import export_stl
+    path = tmp / "brep.stl"
+    export_stl(solid, str(path), tolerance=0.01, angular_tolerance=0.1)
+    return trimesh.load(path, force="mesh")
 
 
 def _evaluate(mesh: trimesh.Trimesh, contract: Contract,
@@ -235,7 +279,8 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
         for name, params, contract_of in templates:
             from . import templates as T
             contract = contract_of()
-            clean, _ = T.get(name).build(params)
+            built, _ = T.get(name).build(params)
+            clean = _as_mesh(built, tmp)
 
             clean_parts += 1
             verdict, screen, _ = _evaluate(clean, contract, tmp)
@@ -314,6 +359,10 @@ PARAMS = {
                   "wall": 2.5, "floor": 2.5},
     "l_bracket": {"width": 40.0, "leg_a": 50.0, "leg_b": 45.0, "thickness": 4.0,
                   "hole_d": 5.0, "hole_inset": 10.0},
+    # The build123d template. Certified and DIRECT-routable, so leaving it out
+    # meant a global CALIBRATED covering a template nobody had measured.
+    "trim_ring": {"hole_d": 60.0, "lip_w": 5.0, "panel_t": 18.0, "lip_t": 3.0,
+                  "wall": 2.0, "chamfer": 1.0},
 }
 
 
