@@ -84,6 +84,7 @@ to compare against.
   ```bash
   V=<your-own-dir>                       # never the project root
   python <skill>/scripts/dt.py audit <project-dir> --out $V --job-id <job>         --updated-utc <iso8601>
+  python <skill>/scripts/dt.py screen <project-dir> --out $V     # what nobody declared
   python <skill>/scripts/dt.py crop crop <project-dir>/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
   python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
   ```

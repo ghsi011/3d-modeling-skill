@@ -137,6 +137,7 @@ and it decides which phases run, not how verbose the record is.
   DT=<skill>/scripts/dt.py
   python $DT templates                                   # which starting point fits
   python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
+  python $DT screen <project> --out <project>/screen      # what nobody declared
   python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
@@ -169,6 +170,14 @@ and it decides which phases run, not how verbose the record is.
 
   Then look at `renders/multi.png` and `renders/section_x.png`, zooming with `dt.py crop`
   where a view is too small, and fill the two judgment fields the receipt leaves blank.
+
+  `screen` writes the one question no check in this toolkit can ask. Every check is
+  conditioned on a declaration — `feature-*` measures what the plan named, `envelope` a
+  declared size — so geometry nobody declared is invisible to all of them: a 4 mm post
+  standing in a bin floor passed twenty-seven green checks, an exact bounding box and a
+  matching bed-contact area. The command states what the part is supposed to be and asks
+  what else is visible. Answer it against the renders. Measured, that takes ten seconds;
+  what used to make it expensive was working out what to ask.
 
   **If `dt.py doctor` reports no renderer, this route cannot finish.** Nothing else in the
   pipeline is going to look: there is no verifier here, and a verifier looks at renders that do

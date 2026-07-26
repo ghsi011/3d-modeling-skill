@@ -57,6 +57,9 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "screen":
+        from .screen import main as screen_main
+        raise SystemExit(screen_main(argv[1:]))
     if argv and argv[0] == "audit":
         from .audit import main as audit_main
         raise SystemExit(audit_main(argv[1:]))
@@ -105,6 +108,9 @@ def main(argv=None):
                         "recomputation, leaving every judgment blank")
     sub.add_parser("templates", add_help=False,
                    help="the parametric starting points and the shapes they cover")
+    sub.add_parser("screen", add_help=False,
+                   help="the one question no check can ask: what is here that "
+                        "nobody declared")
     sub.add_parser("audit", add_help=False,
                    help="everything a verifier can settle mechanically, in one call: "
                         "binding, raw parse, recomputation, contracts")
