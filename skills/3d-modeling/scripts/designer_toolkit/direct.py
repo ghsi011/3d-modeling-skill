@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""The whole no-dispatch route in one call.
+
+Measured: the deterministic work of a `DIRECT` job is 5.1 seconds, and a real
+run of the same job took 13.5 minutes. The gap is not computation and it is not
+dispatch -- this route dispatches nobody. It is turns. Every command is a round
+trip costing 8 to 47 seconds of inference before the shell is even reached, so
+five commands cost minutes to deliver five seconds of work.
+
+So the five become one. `intake`, `plan template`, `build` and `commission`
+always run in that order with the same job id, the same clock and the same
+parameters; there is no branch between them a caller could usefully take. What
+was five decisions is one.
+
+It stops at the first failure and hands back that step's own message, because a
+chain that continues past a broken link produces receipts describing a part that
+was never built. `plan check` is deliberately absent: `commission` validates the
+plan it is handed and refuses an ungateable one, so running it separately buys a
+failure one second earlier at the cost of a whole turn.
+
+    python <skill>/scripts/dt.py direct --job-id clip --template c_clip \
+        --param bore_d=12.0 ... --bbox 40 22 14 \
+        --risk R1_LOW_CONSEQUENCE --updated-utc <iso8601> --out <project>
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from . import build as build_module
+from . import commission as commission_module
+from . import intake as intake_module
+from . import plan as plan_module
+
+
+def _params(raw: list[str]) -> dict[str, Any]:
+    return dict(build_module.parse_param(text) for text in raw)
+
+
+def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float, float, float],
+        risk: str, updated_utc: str, out: Path, material: str | None,
+        render: bool = True) -> tuple[int, list[str]]:
+    """Every step, in order, stopping at the first that fails."""
+    log: list[str] = []
+    out.mkdir(parents=True, exist_ok=True)
+
+    code = intake_module.main([
+        "--job-id", job_id, "--template", template, *_flatten(raw_params),
+        "--profile", "DIRECT", "--risk", risk,
+        "--updated-utc", updated_utc, "--out", str(out)])
+    if code != 0:
+        return code, log + ["intake failed; nothing downstream ran"]
+    log.append("intake      job_state.md, dimensions.md")
+
+    plan_path = out / "print_plan_checks.json"
+    plan_argv = ["template", "--bbox", *(str(v) for v in bbox), "--job-id", job_id,
+                 "--updated-utc", updated_utc, "--out", str(plan_path)]
+    if material:
+        plan_argv += ["--material", material]
+    if plan_module.main(plan_argv) != 0:
+        return 1, log + ["plan failed; no candidate was built"]
+    log.append(f"plan        {plan_path.name}")
+
+    model = out / "model.py"
+    if build_module.main(["--template", template, *_flatten(raw_params),
+                          "--out", str(model)]) != 0:
+        return 1, log + ["build failed; the template rejected these parameters"]
+    log.append("build       model.py")
+
+    gate = ["--model", str(model), "--plan", str(plan_path), "--out", str(out),
+            "--job-id", job_id, "--updated-utc", updated_utc]
+    if not render:
+        gate.append("--no-render")
+    code = commission_module.main(gate)
+    log.append(f"commission  {'PASS' if code == 0 else 'FAIL'}")
+    return code, log
+
+
+def _flatten(raw_params: list[str]) -> list[str]:
+    out: list[str] = []
+    for text in raw_params:
+        out += ["--param", text]
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--template", required=True)
+    parser.add_argument("--param", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--bbox", nargs=3, type=float, required=True, metavar=("X", "Y", "Z"),
+                        help="the envelope the part must come out at, from the brief")
+    parser.add_argument("--risk", default="R1_LOW_CONSEQUENCE",
+                        choices=("R0_DECORATIVE", "R1_LOW_CONSEQUENCE"),
+                        help="R2 and above do not take this route: they need a named "
+                             "reviewer and independent verification")
+    parser.add_argument("--material", help="overrides the plan template's default")
+    parser.add_argument("--updated-utc", required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--no-render", action="store_true",
+                        help="skip the renders -- and with them the only unconditioned "
+                             "evidence this route has")
+    args = parser.parse_args(argv)
+
+    try:
+        _params(args.param)          # fail on a bad literal before anything is written
+    except ValueError as exc:
+        sys.stderr.write(f"direct: {exc}\n")
+        return 2
+
+    code, log = run(job_id=args.job_id, template=args.template, raw_params=args.param,
+                    bbox=tuple(args.bbox), risk=args.risk, updated_utc=args.updated_utc,
+                    out=args.out, material=args.material, render=not args.no_render)
+
+    sys.stderr.write("\n".join(f"  {line}" for line in log) + "\n")
+    if code != 0:
+        sys.stderr.write("direct: the chain stopped above. Fix that step and re-run.\n")
+        return code
+
+    receipt = args.out / "commission.json"
+    payload = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
+    coverage = payload.get("coverage") or {}
+    sys.stderr.write(
+        f"\n{coverage.get('ran', '?')} of {coverage.get('declared', '?')} checks ran"
+        + (f"; {', '.join(coverage['skipped'])} did not" if coverage.get("skipped") else "")
+        + ".\nStill yours: look at the renders, read `evidence.slice_profile`, and answer the\n"
+        "two judgment fields plus every <!-- REQUIRED --> the contracts still carry.\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
