@@ -377,8 +377,14 @@ def run(
 
     # Export: every measurement below is on the re-imported mesh, never on
     # the in-memory model, because that is what actually ships.
+    #
+    # Given an already-exported STL, hash and measure it *where it lies*. Writing
+    # it to `out_dir` produced a byte-identical duplicate, which for a verifier
+    # is a rule violation it then has to clean up -- the charter says never copy
+    # a canonical STL into a verifier folder, and this was the thing copying it.
     from .exporter import export_and_hash
-    report = export_and_hash(source, str(out_dir / "candidate_01"), also_step=True)
+    stem = Path(stl).with_suffix("") if stl is not None else out_dir / "candidate_01"
+    report = export_and_hash(source, str(stem), also_step=stl is None)
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
 
@@ -454,7 +460,7 @@ def run(
         ))
 
     bundle = finalize(
-        str(exported), str(out_dir / "candidate_01"),
+        str(exported), str(stem),
         reference=reference,
         orientation_transform=placement.transform,
         overhang_threshold=float((_plan_support_rules(plan) or [{}])[0].get(
@@ -500,8 +506,14 @@ def run(
             from .render import section_render
             renders = out_dir / "renders"
             renders.mkdir(exist_ok=True)
+            # Through the middle of the part. The plane was pinned at the
+            # origin, and a part seated on the bed by convention starts at
+            # x=0 -- so the cut grazed its outermost face and the section
+            # showed no internal structure at all, on every job.
+            centre = mesh.bounds.mean(axis=0)
             section_render(str(exported), str(renders / "section_x.png"),
-                           plane_origin=(0, 0, 0), plane_normal=(1, 0, 0))
+                           plane_origin=tuple(float(v) for v in centre),
+                           plane_normal=(1, 0, 0))
             preview.render_multi_view(as_mesh(str(exported)), str(renders / "multi.png"),
                                       title="candidate")
             commission.evidence["renders"] = ["renders/section_x.png", "renders/multi.png"]

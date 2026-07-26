@@ -44,6 +44,24 @@ def _run(work: Path, extents=(30.0, 20.0, 10.0)):
                           plan=built, render=False).as_dict()
 
 
+class InPlaceTest(unittest.TestCase):
+    def test_verifying_a_delivered_stl_does_not_duplicate_it(self) -> None:
+        """The charter forbids copying a canonical STL into a verifier folder,
+        and the gate's own export step was the thing copying it -- a verifier
+        had to notice the duplicate and delete it."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl = _seated_box(work / "delivered.stl", (30.0, 20.0, 10.0))
+            out = work / "verify"
+
+            commission.run(model=None, stl=stl, out_dir=out,
+                           plan=plan.direct_template((30.0, 20.0, 10.0)), render=False)
+
+            copies = [p.name for p in out.glob("*.stl")]
+            self.assertEqual([], copies, "the delivered STL must be measured where it lies")
+            self.assertTrue((out / "commission.json").is_file())
+
+
 class ManifestTest(unittest.TestCase):
     def test_the_hash_is_of_the_file_that_exists_now(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -54,7 +72,7 @@ class ManifestTest(unittest.TestCase):
                                                updated_utc=_WHEN)
 
             row = next(a for a in manifest["artifacts"] if a["id"] == "candidate-01")
-            on_disk = receipts.sha256_file(work / "out" / row["path"])
+            on_disk = receipts.sha256_file(Path(result["evidence"]["export"]["stl_path"]))
             self.assertEqual(on_disk, row["sha256"])
 
     def test_the_step_it_exported_is_in_the_manifest(self) -> None:
