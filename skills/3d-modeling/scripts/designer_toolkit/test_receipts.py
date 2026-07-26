@@ -240,6 +240,21 @@ class ReadinessTest(unittest.TestCase):
             self.assertIn("dimensions_revision: UNBOUND", text)
             self.assertIn("print_plan_revision: UNBOUND", text)
 
+    def test_visual_accept_is_blocked_when_nothing_was_rendered(self) -> None:
+        """A verification caught a `visual_accept: yes` written on an interpreter
+        with no renderer. The claim was sincere and ungrounded, which is the
+        worst combination -- so it is not a blank to fill."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = _run(work)  # render=False, so the render check is SKIPPED
+            result["checks"].append({"id": "render", "title": "r", "result": "SKIPPED",
+                                     "detail": "renderer unavailable"})
+
+            text = receipts.build_readiness(result, job_id="t", updated_utc=_WHEN)
+
+            self.assertIn("CANNOT BE ANSWERED HERE", text)
+            self.assertIn("Do not write a verdict you did not see", text)
+
     def test_the_judgments_are_left_blank(self) -> None:
         """A receipt that fills itself in completely has stopped being one."""
         with tempfile.TemporaryDirectory() as raw:

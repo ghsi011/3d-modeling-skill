@@ -141,6 +141,14 @@ def build_manifest(
 
 _UNSET = "<!-- REQUIRED: the agent fills this in after looking. -->"
 
+# When no render exists there is nothing to look at, so `visual_accept` is not a
+# blank to fill -- it is a question this run cannot answer. A verification caught
+# a `visual_accept: yes` written on an interpreter with no renderer; the claim
+# was sincere and ungrounded, which is the worst combination.
+_BLOCKED = ("<!-- CANNOT BE ANSWERED HERE: no render was produced, so there was "
+            "nothing to look at. Install the `visual` extra and re-run, or hand off "
+            "with this explicitly unanswered. Do not write a verdict you did not see. -->")
+
 
 def build_readiness(
     commission: dict[str, Any],
@@ -170,6 +178,9 @@ def build_readiness(
         f"| {c['id']} | {c.get('next_action', '').replace('|', '/')} |" for c in failures
     ) or "| none | commission reported no failing check |"
 
+    rendered = any(c["id"] == "render" and c["result"] == "SKIPPED"
+                   for c in commission.get("checks", []))
+    visual = _BLOCKED if rendered else _UNSET
     revisions = source_revisions or {}
     # No default of 1. A binding invented here is worse than an absent one: it
     # asserts a revision nobody checked, and `contracts status` -- the only
@@ -215,7 +226,7 @@ passes a Phase-4 gate on a verifier's behalf.
 
 Commission leaves these null on purpose. Answer both, from the renders.
 
-- `visual_accept`: {_UNSET}
+- `visual_accept`: {visual}
 - `fit_band_ok`: {_UNSET}
 """
 

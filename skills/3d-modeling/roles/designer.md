@@ -141,9 +141,11 @@ lines to fill two fields is a page you pay for on every job to learn nothing you
    STEP, the renders and the `--reference` mating reference are already there. Do not
    re-validate what the commission emitted: it is generated from the measurements and covered
    by test, and the fresh verifier validates every contract anyway.
-10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
-   judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
-   look) and `fit_band_ok`. Never claim the Phase-4 gate passed.
+10. Fill only the two judgments `commission.json` leaves open: `visual_accept` — look at the
+   render, actually look — and `fit_band_ok`. If the gate reported no render, `visual_accept`
+   is not a blank to fill: say so and hand off with it unanswered. A verification caught a
+   `visual_accept: yes` written where no renderer existed, and a sincere ungrounded claim is
+   worse than an admitted gap. Never claim the Phase-4 gate passed.
 11. In `print_notes.md`, record **only what nothing else captures**: the choices no contract
    fixed and no measurement holds — where you put a feature the sheet did not locate, which
    way round an ambiguous datum was read, why this orientation over the alternative, which
