@@ -107,7 +107,7 @@ and it decides which phases run, not how verbose the record is.
   ```bash
   DT=<skill>/scripts/dt.py
   python $DT templates                                   # which starting point fits
-  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --updated-utc <iso> --out <project>
+  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --updated-utc <iso> --out <project>
   python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest
   ```
 
@@ -118,10 +118,12 @@ and it decides which phases run, not how verbose the record is.
   no branch between those steps worth taking separately. It stops at the first failure and
   hands back that step's own message.
 
-  It writes `job_state.md` and `dimensions.md` with every mechanical field filled and every
-  judgment left as `<!-- REQUIRED -->`. Answer those — the consequence-class rationale is
-  yours and no tool can supply it — and do not let a scaffold's confidence stand in for a
-  decision you did not make.
+  It writes `job_state.md` and `dimensions.md` with every mechanical field filled. The two
+  judgments are still yours and nothing invents them: pass them in and they land in the file,
+  omit them and they stay `<!-- REQUIRED -->` for you to answer. Passing them is not a
+  shortcut past the decision — it is the same decision, delivered without spending turns
+  editing a file that was written a second ago. Do not let a scaffold's confidence stand in
+  for a judgment you have not actually made.
 
   Name the contracts rather than passing `--require all`: this route dispatches nobody, so no
   `verification_report.md` is ever written, and `all` demands one. Those four are what a

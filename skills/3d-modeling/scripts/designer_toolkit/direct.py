@@ -42,15 +42,21 @@ def _params(raw: list[str]) -> dict[str, Any]:
 
 def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float, float, float],
         risk: str, updated_utc: str, out: Path, material: str | None,
+        rationale: str | None = None, acceptance: str | None = None,
         render: bool = True) -> tuple[int, list[str]]:
     """Every step, in order, stopping at the first that fails."""
     log: list[str] = []
     out.mkdir(parents=True, exist_ok=True)
 
-    code = intake_module.main([
+    intake_argv = [
         "--job-id", job_id, "--template", template, *_flatten(raw_params),
         "--profile", "DIRECT", "--risk", risk,
-        "--updated-utc", updated_utc, "--out", str(out)])
+        "--updated-utc", updated_utc, "--out", str(out)]
+    if rationale:
+        intake_argv += ["--rationale", rationale]
+    if acceptance:
+        intake_argv += ["--acceptance", acceptance]
+    code = intake_module.main(intake_argv)
     if code != 0:
         return code, log + ["intake failed; nothing downstream ran"]
     log.append("intake      job_state.md, dimensions.md")
@@ -98,6 +104,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="R2 and above do not take this route: they need a named "
                              "reviewer and independent verification")
     parser.add_argument("--material", help="overrides the plan template's default")
+    parser.add_argument("--rationale", help="why this consequence class; yours to decide")
+    parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
+                                             "get to choose -- 'nothing' is a real answer")
     parser.add_argument("--updated-utc", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--no-render", action="store_true",
@@ -113,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
 
     code, log = run(job_id=args.job_id, template=args.template, raw_params=args.param,
                     bbox=tuple(args.bbox), risk=args.risk, updated_utc=args.updated_utc,
-                    out=args.out, material=args.material, render=not args.no_render)
+                    out=args.out, material=args.material, rationale=args.rationale,
+                    acceptance=args.acceptance, render=not args.no_render)
 
     sys.stderr.write("\n".join(f"  {line}" for line in log) + "\n")
     if code != 0:
@@ -123,11 +133,21 @@ def main(argv: list[str] | None = None) -> int:
     receipt = args.out / "commission.json"
     payload = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
     coverage = payload.get("coverage") or {}
+    # Counted, not asserted. A closing line that demands the required fields be
+    # answered when there are none left reads as boilerplate, and boilerplate is
+    # what gets skimmed past on the run where there really is one.
+    outstanding = sum(
+        path.read_text(encoding="utf-8").count(intake_module.REQUIRED)
+        for path in args.out.glob("*.md") if path.is_file())
     sys.stderr.write(
         f"\n{coverage.get('ran', '?')} of {coverage.get('declared', '?')} checks ran"
         + (f"; {', '.join(coverage['skipped'])} did not" if coverage.get("skipped") else "")
-        + ".\nStill yours: look at the renders, read `evidence.slice_profile`, and answer the\n"
-        "two judgment fields plus every <!-- REQUIRED --> the contracts still carry.\n")
+        + ".\nStill yours: look at the renders and read `evidence.slice_profile` — nothing "
+        "above\nwas measured that nobody declared. Then answer `visual_accept` and "
+        "`fit_band_ok`"
+        + (f",\nand the {outstanding} remaining <!-- REQUIRED --> field"
+           f"{'s' if outstanding != 1 else ''} in the contracts" if outstanding else "")
+        + ".\n")
     return 0
 
 

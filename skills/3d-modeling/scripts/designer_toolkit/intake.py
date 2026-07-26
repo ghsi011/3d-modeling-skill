@@ -92,7 +92,16 @@ def _completeness_rows(built) -> str:
 
 
 def job_state(*, job_id: str, profile: str, risk: str, updated_utc: str,
-              template: str) -> str:
+              template: str, rationale: str | None = None,
+              acceptance: str | None = None) -> str:
+    """The judgments arrive as arguments, or not at all.
+
+    They are still the caller's -- nothing here invents one. What changes is
+    delivery: an agent that has already decided the consequence class pays two
+    or three edit turns to type it into a file it just generated, and turns are
+    what this route spends. Passing it in costs nothing and the field is filled
+    by the same reasoning that would have filled it by hand.
+    """
     dispatches = ("| — | none | — | — | — | not dispatched: this route runs no specialists |"
                   if profile == "DIRECT" else f"| D01 | {REQUIRED} | | | | queued |")
     return f"""---
@@ -115,11 +124,11 @@ updated_utc: {updated_utc}
 
 ## Route
 
-**Consequence class: `{risk}`.** Rationale: {REQUIRED}
+**Consequence class: `{risk}`.** Rationale: {rationale or REQUIRED}
 
 **Profile `{profile}`,** because every design-driving dimension is stated and the
-`{template}` template covers the shape. {REQUIRED} — say here what acceptance depends on
-that you did not get to choose, and if the answer is nothing, say that.
+`{template}` template covers the shape. {acceptance or REQUIRED} — say here what acceptance
+depends on that you did not get to choose, and if the answer is nothing, say that.
 {"" if profile != "DIRECT" else '''
 Built and checked by the orchestrator; no independent fresh-context verification. That is
 what this route is: nobody who did not build the part will look at it. The delivery repeats
@@ -218,6 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--risk", default="R1_LOW_CONSEQUENCE", choices=_RISK)
     parser.add_argument("--updated-utc", required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--rationale", help="why this consequence class; yours to decide, "
+                                            "passed in so you do not spend turns typing it "
+                                            "into a file this just wrote")
+    parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
+                                             "get to choose -- 'nothing' is a real answer")
     args = parser.parse_args(argv)
 
     if args.risk == "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE":
@@ -238,7 +252,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, text in (
         ("job_state.md", job_state(job_id=args.job_id, profile=args.profile,
                                    risk=args.risk, updated_utc=args.updated_utc,
-                                   template=args.template)),
+                                   template=args.template, rationale=args.rationale,
+                                   acceptance=args.acceptance)),
         ("dimensions.md", dimensions(job_id=args.job_id, updated_utc=args.updated_utc,
                                      template=args.template, params=params, built=built)),
     ):

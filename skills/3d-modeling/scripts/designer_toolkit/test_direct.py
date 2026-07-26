@@ -61,6 +61,26 @@ class TestDirect(unittest.TestCase):
             self.assertEqual("PASS", payload["verdict"])
             self.assertIn("feature-screw", [c["id"] for c in payload["checks"]])
 
+    def test_the_judgments_arrive_as_arguments_or_stay_demanded(self) -> None:
+        """Passing them in is not a shortcut past the decision -- it is the same
+        decision, delivered without spending edit turns on a file written a
+        second earlier. Omit them and they must still be demanded."""
+        from . import intake as intake_module
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            direct.main(_argv(out) + ["--rationale", "a dropped cable is inconvenience",
+                                      "--acceptance", "nothing: the mouth gap is chosen"])
+            job = (out / "job_state.md").read_text(encoding="utf-8")
+            self.assertIn("a dropped cable is inconvenience", job)
+            self.assertNotIn(intake_module.REQUIRED, job)
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            direct.main(_argv(out))
+            job = (out / "job_state.md").read_text(encoding="utf-8")
+            self.assertIn(intake_module.REQUIRED, job)
+
     def test_a_bad_parameter_stops_before_anything_is_written(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
