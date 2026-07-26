@@ -420,6 +420,54 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class ClearanceSamplingTest(unittest.TestCase):
+    """The gap is measured wherever the mating part is sampled, and it used to be
+    sampled only at its vertices -- a box has eight. Anything between them was
+    invisible, so the number came back plausible and wrong rather than as an
+    error, which is the worst shape a measurement can have."""
+
+    def _pair(self, local_gap: float | None):
+        floor, gap = 8.0, 0.50
+        plate = trimesh.creation.box(extents=(40.0, 40.0, 4.0))
+        plate.apply_translation([0, 0, floor + gap + 2.0])
+        body = trimesh.creation.box(extents=(70.0, 70.0, floor))
+        body.apply_translation([0, 0, floor / 2])
+        wall = trimesh.boolean.difference([
+            trimesh.creation.box(extents=(70.0, 70.0, 20.0)).apply_translation([0, 0, 10.0]),
+            trimesh.creation.box(extents=(41.0, 41.0, 20.0)).apply_translation([0, 0, 10.0])])
+        if local_gap is None:            # an unobstructed seat: no boss at all
+            return trimesh.boolean.union([body, wall]), plate
+        height = gap - local_gap
+        boss = trimesh.creation.cylinder(radius=3.0, height=height, sections=64)
+        boss.apply_translation([0, 0, floor + height / 2])
+        return trimesh.boolean.union([body, wall, boss]), plate
+
+    def test_a_local_interference_between_vertices_is_found(self) -> None:
+        """A boss under the middle of the plate leaves 0.05 mm where the rest of
+        the seat has 0.50. None of the plate's eight vertices sits over it, so
+        vertex sampling reported 0.50 -- ten times too loose, in the direction
+        that lets an interference pass."""
+        cavity, plate = self._pair(local_gap=0.05)
+
+        measured = commission.seated_clearance_mm(cavity, plate)
+
+        self.assertAlmostEqual(0.05, measured, delta=0.01)
+
+    def test_an_unobstructed_seat_still_reads_its_own_gap(self) -> None:
+        """Denser sampling must not invent tightness that is not there."""
+        cavity, plate = self._pair(local_gap=None)
+        self.assertAlmostEqual(0.50, commission.seated_clearance_mm(cavity, plate), delta=0.01)
+
+    def test_the_samples_are_deterministic(self) -> None:
+        """Reruns on unchanged inputs are meant to be byte-identical, so the
+        sampler may not be random."""
+        _cavity, plate = self._pair(local_gap=0.05)
+        first = commission._clearance_samples(plate)
+        second = commission._clearance_samples(plate)
+        self.assertEqual(first.shape, second.shape)
+        self.assertTrue((first == second).all())
+
+
 class MultipleInterfaceTest(unittest.TestCase):
     """Both benchmark runs hit this and both responded the same way.
 

@@ -424,6 +424,39 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
     return placements
 
 
+# How finely the mating part is sampled. Small enough that a face cannot slip
+# between samples on any plausible interface; large enough that a big reference
+# does not cost seconds. Bounded absolutely so a 500 mm hive part and a 20 mm
+# clip are both sampled usefully.
+CLEARANCE_SAMPLE_MM = 2.0
+
+
+def _clearance_samples(reference) -> np.ndarray:
+    """Points over the reference's whole surface, not just its corners.
+
+    Sampling `reference.vertices` measures the gap only where the mating part
+    happens to have a vertex, and a box has eight. A plate 48 mm long seated in a
+    24 mm channel has none of its vertices inside the channel at all, so the
+    nearest candidate surface to every sample was the channel's end face: a true
+    0.25 mm clearance reported as 12.00, which is not an error message but a
+    plausible wrong number that fails a declared band. A square peg reads its
+    corner diagonal for the same reason.
+
+    Subdivision is used for *points only*, never as a solid. It introduces
+    T-junctions that break watertightness -- which surfaces three layers down as
+    "Not all meshes are volumes!" if the result is fed to a boolean -- but a
+    point set has no topology to break.
+    """
+    from trimesh.remesh import subdivide_to_size
+
+    vertices, faces = subdivide_to_size(
+        np.asarray(reference.vertices, dtype=float),
+        np.asarray(reference.faces),
+        max_edge=CLEARANCE_SAMPLE_MM)
+    _ = faces
+    return np.asarray(vertices, dtype=float)
+
+
 def seated_clearance_mm(candidate, reference) -> float:
     """Tightest per-side gap between the seated pair, in mm.
 
@@ -445,7 +478,7 @@ def seated_clearance_mm(candidate, reference) -> float:
     force, and the sign from the winning face's own normal rather than a
     ray-cast containment test.
     """
-    points = np.asarray(reference.vertices, dtype=float)
+    points = _clearance_samples(reference)
     try:
         from trimesh.proximity import ProximityQuery
 
