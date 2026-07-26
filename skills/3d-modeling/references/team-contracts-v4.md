@@ -81,6 +81,15 @@ in `job_state.md` that no metrologist was dispatched. See [`../SKILL.md`](../SKI
 deciding question and the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run
 under every profile.
 
+**A multi-part job is many projects, not one directory with many STLs.** Contracts resolve
+as `<project-dir>/<name>` with no search below it, and `dt.py audit` reads
+`<project>/job_state.md`, so every part needs its own directory carrying its own
+`job_state.md`, `dimensions.md`, `print_plan_checks.json` and receipts. Derive those slices
+from one table rather than writing each by hand -- a seven-part job that hand-maintains
+seven copies of the same job id and revision will drift, and `contracts status` reports the
+drift only after it has happened. The parent directory holds the brief and the table; it is
+not itself a project and `validate` should not be pointed at it.
+
 `job_state.md`'s `## Route` section also records the job's consequence/risk class from the
 orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQUENCE` /
 `R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`; see

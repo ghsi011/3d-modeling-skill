@@ -34,6 +34,14 @@ Deeper dives: [mechanisms.md](mechanisms.md) (hinges/springs/magnets),
 - Chamfer horizontal/overhanging edges; fillet only vertical edges. Never fillet into the
   bed plane (creates a near-0° overhang). Bed-contact chamfer size: §9.
 - Horizontal holes: teardrop (to ~Ø4) or flat-roof/diamond with +0.4 mm above nominal.
+- **A rectangular opening through a vertical wall is a different problem, and the teardrop
+  advice does not reach it.** A bore's roof is a curve, so gabling it works; a rectangular
+  opening has a flat lintel with nothing under it *anywhere across the wall thickness*, so
+  there is no direction to gable it in. Widening or filleting the corners does not help
+  either. The fix is to stop making one opening: split it into narrow openings, each gabled
+  across its own width, and leave a mullion between them. A window, a vent and a screened
+  panel are all this shape, and a hive job spent a large part of its design time
+  rediscovering it.
 
 ## 2. Orientation & strength
 
