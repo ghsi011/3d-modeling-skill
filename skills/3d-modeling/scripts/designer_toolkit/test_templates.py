@@ -274,6 +274,17 @@ class CClipTest(unittest.TestCase):
         self.assertGreater(built.part.volume, flange_solid - screw_hole,
                            "the mouth cut into the flange")
 
+    def test_a_snap_retaining_mouth_says_it_is_a_fit_interface(self) -> None:
+        """A verification noticed the mouth is narrower than the bore, making the
+        clip retain by elastic snap -- while the plan declared no interfaces, so
+        nothing governed it with a band, a coupon or an acceptance method. The
+        template knows both numbers and can say so."""
+        snapping = self._clip(bore_d=12.0, mouth_gap=9.0)
+        open_mouth = self._clip(bore_d=12.0, mouth_gap=13.0)
+
+        self.assertTrue(any("elastic snap" in n for n in snapping.notes), snapping.notes)
+        self.assertFalse(any("elastic snap" in n for n in open_mouth.notes), open_mouth.notes)
+
     def test_a_mouth_that_would_sever_the_part_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self._clip(mouth_gap=30.0)

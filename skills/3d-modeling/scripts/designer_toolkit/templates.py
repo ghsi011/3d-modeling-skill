@@ -440,8 +440,14 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
             # the channel stands along the print axis, so there is no crown.
             "horizontal_bores": [],
         },
-        notes=(f"channel bore {bore_d} mm, {wall} mm wall, {mouth_gap} mm mouth, axis along "
-               "Z so every wall is a vertical extrusion",),
+        notes=tuple(
+            [f"channel bore {bore_d} mm, {wall} mm wall, {mouth_gap} mm mouth, axis along "
+             "Z so every wall is a vertical extrusion"]
+            + ([f"the {mouth_gap} mm mouth is narrower than the {bore_d} mm bore, so this "
+                "retains by elastic snap: it is a fit interface, and a plan declaring none "
+                "leaves it with no band, no coupon and no acceptance method. Say so in your "
+                "handoff."]
+               if mouth_gap < bore_d else [])),
     )
 
 
