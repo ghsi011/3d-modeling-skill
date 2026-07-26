@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -11,6 +10,8 @@ from typing import Any
 
 import numpy as np
 import trimesh
+
+from team_tools.common import canonical_sha256, sha256_file
 
 SCHEMA_VERSION = 4
 TOOL_VERSION = "1.0"
@@ -33,19 +34,6 @@ INTERFACE_FIT_TYPES = frozenset(
         "compliant",
     }
 )
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def canonical_sha256(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def load_json(path: Path) -> dict[str, Any]:
