@@ -64,10 +64,7 @@ Always:
 2. Shared design/verify toolkit — **one call, not a menu**:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md).
    `dt.py commission` is your deterministic gate and the only entry point you need;
-   `coupon` is the one genuinely separate deliverable. `team_preflight.py` and
-   `team_tools.contracts` are the **verifier's** independent cross-check, not yours —
-   running them here re-screens the mesh the gate just screened, on the same numbers,
-   and answers nothing new.
+   `coupon` is the one genuinely separate deliverable.
 
 Only when you are hand-writing geometry in that backend — a template-built part never touches
 one, so reading its patterns is a page bought and unused:
@@ -158,11 +155,9 @@ one, so reading its patterns is a page bought and unused:
    invoked by absolute path and needs no particular working directory. Ask
    `dt.py doctor` for that path and for what this interpreter can do.
 
-   `--out .`, not a subdirectory. The receipts it writes are contracts, and
-   `contracts validate` resolves each one as `<project-dir>/<name>` without
-   searching below it — a run that used `--out out` built a flawless candidate
-   and was rejected for a manifest that existed one directory down. The gate now
-   refuses that rather than letting it reach a verifier.
+   `--out .`, not a subdirectory: the receipts are contracts, and `contracts validate`
+   resolves each as `<project-dir>/<name>` without searching below it. The gate refuses
+   anything else and says so.
 
    It exports, re-imports, and measures the whole deterministic set — single watertight
    solid, overall size against the plan's declared envelope, downward-facing area for
