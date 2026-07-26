@@ -15,8 +15,8 @@ keywords = ["3d-modeling", "3d-printing", "cad", "fdm", "agents", "trimesh", "ve
 # Core runtime deps derived from actual imports across
 # skills/3d-modeling/scripts/**/*.py. team_preflight.py, mesh_io.py, and the
 # team_tools contract package need only trimesh + numpy + pillow; designer_toolkit
-# adds manifold3d as the boolean engine trimesh uses for its interference /
-# insertion-sweep / coupon operations (a light pure wheel — no OCP).
+# adds manifold3d as the boolean engine trimesh uses for its section, interference
+# and coupon operations (a light pure wheel — no OCP).
 dependencies = [
     "trimesh",
     "numpy",

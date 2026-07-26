@@ -146,18 +146,6 @@ class TestFit(unittest.TestCase):
         far = _box((10, 10, 10), (100, 0, 0))
         self.assertEqual(fit.interference(a, far), 0.0)
 
-    def test_insertion_sweep_clearance_vs_block(self):
-        plate = _plate_with_hole((0, 0), 5.0)              # Ø5 bore
-        peg_ok = trimesh.creation.cylinder(radius=2.0, height=20)   # Ø4 fits
-        peg_ok.apply_translation((0, 0, 10))
-        steps_ok = fit.insertion_sweep(plate, peg_ok, [0, 4, 8, 12], axis=(0, 0, -1))
-        self.assertTrue(all(not s.blocked for s in steps_ok))
-        peg_big = trimesh.creation.cylinder(radius=3.0, height=20)  # Ø6 jams
-        peg_big.apply_translation((0, 0, 10))
-        steps_big = fit.insertion_sweep(plate, peg_big, [0, 4, 8, 12], axis=(0, 0, -1))
-        self.assertTrue(any(s.blocked for s in steps_big))
-
-
 class TestCoupon(unittest.TestCase):
     def test_coupon_builds_and_legend_matches(self):
         with tempfile.TemporaryDirectory() as d:

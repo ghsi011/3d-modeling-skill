@@ -1,22 +1,22 @@
 """CLI for designer_toolkit.
 
     python <skill>/scripts/dt.py doctor        # works from any directory
-    python <skill>/scripts/dt.py commission --model model.py --plan plan.json --out .              --job-id <job> --updated-utc <iso8601>
+    python <skill>/scripts/dt.py commission --model model.py --plan plan.json \
+      --out . --job-id <job> --updated-utc <iso8601>
     python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
 
-Two subcommands, and that is deliberate. There used to be seven more --
-`measure`, `overhang`, `datums`, `interference`, `sweep`, `export`, `finalize`
--- one per deterministic check, each a separate process paying ~3 s of
-interpreter and CAD-library startup, each re-parsing the same STL, and each
-costing an agent round trip that had to be repeated after every edit.
+No verb here is a measurement you assemble yourself. `commission` is the gate:
+it takes a model and a plan and returns every deterministic verdict at once.
+`direct` is the whole no-dispatch route. The rest set a job up, read one back,
+or answer a question the gate cannot -- they do not decompose the gate.
 
-They also taught the wrong thing. Three measured runs read the toolkit docs,
-found a menu of individual verbs plus a `finalize` that takes its datums,
-orientation and thresholds from the caller, and did what the menu implied:
-hand-wrote a 130-280 line verification script. Not one of the three ran the
-gate. A tool surface that offers the pieces will get the pieces assembled by
+That is the shape because the opposite was tried. Seven verbs -- `measure`,
+`overhang`, `datums`, `interference`, `sweep`, `export`, `finalize` -- offered
+one deterministic check each, and three measured runs read that menu, did what
+it implied, and hand-wrote a 130-280 line verification script. Not one of the
+three ran the gate. A surface that offers the pieces gets them assembled by
 hand, and a hand-assembled instrument is how one run widened its acceptance
-bands to fit its own sampler.
+bands until its own sampler agreed with it.
 
 The library functions are all still importable for the rare case that needs
 one. What is gone is the invitation.

@@ -25,8 +25,8 @@ NULLABLE_NUMBER = (int, float, type(None))
 
 PROFILE = frozenset({"DIRECT", "FITTED", "FULL"})
 
-# Consequence/escalation classification (3d-orchestrator/SKILL.md's "Consequence and
-# escalation gate", P-03). Optional on job_state for backward compatibility: existing
+# Consequence/escalation classification (the orchestrator charter's "Consequence and
+# escalation gate"). Optional on job_state for backward compatibility: existing
 # job_state.json files with no risk_class remain valid; when present it must be one of
 # these four values.
 RISK_CLASS = frozenset(

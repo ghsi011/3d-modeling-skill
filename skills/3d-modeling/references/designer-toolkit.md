@@ -77,7 +77,7 @@ The same applies to the receipts. `artifact_manifest.json` and
 numbers is how a receipt starts describing a different mesh.
 
 Every function is still importable — `export_and_hash`, `measure`, `datum_features`,
-`overhang_area`, `interference`, `insertion_sweep`, `fit_coupon`, and
+`overhang_area`, `interference`, `fit_coupon`, and
 `designer_toolkit.render` — for the rare case that genuinely needs one directly. That
 is not the normal path, and reaching for it to rebuild a check the gate already
 performs is the mistake this file exists to prevent.

@@ -11,10 +11,8 @@ a deliberately negative band).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import trimesh
 
 from ._bootstrap import as_mesh  # (also puts scripts/ on sys.path; keep first)
@@ -30,29 +28,3 @@ def _intersection_volume(a: trimesh.Trimesh, b: trimesh.Trimesh) -> float:
 def interference(a: Any, b: Any) -> float:
     """Overlap volume (mm^3) of two meshes; 0.0 when disjoint."""
     return _intersection_volume(as_mesh(a), as_mesh(b))
-
-
-@dataclass(frozen=True)
-class SweepStep:
-    travel_mm: float
-    interference_mm3: float
-    blocked: bool
-
-
-def insertion_sweep(part: Any, ref: Any, travels, *, axis=(0, 0, -1),
-                    tol_mm3: float = 1e-3) -> list:
-    """Translate ``ref`` along ``axis`` by each value in ``travels`` and report
-    the overlap volume with ``part`` at each step. ``blocked`` is True when the
-    overlap exceeds ``tol_mm3`` — a clearance interface must stay unblocked the
-    whole way in.
-    """
-    part_m = as_mesh(part)
-    ref_m = as_mesh(ref)
-    axis = np.asarray(axis, dtype=float)
-    out: list = []
-    for t in travels:
-        moved = ref_m.copy()
-        moved.apply_translation(axis * float(t))
-        v = _intersection_volume(part_m, moved)
-        out.append(SweepStep(float(t), v, v > tol_mm3))
-    return out

@@ -88,11 +88,6 @@ Exit codes:
 
 Module: [`skills/3d-modeling/scripts/team_tools/contracts.py`](../skills/3d-modeling/scripts/team_tools/contracts.py)
 
-Invoke by absolute path from wherever the job is: `python <skill>/scripts/dt.py <command>`.
-It puts its own directory on `sys.path`, so command-line paths resolve against your working
-directory rather than the skill's. The module form (`python -m designer_toolkit ...`) still
-works but requires the working directory to be `skills/3d-modeling/scripts/`, which is what
-made every measured designer run write a shim instead.
 This package validates the v4 team contracts: the four Markdown ones through their
 frontmatter (identity, revision, binding hashes), and the JSON ones structurally.
 Passing it proves contract structure, identifiers, declared hashes, and revision
@@ -115,8 +110,10 @@ Inputs:
 * Optional `--require`, naming contracts whose absence is an **error** rather
   than a warning: `job_state`, `dimensions`, `print_plan`,
   `verification_report`, `artifact_manifest`, or `all`. Repeatable and
-  comma-separated. An unknown name is a usage error (exit `2`) rather than a
-  silently dropped requirement.
+  comma-separated, from `job_state`, `dimensions`, `print_plan`,
+  `verification_report`, `artifact_manifest`, `candidate_readiness`, or `all`.
+  An unknown name is a usage error (exit `2`) rather than a silently dropped
+  requirement.
 * Optional `--output` receipt path.
 * Optional `--timestamp`, injected into the receipt instead of reading wall
   clock time.
@@ -158,8 +155,8 @@ python -m team_tools.contracts hash path/to/project
 python -m team_tools.contracts status path/to/project
 ```
 
-Both take a project directory and print to stdout by default; run `--help` for
-the output, timestamp, and `--json` flags.
+Both take a project directory and print to stdout by default. `hash` takes
+`--output` and `--timestamp`; `status` takes `--output` and `--json`.
 
 | Command | What it proves | Exits `1` when |
 | --- | --- | --- |
@@ -170,10 +167,15 @@ the output, timestamp, and `--json` flags.
 
 Module: [`skills/3d-modeling/scripts/designer_toolkit/__main__.py`](../skills/3d-modeling/scripts/designer_toolkit/__main__.py)
 
-Run from `skills/3d-modeling/scripts/`, or put that directory on `PYTHONPATH`.
-Every subcommand prints indented JSON to stdout. The CLI doesn't catch toolkit
-exceptions, so success returns `0`, argparse usage errors return `2`, and runtime
-errors normally return `1` with a Python traceback.
+Invoke it by absolute path from your project directory. It puts its own directory
+on `sys.path`, so command-line paths resolve against your working directory rather
+than the skill's, and neither a `cd` nor a `PYTHONPATH` is needed. The module form
+(`python -m designer_toolkit ...`) still works but requires the working directory to
+be `skills/3d-modeling/scripts/`, which is what made every measured designer run
+write a shim instead. Every subcommand
+prints indented JSON to stdout. The CLI doesn't catch toolkit exceptions, so
+success returns `0`, argparse usage errors return `2`, and runtime errors
+normally return `1` with a Python traceback.
 
 ### `commission`
 
@@ -205,8 +207,8 @@ python <skill>/scripts/dt.py plan template --bbox X Y Z --out print_plan_checks.
 python <skill>/scripts/dt.py plan check print_plan_checks.json
 ```
 
-Inputs: plan JSON. The command accepts either a JSON object with `interfaces` or
-a raw interface list. `--out` is required.
+Inputs to `coupon`: plan JSON, either a JSON object with `interfaces` or a raw
+interface list, and a required `--out`. `doctor` and `plan` take neither.
 
 Outputs: JSON object with written `stl` path and `legend` rows. The command also
 writes the coupon STL.
@@ -450,11 +452,7 @@ python tools/build_skill.py [--out dist/skills]
 
 Inputs:
 
-* Repository `skills/` tree. Each role directory (`3d-orchestrator`,
-  `3d-metrologist`, `3d-designer`, `3d-verifier`, `3d-print-engineer`) must
-  contain a `SKILL.md` at its root. Shared references and scripts under
-  `skills/3d-modeling/references/` and `skills/3d-modeling/scripts/` are
-  included in every per-role bundle.
+* The `skills/3d-modeling/` tree, packed verbatim.
 * `--out`, output directory for the generated `.skill` zip artifacts. Defaults
   to `dist/skills`.
 

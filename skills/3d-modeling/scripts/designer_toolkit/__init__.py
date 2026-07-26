@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from .coupon import CouponLane, fit_coupon, legend_to_rows
 from .exporter import ExportReport, export_and_hash
-from .fit import SweepStep, insertion_sweep, interference
+from .fit import interference
 from .metrics import (
     DEFAULT_DOWNWARD_NORMAL_Z_MAX,
     Feature,
@@ -33,11 +33,9 @@ __all__ = [
     "ExportReport",
     "Feature",
     "MeasureReport",
-    "SweepStep",
     "datum_features",
     "export_and_hash",
     "fit_coupon",
-    "insertion_sweep",
     "interference",
     "legend_to_rows",
     "measure",

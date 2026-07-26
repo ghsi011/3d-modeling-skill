@@ -121,8 +121,8 @@ mkdir -p ~/.claude/skills
 ln -s "$PWD/skills/3d-modeling" ~/.claude/skills/3d-modeling
 ```
 
-The orchestrator is the skill; the four specialists are files in its `roles/`
-directory that the orchestrator hands to subagents. Everything resolves inside
+All five roles are files in the skill's `roles/` directory, the orchestrator
+included; `SKILL.md` is the router that names them. Everything resolves inside
 that one folder, so it installs and moves as a unit — `python tools/build_skill.py`
 packs exactly this tree into `3d-modeling.skill`.
 
@@ -130,13 +130,13 @@ packs exactly this tree into `3d-modeling.skill`.
 
 ```
 skills/
-  3d-modeling/            # THE skill: orchestrator + roles + shared assets
+  3d-modeling/            # THE skill: router + roles + shared assets
     references/           #   FDM design, CadQuery/FreeCAD patterns, materials, printers, contracts
     scripts/              #   deterministic tooling + backend runners + tests
       team_tools/         #     contract-automation package (validate/hash/status)
       designer_toolkit/   #     export/measure/fit/coupon helpers for the designer role
-    SKILL.md              #   the orchestrator — the invocable entry point
-    roles/                #   metrologist · designer · print-engineer · verifier
+    SKILL.md              #   the router: names the five roles and the shared assets
+    roles/                #   orchestrator · metrologist · designer · print-engineer · verifier
   roles/                  # neutral role sources — edit these, then regenerate
 .claude/agents/3d-*.md    # Claude Code agent definitions   \
 tools/                    # gen_harness · build_skill · check_internal_links · bench
