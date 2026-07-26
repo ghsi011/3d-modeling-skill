@@ -330,6 +330,7 @@ def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], refere
         f"[{low}, {high}] mm",
         "" if ok else action,
     ))
+    commission.evidence["reference_path"] = str(reference) if isinstance(reference, str) else None
     commission.evidence["seated_clearance_mm"] = clearance
     commission.evidence["seated_interference_mm3"] = fit.interference(mesh, reference_mesh)
 

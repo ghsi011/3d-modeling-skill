@@ -62,6 +62,36 @@ class InPlaceTest(unittest.TestCase):
             self.assertTrue((out / "commission.json").is_file())
 
 
+class MatingReferenceTest(unittest.TestCase):
+    def test_the_reference_the_fit_was_measured_against_is_hashed(self) -> None:
+        """A FITTED run hand-added this row. The gate was handed the file and
+        measured the clearance against it; a reference nothing hashes can drift
+        from the one the number came from."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            ref = _seated_box(work / "mating_reference.stl", (20.0, 20.0, 20.0))
+            outer = trimesh.creation.box(extents=(30.0, 30.0, 30.0))
+            outer.apply_translation((0.0, 0.0, 15.0))
+            cavity = trimesh.creation.box(extents=(20.6, 20.6, 40.0))
+            cavity.apply_translation((0.0, 0.0, 20.0))
+            stl = work / "shell.stl"
+            trimesh.boolean.difference([outer, cavity]).export(stl)
+
+            built = plan.direct_template((30.0, 30.0, 30.0))
+            built["interfaces"] = [{"id": "I-01", "fit_type": "clearance",
+                                    "min_mm": 0.20, "max_mm": 0.45}]
+            result = commission.run(model=None, stl=stl, out_dir=work / "out",
+                                    plan=built, reference=str(ref), render=False).as_dict()
+
+            manifest = receipts.build_manifest(result, work / "out", job_id="t",
+                                               updated_utc=_WHEN)
+
+            row = next(a for a in manifest["artifacts"] if a["role"] == "mating_reference")
+            self.assertEqual(receipts.sha256_file(ref), row["sha256"])
+            self.assertFalse(row["printable_deliverable"],
+                             "the contract rejects a mating_reference marked printable")
+
+
 class ManifestTest(unittest.TestCase):
     def test_the_hash_is_of_the_file_that_exists_now(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

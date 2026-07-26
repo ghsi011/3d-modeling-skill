@@ -95,6 +95,27 @@ def build_manifest(
             row["source_revisions"] = dict(source_revisions)
         artifacts.append(row)
 
+    # The mating reference, when one was supplied. The gate was handed the file
+    # and measured the fit against it, so leaving it off the manifest made the
+    # designer hand-add the row -- and a reference nothing hashes can drift from
+    # the one the clearance was measured against. Never printable: the contract
+    # rejects a mating_reference marked as a deliverable.
+    reference = commission.get("evidence", {}).get("reference_path")
+    if reference:
+        path = Path(reference)
+        if path.is_file():
+            row = {
+                "id": "mating-reference", "role": "mating_reference", "path": path.name,
+                "type": _MANIFEST_TYPES.get(path.suffix.lower(), "stl"),
+                "sha256": sha256_file(path), "printable_deliverable": False,
+            }
+            bbox = _bbox_block(path)
+            if bbox:
+                row["bbox"] = bbox
+            if source_revisions:
+                row["source_revisions"] = dict(source_revisions)
+            artifacts.append(row)
+
     # Renders are listed too. An evidence file nothing hashes can silently
     # describe a mesh you no longer ship.
     for relative in commission.get("evidence", {}).get("renders", []) or []:

@@ -125,9 +125,10 @@ lines to fill two fields is a page you pay for on every job to learn nothing you
    is genuinely wrong, say so in your handoff and leave it to the print engineer — that
    number is theirs, not yours.
 9. Add a manifest row for any evidence file you produced outside the commission — an
-   artifact nothing hashes can silently describe a mesh you no longer ship. Do not re-validate
-   what the commission emitted: it is generated from the measurements and covered by test, and
-   the fresh verifier validates every contract anyway.
+   artifact nothing hashes can silently describe a mesh you no longer ship. The candidate, its
+   STEP, the renders and the `--reference` mating reference are already there. Do not
+   re-validate what the commission emitted: it is generated from the measurements and covered
+   by test, and the fresh verifier validates every contract anyway.
 10. Mark `candidate_readiness.md` `DESIGNER SELF-CHECK — NON-ACCEPTANCE`, and fill only the
    judgment `commission.json` leaves open: `visual_accept` (look at the render — actually
    look) and `fit_band_ok`. Never claim the Phase-4 gate passed.
