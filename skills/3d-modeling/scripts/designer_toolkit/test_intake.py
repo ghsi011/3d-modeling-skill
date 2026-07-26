@@ -158,3 +158,43 @@ class TestIntake(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProvenanceTest(unittest.TestCase):
+    """Where each number in `dimensions.md` says it came from.
+
+    Every row used to read `stated in the brief / user / B`, on the reasoning
+    that user-stated numbers are the condition for the DIRECT route. They are
+    not: the condition is that nothing needs measuring. A brief asking for a
+    clip over a 12 mm bundle states three numbers and `c_clip` takes eight, so
+    five rows claimed the user's authority for values the caller invented -- on
+    the one document whose entire purpose is provenance.
+    """
+
+    _PARAMS = {"bore_d": 12.0, "wall": 3.0, "screw_d": 4.8}
+
+    def _rows(self, stated: frozenset[str]) -> str:
+        return intake._dimension_rows(self._PARAMS, stated)
+
+    def test_unlisted_parameters_are_the_designers_choice(self) -> None:
+        rows = self._rows(frozenset({"bore_d"}))
+        self.assertIn("| bore_d | 12.0 | stated in the brief | user | B |", rows)
+        self.assertIn("| wall | 3.0 | chosen by design | designer | D |", rows)
+        self.assertIn("| screw_d | 4.8 | chosen by design | designer | D |", rows)
+
+    def test_the_default_never_claims_the_user_said_anything(self) -> None:
+        """The direction of the failure is the point. Forgetting `--stated`
+        understates the caller's own confidence, which invites scrutiny;
+        the reverse manufactures a statement the user never made, and nothing
+        downstream of the sheet can tell."""
+        rows = self._rows(frozenset())
+        self.assertNotIn("stated in the brief", rows)
+        self.assertNotIn("| user |", rows)
+        self.assertEqual(3, rows.count("chosen by design"))
+
+    def test_stated_accepts_a_comma_list_and_repeated_flags(self) -> None:
+        self.assertEqual(frozenset({"a", "b", "c"}),
+                         intake._stated(["a,b", "c"]))
+        self.assertEqual(frozenset({"a", "b"}),
+                         intake._stated([" a , b "]))
+        self.assertEqual(frozenset(), intake._stated([]))

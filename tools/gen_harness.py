@@ -265,10 +265,41 @@ def _template_table() -> str:
         from designer_toolkit.templates import CATALOGUE
     finally:
         sys.path.pop(0)
-    rows = ["| template | covers | call |", "|---|---|---|"]
-    rows += [f"| `{name}` | {covers} | `{call}` |"
+    rows = ["| template | covers | parameters, as `dt.py` takes them |", "|---|---|---|"]
+    rows += [f"| `{name}` | {covers} | {_as_cli_params(call)} |"
              for name, (covers, call) in CATALOGUE.items()]
     return "\n".join(rows)
+
+
+def _as_cli_params(call: str) -> str:
+    """`c_clip(bore_d=12.0, flange=(40, 22, 5))` -> ``--param bore_d=12.0 --param 'flange=(40, 22, 5)'``.
+
+    The catalogue holds a Python signature because the templates are importable,
+    and the charter's reader is at a shell. A measured run spent two turns
+    working out whether tuples were accepted and how to quote them -- on a route
+    budgeted at four turns total, which is a quarter of the job spent on syntax.
+    """
+    inner = call[call.index("(") + 1: call.rindex(")")]
+    args, depth, current = [], 0, ""
+    for char in inner:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        if char == "," and depth == 0:
+            args.append(current.strip())
+            current = ""
+            continue
+        current += char
+    if current.strip():
+        args.append(current.strip())
+    if any("=" not in a for a in args):
+        # `stack` takes built parts, not values, so no `--param` list can call
+        # it. Saying so beats listing its one keyword and letting a reader spend
+        # a turn discovering the rest.
+        return "**not callable from `dt.py`** — takes built parts; use it from Python"
+    quoted = [f"'{a}'" if any(c in a for c in " ({[") else a for a in args]
+    return "`" + " ".join(f"--param {a}" for a in quoted) + "`"
 
 
 def _expand(body: str) -> str:

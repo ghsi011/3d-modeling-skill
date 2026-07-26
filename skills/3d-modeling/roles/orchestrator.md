@@ -108,19 +108,19 @@ and it decides which phases run, not how verbose the record is.
   templates themselves, and `gen_harness --check` fails when it drifts — `dt.py templates`
   prints this same list and you should not need to spend a turn on it.
 
-| template | covers | call |
+| template | covers | parameters, as `dt.py` takes them |
 |---|---|---|
-| `box_shell` | any walled box: enclosure, hive body, tray, drawer, planter, open or lidded | `box_shell(inner=(120, 80, 60), wall=3.0, floor=3.0, open_top=True)` |
-| `panel` | a flat plate with openings: window, screen board, bottom board, lid, vent grille | `panel(width=100, depth=60, thickness=3.0, openings=({"kind": "rect", "x": 50, "y": 30, "w": 40, "h": 20},))` |
-| `device_case` | a shelled wrap around a slab device: phone case, remote sleeve, instrument boot -- and it returns the mating reference with it | `device_case(device=(73.6, 155.6, 8.5), wall=1.5, clearance=0.25, corner_radius=9.0)` |
-| `c_clip` | a C-channel that snaps over a round thing, on an optional flange: cable clip, hose clamp, rail retainer -- axis along Z, so self-supporting | `c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0, flange=(40, 22, 5), screw_d=4.5, screw_at=(8, 11), countersink_d=9.0)` |
-| `bolt_boss` | a screw boss or standoff, reporting its annulus wall and aspect ratio | `bolt_boss(outer_d=8.0, bore_d=4.2, height=10.0)` |
-| `segmented_box` | a walled box too big for the bed, split into corner pieces that fit it: hive body, large enclosure, planter -- per-axis walls, so it can reproduce a standard that fixes both the inside and the outside | `segmented_box(inner=(374.7, 466.7, 244.5), wall=(15.85, 19.05), bed=256.0)` |
-| `stack` | several parts laid out side by side for one plate, thinnest wall governing | `stack(part_a, part_b, gap=5.0)` |
+| `box_shell` | any walled box: enclosure, hive body, tray, drawer, planter, open or lidded | `--param 'inner=(120, 80, 60)' --param wall=3.0 --param floor=3.0 --param open_top=True` |
+| `panel` | a flat plate with openings: window, screen board, bottom board, lid, vent grille | `--param width=100 --param depth=60 --param thickness=3.0 --param 'openings=({"kind": "rect", "x": 50, "y": 30, "w": 40, "h": 20},)'` |
+| `device_case` | a shelled wrap around a slab device: phone case, remote sleeve, instrument boot -- and it returns the mating reference with it | `--param 'device=(73.6, 155.6, 8.5)' --param wall=1.5 --param clearance=0.25 --param corner_radius=9.0` |
+| `c_clip` | a C-channel that snaps over a round thing, on an optional flange: cable clip, hose clamp, rail retainer -- axis along Z, so self-supporting | `--param bore_d=12.0 --param wall=3.0 --param height=9.0 --param mouth_gap=9.0 --param 'flange=(40, 22, 5)' --param screw_d=4.5 --param 'screw_at=(8, 11)' --param countersink_d=9.0` |
+| `bolt_boss` | a screw boss or standoff, reporting its annulus wall and aspect ratio | `--param outer_d=8.0 --param bore_d=4.2 --param height=10.0` |
+| `segmented_box` | a walled box too big for the bed, split into corner pieces that fit it: hive body, large enclosure, planter -- per-axis walls, so it can reproduce a standard that fixes both the inside and the outside | `--param 'inner=(374.7, 466.7, 244.5)' --param 'wall=(15.85, 19.05)' --param bed=256.0` |
+| `stack` | several parts laid out side by side for one plate, thinnest wall governing | **not callable from `dt.py`** — takes built parts; use it from Python |
 
   ```bash
   DT=<skill>/scripts/dt.py
-  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
+  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --stated <names the brief actually gives>         --brief <project>/brief.md --updated-utc <iso> --out <project>
   python $DT validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
@@ -148,6 +148,12 @@ and it decides which phases run, not how verbose the record is.
   47 seconds before the shell is even reached. There is no branch between those steps worth
   taking separately. It stops at the first failure and
   hands back that step's own message.
+
+  **Pass `--stated` naming the parameters the brief actually gives you.** A brief asking for
+  a clip over a 12 mm bundle states three numbers; `c_clip` takes eight. Everything you do
+  not name is recorded as chosen by the design at confidence `D`, which is what it is — and
+  the sheet exists to record exactly that difference. Omitting the flag understates your own
+  numbers, which is safe; the sheet will never claim the user said something they did not.
 
   It writes `job_state.md` and `dimensions.md` with every mechanical field filled. The two
   judgments are still yours and nothing invents them: pass them in and they land in the file,

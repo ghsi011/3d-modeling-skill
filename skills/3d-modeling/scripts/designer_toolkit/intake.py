@@ -68,19 +68,39 @@ def _brief_hash(brief: Path | None) -> str:
     return f"`{sha256_file(brief)[:16]}`"
 
 
-def _dimension_rows(params: dict[str, Any]) -> str:
+def _dimension_rows(params: dict[str, Any], stated: frozenset[str]) -> str:
     """Every parameter, as a row that says where the number came from.
 
-    Uniformly stated-by-user, because that is the condition for this route
-    existing. A grade of `B` rather than `A`: nothing here was measured, and
-    calling a transcription high-confidence would be the document flattering
-    itself.
+    This used to write `stated in the brief / user / B` on every row, on the
+    reasoning that user-stated numbers are the condition for this route. They
+    are not: the condition is that nothing needs *measuring*. A brief asking for
+    a clip over a 12 mm bundle states three numbers and a `c_clip` takes eight,
+    so five rows claimed the user's authority for values the caller invented --
+    at grade `B`, on a sheet whose whole purpose is provenance. One measured run
+    caught it, and had to correct eight rows by hand.
+
+    Unlisted means chosen, not stated, because that is the direction whose
+    failure is safe. A caller who forgets `--stated` understates its own
+    confidence and prompts scrutiny; the reverse manufactures a user statement
+    that was never made, and nothing downstream can tell.
+
+    `B` rather than `A` even when stated: nothing here was measured, and calling
+    a transcription high-confidence would be the document flattering itself.
     """
     rows = []
     for index, (name, value) in enumerate(sorted(params.items()), start=1):
-        rows.append(f"| D-{index:02d} | {name} | {value} | stated in the brief | "
-                    f"user | B | as stated |")
+        if name in stated:
+            rows.append(f"| D-{index:02d} | {name} | {value} | stated in the brief | "
+                        f"user | B | as stated |")
+        else:
+            rows.append(f"| D-{index:02d} | {name} | {value} | chosen by design | "
+                        f"designer | D | free to change |")
     return "\n".join(rows) or "| — | — | — | — | — | — | — |"
+
+
+def _stated(raw: list[str]) -> frozenset[str]:
+    """Accept `--stated a,b` and repeated `--stated a --stated b` alike."""
+    return frozenset(name.strip() for text in raw for name in text.split(",") if name.strip())
 
 
 def _completeness_rows(built) -> str:
@@ -139,7 +159,7 @@ updated_utc: {updated_utc}
 
 **Consequence class: `{risk}`.** Rationale: {rationale or REQUIRED}
 
-**Profile `{profile}`,** because every design-driving dimension is stated and the
+**Profile `{profile}`,** because nothing here needs measuring and the
 `{template}` template covers the shape. {acceptance or REQUIRED} — say here what acceptance
 depends on that you did not get to choose, and if the answer is nothing, say that.
 {"" if profile != "DIRECT" else '''
@@ -176,7 +196,8 @@ this, and the receipt leaves `visual_accept` for a human who has actually seen a
 
 
 def dimensions(*, job_id: str, updated_utc: str, template: str, params: dict[str, Any],
-               built, brief: Path | None = None) -> str:
+               built, brief: Path | None = None,
+               stated: frozenset[str] = frozenset()) -> str:
     return f"""---
 contract: dimensions
 contract_version: 4
@@ -213,7 +234,7 @@ image-derived or measured, and none is graded `A`.
 ## Dimensions
 | ID | Feature | Value/range | Datum/method | Source | Confidence | Tolerance/design response |
 |---|---|---:|---|---|---|---|
-{_dimension_rows(params)}
+{_dimension_rows(params, stated)}
 
 ## Open questions
 | ID | Unknown | Risk | Approved bound/question | Blocks |
@@ -236,6 +257,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--template", required=True)
     parser.add_argument("--param", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--stated", action="append", default=[], metavar="NAME[,NAME]",
+                        help="comma-separated parameter names the brief actually "
+                             "states. Everything else is recorded as chosen by the "
+                             "design at confidence D. That is the safe direction: "
+                             "forgetting it understates your own confidence, while "
+                             "the reverse claims the user said something they did not.")
     parser.add_argument("--profile", default="DIRECT", choices=_PROFILE)
     parser.add_argument("--risk", default="R1_LOW_CONSEQUENCE", choices=_RISK)
     parser.add_argument("--updated-utc", required=True)
@@ -272,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
                                    acceptance=args.acceptance)),
         ("dimensions.md", dimensions(job_id=args.job_id, updated_utc=args.updated_utc,
                                      template=args.template, params=params, built=built,
-                                     brief=args.brief)),
+                                     brief=args.brief, stated=_stated(args.stated))),
     ):
         path = args.out / name
         if path.exists():

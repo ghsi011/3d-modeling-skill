@@ -141,7 +141,7 @@ and it decides which phases run, not how verbose the record is.
 
   ```bash
   DT=<skill>/scripts/dt.py
-  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
+  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --stated <names the brief actually gives>         --brief <project>/brief.md --updated-utc <iso> --out <project>
   python $DT validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
@@ -169,6 +169,12 @@ and it decides which phases run, not how verbose the record is.
   47 seconds before the shell is even reached. There is no branch between those steps worth
   taking separately. It stops at the first failure and
   hands back that step's own message.
+
+  **Pass `--stated` naming the parameters the brief actually gives you.** A brief asking for
+  a clip over a 12 mm bundle states three numbers; `c_clip` takes eight. Everything you do
+  not name is recorded as chosen by the design at confidence `D`, which is what it is — and
+  the sheet exists to record exactly that difference. Omitting the flag understates your own
+  numbers, which is safe; the sheet will never claim the user said something they did not.
 
   It writes `job_state.md` and `dimensions.md` with every mechanical field filled. The two
   judgments are still yours and nothing invents them: pass them in and they land in the file,

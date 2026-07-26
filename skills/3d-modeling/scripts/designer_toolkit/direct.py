@@ -50,6 +50,7 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
         risk: str, updated_utc: str, out: Path, material: str | None,
         rationale: str | None = None, acceptance: str | None = None,
         brief: Path | None = None, bodies: int | None = None,
+        stated: list[str] | None = None,
         render: bool = True) -> tuple[int, list[str]]:
     """Every step, in order, stopping at the first that fails."""
     log: list[str] = []
@@ -80,6 +81,8 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
         intake_argv += ["--acceptance", acceptance]
     if brief:
         intake_argv += ["--brief", str(brief)]
+    for name in stated or ():
+        intake_argv += ["--stated", name]
     code = intake_module.main(intake_argv)
     if code != 0:
         return code, log + ["intake failed; nothing downstream ran"]
@@ -145,6 +148,12 @@ def main(argv: list[str] | None = None) -> int:
                         choices=("R0_DECORATIVE", "R1_LOW_CONSEQUENCE"),
                         help="R2 and above do not take this route: they need a named "
                              "reviewer and independent verification")
+    parser.add_argument("--stated", action="append", default=[], metavar="NAME[,NAME]",
+                        help="comma-separated parameter names the brief actually "
+                             "states. Everything else is recorded as chosen by the "
+                             "design at confidence D. That is the safe direction: "
+                             "forgetting it understates your own confidence, while "
+                             "the reverse claims the user said something they did not.")
     parser.add_argument("--material", help="overrides the plan template's default")
     parser.add_argument("--rationale", help="why this consequence class; yours to decide")
     parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
@@ -171,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
                     bbox=tuple(args.bbox), risk=args.risk, updated_utc=args.updated_utc,
                     out=args.out, material=args.material, rationale=args.rationale,
                     acceptance=args.acceptance, brief=args.brief, bodies=args.bodies,
-                    render=not args.no_render)
+                    stated=args.stated, render=not args.no_render)
 
     sys.stderr.write("\n".join(f"  {line}" for line in log) + "\n")
     if code != 0:
