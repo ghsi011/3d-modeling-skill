@@ -209,14 +209,29 @@ def _check_receipt_location(commission: Commission, out_dir: Path, plan_path: Pa
     ))
 
 
-def _check_solid(commission: Commission, report) -> None:
-    ok = report.watertight and report.components == 1
+def _check_solid(commission: Commission, report, plan: dict[str, Any]) -> None:
+    """Watertight, and as many bodies as the plan says it should be.
+
+    One, almost always: a second body means a boolean split the solid. But a box
+    too big for the bed is delivered as segments a slicer separates, and hard-
+    coding one made the gate reject a correct six-piece hive body for being six
+    pieces. The count comes from the plan rather than from the mesh, because
+    "however many came out" is not a check.
+    """
+    expected = plan.get("expected_bodies", 1)
+    expected = int(expected) if isinstance(expected, int) and expected > 0 else 1
+    ok = report.watertight and report.components == expected
     commission.add(Check(
-        "solid", "Single watertight solid",
+        "solid", f"Watertight, {expected} bod{'y' if expected == 1 else 'ies'}",
         _PASS if ok else _FAIL,
-        f"watertight={report.watertight}, components={report.components}",
-        "" if ok else "A non-watertight or multi-body export cannot be printed or "
-                      "measured. Fix the boolean/shell before anything else here matters.",
+        f"watertight={report.watertight}, components={report.components}, "
+        f"plan expects {expected}",
+        "" if ok else (
+            "A non-watertight export cannot be printed or measured."
+            if not report.watertight else
+            f"The plan declares {expected} solid{'' if expected == 1 else 's'} and the export "
+            f"has {report.components}. Either a boolean split the part, or the plan's "
+            "`expected_bodies` does not describe what is being built."),
     ))
 
 
@@ -512,7 +527,7 @@ def run(
     if writes_receipts:
         _check_receipt_location(commission, out_dir, plan_path)
     _check_step(commission, report, stl is not None)
-    _check_solid(commission, report)
+    _check_solid(commission, report, plan)
     _check_repair(commission, report)
     _check_envelope(commission, report, plan)
 

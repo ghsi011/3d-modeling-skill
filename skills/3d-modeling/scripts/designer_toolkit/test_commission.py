@@ -411,6 +411,55 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class BodyCountTest(unittest.TestCase):
+    """One body, almost always: a second means a boolean split the part. But a
+    box too big for the bed is delivered as segments a slicer separates, and
+    hard-coding one made the gate reject a correct six-piece hive body for being
+    six pieces."""
+
+    def _two_bodies(self, work: Path) -> Path:
+        pair = trimesh.util.concatenate([
+            trimesh.creation.box(extents=(30, 20, 10)),
+            trimesh.creation.box(extents=(30, 20, 10)).apply_translation([60, 0, 0])])
+        path = work / "pair.stl"
+        pair.export(path)
+        return path
+
+    def test_an_undeclared_second_body_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=self._two_bodies(work),
+                                    out_dir=work / "out",
+                                    plan=_plan(expected_bbox_mm={"x": 90.0, "y": 20.0,
+                                                                 "z": 10.0}),
+                                    render=False)
+
+            solid = next(c for c in result.checks if c.id == "solid")
+            self.assertEqual("FAIL", solid.result)
+            self.assertIn("plan expects 1", solid.detail)
+
+    def test_a_declared_second_body_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=self._two_bodies(work),
+                                    out_dir=work / "out",
+                                    plan=_plan(expected_bodies=2,
+                                               expected_bbox_mm={"x": 90.0, "y": 20.0,
+                                                                 "z": 10.0}),
+                                    render=False)
+
+            self.assertEqual("PASS", next(c for c in result.checks if c.id == "solid").result)
+
+    def test_a_single_part_declared_as_many_fails(self) -> None:
+        """The count is a claim about the part, not a way to silence the check."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(expected_bodies=4), render=False)
+
+            self.assertEqual("FAIL", next(c for c in result.checks if c.id == "solid").result)
+
+
 class SliceProfileEvidenceTest(unittest.TestCase):
     def test_the_gate_emits_the_unconditioned_curve(self) -> None:
         """The charter sends readers to `evidence.slice_profile`, and DIRECT has

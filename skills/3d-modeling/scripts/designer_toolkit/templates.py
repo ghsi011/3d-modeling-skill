@@ -550,9 +550,9 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
     )
 
 
-def segmented_box(*, inner: tuple[float, float, float], wall: float, bed: float,
-                  floor: float = 0.0, tongue: float = 0.0, clearance: float = 0.25,
-                  gap: float = 6.0) -> Built:
+def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
+                  floor: float = 0.0, tongue: float = 0.0,
+                  clearance: float = 0.25) -> Built:
     """A walled box too big for the bed, split into corner pieces that fit it.
 
     Some sizes are not chosen. A Langstroth hive body is 406.4 x 504.8 mm because
@@ -569,7 +569,8 @@ def segmented_box(*, inner: tuple[float, float, float], wall: float, bed: float,
     height is a vertical extrusion and prints with no support, and it registers
     the joint in both directions across the wall.
 
-    Returns the segments laid out for one plate.
+    Returns the segments in their assembled positions, so the exported solid is
+    the box itself and its bounding box is the standard that was asked for.
 
     It declares no area expectation, deliberately. Every other template here
     derives one in closed form, but the section area of a jointed plate depends
@@ -644,9 +645,17 @@ def segmented_box(*, inner: tuple[float, float, float], wall: float, bed: float,
             piece = _cut_with(piece, [g for _, g in cuts])
             if adds:
                 piece = trimesh.boolean.union([piece] + [s for s, _ in adds])
+            # Clamped twice, and the second clamp is the one that matters. A
+            # tongue may cross the seam into its neighbour's cell -- that is what
+            # registers the joint -- but it may not push past the outside of the
+            # box, or the assembled hive comes out 417 x 515 where the standard
+            # says 406.4 x 504.8 and every commercial box it must stack with
+            # disagrees.
             piece = trimesh.boolean.intersection([piece, _box(
                 (cell_x + 2 * tongue, cell_y + 2 * tongue, height * 3),
                 (x0 + cell_x / 2, y0 + cell_y / 2, height / 2))])
+            piece = trimesh.boolean.intersection([piece, _box(
+                (outer_x, outer_y, height * 3), (outer_x / 2, outer_y / 2, height / 2))])
             # Refuse rather than hand back something unprintable. The whole
             # promise of this template is that every piece fits, and a caller who
             # discovers otherwise at the slicer has been told a comfortable lie.
@@ -655,13 +664,19 @@ def segmented_box(*, inner: tuple[float, float, float], wall: float, bed: float,
                 raise ValueError(
                     f"segment {i},{j} reaches {float(reach[0]):.1f} x {float(reach[1]):.1f} mm, "
                     f"over the {bed} mm bed; reduce the tongue or pass a smaller bed")
-            segments.append(Built(part=_seated(piece),
-                                  params={"wall_mm": float(min(wall_x, wall_y))}))
+            segments.append(piece)
 
-    laid = stack(*segments, gap=gap)
-    extents = laid.part.bounds[1] - laid.part.bounds[0]
+    # Left where they belong, not spread along X. Laying them out was the
+    # obvious move and it was wrong twice over: six hive segments come to
+    # 1291 mm side by side, which fits no bed either, and it made the exported
+    # bounding box an artifact of tongue arithmetic that no brief ever stated.
+    # In place, the STL *is* the hive body -- in pieces -- and its bounding box
+    # is the standard the caller asked for and can check. A slicer separates the
+    # objects and arranges them; that is its job, not this one's.
+    assembly = trimesh.util.concatenate(segments)
+    extents = assembly.bounds[1] - assembly.bounds[0]
     return Built(
-        part=laid.part,
+        part=assembly,
         params={
             "wall_mm": float(min(wall_x, wall_y)),
             "overall_mm": {"x": float(extents[0]), "y": float(extents[1]),

@@ -33,10 +33,16 @@ class TestSegmentedBox(unittest.TestCase):
         return T.segmented_box(**kwargs)
 
     def test_it_reproduces_the_standard_it_was_given(self) -> None:
-        assembled = self._hive().params["assembled_mm"]
-        self.assertAlmostEqual(406.4, assembled["x"], places=6)
-        self.assertAlmostEqual(504.8, assembled["y"], places=6)
-        self.assertAlmostEqual(244.5, assembled["z"], places=6)
+        """Both the arithmetic and the solid. They came apart once: tongues were
+        allowed to push past the outer wall, so the assembled hive measured
+        417 x 515 where the standard says 406.4 x 504.8 -- and every commercial
+        box it has to stack with disagrees by 10 mm."""
+        built = self._hive()
+        for key, standard in (("x", 406.4), ("y", 504.8), ("z", 244.5)):
+            with self.subTest(axis=key):
+                self.assertAlmostEqual(standard, built.params["assembled_mm"][key], places=3)
+                self.assertAlmostEqual(standard, built.params["overall_mm"][key], places=3,
+                                       msg="the exported solid must be the box it claims")
 
     def test_every_segment_fits_the_bed(self) -> None:
         """The one promise. A first draft sized cells to fill the bed exactly and
@@ -69,8 +75,8 @@ class TestSegmentedBox(unittest.TestCase):
         """Per-axis walls exist for standards that need them; the ordinary case
         must not have to know that."""
         built = T.segmented_box(inner=(400.0, 400.0, 100.0), wall=5.0, bed=256.0)
-        self.assertAlmostEqual(410.0, built.params["assembled_mm"]["x"], places=6)
-        self.assertAlmostEqual(410.0, built.params["assembled_mm"]["y"], places=6)
+        self.assertAlmostEqual(410.0, built.params["assembled_mm"]["x"], places=3)
+        self.assertAlmostEqual(410.0, built.params["assembled_mm"]["y"], places=3)
 
     def test_the_tongue_must_be_thinner_than_the_wall_it_sits_in(self) -> None:
         with self.assertRaises(ValueError):

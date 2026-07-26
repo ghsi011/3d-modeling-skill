@@ -43,7 +43,8 @@ def _params(raw: list[str]) -> dict[str, Any]:
 def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float, float, float],
         risk: str, updated_utc: str, out: Path, material: str | None,
         rationale: str | None = None, acceptance: str | None = None,
-        brief: Path | None = None, render: bool = True) -> tuple[int, list[str]]:
+        brief: Path | None = None, bodies: int = 1,
+        render: bool = True) -> tuple[int, list[str]]:
     """Every step, in order, stopping at the first that fails."""
     log: list[str] = []
     out.mkdir(parents=True, exist_ok=True)
@@ -68,6 +69,8 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
                  "--updated-utc", updated_utc, "--out", str(plan_path)]
     if material:
         plan_argv += ["--material", material]
+    if bodies != 1:
+        plan_argv += ["--bodies", str(bodies)]
     if plan_module.main(plan_argv) != 0:
         return 1, log + ["plan failed; no candidate was built"]
     log.append(f"plan        {plan_path.name}")
@@ -110,6 +113,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
                                              "get to choose -- 'nothing' is a real answer")
     parser.add_argument("--brief", type=Path, help="hashed into the dimensions sources table")
+    parser.add_argument("--bodies", type=int, default=1,
+                        help="separate solids the part is meant to be; more than one only "
+                             "when it is deliberately segmented for the bed")
     parser.add_argument("--updated-utc", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--no-render", action="store_true",
@@ -126,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     code, log = run(job_id=args.job_id, template=args.template, raw_params=args.param,
                     bbox=tuple(args.bbox), risk=args.risk, updated_utc=args.updated_utc,
                     out=args.out, material=args.material, rationale=args.rationale,
-                    acceptance=args.acceptance, brief=args.brief,
+                    acceptance=args.acceptance, brief=args.brief, bodies=args.bodies,
                     render=not args.no_render)
 
     sys.stderr.write("\n".join(f"  {line}" for line in log) + "\n")

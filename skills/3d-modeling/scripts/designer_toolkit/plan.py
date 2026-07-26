@@ -61,6 +61,7 @@ def direct_template(
     nozzle_mm: float = 0.4,
     material: str = "PETG",
     dimensions_revision: int = 1,
+    bodies: int = 1,
     updated_utc: str = "1970-01-01T00:00:00Z",
 ) -> dict[str, Any]:
     """A bound plan for a job whose dimensions were stated, not measured."""
@@ -80,6 +81,11 @@ def direct_template(
         "dimensions_revision": dimensions_revision,
         "updated_utc": updated_utc,
         "threshold_source": "builtin-default",
+        # How many separate solids the delivered STL should contain. One, unless
+        # the part is deliberately several -- a box too big for the bed comes as
+        # segments, and a slicer separates them. Declared here rather than
+        # inferred from the mesh, because "however many came out" is not a check.
+        "expected_bodies": int(bodies),
         "process": [{"printer_material_nozzle": f"{material}; {nozzle_mm}mm nozzle"}],
         "expected_bbox_mm": {"x": x, "y": y, "z": z},
         "bbox_tolerance_mm": float(tolerance_mm),
@@ -180,7 +186,7 @@ def _cmd_template(args: argparse.Namespace) -> int:
                            job_id=args.job_id, nozzle_mm=args.nozzle,
                            material=args.material,
                            dimensions_revision=args.dimensions_revision,
-                           updated_utc=args.updated_utc)
+                           bodies=args.bodies, updated_utc=args.updated_utc)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")
@@ -209,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     template.add_argument("--job-id", default="direct")
     template.add_argument("--nozzle", type=float, default=0.4)
     template.add_argument("--material", default="PETG")
+    template.add_argument("--bodies", type=int, default=1,
+                          help="separate solids the STL should contain; more than one only "
+                               "when the part is deliberately segmented")
     template.add_argument("--dimensions-revision", type=int, default=1)
     template.add_argument("--updated-utc", default="1970-01-01T00:00:00Z",
                           help="injected, never wall-clock, so a rerun is byte-identical")
