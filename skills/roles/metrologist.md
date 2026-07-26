@@ -49,7 +49,7 @@ render-over-photo overlays.
    domain (`A`/`B`/`C`/`D`) your own table needs, and the hash-binding rule. That rule is
    why every evidence path you cite must resolve on disk and be hashed from bytes: a sheet
    citing a file that does not exist validates clean.
-10. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
+2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
    datum discipline, render/overlay, inspection, and image-alignment patterns only.
 3. Use the shared overlay tools at
    [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
@@ -83,21 +83,21 @@ render-over-photo overlays.
    largest, saying at what height it occurred; a monotonic drift across those reads means the
    jaws were on the curve, not the envelope. Corroborate against an official spec when the
    product is known.
-2. For a known product, search official specifications and existing 3D models first, then
+3. For a known product, search official specifications and existing 3D models first, then
    reconcile them with the supplied photos and calipers.
-3. Define axis directions, named primary/secondary/tertiary datums, and the zero origin.
-4. Inventory every functional, mating, clearance, cosmetic, and uncertain feature. Before
+4. Define axis directions, named primary/secondary/tertiary datums, and the zero origin.
+5. Inventory every functional, mating, clearance, cosmetic, and uncertain feature. Before
    reference dispatch, complete the blind-build table with count, relative layout/handedness,
    and a datum/bounded envelope or explicit shared-envelope response for every visible
    feature.
-5. Record each design-driving dimension with value/range, units, provenance, method, confidence
+6. Record each design-driving dimension with value/range, units, provenance, method, confidence
    (`A measured`, `B official/corroborated`, `C image-derived`, `D assumed`), and datum. For a
    mating/fit-relevant feature, record the **as-observed geometry and its measurement
    uncertainty** (instrument resolution, repeat-read spread, near-feature bias) — never a fit
    class, clearance band, or interference allowance. Fit strategy is the print engineer's
    decision in `print_plan.md`, made from this as-observed geometry plus its uncertainty; the
    metrologist does not choose clearance, interference, or contact intent.
-6. Never silently average conflicts or convert an assumed visual proportion into a measured
+7. Never silently average conflicts or convert an assumed visual proportion into a measured
    fact. Put unresolved conflicts in open questions with their downstream effect.
    **A caliper read and a published spec are both fallible** — the part may not be the exact
    variant, may carry a film or case, or may be measured off-axis; the spec may be nominal,
@@ -107,10 +107,10 @@ render-over-photo overlays.
    changes downstream. Say what you would use absent an answer and why. Do not hand the sheet
    on as ACCEPTED with a fit-critical conflict open — a DRAFT that stalls the pipeline in
    silence costs more than one question.
-7. Mark the minimum set of blocking unknowns that prevents reference construction.
-8. After the designer builds the mating reference blind from the sheet, render matching
+8. Mark the minimum set of blocking unknowns that prevents reference construction.
+9. After the designer builds the mating reference blind from the sheet, render matching
    photo viewpoints, make one decisive crop/overlay per fit-critical view, and inspect each
    composite by eye. Do not fan out duplicate whole-image overlays.
-9. `ACCEPT` only when the reference hugs all fit-critical features within the stated
+10. `ACCEPT` only when the reference hugs all fit-critical features within the stated
    tolerance. Otherwise revise `dimensions.md`, increase ambiguity explicitly, and require
    a fresh blind rebuild. The round trip tests the sheet, not the designer.

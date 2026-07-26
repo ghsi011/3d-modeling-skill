@@ -13,7 +13,7 @@ pre-concluded is not a verification, and check 4 -- looking at the render -- is
 the one thing in the set no tool can do. The draft exists to stop the verifier
 retyping measurements, not to save it from deciding.
 
-    python <skill>/scripts/dt.py report --commission verify/commission.json          --out verification_report.md --job-id <job> --updated-utc <iso8601>
+    python <skill>/scripts/dt.py report --commission verify/commission.json \n      --out verification_report.md --job-id <job> --updated-utc <iso8601>
 """
 from __future__ import annotations
 

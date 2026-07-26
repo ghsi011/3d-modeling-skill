@@ -52,10 +52,10 @@ Only when the job has the evidence for it:
    [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
 6. A FreeCAD candidate:
    [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
-8. A conditional final-prep review, for the `final_prep_review.md` template:
+7. A conditional final-prep review, for the `final_prep_review.md` template:
    [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md).
    The `verification_report.md` template is **not** on this list: `dt.py report` emits it,
-   already filled with your own measurements, so reading 592 lines of contract to obtain a
+   already filled with your own measurements, so reading the whole contract to obtain a
    thirty-line skeleton buys nothing.
 
 `dt.py crop` zooms a render or a photograph in one call, capped so the pixels are not paid

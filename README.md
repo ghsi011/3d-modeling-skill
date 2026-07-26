@@ -172,14 +172,16 @@ Set up the 3d-modeling skill (https://github.com/ghsi011/3d-modeling-skill) for 
 
 1. Clone it outside this project, e.g. `git clone https://github.com/ghsi011/3d-modeling-skill.git ~/src/3d-modeling-skill`. If the clone already exists, `git pull` instead.
 2. Install the tooling dependencies as the clone's README "Dependencies" section specifies: the core install first, extras only for what this job actually needs.
-3. Install the role definitions for the harness you are running under as the clone's README "Harnesses" section specifies, and say which harness you picked. Do not fabricate a config format the runtime does not document.
-5. Verify: `pip install pytest` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
+3. Install the skill as the clone's README "Installing the skill" section specifies. There is nothing to register per harness: `SKILL.md` is a router and the five roles are files beside it, so any runtime that can read a file and spawn a subagent can run it.
+4. Verify: `pip install pytest` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
 
 Then tell me: what you installed, what you skipped and why, and anything that failed. Do not guess versions or invent commands that are not in the repo's README or docs/tooling.md.
 ```
 
 Once installed, the entry point is the orchestrator role — `/3d-orchestrator` in
-Claude Code — the skill is the orchestrator.
+Claude Code. `SKILL.md` itself is a router: it names the five roles and points at
+the shared references, and the orchestrator reads its own charter like everyone
+else.
 Working notes for agents editing this repo live in [`AGENTS.md`](AGENTS.md); the
 deterministic tool surfaces, their exact flags, and their exit-code contracts are
 in [`docs/tooling.md`](docs/tooling.md).

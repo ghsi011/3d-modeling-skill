@@ -33,7 +33,8 @@ the contracts.
 
 This list is short on purpose: everything on it changes what you *build*. The contract spec
 for `candidate_readiness.md` is not here because you no longer write that file, and reading
-578 lines to fill two fields is a page you pay for on every job to learn nothing you act on.
+the whole contract spec to fill two fields is a page you pay for on every job to learn
+nothing you act on.
 
 Always:
 

@@ -164,6 +164,32 @@ Its `still_requires_a_look` field is the honest part: nothing in the call reads
 defects this pipeline has shipped were invisible to every number and obvious in
 a render.
 
+## Everything else the launcher offers
+
+Sixteen verbs, and this file used to describe five. `report` and `screen` were among the
+missing, and both charters instruct a reader to run them.
+
+| verb | what it is for |
+|---|---|
+| `direct` | the whole no-dispatch route in one call: intake, plan, build, gate |
+| `intake` | `job_state.md` and `dimensions.md` for a job, judgments left blank |
+| `build` | `model.py` for a template-covered part, parameters checked by building once |
+| `plan template` / `plan check` | the built-in DIRECT plan, and the gate that rejects an unbuildable one before a build |
+| `probe` | ask the delivered solid a question: section area, a hole's size **and position**, the slice profile |
+| `screen` | the one question no check can ask: what is here that nobody declared |
+| `report` | draft `verification_report.md` from the verifier's own numbers, judgments blank |
+| `integrity` | the raw, un-repaired parse of a delivered mesh |
+| `crop` | `crop` / `contact-sheet` / `rotations` -- zoom evidence without hand-rolling it |
+| `validate` / `status` | the contract checks, reachable from anywhere rather than only from the scripts directory |
+
+Two of those exist because of a defect rather than a feature. `probe` exists because the
+charter told a verifier to compare the sheet against geometry *and* not to hand-roll
+anything, with no way to do the first without the second -- and a part shipped with its
+holes 0.25 mm out of place while every check agreed, because each measured a correct hole at
+the position the designer declared. `validate` and `status` route through the launcher
+because `python -m team_tools.contracts` only resolves with the scripts directory on
+`sys.path`: fine from the repo, broken from an installed bundle.
+
 ## What is still yours
 
 Interpreting photos, choosing datums and geometry, choosing the fit and manufacturing

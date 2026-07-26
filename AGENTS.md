@@ -16,7 +16,7 @@ This is file-contract only communication: roles write and read project files, no
 
 ## Invocation
 
-The pipeline ships as one skill: `skills/3d-modeling/SKILL.md` is the orchestrator and the only invocable entry point, and the four specialists are files in `skills/3d-modeling/roles/` that it hands to subagents. Any runtime that can spawn a subagent and read a file can run it — there is nothing to register per harness.
+The pipeline ships as one skill. `skills/3d-modeling/SKILL.md` is a router naming five roles, all of them files in `skills/3d-modeling/roles/` -- the orchestrator reads its own charter like every specialist, rather than being the entry point itself. Any runtime that can spawn a subagent and read a file can run it — there is nothing to register per harness.
 
 `skills/roles/*.md` are the source. After editing a role file, run `python tools/gen_harness.py`; CI fails on drift.
 

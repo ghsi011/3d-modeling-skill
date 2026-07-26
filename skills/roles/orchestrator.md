@@ -81,7 +81,7 @@ disk, not on how the context was named.
 ## Required reading
 
 1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md)
-   — **when you are dispatching.** It is 600 lines of contract schema, and its job is to let
+   — **when you are dispatching.** It is the whole contract schema, and its job is to let
    you gate what a specialist hands back. On `DIRECT` you dispatch nobody and author no
    contract by hand: `dt.py direct` writes them and `contracts validate` checks them, so
    reading it there is a page paid for on every job to learn nothing you act on. Reach for it

@@ -67,13 +67,19 @@ print("volume", body.val().Volume(), "bbox", body.val().BoundingBox().xlen)
 
 ## Phase-4 verification patterns
 
-**First reach for the toolkit, not this code.** These checks are packaged and
-tested in [`designer-toolkit.md`](designer-toolkit.md) — `export_and_hash`,
-`interference`, `insertion_sweep`, `datum_features`, `overhang_area`, and a
-one-call `finalize`. Call those; they already handle the traps below (the
-`plane_transform` datum frame, the -0.73 overhang screen, watertight-on-the-
-normalized-mesh). The raw patterns here are the under-the-hood explanation and a
-fallback when you need a bespoke check the toolkit does not cover.
+**Run `dt.py commission`, not this code.** One call measures everything the plan
+declares and exits non-zero if any of it fails; see
+[`designer-toolkit.md`](designer-toolkit.md). It already handles the traps below
+— the `plane_transform` datum frame, the -0.73 overhang screen,
+watertight-on-the-normalized-mesh.
+
+This section used to open by listing the individual check functions and telling
+you to call those. That menu is exactly what made three measured runs hand-write
+130-to-280-line verification scripts instead of running the gate, and one of them
+widened its own acceptance bands until its wrong numbers passed. The per-check
+CLI verbs were retired for the same reason. The patterns below are the
+under-the-hood explanation of what the gate does, and a reference if you need to
+understand a result — not a kit to assemble.
 
 ```python
 # 1. seated interference (must be ~0)

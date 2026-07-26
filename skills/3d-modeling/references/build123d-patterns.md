@@ -15,9 +15,9 @@ documented once in [`cadquery-patterns.md`](cadquery-patterns.md) and
 modelling below is build123d-specific.
 
 ```bash
-cd skills/3d-modeling/scripts     # or scripts/ inside a packaged .skill bundle
-python3 preview.py body.stl preview.png --views multi
-python3 -m designer_toolkit commission --model model.py --plan print_plan_checks.json \n  --out . --job-id <job> --updated-utc <iso8601>   # the deterministic gate
+python3 <skill>/scripts/dt.py commission --model model.py \
+  --plan print_plan_checks.json --out . --job-id <job> \
+  --updated-utc <iso8601>          # the deterministic gate, from any directory
 ```
 
 Failure → read the tool output, fix the script, re-export, and always LOOK at
