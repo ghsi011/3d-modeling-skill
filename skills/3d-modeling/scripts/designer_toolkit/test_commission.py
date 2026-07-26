@@ -404,6 +404,52 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class PlanDeclaredFeatureTest(unittest.TestCase):
+    """The plan-side half of feature checking.
+
+    A template expectation is derived from the caller's parameters, so it cannot
+    catch a feature nobody asked for -- drop the parameter and the check leaves
+    with the geometry. A plan row is written from the sheet, upstream of the
+    model, so it survives the model omitting the feature entirely. That is the
+    only thing standing between a transcription that quietly lost a hole and a
+    part that measures self-consistently wrong.
+    """
+
+    def test_a_feature_the_model_never_built_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(features=[{"kind": "through_hole", "id": "H-01",
+                                    "at": [0.0, 0.0], "d_mm": 5.0,
+                                    "z_from": -4.0, "z_to": 4.0}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            self.assertIn("feature-H-01", [c.id for c in result.failed],
+                          "a solid box has no 5 mm bore, and the plan says it must")
+
+    def test_the_receipt_records_where_the_expectations_came_from(self) -> None:
+        """Auditable on purpose: an expectation from the plan and one from the
+        template carry different weight, and a reader cannot tell them apart
+        from the check result alone."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(features=[{"kind": "solid_region", "id": "mid",
+                                    "z": 0.0, "area_mm2": 600.0}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            self.assertEqual("plan", result.evidence["expected_features_source"])
+
+    def test_no_declared_features_records_no_source(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(), render=False)
+            self.assertNotIn("expected_features_source", result.evidence)
+
+
 class CliTest(unittest.TestCase):
     def test_a_failing_candidate_exits_nonzero(self) -> None:
         """The whole point: a failing candidate cannot reach a verifier."""
