@@ -179,11 +179,10 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
 
     evidence["look_at"] = _gather_views(project, out_dir)
 
-    # Unconditioned, unlike every check above it: nobody declared these heights
-    # and nothing decides a verdict from them. It is here because the one thing
-    # measurement structurally cannot do is report a feature nobody named, and a
-    # curve over the whole part is the cheapest way to put that in front of the
-    # reader doing the looking.
+    # Recomputed here from the delivered bytes rather than copied out of the
+    # designer's receipt, which also carries it. The point of the curve is to
+    # show a fresh reader the whole part; taking the author's version of it
+    # would defeat that for the sake of 0.14 s.
     try:
         from . import features as _features
         from ._bootstrap import as_mesh

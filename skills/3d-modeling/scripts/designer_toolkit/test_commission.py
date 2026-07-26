@@ -411,6 +411,24 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class SliceProfileEvidenceTest(unittest.TestCase):
+    def test_the_gate_emits_the_unconditioned_curve(self) -> None:
+        """The charter sends readers to `evidence.slice_profile`, and DIRECT has
+        no verifier -- so it has to be in the designer's own receipt, not only in
+        the audit path. A measured run found the field missing and reached into
+        the library itself to get it."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(), render=False)
+
+            profile = result.evidence["slice_profile"]
+            self.assertEqual(28, len(profile))
+            self.assertTrue(all(row["area_mm2"] > 0 for row in profile))
+            heights = [row["z"] for row in profile]
+            self.assertEqual(heights, sorted(heights))
+
+
 class VisualEvidenceTest(unittest.TestCase):
     def test_not_rendering_blocks_the_visual_verdict(self) -> None:
         """`--no-render` leaves exactly as little to look at as a renderer that

@@ -611,6 +611,17 @@ def run(
         # row edited to fit a defective part reads as an edited row.
         commission.evidence["features_checked"] = feature_rows
 
+    # Unconditioned, unlike every check above it: nobody declared these heights
+    # and no verdict is drawn from them. It belongs in the designer's own receipt
+    # and not only the verifier's, because DIRECT has no verifier -- the charter
+    # sent readers to a field that only the audit path produced, and a measured
+    # run had to reach into the library itself to get it.
+    try:
+        from . import features as _features
+        commission.evidence["slice_profile"] = _features.slice_profile(mesh)
+    except Exception:  # noqa: BLE001 - evidence, never a gate
+        commission.evidence["slice_profile"] = []
+
     commission.evidence.update({
         "export": {
             "stl_path": report.stl_path,
