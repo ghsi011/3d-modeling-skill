@@ -462,8 +462,25 @@ def run(
         also_step=False,
     )
 
+    # The *first* export's report, not the bundle's. `finalize` re-exports with
+    # `also_step=False`, so its block carries `step_path: None` -- and taking it
+    # dropped the STEP row from every derived manifest while the .step file sat
+    # on disk beside it. Two measured runs shipped a manifest that did not
+    # describe a file they delivered; a third hand-added the row.
     commission.evidence.update({
-        "export": bundle["export"],
+        "export": {
+            "stl_path": report.stl_path,
+            "step_path": report.step_path,
+            "file_sha256": report.file_sha256,
+            "geometry_sha256": report.geometry_sha256,
+            "watertight": report.watertight,
+            "components": report.components,
+            "triangle_count": report.triangle_count,
+            "volume_mm3": round(report.volume_mm3, 4),
+            "bbox_mm": {k: round(v, 4) for k, v in report.bbox_mm.items()},
+        },
+        "overhang_mm2": bundle["overhang_mm2"],
+        "datums": bundle["datums"],
         "placement": placement.as_dict(),
         "placements_considered": [p.as_dict() for p in orient.sweep(mesh)],
         "edges": measured_edges,

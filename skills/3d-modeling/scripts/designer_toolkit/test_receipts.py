@@ -57,6 +57,30 @@ class ManifestTest(unittest.TestCase):
             on_disk = receipts.sha256_file(work / "out" / row["path"])
             self.assertEqual(on_disk, row["sha256"])
 
+    def test_the_step_it_exported_is_in_the_manifest(self) -> None:
+        """The .step sat on disk beside a manifest that did not mention it,
+        because `finalize` re-exports without one and its export block won.
+        Two measured runs shipped that; a third hand-added the row."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = _run(work)
+            step_path = result["evidence"]["export"].get("step_path")
+            if step_path is None or not Path(step_path).is_file():
+                self.skipTest("no CAD kernel here, so no STEP was written")
+
+            manifest = receipts.build_manifest(result, work / "out", job_id="t",
+                                               updated_utc=_WHEN)
+
+            self.assertTrue(any(a["type"] == "step" for a in manifest["artifacts"]),
+                            manifest["artifacts"])
+
+    def test_the_export_block_describes_the_authoritative_export(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            export = _run(Path(raw))["evidence"]["export"]
+
+            self.assertTrue(Path(export["stl_path"]).is_file())
+            self.assertEqual(64, len(export["file_sha256"]))
+
     def test_the_bbox_is_corners_not_extents(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
