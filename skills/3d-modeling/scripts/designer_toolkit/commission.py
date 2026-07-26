@@ -269,6 +269,43 @@ def _check_repair(commission: Commission, report) -> None:
     ))
 
 
+def _check_seated(commission: Commission, mesh, plan: dict[str, Any],
+                  rule: dict[str, Any], placement) -> None:
+    """Does the part actually sit on the bed the plan declares?
+
+    `bed_z_mm` and `bed_tolerance_mm` were required of every support rule and
+    read by nothing. Bed contact is measured against the part's own lowest
+    plane, so a part floating fifty millimetres up reports its full footprint as
+    touching -- true of that plane, and not of the bed. The overhang screen
+    catches it sideways, because the whole underside becomes unsupported, but
+    the check named for the bed could not see it. This is the defect a verifier
+    once found by hand and the docstring at the top of this file still cites.
+    """
+    bed_z = rule.get("bed_z_mm")
+    tolerance = rule.get("bed_tolerance_mm")
+    if bed_z is None or tolerance is None:
+        return          # validate_plan refuses this before a build; nothing to add
+    placed = mesh.copy()
+    placed.apply_transform(placement.transform)
+    lowest = float(placed.bounds[0][2])
+    off = lowest - float(bed_z)
+    rule_id = rule.get("id", "S-01")
+    detail = (f"lowest point sits at z={lowest:.3f} against a declared bed at "
+              f"{float(bed_z):.3f} (tolerance {float(tolerance)})")
+    if abs(off) <= float(tolerance):
+        commission.add(Check(f"seated-{rule_id}", "Part sits on the declared bed",
+                             _PASS, detail))
+        return
+    commission.add(Check(
+        f"seated-{rule_id}", "Part sits on the declared bed", _FAIL,
+        f"{detail}: off by {off:+.3f} mm",
+        "A part modelled off the bed prints with its whole underside unsupported, and "
+        "every bed-contact number describes the plane it happens to start at rather than "
+        "the bed. Seat the model at the plan's bed_z -- templates return parts already "
+        "seated, so a hand-written model is the usual cause."
+    ))
+
+
 def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> None:
     """The check whose absence shipped a case 31% too thick.
 
@@ -348,6 +385,7 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
 
         placement = planned_placement(rule, mesh, threshold)
         placements.append(placement)
+        _check_seated(commission, mesh, plan, rule, placement)
         area = placement.overhang_mm2
         ok = area <= ceiling
         best = orient.best(mesh, threshold=threshold)

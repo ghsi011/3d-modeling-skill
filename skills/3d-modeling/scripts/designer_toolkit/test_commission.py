@@ -55,8 +55,17 @@ def _plan(**overrides):
 
 
 def _box_stl(directory: Path, extents=(30, 20, 10)) -> Path:
+    """Seated on the bed, which is the convention every template returns.
+
+    This used to export a box centred on the origin -- half of it below z=0 --
+    so every test built on it was quietly exercising a part the plan's identity
+    transform places underground. Harmless while nothing looked, and the moment
+    something did, the whole suite failed at once.
+    """
     path = directory / "box.stl"
-    trimesh.creation.box(extents=extents).export(path)
+    mesh = trimesh.creation.box(extents=extents)
+    mesh.apply_translation([0.0, 0.0, -float(mesh.bounds[0][2])])
+    mesh.export(path)
     return path
 
 
@@ -409,6 +418,41 @@ class SolidCheckTest(unittest.TestCase):
                                     plan=_plan(), render=False)
 
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
+
+
+class SeatingTest(unittest.TestCase):
+    """`bed_z_mm` and `bed_tolerance_mm` were required of every support rule and
+    read by nothing. Bed contact is measured against the part's own lowest
+    plane, so a part floating above the bed reported its full footprint as
+    touching -- true of that plane, and not of the bed."""
+
+    def _lifted(self, work: Path, lift: float) -> Path:
+        mesh = trimesh.creation.box(extents=(30, 20, 10))
+        mesh.apply_translation([0, 0, -float(mesh.bounds[0][2]) + lift])
+        path = work / f"lift{lift}.stl"
+        mesh.export(path)
+        return path
+
+    def test_a_seated_part_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=self._lifted(work, 0.0),
+                                    out_dir=work / "out", plan=_plan(), render=False)
+            seated = next(c for c in result.checks if c.id.startswith("seated-"))
+            self.assertEqual("PASS", seated.result)
+
+    def test_a_part_off_the_bed_fails(self) -> None:
+        """Sixteen millimetres, because that is the number from the archived run
+        this file's own docstring cites."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=self._lifted(work, 16.0),
+                                    out_dir=work / "out", plan=_plan(), render=False)
+
+            seated = next(c for c in result.checks if c.id.startswith("seated-"))
+            self.assertEqual("FAIL", seated.result)
+            self.assertIn("16.0", seated.detail)
+            self.assertIn("seated-S-01", [c.id for c in result.failed])
 
 
 class BodyCountTest(unittest.TestCase):
