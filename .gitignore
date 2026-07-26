@@ -53,9 +53,4 @@ desktop.ini
 # developer's global ignore file, which does not travel with a fresh clone.
 .claude/settings.local.json
 
-# ---------------------------------------------------------------------------
-# uv lockfile. CI installs the light stack with pip and this repo ships a skill
-# tree rather than a uv-managed application, so the lock is a local artifact.
-# ---------------------------------------------------------------------------
-uv.lock
 temp/*

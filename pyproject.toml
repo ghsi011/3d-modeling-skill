@@ -12,26 +12,35 @@ license = { file = "LICENSE" }
 authors = [{ name = "Idan" }]
 keywords = ["3d-modeling", "3d-printing", "cad", "fdm", "agents", "trimesh", "verification", "automation"]
 
-# Core runtime deps derived from actual imports across
-# skills/3d-modeling/scripts/**/*.py. team_preflight.py, mesh_io.py, and the
-# team_tools contract package need only trimesh + numpy + pillow; designer_toolkit
-# adds manifold3d as the boolean engine trimesh uses for its section, interference
-# and coupon operations (a light pure wheel — no OCP).
+# The core path is exactly four things: uv, build123d, trimesh, manifold3d
+# (plus numpy/pillow, which trimesh and rendering need anyway).
+#
+# build123d is core rather than an extra because a certified template may choose
+# it and the runner must not have to ask whether it is installed. It is imported
+# lazily -- a trimesh-only job never pays its ~1.5 s -- but it is always present.
+#
+# manifold3d is not an optimization. It is the only boolean engine this pipeline
+# may use, selected explicitly at every call site; automatic engine selection is
+# a commissioning failure.
 dependencies = [
-    "trimesh",
-    "numpy",
-    "pillow",
-    "manifold3d",
+    "trimesh>=4.4",
+    "numpy>=1.26",
+    "pillow>=10",
+    "manifold3d>=2.5",
+    "build123d>=0.9",
 ]
 
 # What each extra is FOR is tabled in README.md#dependencies; the comments here
 # only carry what the table cannot -- why a set is shaped the way it is.
-[project.optional-dependencies]
-# Two separate heavy OCC/OCP stacks so a host picks its Python CAD kernel
-# explicitly rather than getting both.
-cad = ["cadquery"]
-cad-build123d = ["build123d"]
+[dependency-groups]
+# Dev-only, kept out of the core install: `uv sync --frozen` gives a working
+# toolchain, `uv sync --frozen --group dev` adds the test runner.
+# scipy/networkx/shapely/rtree are here and NOT on the core path: the legacy
+# toolkit's section tests need them, and the core must stay installable
+# without them.
+dev = ["pytest>=8", "ruff>=0.6", "scipy", "networkx", "shapely", "rtree"]
 
+[project.optional-dependencies]
 # Mesh cross-sectioning. Not a grab bag: these are the trimesh soft
 # dependencies the section path reaches in turn -- scipy (csgraph, walking the
 # cut edges), networkx (vertex graph -> closed paths), shapely (the rings),
@@ -50,7 +59,13 @@ visual = ["pyrender", "PyOpenGL", "scipy", "networkx", "shapely", "rtree"]
 bambu = ["lxml"]
 
 # Everything (convenience for a full local workstation).
-all = ["cadquery", "build123d", "scipy", "networkx", "shapely", "rtree", "pyrender", "PyOpenGL", "lxml"]
+all = ["scipy", "networkx", "shapely", "rtree", "pyrender", "PyOpenGL", "lxml"]
+
+# One fused production command. Lower-level verbs stay available for debugging
+# but are never the production path -- a job is one invocation, because every
+# extra one pays ~1.5 s of interpreter start to do work measured in milliseconds.
+[project.scripts]
+design-tool = "pipeline.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/ghsi011/3d-modeling-skill"
@@ -62,9 +77,11 @@ Changelog = "https://github.com/ghsi011/3d-modeling-skill/blob/main/CHANGELOG.md
 # `import mesh_io`) resolve without an install step.
 # ---------------------------------------------------------------------------
 [tool.setuptools]
-# Not a pip-installable library in the conventional sense; the skill tree is the
-# deliverable. Packaging metadata above exists for dependency resolution only.
-py-modules = []
+package-dir = { "" = "skills/3d-modeling/scripts" }
+
+[tool.setuptools.packages.find]
+where = ["skills/3d-modeling/scripts"]
+include = ["pipeline*"]
 
 [tool.ruff]
 target-version = "py311"

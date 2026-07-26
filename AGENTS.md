@@ -60,3 +60,11 @@ A role definition is a claim about what makes an agent design better. Test it th
 Run the role blind against a part whose ground truth you hold but the agent cannot see — real photographs, a terse request, and nothing else in the job folder. Score its output against the truth afterwards. Then change exactly one thing in `skills/roles/`, re-run with byte-identical inputs, and compare. Record tokens, tool calls and wall-clock alongside the geometric error: a change that improves accuracy while costing twice as much has not obviously helped.
 
 Two cautions learned from doing it. Pick a scoring datum the model cannot recall from training — a published phone dimension proves nothing about whether an agent measured, so score on a feature that appears in no spec sheet. And expect the useful failures to be reasoning failures rather than arithmetic: the run that moved the numbers most did not read its calipers differently, it stopped trusting a biased read and said why.
+
+## Reviewing an iteration
+
+Every implementation iteration ends with a code-review agent over its diff, and gets one mid-iteration when enough has changed to be worth the pass. This is not a formality at the end of the work — it is part of the work, and the iteration is not finished until its findings are resolved.
+
+**Validate before you fix.** A reviewer's finding is a claim, not a fact. Re-derive each one against the code and paste the command that settles it. Both directions have burned this repo: a garbage-collection agent reported ~139 lines of duplicated role prose that measurement reduced to YAML frontmatter keys, and a review pass on the redesign plan caught an assertion that the repo's own docstring already contradicted. Acting on every finding is as wrong as acting on none.
+
+Report which findings held, which did not, and why — in the commit message, where the next reader will be standing when they wonder.

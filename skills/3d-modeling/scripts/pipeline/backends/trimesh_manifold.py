@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Primitive mesh CSG, with manifold3d selected explicitly at every boolean.
+
+Never `trimesh.boolean.*` without `engine="manifold"`. Automatic engine selection
+is a commissioning failure, not a convenience: whichever engine happens to be
+importable then decides the result, and a receipt that does not name the engine
+cannot be reproduced.
+"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import trimesh
+
+from . import BuildArtifacts
+
+ENGINE = "manifold"
+
+# Where the mounting screw sits along the flange, as a fraction of its width.
+# Shared with the expectations only as a number in the contract, never as an
+# import: the two sides must not be able to move together.
+SCREW_X_FRACTION = 0.2
+
+
+def _boolean(op: str, meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
+    fn = {"difference": trimesh.boolean.difference,
+          "union": trimesh.boolean.union,
+          "intersection": trimesh.boolean.intersection}[op]
+    return fn(meshes, engine=ENGINE)
+
+
+def seated(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Minimum Z at zero.
+
+    `trimesh.creation.box()` is centred on the origin, so the library default is
+    the opposite of this pipeline's convention: a mesh built by hand is
+    underground unless somebody moved it. Call this rather than retyping the
+    arithmetic -- three test fixtures encoded a part half below the bed because
+    the convention was prose and not a function.
+    """
+    mesh.apply_translation((0.0, 0.0, -float(mesh.bounds[0][2])))
+    return mesh
+
+
+def _box(extents, centre) -> trimesh.Trimesh:
+    mesh = trimesh.creation.box(extents=extents)
+    mesh.apply_translation(centre)
+    return mesh
+
+
+def _cylinder(radius: float, height: float, centre, sections: int = 96) -> trimesh.Trimesh:
+    mesh = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
+    mesh.apply_translation(centre)
+    return mesh
+
+
+def build_c_clip(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
+    """A C-channel on a mounting flange, axis along Z so every wall is vertical."""
+    fw, fd, ft = float(p["flange_w"]), float(p["flange_d"]), float(p["flange_t"])
+    bore_d, wall, height = float(p["bore_d"]), float(p["wall"]), float(p["height"])
+    gap, screw_d = float(p["mouth_gap"]), float(p["screw_d"])
+
+    cx, cy = fw / 2.0, fd / 2.0
+    outer_r, inner_r = bore_d / 2.0 + wall, bore_d / 2.0
+    ops: list[str] = []
+
+    flange = _box((fw, fd, ft), (cx, cy, ft / 2.0))
+    ring_z = ft + height / 2.0
+    ring = _boolean("difference", [
+        _cylinder(outer_r, height, (cx, cy, ring_z)),
+        # Overshoot the bore through both ends: a cutter whose face lands exactly
+        # on the surface it crosses leaves coplanar artifacts that survive as
+        # degenerate faces and fail repair on re-import.
+        _cylinder(inner_r, height + 2.0, (cx, cy, ring_z)),
+    ])
+    ops.append("difference: ring outer - bore")
+
+    # The mouth: a straight slot on one side, running the full ring height so a
+    # bundle can be pressed in anywhere along it.
+    mouth = _box((gap, outer_r + 2.0, height + 2.0),
+                 (cx, cy + (outer_r + 2.0) / 2.0, ring_z))
+    ring = _boolean("difference", [ring, mouth])
+    ops.append("difference: ring - mouth slot")
+
+    part = _boolean("union", [flange, ring])
+    ops.append("union: flange + ring")
+
+    # Clear of the channel on purpose. A screw on the flange centre sits directly
+    # under the bore, where a driver cannot reach it and the bundle wants to be.
+    screw = _cylinder(screw_d / 2.0, ft + 2.0, (fw * SCREW_X_FRACTION, cy, ft / 2.0))
+    part = _boolean("difference", [part, screw])
+    ops.append("difference: part - screw bore")
+
+    return seated(part), ops
+
+
+_BUILDERS = {"c_clip": build_c_clip}
+
+
+class TrimeshManifoldBackend:
+    name = "trimesh-manifold"
+
+    def build(self, contract, output_dir: Path) -> BuildArtifacts:
+        import manifold3d
+
+        started = time.perf_counter()
+        builder = _BUILDERS.get(contract.template)
+        if builder is None:
+            raise KeyError(f"{self.name}: no builder for template {contract.template!r}")
+        part, ops = builder(contract.parameters)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stl_path = output_dir / "candidate.stl"
+        part.export(stl_path)
+
+        source_path = output_dir / "model.py"
+        source_path.write_text(
+            "# Generated from model_contract.json. The contract is authoritative;\n"
+            "# this file is a record of what was built, not a source of expectations.\n"
+            f"TEMPLATE = {contract.template!r}\n"
+            f"BACKEND = {self.name!r}\n"
+            f"PARAMETERS = {contract.parameters!r}\n",
+            encoding="utf-8")
+
+        if contract.step_required:
+            raise ValueError(
+                f"{self.name} exports STL only. The contract requires STEP, which needs "
+                "a B-rep kernel -- route this template to build123d or drop the "
+                "requirement.")
+
+        return BuildArtifacts(
+            stl_path=stl_path, step_path=None, source_path=source_path,
+            backend=self.name,
+            backend_version=f"trimesh {trimesh.__version__}/manifold3d "
+                            f"{getattr(manifold3d, '__version__', 'unknown')}",
+            tessellation={"cylinder_sections": 96, "note": "primitives are already meshes"},
+            boolean_ops=tuple(ops),
+            build_seconds=time.perf_counter() - started,
+        )
+
+
+__all__ = ["TrimeshManifoldBackend", "build_c_clip", "seated", "ENGINE", "np"]
