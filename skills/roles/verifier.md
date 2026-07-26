@@ -160,7 +160,7 @@ gate. `R3` never receives a `PASS` under any profile.
    same instrument on the same bytes: it cannot catch a wrong instrument, and what it can
    catch — a delivered STL that is not the one measured — the hash binding catches first and
    more cheaply. It runs because it costs a second, not because it is where findings come
-   from. Budget accordingly and leave the time for step 6.
+   from. Budget accordingly and leave the time for step 7.
 
    **Do not hand-write a replacement.** Independence is a property of which inputs you
    consult, not of who wrote the code. A bespoke re-implementation is a second uncalibrated
@@ -182,12 +182,22 @@ gate. `R3` never receives a `PASS` under any profile.
    independently of the toolkit's, so a silent disagreement between them is the cheapest bug
    detector available and costs one command.
 7. Check **4**, and it is yours alone: look at the images. **Spend your effort here.** Across
-   every verification this pipeline has recorded, the deterministic recomputation in step 5
-   has never once disagreed with the designer's — it is the same instrument on the same bytes,
-   and agreement is what it is for. Every defect actually found was found by looking, or by
-   the contract checks in step 8. Two were parts that passed every scalar and were still
-   wrong: one missing a countersink its own sheet required, one whose mounting flange had a
-   slot cut clean through it. Both were visible; neither was a number.
+   every verification this pipeline has recorded, the deterministic recomputation has never
+   once disagreed with the designer's — it is the same instrument on the same bytes, and
+   agreement is what it is for.
+
+   Be clear about why you are looking, because the old reason has expired. Two parts once
+   passed every scalar and were wrong anyway — one missing a countersink its own sheet
+   required, one whose mounting flange had a slot cut clean through it — and for a long time
+   those were the argument that only eyes could catch such things. They are now arithmetic:
+   both fail `feature-*` checks in about 40 ms, and both have regression tests.
+
+   What survives is narrower and sharper. **Every measurement is conditioned on somebody
+   having declared what to measure; a render is conditioned on nothing.** A feature the sheet
+   asks for and the model never built takes its own expectation with it — one parameter drives
+   the geometry and the check together — so the part measures self-consistently and is missing
+   a hole. Nothing in the numbers can report that. You are the only thing here that sees what
+   is present rather than what was asked about.
 
    So: the tool renders sections, it cannot read them. Judge silhouette,
    feature shape, count, position, and handedness against the reference and the original
@@ -204,14 +214,16 @@ gate. `R3` never receives a `PASS` under any profile.
    whole of this step with every occluded view resolved and the `SUPPORT_ALLOWED` contact
    inspection written out. What never scales down is that this step happens at all: a purely
    numeric `PASS` reintroduces the exact failure this role exists to catch, a part that
-   satisfies every scalar and is the wrong object.
+   satisfies every scalar and is the wrong object. Compare the sheet's feature inventory
+   against what you can see, item by item — that comparison is the one this role owns
+   outright, and no future check will take it over, because a check has to be told what to
+   look for and you do not.
 8. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
-   intended bodies, units, and no missing or stray components. Independently run
-   `python -m team_tools.contracts validate <project-dir> --require all` (from
-   `skills/3d-modeling/scripts/`); require exit code 0. `--require` is load-bearing, not
-   decoration: without it an absent contract is silent, so a typo'd path or a project missing
-   the manifest entirely exits 0 and reads as a pass. At Phase 4 every contract should exist,
-   so name them all; earlier phases name the subset that phase requires. Treat any `UNIT_SCALE_MISMATCH` —
+   intended bodies, units, and no missing or stray components. `audit` has already run
+   `contracts validate --require all` and `status`; read their rows rather than repeating the
+   commands. `--require` is load-bearing, not decoration: without it an absent contract is
+   silent, so a typo'd path or a project missing the manifest entirely exits 0 and reads as a
+   pass. Treat any `UNIT_SCALE_MISMATCH` —
    the hard 25.4x inch/mm bbox check between the declared manifest and the re-imported STL —
    as a hard `UNIT_SCALE` reject, never a warning to note and pass. A
    `POSSIBLE_UNIT_SCALE_MISMATCH` warning still needs an explicit agent judgment call before
@@ -244,8 +256,9 @@ gate. `R3` never receives a `PASS` under any profile.
     footprint rejects or blocks final prep. This review never waives candidate verification.
 13. If required native slicer evidence is unavailable, return `FINAL_PRINT_BLOCKED`; do not
     convert notes or a render into native proof.
-14. Re-import the canonical STL in place and record its hash; never copy it into the verifier
-    folder. For a rejection, retain only the report, metrics, hashes, and defect-specific
-    visual in addition to canonical artifacts.
+14. Never copy the canonical STL into your own folder — `audit` reads it in place, and a run
+    that duplicated it verified a copy of the thing it was sent to check. For a rejection,
+    retain only the report, metrics, hashes, and defect-specific visual in addition to
+    canonical artifacts.
 15. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
     not acquire the FreeCAD mutation lease and do not mutate the `.FCStd`.

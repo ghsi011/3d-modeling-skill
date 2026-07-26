@@ -109,22 +109,19 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
     checks: list[Check] = [check_binding(project, stl)]
     evidence: dict[str, Any] = {}
 
+    # Reported, not re-checked. The one acceptance-relevant number in a raw parse
+    # is the degenerate face count, and `normalize_mesh` takes it on an unmutated
+    # copy before removing anything -- so it is identical, by construction, to
+    # what the recomputation's `repair` check already fails on. A separate check
+    # here would be two paths to one number that could disagree, which is the
+    # defect this pipeline has already fixed once, in overhang area, at 2x.
+    #
+    # Every other field a raw parse yields is meaningless for STL: the format
+    # stores no vertex sharing, so a sound part reads as many components and
+    # watertight=False. It is here because a reader wanting the numbers should
+    # not need a second command to see them.
     from . import integrity as integrity_module
-    raw = integrity_module.report(stl)
-    evidence["raw_integrity"] = raw
-    # An STL stores no vertex sharing, so a raw parse of a sound part reports
-    # many components and watertight=False. That is the format, not a defect.
-    # `degenerate_face_count` is the number that means something here.
-    degenerate = int(raw.get("degenerate_face_count", 0))
-    checks.append(Check(
-        "raw-parse", "Delivered bytes carry no degenerate geometry",
-        _PASS if degenerate == 0 else _FAIL,
-        f"{degenerate} degenerate faces in the un-repaired parse",
-        "" if degenerate == 0 else
-        "These are faces no repair should have to remove. Every measurement "
-        "downstream ran on a normalized copy, so it describes a mesh the "
-        "delivered file is not.",
-    ))
+    evidence["raw_integrity"] = integrity_module.report(stl)
 
     # A verifier holds the STL and the plan, never model.py, so a template's own
     # expectations would be invisible here. The designer's evidence records the

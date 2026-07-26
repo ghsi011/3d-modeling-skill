@@ -72,10 +72,33 @@ class TestAudit(unittest.TestCase):
 
             results = _by_id(payload)
             self.assertEqual("PASS", results["binding"])
-            self.assertEqual("PASS", results["raw-parse"])
             self.assertEqual("PASS", results["recompute"],
                              next(c["detail"] for c in payload["checks"]
                                   if c["id"] == "recompute"))
+
+    def test_degenerate_geometry_fails_through_the_recomputation(self) -> None:
+        """There is deliberately no separate raw-parse check. `normalize_mesh`
+        counts degenerate faces on an unmutated copy before removing any, so the
+        number is identical to the one the recomputation's `repair` check already
+        fails on -- and two paths to one number are how the overhang area came to
+        disagree with itself by 2x."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            mesh = trimesh.load(project / "candidate-01.stl")
+            import numpy as np
+            broken = trimesh.Trimesh(vertices=mesh.vertices,
+                                     faces=np.vstack([mesh.faces, [0, 0, 0]]),
+                                     process=False)
+            broken.export(project / "candidate-01.stl")
+
+            done, payload = _audit(project, root / "verify")
+
+            self.assertEqual(1, done.returncode)
+            mine = json.loads((root / "verify" / "commission.json").read_text(encoding="utf-8"))
+            repair = next(c for c in mine["checks"] if c["id"] == "repair")
+            self.assertEqual("FAIL", repair["result"], repair["detail"])
+            self.assertIn("raw_integrity", payload["evidence"])
 
     def test_a_swapped_stl_fails_the_binding(self) -> None:
         """The one thing re-measuring was actually for. A part 2% taller is the
