@@ -190,10 +190,10 @@ def _agent_tools(role: Role) -> str:
     """Always an allowlist, never a deny-list.
 
     A deny-list admits every tool it does not name, including the host's whole
-    MCP surface. The designer used to carry one, and paid ~16k tokens of unused
-    tool definitions at turn one -- re-billed on all 256 turns of its longest
-    measured run, which is more than that run spent on required reading. An
-    allowlist that omits `Agent` denies spawning just as effectively.
+    MCP surface. One measured designer run carried a deny-list and paid ~16k
+    tokens of unused tool definitions at turn one, re-billed across all 256 of
+    its turns -- more than it spent on required reading. An allowlist that omits
+    `Agent` denies spawning just as effectively.
     """
     tools: list[str] = []
     if role.reads_files:
@@ -220,10 +220,10 @@ SKILL_NAME: Final = "3d-modeling"
 def render_agent(role: Role) -> GeneratedFile:
     """Every role requests the one skill.
 
-    There is no `3d-designer` skill to request -- the five were dissolved into
-    `3d-modeling`, whose `roles/` directory holds the four specialist charters.
-    An agent naming a skill that does not exist does not fail loudly; it just
-    starts with no skill loaded, which is the whole charter missing.
+    There is no `3d-designer` skill to request. `3d-modeling` is the only one,
+    and its `roles/` directory holds all five charters. An agent naming a skill
+    that does not exist does not fail loudly; it just starts with no skill
+    loaded, which is the whole charter missing.
     """
     name = f"3d-{role.role}"
     content = (
@@ -260,10 +260,10 @@ def _rewrite_shared_links(body: str, prefix: str) -> str:
 def render_skill(role: Role) -> GeneratedFile:
     """Every role is a file under `roles/`, the orchestrator included.
 
-    One installable skill rather than five: the roles are not independently
+    One installable skill, not one per role: the roles are not independently
     useful (a designer with no commission refuses to start, by design), and
-    five sibling skills that reach each other by relative path break the moment
-    a host installs one of them on its own.
+    sibling skills that reach each other by relative path break the moment a
+    host installs one of them on its own.
     """
     return GeneratedFile(
         SKILL_DIR / "roles" / f"{role.role}.md",
@@ -275,11 +275,11 @@ def render_skill(role: Role) -> GeneratedFile:
 def render_router(roles: tuple[Role, ...]) -> GeneratedFile:
     """`SKILL.md`: which role you are, and where to read it.
 
-    Loading the skill used to load the orchestrator's entire charter -- routing
-    rules, consequence classes, the dispatch protocol -- into every specialist
-    context that requested it, because the orchestrator *was* `SKILL.md`. A
-    designer needs none of that and every dispatch paid for it. The entry point
-    is a router now, and the orchestrator reads its own file like everyone else.
+    A router, so that requesting the skill costs a name and five links. Make
+    `SKILL.md` the orchestrator's charter instead and every specialist context
+    loads the routing rules, the consequence classes and the dispatch protocol
+    to read its own file -- none of which a designer acts on, and all of which
+    each dispatch pays for.
     """
     orchestrator = next(r for r in roles if r.role == "orchestrator")
     lines = [

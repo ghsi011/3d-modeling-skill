@@ -155,9 +155,9 @@ independent recomputation compared check-by-check against the designer's, and
 both contract checks. It refuses to write into the project root, because the
 receipts it compares against are what a run there would overwrite.
 
-It was six commands. Each was under a second of compute, and the pipeline's cost
-is agent turns rather than arithmetic — one measured dispatch spent 6 min 25 s
-running four commands totalling 4.4 seconds of work.
+One call, because the pipeline's cost is agent turns rather than arithmetic: a
+measured dispatch spent 6 min 25 s running four commands totalling 4.4 seconds
+of work.
 
 Its `still_requires_a_look` field is the honest part: nothing in the call reads
 `dimensions.md`, and no measurement is taken of a feature nobody declared. Both
@@ -166,8 +166,8 @@ a render.
 
 ## Everything else the launcher offers
 
-Sixteen verbs, and this file used to describe five. `report` and `screen` were among the
-missing, and both charters instruct a reader to run them.
+The launcher has sixteen verbs. Every one is listed here, because a charter that
+tells a reader to run something this file does not mention is a dead end.
 
 | verb | what it is for |
 |---|---|

@@ -150,10 +150,10 @@ and it decides which phases run, not how verbose the record is.
   told you.
 
   `direct` is intake, plan, build and gate in one call — about four seconds, renders included.
-  They were four commands until it was measured that the whole deterministic route is 5.1
-  seconds while a real run of it took 13.5 minutes: the cost is turns, not work, and every
-  command is a round trip costing 8 to 47 seconds before the shell is even reached. There is
-  no branch between those steps worth taking separately. It stops at the first failure and
+  One call because the cost is turns, not work: the whole deterministic route is 5.1 seconds
+  of compute and a real run of it took 13.5 minutes, each command a round trip costing 8 to
+  47 seconds before the shell is even reached. There is no branch between those steps worth
+  taking separately. It stops at the first failure and
   hands back that step's own message.
 
   It writes `job_state.md` and `dimensions.md` with every mechanical field filled. The two
@@ -176,8 +176,8 @@ and it decides which phases run, not how verbose the record is.
   declared size — so geometry nobody declared is invisible to all of them: a 4 mm post
   standing in a bin floor passed twenty-seven green checks, an exact bounding box and a
   matching bed-contact area. The command states what the part is supposed to be and asks
-  what else is visible. Answer it against the renders. Measured, that takes ten seconds;
-  what used to make it expensive was working out what to ask.
+  what else is visible. Answer it against the renders: ten seconds, now that the question is
+  written down rather than worked out each time.
 
   **If `dt.py doctor` reports no renderer, this route cannot finish.** Nothing else in the
   pipeline is going to look: there is no verifier here, and a verifier looks at renders that do

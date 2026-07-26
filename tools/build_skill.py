@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Build the deterministic .skill zip artifact for the 3D modeling pipeline.
 
-One archive, not five. The orchestrator is the skill; the four specialists are
-files it hands to subagents. They were never independently useful -- a designer
-with no commission refuses to start, by design -- and five sibling skills that
-reach each other by relative path break the moment a host installs one alone.
+One archive: `skills/3d-modeling/` packed verbatim, router and all five role
+files together. `gen_harness.render_skill` explains why it is one and not one
+per role.
 
 Usage:
     python tools/build_skill.py [--out dist/skills]

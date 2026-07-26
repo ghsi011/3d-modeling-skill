@@ -73,13 +73,11 @@ declares and exits non-zero if any of it fails; see
 — the `plane_transform` datum frame, the -0.73 overhang screen,
 watertight-on-the-normalized-mesh.
 
-This section used to open by listing the individual check functions and telling
-you to call those. That menu is exactly what made three measured runs hand-write
+The patterns below explain what the gate does under the hood, for when you need
+to understand a result. They are not a kit to assemble. Offering the individual
+check functions as a menu is what made three measured runs hand-write
 130-to-280-line verification scripts instead of running the gate, and one of them
-widened its own acceptance bands until its wrong numbers passed. The per-check
-CLI verbs were retired for the same reason. The patterns below are the
-under-the-hood explanation of what the gate does, and a reference if you need to
-understand a result — not a kit to assemble.
+widened its own acceptance bands until its wrong numbers passed.
 
 ```python
 # 1. seated interference (must be ~0)

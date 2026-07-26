@@ -4,9 +4,9 @@ Read this when no template fits **and** `dt.py doctor` reports no CAD kernel. Th
 common case, not the fallback: trimesh and a boolean kernel are the only hard dependencies,
 so a part written here needs nothing installed and feeds `commission` unchanged.
 
-The charter used to send you to "the commissioned backend and its patterns" for this. On an
-interpreter with no backend that is advice to nowhere, and a measured run spent its single
-largest block of time working out these conventions from the template source.
+Written down because a measured run spent its single largest block of time working these
+conventions out from the template source, having been sent to a backend that was not
+installed.
 
 ## The shape of a model file
 

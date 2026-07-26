@@ -54,7 +54,7 @@ the contracts.
 ## Required reading
 
 This list is short on purpose: everything on it changes what you *build*. The contract spec
-for `candidate_readiness.md` is not here because you no longer write that file, and reading
+for `candidate_readiness.md` is not here because you do not write that file, and reading
 the whole contract spec to fill two fields is a page you pay for on every job to learn
 nothing you act on.
 
