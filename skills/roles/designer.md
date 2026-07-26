@@ -53,25 +53,31 @@ the contracts.
 
 ## Required reading
 
-Read exactly one backend pattern file plus mandatory FDM guidance. This list is short on
-purpose: everything on it changes what you *build*. The contract spec for
-`candidate_readiness.md` is not here because you no longer write that file, and reading 578
-lines to fill two fields is a page you pay for on every job to learn nothing you act on.
+This list is short on purpose: everything on it changes what you *build*. The contract spec
+for `candidate_readiness.md` is not here because you no longer write that file, and reading
+578 lines to fill two fields is a page you pay for on every job to learn nothing you act on.
 
-1. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
-2. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
-   — read alongside the CadQuery patterns, which own everything downstream of the export.
-3. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-4. Always: [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
-5. Only when the part uses a standard mechanism:
-   [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
-6. Shared design/verify toolkit — **one call, not a menu**:
+Always:
+
+1. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md) — the
+   rules the geometry has to satisfy, whatever builds it.
+2. Shared design/verify toolkit — **one call, not a menu**:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md).
    `dt.py commission` is your deterministic gate and the only entry point you need;
    `coupon` is the one genuinely separate deliverable. `team_preflight.py` and
    `team_tools.contracts` are the **verifier's** independent cross-check, not yours —
    running them here re-screens the mesh the gate just screened, on the same numbers,
    and answers nothing new.
+
+Only when you are hand-writing geometry in that backend — a template-built part never touches
+one, so reading its patterns is a page bought and unused:
+
+3. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
+4. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
+   — read alongside the CadQuery patterns, which own everything downstream of the export.
+5. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+6. A standard mechanism — snap-fit, hinge, thread, bearing seat:
+   [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
 
 ## Checklist
 
