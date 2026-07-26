@@ -31,7 +31,10 @@ the contracts.
 
 ## Required reading
 
-Read exactly one backend pattern file plus mandatory FDM guidance:
+Read exactly one backend pattern file plus mandatory FDM guidance. This list is short on
+purpose: everything on it changes what you *build*. The contract spec for
+`candidate_readiness.md` is not here because you no longer write that file, and reading 578
+lines to fill two fields is a page you pay for on every job to learn nothing you act on.
 
 1. CadQuery: [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md).
 2. build123d: [`../references/build123d-patterns.md`](../references/build123d-patterns.md)
@@ -40,9 +43,7 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
 4. Always: [`../references/fdm-design.md`](../references/fdm-design.md).
 5. Only when the part uses a standard mechanism:
    [`../references/mechanisms.md`](../references/mechanisms.md).
-6. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
-   `candidate_readiness.md` only.
-7. Shared design/verify toolkit — **one call, not a menu**:
+6. Shared design/verify toolkit — **one call, not a menu**:
    [`../references/designer-toolkit.md`](../references/designer-toolkit.md).
    `dt.py commission` is your deterministic gate and the only entry point you need;
    `coupon` is the one genuinely separate deliverable. `team_preflight.py` and
