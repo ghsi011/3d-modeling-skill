@@ -9,7 +9,7 @@ geometry the print will be sliced from.
 
 Design notes:
 * Measurement/fit/coupon are mesh-based and need no CAD kernel (CI-safe).
-* ``exporter.export_and_hash`` also accepts CadQuery models (lazy import).
+* ``exporter.export_and_hash`` also accepts build123d parts (lazy import).
 * ``render`` needs a pyrender/GL context; its import is deferred to call time.
 """
 

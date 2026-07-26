@@ -1,5 +1,5 @@
 """Tests for designer_toolkit. Mesh-based so they run on the lean stack
-(trimesh + numpy + manifold3d); the CadQuery export path and the two
+(trimesh + numpy + manifold3d); the B-rep export path and the two
 cross-section cases (datum_features, which derives datum
 blocks from it — both need the `section` extra) are gated with skipUnless, and
 the pyrender-backed render module is not exercised here (needs a GL context).

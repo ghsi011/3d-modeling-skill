@@ -2,7 +2,7 @@
 integrity report.
 
 Kept separate from preview.py so consumers that only need mesh loading
-(run_cadquery_model.py's --strict watertight check) don't
+(the runner's --strict watertight check) don't
 pay the pyrender + PyOpenGL import cost. Only depends on trimesh + numpy.
 
 Two views of the same file are available:
