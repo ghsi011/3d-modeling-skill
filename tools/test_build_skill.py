@@ -70,6 +70,52 @@ class TestBuildSkill:
         assert any(n.startswith("references/") for n in names)
         assert any(n.startswith("scripts/") for n in names)
 
+    def test_the_extracted_bundle_gates_a_part_on_its_own(self, build_dir: Path):
+        """What ships must work standing alone, not just in the repo.
+
+        Everything measured this session ran from the working tree. The archive
+        is what a host installs, so it has to carry a whole working toolchain --
+        launcher, templates, plan generator and gate -- with nothing importing
+        back into the repo it was built from.
+        """
+        pytest.importorskip("trimesh")
+        pytest.importorskip("manifold3d")
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+            launcher = root / "scripts" / "dt.py"
+            assert launcher.is_file(), "the bundle must carry its own launcher"
+
+            job = root / "job"
+            job.mkdir()
+            plan = job / "print_plan_checks.json"
+            assert subprocess.run(
+                [sys.executable, str(launcher), "plan", "template", "--bbox", "40", "22", "14",
+                 "--job-id", "ship", "--updated-utc", "1970-01-01T00:00:00Z",
+                 "--out", str(plan)], capture_output=True, check=False).returncode == 0
+
+            (job / "model.py").write_text(
+                "\n".join([
+                    "from designer_toolkit.templates import c_clip",
+                    "_b = c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0,",
+                    "            flange=(40.0, 22.0, 5.0), screw_d=4.5,",
+                    "            screw_at=(8.0, 11.0), countersink_d=9.0)",
+                    "PARAMS, part = _b.params, _b.part",
+                    "",
+                ]), encoding="utf-8")
+
+            done = subprocess.run(
+                [sys.executable, str(launcher), "commission", "--model", "model.py",
+                 "--plan", "print_plan_checks.json", "--out", ".", "--job-id", "ship",
+                 "--updated-utc", "1970-01-01T00:00:00Z", "--no-render"],
+                cwd=job, capture_output=True, text=True, check=False)
+
+            assert done.returncode == 0, done.stderr[-2000:]
+            assert (job / "artifact_manifest.json").is_file()
+            assert (job / "candidate_readiness.md").is_file()
+
     def test_every_internal_link_resolves_inside_the_archive(self, build_dir: Path):
         """No link may escape the archive or point at a missing member.
 
