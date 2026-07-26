@@ -49,11 +49,11 @@ Always:
 
 1. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md) — you
    judge printability, and this is what you judge it against.
-2. Shared raw-vs-normalized mesh loader:
-   [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py)
-   (`load_mesh_report` / `load_mesh_raw`). Read its docstring before reading its numbers: an
-   STL is a triangle soup, so a raw parse reporting many components is the format, not a
-   defect, and `degenerate_face_count` is the metric that would catch a real one.
+2. Shared raw-vs-normalized mesh loader, behind `dt.py integrity`:
+   [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py). Read its
+   docstring for why the raw side is authoritative — every shared tool downstream loads the
+   normalized copy, so an export defect only ever shows on the raw side and normalization
+   erases the evidence.
 3. Shared design/verify toolkit — run the same one command against the **delivered** STL,
    into your own output directory:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
@@ -110,10 +110,17 @@ gate. `R3` never receives a `PASS` under any profile.
    evidence only. It never passes a check on the verifier's behalf.
 3. Audit upstream: independently compare `dimensions.md` values, named datums, provenance,
    and feature inventory against the original evidence. Reject corrupted ground truth.
-4. Re-import the exported STL and use it, not the in-memory source, for all geometric checks.
-   Load it with `mesh_io.load_mesh_report` (or `load_mesh_raw`) and use the **raw, unrepaired**
-   parse and its integrity metrics (watertight, connected components, degenerate-face count,
-   duplicate-vertex count, non-manifold edges) for every acceptance decision. Use the
+4. Read the delivered STL's **raw, unrepaired** parse and use it, not the in-memory source,
+   for every acceptance decision:
+
+   ```bash
+   python <skill>/scripts/dt.py integrity <canonical.stl> --out <verifier-dir>/integrity.json
+   ```
+
+   Do not hand-write this either. Read the note it prints before reading its numbers: an STL
+   stores no vertex sharing, so a raw parse of a sound part reports many components and
+   `watertight=False` — that is the format, and `degenerate_face_count` is what catches a real
+   export defect. Use the
    **normalized** copy only for rendering, overlays, and other visuals — never for an
    acceptance check. A repaired mesh must never stand in for the raw read: a genuine export
    defect has to show up on the raw side before any repair runs, and the mutation log records

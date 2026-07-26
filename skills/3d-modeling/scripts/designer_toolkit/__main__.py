@@ -57,6 +57,9 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "integrity":
+        from .integrity import main as integrity_main
+        raise SystemExit(integrity_main(argv[1:]))
     if argv and argv[0] == "report":
         from .report import main as report_main
         raise SystemExit(report_main(argv[1:]))
@@ -76,6 +79,9 @@ def main(argv=None):
     sub.add_parser("doctor", add_help=False,
                    help="what this interpreter can do: backends, extras, and what "
                         "each missing one costs")
+    sub.add_parser("integrity", add_help=False,
+                   help="raw-parse integrity of a delivered STL: the one acceptance "
+                        "read the gate cannot do for you")
     sub.add_parser("report", add_help=False,
                    help="draft verification_report.md from the verifier's own "
                         "recomputation, leaving every judgment blank")
