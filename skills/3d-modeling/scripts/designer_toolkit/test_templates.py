@@ -257,6 +257,23 @@ class CClipTest(unittest.TestCase):
 
         self.assertLess(open_wide.part.volume, closed.part.volume)
 
+    def test_the_mouth_does_not_slot_the_flange(self) -> None:
+        """A verification caught this by sectioning the flange: a cutter centred
+        on the ring and three times its height reached below the flange top and
+        cut 108 mm2 clean through the mounting plate, open to the short edge,
+        while every scalar check still passed.
+        """
+        import math
+
+        built = self._clip(flange=(40.0, 22.0, 5.0))
+        flange_solid = 40.0 * 22.0 * 5.0
+        screw_hole = math.pi * (4.5 / 2) ** 2 * 5.0
+
+        # The part is the flange plus a ring, so its volume must exceed what the
+        # flange alone contributes. A slotted flange falls below this.
+        self.assertGreater(built.part.volume, flange_solid - screw_hole,
+                           "the mouth cut into the flange")
+
     def test_a_mouth_that_would_sever_the_part_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             self._clip(mouth_gap=30.0)

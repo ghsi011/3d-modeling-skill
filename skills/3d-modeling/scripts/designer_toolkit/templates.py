@@ -401,8 +401,14 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
     # The mouth is a straight-walled slot, not a radial wedge: a pie-slice cut
     # leaves cheek faces a few degrees past the overhang screen, which one run
     # measured at 293 mm2 and spent a build cycle removing.
-    mouth = _box((outer_d, mouth_gap, height * 3),
-                 (centre[0] + outer_d / 2, centre[1], base_h + height / 2))
+    # Only as tall as the ring, and starting at its base. A cutter centred on
+    # the ring and three times its height reached below the flange top and slotted
+    # the mounting plate clean through -- 108 mm2 of it, open to the short edge,
+    # while every scalar check still passed. A verification caught it by
+    # sectioning the flange and comparing areas.
+    mouth_h = height + 1.0
+    mouth = _box((outer_d, mouth_gap, mouth_h),
+                 (centre[0] + outer_d / 2, centre[1], base_h + mouth_h / 2))
     part = _seated(trimesh.boolean.difference([part, mouth]))
 
     if screw_d > 0 and flange is not None:
