@@ -48,10 +48,9 @@ render = ["pyrender", "PyOpenGL"]
 visual = ["pyrender", "PyOpenGL", "scipy", "networkx", "shapely", "rtree"]
 
 bambu = ["lxml"]
-mcp = ["mcp>=1.27,<2"]
 
 # Everything (convenience for a full local workstation).
-all = ["cadquery", "build123d", "scipy", "networkx", "shapely", "rtree", "pyrender", "PyOpenGL", "lxml", "mcp>=1.27,<2"]
+all = ["cadquery", "build123d", "scipy", "networkx", "shapely", "rtree", "pyrender", "PyOpenGL", "lxml"]
 
 [project.urls]
 Homepage = "https://github.com/ghsi011/3d-modeling-skill"

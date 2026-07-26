@@ -24,13 +24,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # Only the light stack. The editable install pulls core runtime deps plus
-      # the MCP extra for tools/mcp_server.py smoke coverage. cadquery / OCP /
       # pyrender / scipy / shapely are heavy optional extras and are deliberately
       # NOT installed here -- this job is also what proves the tooling degrades
       # honestly on a core-only install. The `section` job below covers the
       # cross-section path that skips here.
       - name: Install dependencies
-        run: python -m pip install --upgrade pip ruff pytest -e ".[mcp]"
+        run: python -m pip install --upgrade pip ruff pytest -e "."
 
       - name: Ruff (lint)
         run: ruff check skills tools
@@ -50,8 +49,8 @@ jobs:
       - name: Build skill bundles
         run: python tools/build_skill.py --out dist/skills
 
-  # The cross-section path (designer_toolkit.metrics.datum_features and the
-  # datum blocks bundle.finalize derives from it) skips on the lean stack above.
+  # The cross-section path (designer_toolkit.metrics.datum_features, and the edge
+  # measurement that reaches it) skips on the lean stack above.
   # It is deterministic mesh work with no GL context needed, so it gets its own
   # job with the `section` extra installed rather than going untested.
   section:

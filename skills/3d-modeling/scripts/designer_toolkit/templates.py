@@ -25,7 +25,7 @@ yourself.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -39,7 +39,6 @@ class Built:
     part: Any
     params: dict[str, Any]
     reference: Any | None = None
-    edge_samples: dict[str, tuple[float, float]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
     # What the solid must measure, derived from the caller's numbers rather than
     # from the solid. The independence is the whole value: the mouth-cutter bug
@@ -1016,8 +1015,3 @@ def catalogue_lines() -> list[str]:
                   "not, and declare PARAMS yourself. Everything else about the commission is",
                   "the same either way."])
     return lines
-
-
-def deg_to_normal_z(degrees_from_vertical: float) -> float:
-    """The `downward_normal_z_max` a plan would declare for a given overhang angle."""
-    return -math.cos(math.radians(degrees_from_vertical))

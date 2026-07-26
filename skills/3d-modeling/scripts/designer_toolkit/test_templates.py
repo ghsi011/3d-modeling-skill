@@ -17,6 +17,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import mesh_io  # noqa: E402
 from designer_toolkit import static, templates  # noqa: E402
+from designer_toolkit.metrics import BARE_45_DEG  # noqa: E402
 
 
 def _extents(built):
@@ -234,7 +235,7 @@ class CClipTest(unittest.TestCase):
         self.assertAlmostEqual(0.0, metrics.overhang_area(built.part, threshold=-0.73),
                                places=6)
         self.assertAlmostEqual(0.0, metrics.overhang_area(built.part,
-                                                          threshold=templates.deg_to_normal_z(45)),
+                                                          threshold=BARE_45_DEG),
                                places=6)
 
     def test_the_reported_size_is_the_size_it_built(self) -> None:
@@ -313,7 +314,7 @@ class CClipTest(unittest.TestCase):
         sunk = self._clip(countersink_d=9.0)
 
         self.assertLess(sunk.part.volume, plain.part.volume, "nothing was cut")
-        for threshold in (-0.73, templates.deg_to_normal_z(45)):
+        for threshold in (-0.73, BARE_45_DEG):
             with self.subTest(threshold=threshold):
                 self.assertAlmostEqual(
                     0.0, metrics.overhang_area(sunk.part, threshold=threshold), places=6)
@@ -360,7 +361,9 @@ class StackTest(unittest.TestCase):
 
 class AngleTest(unittest.TestCase):
     def test_forty_five_degrees_is_the_bare_screen_value(self) -> None:
-        self.assertAlmostEqual(-0.70710678, templates.deg_to_normal_z(45.0), places=7)
+        # `templates.deg_to_normal_z` used to compute this and was a second
+        # definition of the same number; the constant is the one the gate reads.
+        self.assertAlmostEqual(-0.70710678, BARE_45_DEG, places=7)
 
 
 if __name__ == "__main__":

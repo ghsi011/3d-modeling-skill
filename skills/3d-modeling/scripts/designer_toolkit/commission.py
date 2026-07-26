@@ -123,12 +123,6 @@ def load_model(model_path: Path):
     raise ValueError(f"{model_path.name} must define `part` or `build()`")
 
 
-def load_part(model_path: Path) -> Any:
-    """Back-compat shim for direct callers: just the part."""
-    _, part, _ = load_model(model_path)
-    return part() if callable(part) else part
-
-
 def _plan_support_rules(plan: dict[str, Any]) -> list[dict[str, Any]]:
     """Every rule, not the first.
 

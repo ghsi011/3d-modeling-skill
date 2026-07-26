@@ -103,7 +103,6 @@ backends you actually use:
 | `render`        | pyrender, PyOpenGL                                | `preview.py` offscreen renders                          |
 | `visual`        | pyrender, PyOpenGL, scipy, networkx, shapely, rtree | `overlay_photo.py`, `verify_visual.py`                |
 | `bambu`         | lxml                                              | `make_bambu_3mf.py` (3MF authoring / verify)            |
-| `mcp`           | mcp                                               | `tools/mcp_server.py` local stdio bridge                |
 
 ```bash
 pip install -e ".[section]"   # or .[cad], .[visual], .[all], ...
@@ -140,7 +139,7 @@ skills/
     roles/                #   metrologist · designer · print-engineer · verifier
   roles/                  # neutral role sources — edit these, then regenerate
 .claude/agents/3d-*.md    # Claude Code agent definitions   \
-tools/                    # gen_harness · build_skill · check_internal_links · mcp_server
+tools/                    # gen_harness · build_skill · check_internal_links · bench
 ```
 
 `skills/roles/*.md` are the source of truth. Edit a role there and run
@@ -151,7 +150,7 @@ tools/                    # gen_harness · build_skill · check_internal_links �
 Tests and lint run on the core stack — no cadquery, no OCP, no GL context:
 
 ```bash
-pip install ruff pytest -e ".[mcp]"
+pip install ruff pytest -e "."
 ruff check skills/3d-modeling/scripts
 pytest
 ```

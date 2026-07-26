@@ -451,52 +451,6 @@ Exit codes:
 * `1`, missing arguments, no mesh found, render failure, JSON write failure, or
   another uncaught runtime error.
 
-## `tools/mcp_server.py`
-
-Script: [`tools/mcp_server.py`](../tools/mcp_server.py)
-
-Install the MCP extra before registering the bridge:
-
-```bash
-pip install -e ".[mcp]"
-```
-
-Register the stdio server from the repository root with this one-liner:
-
-```bash
-claude mcp add 3d-modeling-tools -- python tools/mcp_server.py
-```
-
-Run directly when a host needs to launch the stdio server itself:
-
-```bash
-python tools/mcp_server.py
-```
-
-Inputs:
-
-* Stdio MCP requests from the host harness.
-* Project paths and tool arguments forwarded to contract, preflight, and toolkit
-  functions.
-
-Outputs:
-
-* MCP tool responses over stdio.
-* No generated project files unless the called tool writes them.
-
-Exposed tool families:
-
-* `team_preflight_*`, support, receipt, and interface preflight checks.
-* `contracts_*`, contract validation, hashing, and status rows.
-* `designer_*`, mesh measurement and Phase-4 readiness bundle helpers.
-
-Exit codes:
-
-* `0`, the stdio server starts and exits normally after the MCP transport
-  closes.
-* Non-zero, Python cannot import required dependencies, tool initialization
-  fails, or the stdio transport exits with an uncaught runtime error.
-
 ## `tools/gen_harness.py`
 
 Script: [`tools/gen_harness.py`](../tools/gen_harness.py)

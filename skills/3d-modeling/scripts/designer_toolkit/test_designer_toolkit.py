@@ -1,6 +1,6 @@
 """Tests for designer_toolkit. Mesh-based so they run on the lean stack
 (trimesh + numpy + manifold3d); the CadQuery export path and the two
-cross-section cases (datum_features, and the finalize call that derives datum
+cross-section cases (datum_features, which derives datum
 blocks from it — both need the `section` extra) are gated with skipUnless, and
 the pyrender-backed render module is not exercised here (needs a GL context).
 CI runs this file twice: once lean, where the section cases skip and the
@@ -9,7 +9,6 @@ where those cases run for real.
 """
 
 import importlib.util
-import math
 import os
 import sys
 import tempfile
@@ -25,7 +24,6 @@ if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
 from designer_toolkit import (  # noqa: E402
-    bundle,
     coupon,
     exporter,
     fit,
@@ -181,70 +179,3 @@ class TestCoupon(unittest.TestCase):
             coupon.fit_coupon([], "x.stl")
 
 
-class TestFinalize(unittest.TestCase):
-    def test_finalize_clean_solid(self):
-        with tempfile.TemporaryDirectory() as d:
-            stl = os.path.join(d, "body.stl")
-            _box((10, 10, 10), (0, 0, 5)).export(stl)
-            ev = bundle.finalize(stl, os.path.join(d, "body"), also_step=False)
-            self.assertTrue(ev["readiness_skeleton"]["single_watertight_solid"])
-            self.assertAlmostEqual(ev["overhang_mm2"], 0.0, delta=1e-6)
-            self.assertEqual(ev["datums"], [])
-            self.assertIsNone(ev["readiness_skeleton"]["visual_accept"])
-            self.assertEqual(ev["readiness_skeleton"]["auto_notes"], [])
-
-    @unittest.skipUnless(_HAS_SECTION, "section extra not installed")
-    def test_finalize_records_a_datum_block_per_requested_plane(self):
-        with tempfile.TemporaryDirectory() as d:
-            stl = os.path.join(d, "body.stl")
-            _box((10, 10, 10), (0, 0, 5)).export(stl)
-            ev = bundle.finalize(
-                stl, os.path.join(d, "body"),
-                datums=[{"name": "mid", "plane_origin": (0, 0, 5)}],
-                also_step=False)
-            self.assertEqual(len(ev["datums"]), 1)
-            block = ev["datums"][0]
-            self.assertEqual(block["name"], "mid")
-            self.assertEqual(block["plane_origin"], [0, 0, 5])
-            # A solid box cut at mid-height: one outline ring, no holes.
-            kinds = [f["kind"] for f in block["features"]]
-            self.assertEqual(kinds, ["outline"])
-
-    def test_finalize_flags_seated_interference(self):
-        with tempfile.TemporaryDirectory() as d:
-            stl = os.path.join(d, "body.stl")
-            _box((10, 10, 10)).export(stl)
-            ref = _box((10, 10, 10), (5, 0, 0))
-            ev = bundle.finalize(stl, os.path.join(d, "body"), reference=ref,
-                                   also_step=False)
-            self.assertGreater(ev["seated_interference_mm3"], 1.0)
-            self.assertTrue(any("interference" in n
-                                for n in ev["readiness_skeleton"]["auto_notes"]))
-
-    def test_the_toolkit_default_is_looser_than_a_plan_at_45_degrees(self):
-        # A 46deg downward face sits between the toolkit default (-sin47deg) and
-        # a plan declaring the bare 45deg value: the default screens it away and
-        # reports clean where the gate FAILs. That is why the threshold must come
-        # from the plan, and why the evidence records which one was used.
-        with tempfile.TemporaryDirectory() as d:
-            stl = os.path.join(d, "cone.stl")
-            height = 20.0
-            cone = trimesh.creation.cone(
-                radius=height * math.tan(math.radians(46)), height=height, sections=128)
-            cone.apply_transform(
-                trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
-            cone.apply_translation((0, 0, height + 1))
-            cone.export(stl)
-
-            loose = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False)
-            self.assertEqual(loose["overhang_threshold_source"], "toolkit_default")
-            self.assertAlmostEqual(loose["overhang_mm2"], 0.0, delta=1e-6)
-
-            strict = bundle.finalize(stl, os.path.join(d, "cone"), also_step=False,
-                                     overhang_threshold=-0.70710678)
-            self.assertEqual(strict["overhang_threshold_source"], "caller")
-            self.assertGreater(strict["overhang_mm2"], 100.0)
-
-
-if __name__ == "__main__":
-    unittest.main()

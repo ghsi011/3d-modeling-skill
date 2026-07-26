@@ -860,7 +860,7 @@ class LoadPartTest(unittest.TestCase):
             module.write_text("x = 1\n", encoding="utf-8")
 
             with self.assertRaises(ValueError) as caught:
-                commission.load_part(module)
+                commission.load_model(module)
 
             self.assertIn("build()", str(caught.exception))
 

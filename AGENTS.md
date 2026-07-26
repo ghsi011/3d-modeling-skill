@@ -24,7 +24,7 @@ The pipeline ships as one skill: `skills/3d-modeling/SKILL.md` is the orchestrat
 
 - `skills/3d-modeling/scripts`, deterministic model, mesh, preflight, preview, 3MF, and contract tooling.
 - `tools/gen_harness.py`, renders the neutral role sources into the skill tree.
-- `tools/mcp_server.py`, local MCP server for contract and preflight tools.
+- `tools/bench.py`, snapshot a job mid-pipeline so one phase can be measured.
 - `tools/build_skill.py`, packs `skills/3d-modeling/` into the deterministic `3d-modeling.skill`. CI step.
 - `tools/check_internal_links.py`, relative-markdown-link resolver over the whole tree. CI step.
 

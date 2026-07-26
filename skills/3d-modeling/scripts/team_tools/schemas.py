@@ -16,7 +16,6 @@ from common import Issue, error, warning
 NUMBER = (int, float)
 
 # Enumerations shared across contracts (team-contracts-v4.md naming).
-CONFIDENCE = frozenset({"A", "B", "C", "D"})
 
 
 def check_type(value: Any, expected: type | tuple[type, ...]) -> bool:

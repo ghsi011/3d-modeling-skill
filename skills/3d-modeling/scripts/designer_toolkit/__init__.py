@@ -15,7 +15,6 @@ Design notes:
 
 from __future__ import annotations
 
-from .bundle import finalize
 from .coupon import CouponLane, fit_coupon, legend_to_rows
 from .exporter import ExportReport, export_and_hash
 from .fit import SweepStep, insertion_sweep, interference
@@ -37,7 +36,6 @@ __all__ = [
     "SweepStep",
     "datum_features",
     "export_and_hash",
-    "finalize",
     "fit_coupon",
     "insertion_sweep",
     "interference",
