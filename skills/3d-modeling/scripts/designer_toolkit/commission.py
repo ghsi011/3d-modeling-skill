@@ -222,11 +222,25 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
         area = placement.overhang_mm2
         ok = area <= ceiling
         best = orient.best(mesh, threshold=threshold)
-        advice = (f"Reorient, chamfer the offending face, or declare SUPPORT_ALLOWED with a "
-                  f"contact class. The best of {len(orient._CANDIDATES)} screened placements "
-                  f"is '{best.name}' at {best.overhang_mm2:.2f} mm2"
-                  + (" -- no orientation clears this, so the fix is geometric."
-                     if best.overhang_mm2 > ceiling else "."))
+        # Name the remedies rather than leaving them to be rediscovered. One
+        # measured run spent three full build/export/measure cycles arriving at
+        # two of these -- a vertical-walled slot and a teardrop bore roof --
+        # both of which fdm-design.md already documents.
+        advice = (
+            f"The best of {len(orient._CANDIDATES)} screened placements is "
+            f"'{best.name}' at {best.overhang_mm2:.2f} mm2"
+            + (" -- no orientation clears this, so the fix is geometric. "
+               if best.overhang_mm2 > ceiling else ", so reorienting may be enough. ")
+            + "For the usual causes: a horizontal round bore has an unsupported crown -- "
+              "give it a teardrop or flat/diamond roof (fdm-design section 3). A radial or "
+              "pie-slice cut leaves a cheek face just past the screen -- make the slot "
+              "vertical-walled instead. A flat roof or ledge wants a 45 deg chamfer under "
+              "it. If meeting zero would distort a functional surface -- a mating wall, a "
+              "bore that has to stay round, the cavity itself -- do not contort the "
+              "geometry: say so in your handoff and let the print engineer plan a bounded "
+              "SUPPORT_ALLOWED on a nonfunctional region. Support-free is the default, not "
+              "a hard constraint."
+        )
         commission.add(Check(
             f"support-{rule_id}", f"{rule_id} downward-facing area within its limit",
             _PASS if ok else _FAIL,
