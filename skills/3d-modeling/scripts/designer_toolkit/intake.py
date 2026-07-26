@@ -125,6 +125,22 @@ Built and checked by the orchestrator; no independent fresh-context verification
 what this route is: nobody who did not build the part will look at it. The delivery repeats
 this, and the receipt leaves `visual_accept` for a human who has actually seen a render.
 '''}
+## Bound inputs
+| Contract/evidence | Revision/hash | Status |
+|---|---|---|
+| brief.md | as supplied | read |
+| dimensions.md | r1 | written here, not by a metrologist |
+
+## Gates
+| Gate | Required receipt | Result | Evidence |
+|---|---|---|---|
+| consequence class | this section | PASS | the rationale above |
+| route | this section | PASS | the profile above |
+| plan | `dt.py plan check` | NOT RUN | — |
+| candidate | `dt.py commission` exit 0 | NOT RUN | — |
+| contracts | `contracts validate` exit 0 | NOT RUN | — |
+| visual | a human looked at the renders | NOT RUN | — |
+
 ## Dispatches
 | ID | Role/commission | Authorized inputs | Required output | Budget min | Status |
 |---|---|---|---|---:|---|

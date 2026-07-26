@@ -79,6 +79,27 @@ class TestIntake(unittest.TestCase):
             for feature in ("channel-mid", "flange-mid", "screw"):
                 self.assertIn(feature, sheet)
 
+    def test_it_emits_every_section_the_contract_declares(self) -> None:
+        """`validate` only reads frontmatter, so a scaffold missing half the
+        body passes it and still fails the reader who follows the spec."""
+        try:
+            import trimesh  # noqa: F401
+        except ImportError:
+            self.skipTest("needs trimesh")
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            _run(out)
+
+            job = (out / "job_state.md").read_text(encoding="utf-8")
+            for section in ("## Route", "## Bound inputs", "## Gates",
+                            "## Dispatches", "## Open user questions"):
+                self.assertIn(section, job)
+
+            sheet = (out / "dimensions.md").read_text(encoding="utf-8")
+            for section in ("## Frame", "## Sources", "## Blind-build completeness",
+                            "## Dimensions", "## Open questions", "## Reference round trip"):
+                self.assertIn(section, sheet)
+
     def test_it_will_not_overwrite_an_edited_contract(self) -> None:
         try:
             import trimesh  # noqa: F401
