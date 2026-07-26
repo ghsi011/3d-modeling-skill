@@ -94,7 +94,11 @@ ACCEPTED_CONTRACT_VERSIONS: dict[str, frozenset[int]] = {
 CANONICAL_FILENAMES: dict[str, tuple[str, ...]] = {
     "job_state": ("job_state.md", "job_state.json"),
     "dimensions": ("dimensions.md", "dimensions.json"),
-    "print_plan": ("print_plan.md", "print_plan.json"),
+    # `print_plan_checks.json` is the machine-readable projection of the plan and
+    # is the *only* plan a DIRECT job has, so omitting it made
+    # `validate --require all` unsatisfiable there -- the verifier is told to
+    # require exit zero, and exit zero was unreachable.
+    "print_plan": ("print_plan.md", "print_plan.json", "print_plan_checks.json"),
     "verification_report": ("verification_report.md", "verification_report.json"),
     "artifact_manifest": ("artifact_manifest.json",),
 }
@@ -237,10 +241,13 @@ def validate_print_plan(
             "owner": str,
             "status": str,
             "dimensions_revision": int,
-            "reference_sha256": str,
             "updated_utc": str,
         },
         optional={
+            # Optional because a job with no recreated mating object has no
+            # reference to bind to, and requiring the hash of a thing that does
+            # not exist made a DIRECT plan unvalidatable.
+            "reference_sha256": str,
             "process": list,
             "transform": dict,
             "geometry_rules": list,
@@ -248,6 +255,12 @@ def validate_print_plan(
             "support_rules": list,
             "coupon": dict,
             "final_prep_notes": str,
+            # The envelope the candidate is gated against. `commission` fails
+            # rather than skips without it, so the contract has to name it.
+            "expected_bbox_mm": dict,
+            "bbox_tolerance_mm": (int, float),
+            "interfaces": list,
+            "threshold_source": str,
         },
         where=where,
     )

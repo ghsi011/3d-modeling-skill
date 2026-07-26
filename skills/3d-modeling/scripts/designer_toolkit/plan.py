@@ -60,6 +60,8 @@ def direct_template(
     job_id: str = "direct",
     nozzle_mm: float = 0.4,
     material: str = "PETG",
+    dimensions_revision: int = 1,
+    updated_utc: str = "1970-01-01T00:00:00Z",
 ) -> dict[str, Any]:
     """A bound plan for a job whose dimensions were stated, not measured."""
     x, y, z = (float(v) for v in bbox_mm)
@@ -74,6 +76,9 @@ def direct_template(
         # is what keeps the distinction visible downstream, where a plan that
         # merely *looks* authored is indistinguishable from one that was.
         "owner": "builtin-direct-template",
+        "status": "ACCEPTED",
+        "dimensions_revision": dimensions_revision,
+        "updated_utc": updated_utc,
         "threshold_source": "builtin-default",
         "process": [{"printer_material_nozzle": f"{material}; {nozzle_mm}mm nozzle"}],
         "expected_bbox_mm": {"x": x, "y": y, "z": z},
@@ -173,7 +178,9 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
 def _cmd_template(args: argparse.Namespace) -> int:
     plan = direct_template(tuple(args.bbox), tolerance_mm=args.tolerance,
                            job_id=args.job_id, nozzle_mm=args.nozzle,
-                           material=args.material)
+                           material=args.material,
+                           dimensions_revision=args.dimensions_revision,
+                           updated_utc=args.updated_utc)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")
@@ -202,6 +209,9 @@ def main(argv: list[str] | None = None) -> int:
     template.add_argument("--job-id", default="direct")
     template.add_argument("--nozzle", type=float, default=0.4)
     template.add_argument("--material", default="PETG")
+    template.add_argument("--dimensions-revision", type=int, default=1)
+    template.add_argument("--updated-utc", default="1970-01-01T00:00:00Z",
+                          help="injected, never wall-clock, so a rerun is byte-identical")
     template.add_argument("--out", type=Path, required=True)
     template.set_defaults(func=_cmd_template)
 

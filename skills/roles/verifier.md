@@ -46,33 +46,40 @@ overlays, and issue a concrete file-contract verdict.
 
 ## Required reading
 
+Always:
+
 1. [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md):
    `verification_report.md` and `final_prep_review.md` only.
-2. [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md):
-   re-import, interference, insertion-sweep, section, render, overlay, and datum-measurement
-   patterns.
-3. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md).
-4. For a FreeCAD candidate, also read
-   [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-5. Shared tools:
-   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py) and
-   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py).
-6. Shared deterministic support predicate:
-   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
-7. Shared artifact-manifest validator:
-   [`../3d-modeling/scripts/team_tools/`](../3d-modeling/scripts/team_tools/)
-   (`python -m team_tools.contracts validate <project-dir>`).
-8. Shared raw-vs-normalized mesh loader:
+2. [`../3d-modeling/references/fdm-design.md`](../3d-modeling/references/fdm-design.md) — you
+   judge printability, and this is what you judge it against.
+3. Shared raw-vs-normalized mesh loader:
    [`../3d-modeling/scripts/mesh_io.py`](../3d-modeling/scripts/mesh_io.py)
-   (`load_mesh_report` / `load_mesh_raw`).
-9. Shared design/verify toolkit — run the same one command against the
-   **delivered** STL, into your own output directory:
+   (`load_mesh_report` / `load_mesh_raw`). Read its docstring before reading its numbers: an
+   STL is a triangle soup, so a raw parse reporting many components is the format, not a
+   defect, and `degenerate_face_count` is the metric that would catch a real one.
+4. Shared design/verify toolkit — run the same one command against the **delivered** STL,
+   into your own output directory:
    [`../3d-modeling/references/designer-toolkit.md`](../3d-modeling/references/designer-toolkit.md)
-   (`python <skill>/scripts/dt.py commission --stl <canonical.stl> ...`). Recomputing
-   from the delivered bytes with the tested instrument *is* independence — it never
-   reads the designer's `commission.json`, which is the one input you distrust.
-   Re-authoring the predicate in a bespoke script is not independence, it is a second
-   uncalibrated instrument; the accept/reject and every visual judgment stay yours.
+   (`dt.py commission --stl <canonical.stl> ...`, then `dt.py report`). Recomputing from the
+   delivered bytes with the tested instrument *is* independence — it never reads the
+   designer's `commission.json`, which is the one input you distrust. Re-authoring the
+   predicate in a bespoke script is not independence, it is a second uncalibrated instrument;
+   the accept/reject and every visual judgment stay yours.
+
+Only when the job has the evidence for it:
+
+5. `FITTED`/`FULL`, where photographs and a mating reference exist:
+   [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py),
+   [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py), and
+   [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md)
+   for the insertion-sweep and datum-measurement patterns you author yourself.
+6. A `SUPPORT_ALLOWED` rule, whose contact class you inspect independently:
+   [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
+7. A FreeCAD candidate:
+   [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+
+`team_tools.contracts` you run rather than read:
+`validate <project-dir> --require all` and `status <project-dir>`, both requiring exit zero.
 
 ## Scope by profile
 

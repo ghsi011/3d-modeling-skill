@@ -241,10 +241,19 @@ The print engineer also writes `print_plan_checks.json` with every Edge ID, supp
 declared interface. This file is the machine-readable projection of the accepted Markdown plan,
 not a second source of requirements:
 
+The plan also declares the envelope the candidate is gated against, and the machine-readable
+projection carries it: `expected_bbox_mm` (`{x, y, z}` in millimetres) and
+`bbox_tolerance_mm`. These are not optional decoration — `commission` **fails** rather than
+skips when they are absent, because a part can satisfy every other gate while being wholly the
+wrong size, and one did, by 31%. `reference_sha256` is omitted when the job recreates no
+mating object; there is no hash to bind.
+
 ```json
 {
   "schema_version": 4,
   "candidate_predicate_revision": 1,
+  "expected_bbox_mm": {"x": 76.5, "y": 158.6, "z": 10.1},
+  "bbox_tolerance_mm": 0.5,
   "edges": [
     {
       "id": "E-01",

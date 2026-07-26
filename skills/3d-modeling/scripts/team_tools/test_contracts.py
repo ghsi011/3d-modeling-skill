@@ -470,6 +470,12 @@ class PrintPlanValidatorTest(unittest.TestCase):
         issues, _ = V.validate_print_plan(broken)
         self.assertIn("DUPLICATE_ID@print_plan.edges", issue_ids(issues))
 
+    def test_a_direct_jobs_plan_filename_is_recognised(self) -> None:
+        """A DIRECT job has only `print_plan_checks.json`. While that was not a
+        canonical name, `validate --require all` could never exit zero there --
+        and the verifier is instructed to require exit zero."""
+        self.assertIn("print_plan_checks.json", V.CANONICAL_FILENAMES["print_plan"])
+
     def test_the_orchestrator_may_own_a_direct_jobs_dimensions(self) -> None:
         """Under DIRECT nothing is recovered from evidence, so the orchestrator
         transcribes the stated numbers. Forcing `owner: metrologist` there would
