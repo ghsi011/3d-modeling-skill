@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -85,8 +84,8 @@ def require_finite(value: Any, *, label: str) -> float:
     """Return `value` as a float, or raise ValueError naming `label`.
 
     Use for fields that must fail loudly (contract-structure problems), as
-    opposed to fields validated inside `validate_receipts`, which collects
-    field-level messages into its `errors` list instead of raising.
+    opposed to the per-field messages the validators here collect into an
+    `errors` list instead of raising.
     """
     if not _finite(value):
         raise ValueError(f"{label} must be a finite number, got {value!r}")
@@ -120,29 +119,6 @@ def is_finite_rigid(matrix: Any) -> bool:
     if not math.isclose(determinant, 1.0, abs_tol=1e-6):
         return False
     return True
-
-
-def resolve_contained_path(base_dir: Path, relative: Any, *, label: str) -> Path:
-    """Resolve `relative` against `base_dir`, requiring strict containment.
-
-    Rejects a non-string value, an absolute path, a `..` escape, and a
-    symlink/junction escape (``os.path.realpath`` follows links before the
-    containment check runs). Raises ValueError naming `label` on any
-    rejection; returns the resolved, contained, absolute Path otherwise.
-    """
-    if not isinstance(relative, str) or not relative:
-        raise ValueError(f"{label} must be a non-empty relative path string")
-    if os.path.isabs(relative) or Path(relative).is_absolute():
-        raise ValueError(f"{label} must be a relative path, got absolute {relative!r}")
-    base_real = os.path.realpath(str(base_dir))
-    candidate_real = os.path.realpath(os.path.join(str(base_dir), relative))
-    try:
-        common = os.path.commonpath([base_real, candidate_real])
-    except ValueError:
-        raise ValueError(f"{label} escapes its evidence root: {relative!r}")
-    if common != base_real:
-        raise ValueError(f"{label} escapes its evidence root: {relative!r}")
-    return Path(candidate_real)
 
 
 def indexed_rows(
@@ -242,194 +218,6 @@ def support_audit(
     return result, maximum_area
 
 
-def validate_receipts(
-    *,
-    stl_path: Path,
-    plan_path: Path,
-    readiness_path: Path,
-) -> dict[str, Any]:
-    plan = load_json(plan_path)
-    readiness = load_json(readiness_path)
-    errors: list[str] = []
-
-    # `contract_version` is accepted as an alias so one JSON file can serve both
-    # gates. print_plan_checks.json (this tool) and print_plan.json (team_tools)
-    # carry field-for-field identical edges and support_rules, differing only in
-    # the name of this key -- two hand-maintained copies whose agreement nothing
-    # checked, which is the failure mode the whole contract exists to prevent.
-    plan_version = plan.get("schema_version", plan.get("contract_version"))
-    if plan_version != SCHEMA_VERSION:
-        errors.append(f"plan schema_version must be {SCHEMA_VERSION}")
-    if readiness.get("schema_version") != SCHEMA_VERSION:
-        errors.append(f"readiness schema_version must be {SCHEMA_VERSION}")
-
-    stl_sha = sha256_file(stl_path)
-    plan_sha = sha256_file(plan_path)
-    if readiness.get("candidate_stl_sha256") != stl_sha:
-        errors.append("candidate_stl_sha256 does not match the exported STL")
-    if readiness.get("print_plan_checks_sha256") != plan_sha:
-        errors.append("print_plan_checks_sha256 does not match the plan checks file")
-
-    plan_edges = indexed_rows(plan.get("edges"), label="plan edges")
-    ready_edges = indexed_rows(readiness.get("edges"), label="readiness edges")
-    if set(plan_edges) != set(ready_edges):
-        errors.append(
-            "edge ID set mismatch: "
-            f"missing={sorted(set(plan_edges) - set(ready_edges))}, "
-            f"extra={sorted(set(ready_edges) - set(plan_edges))}"
-        )
-    for edge_id in sorted(set(plan_edges) & set(ready_edges)):
-        expected = plan_edges[edge_id]
-        observed = ready_edges[edge_id]
-        samples = observed.get("samples_mm")
-        if not isinstance(samples, list) or len(samples) == 0:
-            errors.append(f"{edge_id}: samples_mm must be a non-empty numeric list")
-            continue
-        if not all(_finite(value) for value in samples):
-            errors.append(
-                f"{edge_id}: samples_mm must contain only finite numbers "
-                "(NaN/Inf/null/bool/non-numeric samples are rejected)"
-            )
-            continue
-        if any(value < 0 for value in samples):
-            errors.append(f"{edge_id}: samples_mm must be non-negative")
-            continue
-        required_samples_raw = expected.get("samples_required", 3)
-        if not _finite(required_samples_raw) or float(required_samples_raw) < 0:
-            errors.append(f"{edge_id}: samples_required must be a finite non-negative number")
-            continue
-        required_samples = int(required_samples_raw)
-        if len(samples) < required_samples:
-            errors.append(
-                f"{edge_id}: needs {required_samples} samples, found {len(samples)}"
-            )
-            continue
-        if expected.get("allowed_sharp") is True:
-            if not expected.get("allowed_sharp_reason"):
-                errors.append(f"{edge_id}: allowed sharp edge needs a plan reason")
-            continue
-        if not _finite(expected.get("min_radius_mm")):
-            errors.append(f"{edge_id}: min_radius_mm must be a finite number")
-            continue
-        minimum = float(expected.get("min_radius_mm"))
-        if minimum < 0:
-            errors.append(f"{edge_id}: min_radius_mm must be >= 0")
-            continue
-        maximum_value = expected.get("max_radius_mm")
-        if maximum_value is not None and not _finite(maximum_value):
-            errors.append(f"{edge_id}: max_radius_mm must be a finite number or null")
-            continue
-        if maximum_value is not None and float(maximum_value) < minimum:
-            errors.append(f"{edge_id}: max_radius_mm must be >= min_radius_mm")
-            continue
-        observed_min = min(float(value) for value in samples)
-        observed_max = max(float(value) for value in samples)
-        if observed_min + 1e-9 < minimum:
-            errors.append(
-                f"{edge_id}: radius {observed_min:.6f} below {minimum:.6f} mm"
-            )
-        if maximum_value is not None and observed_max - 1e-9 > float(maximum_value):
-            errors.append(
-                f"{edge_id}: radius {observed_max:.6f} above "
-                f"{float(maximum_value):.6f} mm"
-            )
-        if not observed.get("method") or not observed.get("evidence"):
-            errors.append(f"{edge_id}: method and evidence are required")
-
-    plan_support = indexed_rows(plan.get("support_rules"), label="plan support_rules")
-    ready_support = indexed_rows(
-        readiness.get("support_rules"), label="readiness support_rules"
-    )
-    if set(plan_support) != set(ready_support):
-        errors.append(
-            "support-rule ID set mismatch: "
-            f"missing={sorted(set(plan_support) - set(ready_support))}, "
-            f"extra={sorted(set(ready_support) - set(plan_support))}"
-        )
-    for rule_id in sorted(set(plan_support) & set(ready_support)):
-        expected = plan_support[rule_id]
-        observed = ready_support[rule_id]
-        audit_value = observed.get("audit_path")
-        if not isinstance(audit_value, str):
-            errors.append(f"{rule_id}: audit_path is required")
-            continue
-        try:
-            audit_path = resolve_contained_path(
-                readiness_path.parent, audit_value, label=f"{rule_id}: audit_path"
-            )
-        except ValueError as error:
-            errors.append(str(error))
-            continue
-        if not audit_path.is_file():
-            errors.append(f"{rule_id}: missing audit file {audit_value}")
-            continue
-        audit = load_json(audit_path)
-        if audit.get("tool") != "team_preflight.py":
-            errors.append(f"{rule_id}: audit must come from team_preflight.py")
-        if audit.get("stl_sha256") != stl_sha:
-            errors.append(f"{rule_id}: audit STL hash mismatch")
-        if audit.get("plan_checks_sha256") != plan_sha:
-            errors.append(f"{rule_id}: audit plan hash mismatch")
-        if audit.get("rule_id") != rule_id:
-            errors.append(f"{rule_id}: audit rule ID mismatch")
-        expected_matrix = expected.get("model_to_printer_matrix")
-        if not is_finite_rigid(expected_matrix):
-            errors.append(
-                f"{rule_id}: model_to_printer_matrix must be a finite rigid 4x4 transform "
-                "(all entries finite, last row [0, 0, 0, 1], orthonormal rotation, "
-                "determinant +1 -- no scale/shear/reflection)"
-            )
-            continue
-        if audit.get("matrix_sha256") != canonical_sha256(expected_matrix):
-            errors.append(f"{rule_id}: transform hash mismatch")
-        disposition = expected.get("disposition")
-        if disposition == "SELF_SUPPORT_REQUIRED":
-            # max_out_of_limit_area_mm2 is only meaningful (and required) for this
-            # disposition; SUPPORT_ALLOWED rows may legitimately leave it JSON-null
-            # (bounded instead by a named footprint/region). Validating it here,
-            # rather than unconditionally before the disposition branch, is what
-            # stops a null value from crashing this check with `float(None)`.
-            if not _finite(audit.get("out_of_limit_area_mm2")):
-                errors.append(f"{rule_id}: audit out_of_limit_area_mm2 must be a finite number")
-                continue
-            if not _finite(expected.get("max_out_of_limit_area_mm2")):
-                errors.append(
-                    f"{rule_id}: max_out_of_limit_area_mm2 must be a finite number "
-                    "for SELF_SUPPORT_REQUIRED"
-                )
-                continue
-            observed_area = float(audit["out_of_limit_area_mm2"])
-            maximum_area = float(expected["max_out_of_limit_area_mm2"])
-            if maximum_area < 0:
-                errors.append(f"{rule_id}: max_out_of_limit_area_mm2 must be >= 0")
-                continue
-            if observed_area > maximum_area + 1e-9:
-                errors.append(
-                    f"{rule_id}: {observed_area:.6f} mm2 exceeds "
-                    f"{maximum_area:.6f} mm2"
-                )
-        elif disposition == "SUPPORT_ALLOWED":
-            if not expected.get("allowed_contact_class"):
-                errors.append(f"{rule_id}: SUPPORT_ALLOWED needs allowed_contact_class")
-            if observed.get("forbidden_faces_checked") is not True:
-                errors.append(f"{rule_id}: forbidden faces were not checked")
-        else:
-            errors.append(f"{rule_id}: unknown disposition")
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "tool": "team_preflight.py",
-        "tool_version": TOOL_VERSION,
-        "kind": "receipt-validation",
-        "candidate_stl_sha256": stl_sha,
-        "print_plan_checks_sha256": plan_sha,
-        "edge_ids": sorted(plan_edges),
-        "support_rule_ids": sorted(plan_support),
-        "errors": errors,
-        "result": "PASS" if not errors else "FAIL",
-    }
-
-
 def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
     """Validate the optional `print_plan_checks.json` `"interfaces"` array (H-03).
 
@@ -441,9 +229,9 @@ def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
 
     Backward-compatible: a plan with no `interfaces` key (or `null`) PASSes with an empty
     `interface_ids` list -- older plans are unaffected. When the key is present, every entry
-    is fully validated and any malformed entry FAILs with a field/ID-named error, mirroring
-    `validate_receipts`'s error style. Reuses `_finite` for numeric fields so NaN/Inf/bool/
-    None/non-numeric handling matches the rest of this module exactly.
+    is fully validated and any malformed entry FAILs with a field/ID-named error. Reuses
+    `_finite` for numeric fields so NaN/Inf/bool/None/non-numeric handling matches the rest
+    of this module exactly.
     """
     errors: list[str] = []
     interface_ids: list[str] = []
@@ -546,15 +334,6 @@ def build_parser() -> argparse.ArgumentParser:
     support.add_argument("--rule-id", required=True)
     support.add_argument("--output", type=Path)
 
-    validate = subparsers.add_parser(
-        "validate-receipts",
-        help="Validate hashes and complete edge/support ID coverage.",
-    )
-    validate.add_argument("--stl", required=True, type=Path)
-    validate.add_argument("--plan", required=True, type=Path)
-    validate.add_argument("--readiness", required=True, type=Path)
-    validate.add_argument("--output", type=Path)
-
     interfaces = subparsers.add_parser(
         "validate-interfaces",
         help=(
@@ -577,14 +356,8 @@ def main() -> int:
                 plan_path=args.plan.resolve(),
                 rule_id=args.rule_id,
             )
-        elif args.command == "validate-interfaces":
-            result = validate_interfaces(load_json(args.plan.resolve()))
         else:
-            result = validate_receipts(
-                stl_path=args.stl.resolve(),
-                plan_path=args.plan.resolve(),
-                readiness_path=args.readiness.resolve(),
-            )
+            result = validate_interfaces(load_json(args.plan.resolve()))
         write_result(result, args.output.resolve() if args.output else None)
         return 0 if result["result"] == "PASS" else 1
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:

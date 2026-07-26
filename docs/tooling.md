@@ -59,39 +59,6 @@ Exit codes:
 * `2`, missing rule, malformed rigid transform, missing file, bad JSON, or bad
   numeric input.
 
-### validate, actual command `validate-receipts`
-
-```bash
-python skills/3d-modeling/scripts/team_preflight.py validate-receipts \
-  --stl candidate.stl \
-  --plan print_plan_checks.json \
-  --readiness readiness.json \
-  [--output receipt_validation.json]
-```
-
-Inputs:
-
-* `--stl`, exported STL that readiness claims to describe.
-* `--plan`, `print_plan_checks.json` with edge and support expectations.
-* `--readiness`, readiness receipt with candidate hashes, edge samples, and
-  support audit paths.
-* `--output`, optional JSON output path.
-
-Outputs:
-
-* JSON kind `receipt-validation`.
-* Candidate STL hash, plan hash, sorted edge ids, sorted support rule ids,
-  collected error strings, and `PASS` or `FAIL`.
-
-Exit codes:
-
-* `0`, hashes match, edge and support id coverage is complete, samples satisfy
-  plan rules, and support audit files bind to the same STL, plan, rule, and
-  transform.
-* `1`, validation ran and found one or more receipt errors.
-* `2`, an input file cannot be read, JSON is invalid, or required top-level
-  structures are malformed.
-
 ### interfaces, actual command `validate-interfaces`
 
 ```bash

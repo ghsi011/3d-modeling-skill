@@ -397,11 +397,8 @@ write either by hand: `dt.py commission` derives both from the measurements it j
 the re-imported STL. The designer runs nothing else. `team_preflight.py` and the contract
 commands re-screen the same mesh from the same numbers -- a second reading of one instrument,
 not a second opinion -- and belong to the fresh verifier, where a disagreement between two
-implementations means something. This spec used to require a `candidate_preflight.json` and a
-`candidate_preflight_validation.json` from the designer as well; nothing in the pipeline
-writes either, a measured run burned turns hand-assembling one to feed a validator, and the
-designer charter now forbids it in as many words. The requirement is gone rather than
-reconciled, because there was nothing on the other side of it.
+implementations means something. The designer owes no preflight artefact of its own: the
+charter forbids hand-assembling one, and there is no validator on the other side of it.
 
 `team_preflight.py support-audit` (subcommand name kept for backward compatibility; its
 result `kind` is `downward-facing-surface-screen`) is a **conservative downward-facing-surface

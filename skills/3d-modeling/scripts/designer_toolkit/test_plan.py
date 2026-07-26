@@ -133,7 +133,7 @@ class ValidatePlanTest(unittest.TestCase):
 
     def test_support_allowed_without_a_contact_class_is_rejected(self) -> None:
         """The exact defect that cost one run 39 minutes: commission passed this
-        plan, and validate-receipts rejected it only after the build."""
+        plan, and nothing rejected it until after the build."""
         broken = plan.direct_template((40.0, 22.0, 14.0))
         broken["support_rules"][0]["disposition"] = "SUPPORT_ALLOWED"
 

@@ -125,11 +125,11 @@ _DISPOSITIONS = ("SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED", "BRIDGED_NO_SUPPORT
 def validate_plan(plan: dict[str, Any]) -> list[str]:
     """Every way a plan can be unbuildable, checked before a designer reads it.
 
-    These are exactly the conditions `team_preflight validate-receipts` applies
-    to the finished candidate. Applying them only there is what cost one
-    archived run 39 minutes: `commission` passed a plan whose single support
-    rule declared `SUPPORT_ALLOWED` with no `allowed_contact_class`, and the
-    designer learned the plan was incomplete only after building against it.
+    None of them need geometry, so every one can be settled before a designer
+    reads the plan. Leaving them to the finished candidate cost one archived run
+    39 minutes: `commission` passed a plan whose single support rule declared
+    `SUPPORT_ALLOWED` with no `allowed_contact_class`, and the designer learned
+    the plan was incomplete only after building against it.
     None of these depend on the geometry, so none of them need to wait for it.
     """
     problems: list[str] = []

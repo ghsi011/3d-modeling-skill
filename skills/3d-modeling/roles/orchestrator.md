@@ -274,16 +274,14 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    python <skill>/scripts/dt.py plan check <project-dir>/print_plan_checks.json
    ```
 
-   Require exit zero. It applies the conditions `validate-receipts` will apply to the finished
-   candidate, none of which depend on geometry. One archived run spent 39 minutes building
+   Require exit zero. None of these conditions depend on geometry, so there is no reason to
+   discover any of them after a build. One archived run spent 39 minutes building
    against a plan whose only support rule declared `SUPPORT_ALLOWED` with no
    `allowed_contact_class`, passed `commission`, and was rejected for the plan afterwards.
 8. Dispatch candidate designer(s) against the sheet, accepted reference, and print plan.
    Require a hash-bound `candidate_readiness.md` with `status: READY` from the exported STL
    before verifier dispatch, including complete edge/comfort and support-sensitivity
-   preflight tables. `validate-receipts` is not yours to rerun here: it needs a
-   `candidate_preflight.json` the pipeline stopped producing, so the instruction was
-   unexecutable on any current job. The verifier runs the second implementation, on the
+   preflight tables. The verifier runs the second implementation, on the
    delivered bytes, where a disagreement between two instruments means something. Run
    `dt.py status <project-dir>` and require a zero exit: it is the
    only check that compares each contract's `revision` against what the downstream contracts
