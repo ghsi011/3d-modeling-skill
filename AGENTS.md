@@ -43,13 +43,13 @@ Every commission should state:
 - required output files,
 - contract revision or hash expectations,
 - phase gate to satisfy,
-- backend choice: `cadquery` | `build123d` | `freecad`.
+- backend choice: `trimesh-manifold` | `build123d`.
 
 ## Backend selection
 
 Treat the backend as an explicit commission input, not an agent preference. Use one backend per part unless the orchestrator records a new revision that changes the route.
 
-The discriminator is the execution environment, not the modeling feature set: `cadquery` and `build123d` are headless Python/OCP kernels that run wherever the tooling runs, while `freecad` needs a desktop FreeCAD document driven over MCP.
+The discriminator is what the shape needs, not where it runs: both backends are headless and file-based. `trimesh-manifold` is primitive boolean CSG and is the default; `build123d` is for exact face and edge work -- fillets, chamfers, revolves, lofts -- or when the contract requires an editable STEP. Its import costs 10.7 s against 1.5 s, so it is loaded only when selected.
 
 Record the selected backend in the project contract files so downstream roles and tools can verify the same artifact chain.
 

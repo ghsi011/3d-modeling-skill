@@ -25,8 +25,8 @@ _CAPABILITIES: dict[str, tuple[str, str]] = {
     "trimesh": ("mesh measurement, booleans, export", "nothing runs"),
     "manifold3d": ("robust booleans", "boolean results become unreliable"),
     "numpy": ("every measurement", "nothing runs"),
-    "cadquery": ("the cadquery backend", "use build123d, or the trimesh templates"),
-    "build123d": ("the build123d backend", "use cadquery, or the trimesh templates"),
+    "build123d": ("exact B-rep: fillets, chamfers, revolves, and STEP",
+                  "use the trimesh templates; no STEP and no exact edge work"),
     "scipy": ("cross-sections", "edge measurement and datum features report SKIPPED"),
     "networkx": ("cross-sections", "edge measurement and datum features report SKIPPED"),
     "shapely": ("cross-sections", "edge measurement and datum features report SKIPPED"),
@@ -50,7 +50,7 @@ def _present(module: str) -> bool:
 def report() -> dict:
     found = {name: _present(name) for name in _CAPABILITIES}
     missing_required = [n for n in _REQUIRED if not found[n]]
-    backends = [n for n in ("cadquery", "build123d") if found[n]]
+    backends = [n for n in ("build123d",) if found[n]]
     return {
         "python": sys.version.split()[0],
         "executable": sys.executable,

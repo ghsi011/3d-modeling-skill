@@ -39,9 +39,8 @@ owner: orchestrator
 mode: PIPELINE
 profile: DIRECT | FITTED | FULL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
-backend: cadquery | build123d | freecad
+backend: trimesh-manifold | build123d
 active_candidate: <id-or-none>
-freecad_owner: none | <job_id>/<commission>/<acquired-utc>
 updated_utc: <iso-8601>
 ---
 
@@ -102,16 +101,7 @@ rejects any project whose `job_state` declares `R3_PROHIBITED_AUTONOMOUS_ACCEPTA
 advisory. Absence of the field remains valid for backward compatibility, but a job with no
 `risk_class` cannot be checked for it, so omit it only for work that is plainly `R0`.
 
-For `freecad` backend work, the orchestrator acquires a repo-wide mutation lease at
-`.claude/3d-freecad.lock` before any FreeCAD MCP call that can mutate a document. The lock
-records `job_id`, commission, and acquisition time; `job_state.md` mirrors the same value in
-`freecad_owner` while the lease is held and resets it to `none` when released. There is exactly
-one active FreeCAD designer commission across all jobs, including reference and candidate work.
-FreeCAD reference modeling completes and passes metrologist review before candidate modeling
-continues in the same `.FCStd`. The verifier works from staged exported STL/renders in a fresh
-context and never needs the FreeCAD mutation lease. CadQuery/build123d reference work remains
-serial before print planning; after that gate, parallel candidates may run only in isolated
-folders with no shared filenames, import state, or output directories.
+Both backends are headless and file-based, so candidates isolate by directory rather than by lock. There is no mutation lease and no single-session backend.
 
 ## `dimensions.md`
 

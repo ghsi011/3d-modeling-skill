@@ -149,7 +149,6 @@ risk_class: {risk}
 state: INTAKE
 backend: trimesh-template
 active_candidate: none
-freecad_owner: none
 updated_utc: {updated_utc}
 ---
 

@@ -1,16 +1,21 @@
 # build123d — tested code patterns
 
-**When to pick build123d** (vs CadQuery/FreeCAD): runs headless like CadQuery,
-keeps scripts Python-first, and is the right backend when a host or source model
-standardizes on build123d's builder contexts and direct exporters. **Costs**:
-the user edits a .py, not a GUI document (also ship STEP so any CAD can open it);
-OCC kernel pitfalls still apply; every output must be delivered explicitly —
-nothing lands on the user's disk by itself.
+**When to pick build123d**: exact B-rep authoring — fillets, chamfers, revolves,
+lofts, sweeps, exact face and edge operations — and editable STEP output. It is
+the only CAD kernel on this stack. For primitive boolean geometry prefer the
+trimesh + manifold3d backend: `import build123d` costs 10.7 s measured, against
+1.5 s for trimesh and manifold3d together.
+
+**Costs.** The user edits a `.py`, not a GUI document, so ship STEP when they
+need to edit the shape itself. And the OCC pitfalls are real: fillets corrupt on
+scalloped solids, and volume misreports on periodic splines. Both present as a
+solid that looks right and measures wrong, which is what the gate is for —
+commission the export, never the kernel's own numbers.
 
 Everything after `export_stl` is backend-neutral — Phase-4 verification, the
 render-over-photo overlay loop, printability screening, non-watertight-source
 extraction, and multi-color 3MF packing all operate on the exported STL and are
-documented once in [`cadquery-patterns.md`](cadquery-patterns.md) and
+documented once in [`verification-patterns.md`](verification-patterns.md) and
 [`designer-toolkit.md`](designer-toolkit.md). Use those as written; only the
 modelling below is build123d-specific.
 
@@ -69,10 +74,10 @@ print("volume", body.volume, "bbox", body.bounding_box())
 - Bottom of the part at Z=0 in print orientation (`Align.MIN` on Z).
 - Booleans: use builder operations (`add`, `subtract`, `intersect`) or explicit
   shape booleans, then export the final `Part`.
-- Same OCC kernel as CadQuery, so the same failures: the fillet-won't-compute
-  ladder and the scalloped/periodic-spline corruption traps are in
-  [`cadquery-patterns.md`](cadquery-patterns.md) — apply them here unchanged
-  (builder `fillet()`/`chamfer()` take edge lists the same way).
+- When a fillet will not compute, take the radius down in steps rather than
+  fighting it: OCC fails on scalloped solids well before the radius is
+  geometrically impossible. If it still fails, fillet *earlier* — before the
+  booleans that produced the scallop.
 
 ## Common shapes
 

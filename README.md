@@ -99,7 +99,6 @@ backends you actually use:
 
 | Extra           | Pulls in                                          | Needed for                                              |
 |-----------------|---------------------------------------------------|---------------------------------------------------------|
-| `cad`           | cadquery (heavy OCP stack)                        | `run_cadquery_model.py`, CadQuery patterns              |
 | `cad-build123d` | build123d (heavy OCP stack)                       | build123d backend + patterns                            |
 | `section`       | scipy, networkx, shapely, rtree                   | `datum_features` / `finalize` datum blocks              |
 | `render`        | pyrender, PyOpenGL                                | `preview.py` offscreen renders                          |
@@ -110,8 +109,6 @@ backends you actually use:
 pip install -e ".[section]"   # or .[cad], .[visual], .[all], ...
 ```
 
-The **FreeCAD** backend additionally needs a FreeCAD desktop install reachable
-via the FreeCAD MCP; it is not a pip dependency.
 
 ### Installing the skill
 
@@ -133,7 +130,7 @@ packs exactly this tree into `3d-modeling.skill`.
 ```
 skills/
   3d-modeling/            # THE skill: router + roles + shared assets
-    references/           #   FDM design, CadQuery/FreeCAD patterns, materials, printers, contracts
+    references/           #   FDM design, build123d/trimesh patterns, verification, materials, contracts
     scripts/              #   deterministic tooling + backend runners + tests
       team_tools/         #     contract-automation package (validate/hash/status)
       designer_toolkit/   #     export/measure/fit/coupon helpers for the designer role
@@ -149,7 +146,7 @@ tools/                    # gen_harness · build_skill · check_internal_links �
 
 ## Running the tests
 
-Tests and lint run on the core stack — no cadquery, no OCP, no GL context:
+Tests and lint run on the core stack — no GL context:
 
 ```bash
 pip install ruff pytest -e "."

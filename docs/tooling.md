@@ -15,7 +15,6 @@ Exit code convention across these tools:
 | 0 | Command completed successfully. For validation commands, the checked gate passed. |
 | 1 | The command ran but the gate failed, output verification failed, or an uncaught runtime error occurred. |
 | 2 | Command line usage failed, an input contract was malformed, a file could not be opened, or a strict preflight guard rejected the input. A file that is simply *absent* is not always an open failure: `team_tools.contracts validate` records a missing contract as a warning and still exits `0` unless the caller named it with `--require`. |
-| 3 | Timeout, only used by `run_cadquery_model.py`. |
 
 Individual tools narrow or extend this table below.
 
@@ -239,36 +238,6 @@ Outputs:
 
 Exit codes: the convention above, with `--strict` rejecting a non-watertight
 mesh as a `2` rather than a `1`.
-
-## `run_cadquery_model.py`
-
-Script: [`skills/3d-modeling/scripts/run_cadquery_model.py`](../skills/3d-modeling/scripts/run_cadquery_model.py)
-
-```bash
-python skills/3d-modeling/scripts/run_cadquery_model.py path/to/model.py \
-  [--preview] [--strict] [--views iso|multi] [--timeout 180]
-```
-
-Inputs:
-
-* CadQuery Python script path.
-* `--preview`, render a preview for each STL written by the script.
-* `--strict`, fail if any STL is not watertight, or if no STL is produced.
-* `--views`, preview layout when rendering.
-* `--timeout`, seconds before killing the model subprocess.
-
-Outputs:
-
-* One JSON object on stdout with `success`, script path, discovered STL, 3MF,
-  STEP, and STP outputs, preview paths when requested, aggregate watertightness,
-  captured stdout, captured stderr, and child return code.
-
-Exit codes:
-
-* `0`, the CadQuery script completed and all requested post-checks passed.
-* `1`, the CadQuery script failed, preview failed, or `--strict` rejected output.
-* `2`, the interpreter or script path could not be launched.
-* `3`, the subprocess timed out.
 
 ## `mesh_io` library
 

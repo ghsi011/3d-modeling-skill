@@ -62,7 +62,7 @@ def _file_sha256(path: Path) -> str:
 
 def _write_solid(model: Any, stl_path: Path, step_path: Path | None,
                  tolerance: float, angular_tolerance: float) -> str | None:
-    """Write an STL (+ optional STEP) from a CadQuery model, a trimesh mesh, or
+    """Write an STL (+ optional STEP) from a build123d part, a trimesh mesh, or
     an existing STL path. Returns the STEP path actually written, or ``None``.
     """
     # Case 1: an existing STL path — copy it in if needed, nothing to tessellate.
@@ -71,19 +71,20 @@ def _write_solid(model: Any, stl_path: Path, step_path: Path | None,
         if src.resolve() != stl_path.resolve():
             stl_path.write_bytes(src.read_bytes())
         return None
-    # Case 2: a trimesh mesh. Use isinstance, NOT duck-typing — a CadQuery
-    # Workplane also has `.export` and a `.vertices` selector, so hasattr would
-    # misroute it here and silently skip the STEP export.
+    # Case 2: a trimesh mesh. Use isinstance, NOT duck-typing -- a B-rep part
+    # also has `.export` and a `.vertices` selector, so hasattr would misroute it
+    # here and silently skip the STEP export.
     if isinstance(model, trimesh.Trimesh):
         model.export(str(stl_path))
         return None
-    # Case 3: assume a CadQuery Workplane/Shape (lazy import keeps CI cadquery-free).
-    import cadquery as cq
+    # Case 3: a build123d part. Imported lazily -- the kernel costs 10.7 s to
+    # load, measured, and a trimesh job must never pay it.
+    from build123d import export_step, export_stl
 
-    cq.exporters.export(model, str(stl_path),
-                        tolerance=tolerance, angularTolerance=angular_tolerance)
+    export_stl(model, str(stl_path),
+               tolerance=tolerance, angular_tolerance=angular_tolerance)
     if step_path is not None:
-        cq.exporters.export(model, str(step_path))
+        export_step(model, str(step_path))
         return str(step_path)
     return None
 
@@ -91,7 +92,7 @@ def _write_solid(model: Any, stl_path: Path, step_path: Path | None,
 def export_and_hash(model: Any, out_stem: str | Path, *, tolerance: float = 0.01,
                     angular_tolerance: float = 0.1,
                     also_step: bool = True) -> ExportReport:
-    """Export ``model`` to ``<out_stem>.stl`` (+ ``.step`` for CadQuery models),
+    """Export ``model`` to ``<out_stem>.stl`` (+ ``.step`` for B-rep parts),
     re-import the STL with the authoritative raw loader, and return an
     :class:`ExportReport`.
 

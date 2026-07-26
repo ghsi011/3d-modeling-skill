@@ -68,13 +68,11 @@ Only when the job has the evidence for it:
 4. `FITTED`/`FULL`, where photographs and a mating reference exist:
    [`../3d-modeling/scripts/overlay_photo.py`](../3d-modeling/scripts/overlay_photo.py),
    [`../3d-modeling/scripts/verify_visual.py`](../3d-modeling/scripts/verify_visual.py), and
-   [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md)
+   [`../3d-modeling/references/verification-patterns.md`](../3d-modeling/references/verification-patterns.md)
    for the insertion-sweep and datum-measurement patterns you author yourself.
 5. A `SUPPORT_ALLOWED` rule, whose contact class you inspect independently:
    [`../3d-modeling/scripts/team_preflight.py`](../3d-modeling/scripts/team_preflight.py).
-6. A FreeCAD candidate:
-   [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-7. A conditional final-prep review, for the `final_prep_review.md` template:
+6. A conditional final-prep review, for the `final_prep_review.md` template:
    [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md).
    The `verification_report.md` template is **not** on this list: `dt.py report` emits it,
    already filled with your own measurements, so reading the whole contract to obtain a
@@ -280,5 +278,5 @@ gate. `R3` never receives a `PASS` under any profile.
     that duplicated it verified a copy of the thing it was sent to check. For a rejection,
     retain only the report, metrics, hashes, and defect-specific visual in addition to
     canonical artifacts.
-16. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
-    not acquire the FreeCAD mutation lease and do not mutate the `.FCStd`.
+16. Verify the delivered artifacts in place. Never copy the canonical STL into your own
+    folder -- a run that duplicated it verified a copy of the thing it was sent to check.

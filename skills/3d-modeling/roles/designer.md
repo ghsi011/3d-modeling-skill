@@ -16,10 +16,9 @@ the contracts.
 - Reference commission inputs: `dimensions.md` only.
 - Candidate commission inputs: accepted `dimensions.md`, reference source/export/renders,
   `print_plan.md`, and prior `verification_report.md` when iterating.
-- CadQuery / build123d outputs: `model.py`, per-part STL, combined STEP, `commission.json`,
+- build123d and trimesh outputs: `model.py`, per-part STL, STEP when the contract asks,
+  `commission_report.json`,
   renders, and `print_notes.md`.
-- FreeCAD outputs: `.FCStd` with organized parameters and hidden mating reference, per-part
-  STL, combined STEP, `commission.json`, renders, and `print_notes.md`.
 - Multi-colour jobs also output the required single-file multi-body 3MF.
 - `candidate_readiness.md` and `artifact_manifest.json` are **written by the commission**, from
   the measurements it just took on the re-imported exported STL — you do not author either.
@@ -52,11 +51,11 @@ one, so reading its patterns is a page bought and unused:
    [`../references/trimesh-patterns.md`](../references/trimesh-patterns.md)
    — the conventions the gate assumes, and the boolean traps that cost archived runs whole
    build cycles.
-4. CadQuery: [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md).
-5. build123d: [`../references/build123d-patterns.md`](../references/build123d-patterns.md)
-   — read alongside the CadQuery patterns, which own everything downstream of the export.
-6. FreeCAD: [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
-7. A standard mechanism — snap-fit, hinge, thread, bearing seat:
+4. build123d, for exact B-rep — fillets, chamfers, revolves, lofts, or a STEP the user
+   can edit: [`../references/build123d-patterns.md`](../references/build123d-patterns.md).
+5. Everything downstream of the export, whatever authored it:
+   [`../references/verification-patterns.md`](../references/verification-patterns.md).
+6. A standard mechanism — snap-fit, hinge, thread, bearing seat:
    [`../references/mechanisms.md`](../references/mechanisms.md).
 
 ## Checklist
@@ -189,11 +188,7 @@ one, so reading its patterns is a page bought and unused:
    is one more place for the record to disagree with the mesh.
 13. When a verifier rejects, change only the owned geometry, regenerate every derived
     artifact, and cite each resolved defect in the next handoff.
-14. For FreeCAD commissions, require the orchestrator-held `.claude/3d-freecad.lock` mutation
-    lease before any MCP call that can mutate a document. Never run two FreeCAD designer
-    instances concurrently, across reference or candidate work and across jobs. Complete and
-    pass metrologist review of the FreeCAD reference before candidate modeling continues in
-    the same `.FCStd`. Plan at most eight substantive `execute_code` chunks for a job; each
-    chunk prints validity, volume, and bounding-box checks, and you inspect returned screenshots.
-    Separate CadQuery/build123d candidate folders may run in parallel and must not share
-    filenames, Python import state, output directories, or shared contract writes.
+14. Separate candidate folders may run in parallel and must not share filenames, Python
+    import state, output directories, or contract writes. There is no mutation lease to
+    acquire: every backend on this stack is headless and file-based, so isolation is a
+    directory rather than a lock.

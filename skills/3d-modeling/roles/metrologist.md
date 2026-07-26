@@ -27,7 +27,7 @@ render-over-photo overlays.
    domain (`A`/`B`/`C`/`D`) your own table needs, and the hash-binding rule. That rule is
    why every evidence path you cite must resolve on disk and be hashed from bytes: a sheet
    citing a file that does not exist validates clean.
-2. [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md):
+2. [`../references/verification-patterns.md`](../references/verification-patterns.md):
    datum discipline, render/overlay, inspection, and image-alignment patterns only.
 3. Use the shared overlay tools at
    [`../scripts/overlay_photo.py`](../scripts/overlay_photo.py) and

@@ -355,11 +355,9 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    only check that compares each contract's `revision` against what the downstream contracts
    bound to, so a `dimensions.md` revised after the plan cited it shows up as `STALE` here and
    nowhere else. `validate` does not do this. `NOT_READY` remains inside
-   the same designer commission. Only CadQuery/build123d candidates may run in parallel, and
-   only in isolated folders with no shared filenames, import state, or output directories.
-   Serialize all FreeCAD work through the repo-wide `.claude/3d-freecad.lock` mutation lease,
-   mirror the holder in `job_state.md.freecad_owner`, and allow exactly one active FreeCAD
-   designer commission across all jobs.
+   the same designer commission. Candidates may run in parallel, in isolated folders with no
+   shared filenames, import state, or output directories. Every backend here is headless and
+   file-based, so there is no session to serialize and no mutation lease to hold.
 9. Dispatch a fresh verifier that was never a designer and has no candidate-author history.
     Treat designer readiness as untrusted and require all seven checks. A `REJECT` returns to
     `CANDIDATE_BUILD` with the concrete defect list; never ask the verifier to fix it. For an

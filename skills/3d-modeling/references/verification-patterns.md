@@ -1,69 +1,21 @@
-# CadQuery — tested code patterns
+# Verification patterns — backend-neutral
 
-**When to pick CadQuery** (vs FreeCAD): runs anywhere Python does — no desktop, no GUI
-dependency; iteration is cheap and fast; verification is scriptable; previews render
-headless. Best cost/quality ratio in our benchmark. **Costs**: the user edits a .py, not
-a GUI document (also ship STEP so any CAD can open it); OCC kernel pitfalls below
-(fillet corruption on scalloped solids, volume misreport on periodic splines); every
-output must be delivered explicitly — nothing lands on the user's disk by itself.
+Everything here operates on the **exported STL**, so it applies whatever authored
+the geometry: build123d, the trimesh templates, or a hand-written model. That is
+the point of the split -- the kernel is an authoring choice and verification is
+not.
 
-Run everything through the bundled runner — it executes the script, finds the STL,
-renders a multi-view preview, and returns JSON (`success`, `stderr`, `stl`, `preview`,
-`watertight`):
+The deterministic gate runs these for you:
 
 ```bash
-cd skills/3d-modeling/scripts     # or scripts/ inside a packaged .skill bundle
-python3 run_cadquery_model.py model.py --preview --strict   # strict: non-watertight = fail
-python3 preview.py model.stl preview.png --views multi      # render-only
+uv run design-tool run-job job_dir/
 ```
 
-`success: false` → read `stderr`, fix the script, re-run. Always LOOK at the preview.
-
-## Script skeleton (one file, parameters first)
-
-```python
-import cadquery as cq
-
-# ==== PARAMETERS (mm; provenance in comments) ====
-shaft_d       = 12.9   # measured, caliper photo 1
-fit_clr_side  = 0.15   # per-side, sliding fit — fdm-design §4
-bore_depth    = 74.0   # rod exposed 72.1 + 1.9 seat offset
-# ==== MODEL ====
-body = (cq.Workplane("XY")
-        .circle(46/2).extrude(95)                      # never centered in Z: bed at Z=0
-        .faces("<Z").workplane()
-        .hole(shaft_d + 2*fit_clr_side, bore_depth))
-# ==== REFERENCE (mating object, NOT exported) ====
-ref_part = (cq.Workplane("XY").circle(shaft_d/2).extrude(72.1)
-            .translate((0, 0, 1.9)))                   # seated position
-# ==== EXPORT ====
-cq.exporters.export(body, "body.stl", tolerance=0.01, angularTolerance=0.1)
-cq.exporters.export(body, "body.step")
-print("volume", body.val().Volume(), "bbox", body.val().BoundingBox().xlen)
-```
-
-- Bottom of the part at Z=0 in print orientation (`centered=(True, True, False)`).
-- Booleans: `.cut()`, `.union()`, `.intersect()`.
-- **Fillet/chamfer robustness** (recurring OCC failure: a fillet that will not compute at *any*
-  radius — usually on a lip, thin, lofted, or post-boolean edge). Work this ladder before giving
-  up, rather than looping on radii:
-  1. Fillet on the **primitive, before** the boolean/union — not on the merged edge afterward
-     (largest radius first). Most "won't-compute" fillets succeed when applied earlier in the tree.
-  2. Reduce the radius (a fillet ≥ local wall/feature always fails) and select **one edge at a
-     time** — a batch `edges(...)` selector fails the whole operation if any single edge is fragile.
-  3. **Substitute a chamfer.** Chamfers are far more OCC-robust than fillets and satisfy an
-     exposed-edge comfort requirement just as well (a 0.6 mm chamfer breaks an edge for hand-feel
-     as well as a 0.6 mm fillet). Prefer this over shipping the edge sharp, and over distorting
-     the part to route around the fillet.
-  4. Last resort: ship the edge **sharp but DECLARE it `allowed_sharp` with a feature-specific
-     reason** in the plan's edge set — never leave an *undeclared* sharp edge, which silently
-     fails the gate (that is a NOT_READY, not a delivery).
-- OCC pitfalls (observed): fillet/chamfer on scalloped/periodic-spline edges can silently
-  corrupt the solid — assert `isValid()` AND a sane volume delta after every
-  fillet/chamfer/boolean; if one corrupts, replace it with a revolved or wedge cut.
-  `.val().Volume()` can misreport on periodic-spline solids — trust the exported mesh
-  (trimesh volume), which is also what Phase 4 must measure.
-- Selectors: `faces(">Z")`, `edges("|Z")`, `edges("<Z")` (bed chamfer: `.chamfer(0.5)`).
+Read on when you need to understand a result, reproduce one by hand, or work on
+the checks themselves. This is an explanation, not a kit to assemble: offering
+the individual check functions as a menu is what made three measured runs
+hand-write 130-to-280-line verification scripts instead of running the gate, and
+one of them widened its own acceptance bands until its wrong numbers passed.
 
 ## Phase-4 verification patterns
 
@@ -100,7 +52,7 @@ import sys; sys.path.insert(0, '<skill>/scripts'); from preview import render_vi
 from PIL import Image
 import trimesh
 ref_mesh = trimesh.load('ref.stl')                  # render_view takes trimesh meshes,
-cand_mesh = trimesh.load('body.stl')                # not CadQuery Workplanes
+cand_mesh = trimesh.load('body.stl')                # the exported mesh, not a B-rep part
 views = [(89, -90), (5, -90), (25, -60)]            # top, front, iso
 row_r = [render_view(ref_mesh, e, a, 420, 420) for e, a in views]
 row_c = [render_view(cand_mesh, e, a, 420, 420) for e, a in views]
@@ -191,32 +143,3 @@ chunk = trimesh.boolean.intersection([src, box], engine="manifold")
 - **Self-touching marching-cubes surfaces**: fine in memory (the two sheets have distinct
   vertex indices), but go non-manifold the instant a binary STL merges coincident vertices
   on export. Nudge such vertices ~2 µm apart before writing the STL.
-
-## Common shapes
-
-```python
-# revolve a profile (knobs, bulbs)
-profile = cq.Workplane("XZ").polyline([(0,0),(15,0),(23,40),(8,95),(0,95)]).close()
-solid = profile.revolve(360, (0,0,0), (0,0,1))
-# polar pattern (bolt circles, fins)
-r = 20  # bolt-circle radius
-wp = (cq.Workplane("XY").pushPoints(
-      [(r*__import__('math').cos(a), r*__import__('math').sin(a))
-       for a in [i*2*3.14159/6 for i in range(6)]]).circle(1.6).cutThruAll())
-# text (engrave 0.6 deep)
-body = body.faces(">Z").workplane().text("R", 8, -0.6, font="DejaVu Sans", kind="bold")
-# shell an enclosure (open top)
-box = cq.Workplane("XY").box(60, 40, 25, centered=(True, True, False)).faces(">Z").shell(-2)
-```
-
-## Multi-color
-
-Export each color as its own STL from the same script (shared coordinates), then run
-this from `skills/3d-modeling/scripts/` (`scripts/` inside a packaged .skill bundle):
-`python3 make_3mf.py out.3mf "Body=body.stl" "Inlay=inlay.stl"` — one 3MF,
-one build object, one component per part; Bambu/Orca import it as a single object with
-parts individually assignable to filaments. Inlay geometry rules (flush recess, zero
-clearance, stroke ≥0.8 mm): fdm-design §6.
-
-Slicer-facing design decisions (orientation, prime tower, materials, clearances) live in
-`fdm-design.md` — consult it, not memory.
