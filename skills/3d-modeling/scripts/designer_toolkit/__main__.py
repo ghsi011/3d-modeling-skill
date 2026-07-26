@@ -52,6 +52,11 @@ def main(argv=None):
     if argv and argv[0] == "doctor":
         from .doctor import main as doctor_main
         raise SystemExit(doctor_main(argv[1:]))
+    if argv and argv[0] == "templates":
+        from .templates import catalogue_lines
+        for line in catalogue_lines():
+            print(line)
+        raise SystemExit(0)
     if argv and argv[0] == "plan":
         from .plan import main as plan_main
         raise SystemExit(plan_main(argv[1:]))
@@ -68,6 +73,8 @@ def main(argv=None):
     sub.add_parser("doctor", add_help=False,
                    help="what this interpreter can do: backends, extras, and what "
                         "each missing one costs")
+    sub.add_parser("templates", add_help=False,
+                   help="the parametric starting points and the shapes they cover")
     sub.add_parser("plan", add_help=False,
                    help="template | check -- the built-in DIRECT plan, and the "
                         "gate that rejects an unbuildable one before a build")

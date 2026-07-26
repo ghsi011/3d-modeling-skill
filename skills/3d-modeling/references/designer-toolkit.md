@@ -80,12 +80,19 @@ performs is the mistake this file exists to prevent.
 
 ## Starting points that know their own topology
 
-```python
-from designer_toolkit.templates import box_shell, panel, bolt_boss, stack
+```bash
+python <skill>/scripts/dt.py templates      # what they cover, and the call for each
+```
 
-built = box_shell(inner=(120, 80, 60), wall=3.0, floor=3.0)   # body, enclosure, tray
+```python
+from designer_toolkit.templates import box_shell
+
+built = box_shell(inner=(120, 80, 60), wall=3.0, floor=3.0)
 part, PARAMS = built.part, built.params
 ```
+
+That model is four lines, and the whole deterministic path from it — build, export,
+re-import, every check, both receipts — measures about one second.
 
 `box_shell`, `panel` (a plate with rectangular or round openings), `bolt_boss`, and `stack`
 (several parts laid out for one plate). Each returns geometry *and* the `PARAMS` describing it,

@@ -99,9 +99,12 @@ lines to fill two fields is a page you pay for on every job to learn nothing you
    exactly "clearance ≥ fillet radius", and another spent three reshaping geometry around a
    horizontal bore whose round roof was never going to clear a zero ceiling at any threshold.
 
-   `designer_toolkit.templates` (`box_shell`, `panel`, `bolt_boss`, `stack`) returns geometry
-   and its `PARAMS` together, computed from the same arithmetic, so the two cannot drift.
-   Prefer a template where one fits.
+   Ask `dt.py templates` what the parametric starting points cover before you author
+   anything — one call. Where a shape fits, the model is four lines and the whole
+   deterministic path takes about a second; `designer_toolkit.templates` returns geometry and
+   its `PARAMS` together, computed from the same arithmetic, so the two cannot drift. Where no
+   shape fits, hand-write the backend model and declare `PARAMS` yourself. Everything else
+   about the commission is identical either way.
 3. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
 4. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,

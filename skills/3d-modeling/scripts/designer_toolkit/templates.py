@@ -255,6 +255,48 @@ def stack(*builts: Built, gap: float = 0.0) -> Built:
                  notes=tuple(n for b in builts for n in b.notes))
 
 
+# name -> (what shapes it covers, the call)
+CATALOGUE: dict[str, tuple[str, str]] = {
+    "box_shell": (
+        "any walled box: enclosure, hive body, tray, drawer, planter, open or lidded",
+        "box_shell(inner=(120, 80, 60), wall=3.0, floor=3.0, open_top=True)",
+    ),
+    "panel": (
+        "a flat plate with openings: window, screen board, bottom board, lid, vent grille",
+        'panel(width=100, depth=60, thickness=3.0, openings=('
+        '{"kind": "rect", "x": 50, "y": 30, "w": 40, "h": 20},))',
+    ),
+    "bolt_boss": (
+        "a screw boss or standoff, reporting its annulus wall and aspect ratio",
+        "bolt_boss(outer_d=8.0, bore_d=4.2, height=10.0)",
+    ),
+    "stack": (
+        "several parts laid out side by side for one plate, thinnest wall governing",
+        "stack(part_a, part_b, gap=5.0)",
+    ),
+}
+
+
+def catalogue_lines() -> list[str]:
+    """What a template would save, before deciding to hand-write one.
+
+    A template is worth reaching for only if the part is one of these shapes.
+    Knowing that costs one call; discovering it after authoring 130 lines costs
+    the authoring.
+    """
+    lines = ["Parametric starting points. Each returns .part and .params together,",
+             "computed from the same arithmetic, so the two cannot drift.", ""]
+    for name, (covers, call) in CATALOGUE.items():
+        lines.append(f"  {name}")
+        lines.append(f"    covers: {covers}")
+        lines.append(f"    call:   {call}")
+    lines.extend(["",
+                  "Use one where the shape fits; hand-write the backend model where it does",
+                  "not, and declare PARAMS yourself. Everything else about the commission is",
+                  "the same either way."])
+    return lines
+
+
 def deg_to_normal_z(degrees_from_vertical: float) -> float:
     """The `downward_normal_z_max` a plan would declare for a given overhang angle."""
     return -math.cos(math.radians(degrees_from_vertical))
