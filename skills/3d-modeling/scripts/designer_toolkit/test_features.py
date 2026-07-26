@@ -182,3 +182,68 @@ class TestTemplateExpectations(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@_needs_trimesh
+class TestDefectsFoundByAdversarialReview(unittest.TestCase):
+    """Each of these shipped a defective part at exit 0 with `verdict: PASS`,
+    and each was reproduced before it was fixed."""
+
+    def test_a_missing_mounting_hole_cannot_hide_in_the_plate_area(self) -> None:
+        """The area tolerance was half a percent of the whole plate -- 299 mm2 on
+        a 300 x 200 panel -- and four M5 holes come to 78. All four could be
+        deleted and the panel still passed."""
+        from .templates import panel
+
+        holes = tuple({"kind": "round", "x": x, "y": y, "d": 5.0}
+                      for x, y in ((20.0, 20.0), (280.0, 20.0), (20.0, 180.0), (280.0, 180.0)))
+        asked = panel(width=300.0, depth=200.0, thickness=3.0, openings=holes)
+        without = panel(width=300.0, depth=200.0, thickness=3.0, openings=())
+
+        results = _results(without.part, asked.expected,
+                           bed_contact_mm2=asked.expected[1]["area_mm2"])
+
+        self.assertEqual("FAIL", results["feature-plate-mid"])
+        for index in range(1, 5):
+            self.assertEqual("FAIL", results[f"feature-hole-{index:02d}"],
+                             "every declared hole must be measured on its own")
+
+    def test_an_oversize_hole_is_caught_at_the_hole_not_the_plate(self) -> None:
+        """A round opening survived to 23% oversize inside the plate tolerance."""
+        from .templates import panel
+
+        asked = panel(width=300.0, depth=200.0, thickness=3.0,
+                      openings=({"kind": "round", "x": 150.0, "y": 100.0, "d": 8.0},))
+        wider = panel(width=300.0, depth=200.0, thickness=3.0,
+                      openings=({"kind": "round", "x": 150.0, "y": 100.0, "d": 9.0},))
+
+        results = _results(wider.part, asked.expected,
+                           bed_contact_mm2=asked.expected[1]["area_mm2"])
+
+        self.assertEqual("FAIL", results["feature-hole-01"])
+
+    def test_a_case_cavity_cut_undersize_fails(self) -> None:
+        """`device_case` declared nothing at all, so a cavity 0.75 mm per side
+        undersize -- the phone physically will not go in -- left the bounding
+        box, watertightness, body count, bed contact and overhang identical."""
+        from .templates import _rounded_slab, _seated, device_case
+
+        device, wall, clearance, radius = (73.6, 155.6, 8.5), 1.5, 0.25, 9.0
+        good = device_case(device=device, wall=wall, clearance=clearance,
+                           corner_radius=radius)
+        dw, dl, dt = device
+        outer_t = dt + 2 * clearance + wall
+        outer = _rounded_slab(dw + 2 * (clearance + wall), dl + 2 * (clearance + wall),
+                              outer_t, radius + clearance + wall, centre=(0, 0, outer_t / 2))
+        tight = _rounded_slab(dw + 2 * clearance - 1.5, dl + 2 * clearance - 1.5, outer_t,
+                              radius + clearance, centre=(0, 0, wall + outer_t / 2))
+        undersize = _seated(trimesh.boolean.difference([outer, tight]))
+
+        self.assertEqual([round(float(v), 3) for v in good.part.extents],
+                         [round(float(v), 3) for v in undersize.extents],
+                         "the reproduction must be one a bounding box cannot separate")
+        footprint = next(r for r in good.expected if r["kind"] == "bed_footprint")
+        results = _results(undersize, good.expected,
+                           bed_contact_mm2=footprint["area_mm2"])
+
+        self.assertEqual("FAIL", results["feature-wall-ring"])

@@ -225,6 +225,20 @@ def _min_ligament(openings, width: float, depth: float) -> float | None:
     return min(gaps) if gaps else None
 
 
+def area_tolerance_for(total: float, features: list[float]) -> float:
+    """A band the whole plate can move within, that one feature cannot hide in.
+
+    The default area tolerance is a fraction of what is being measured, which is
+    right for a single region and wrong for a plate full of holes: half a percent
+    of 60,000 mm2 is 300, and four M5 holes come to 78. Whichever is smaller
+    wins, with a floor so tessellation noise still passes.
+    """
+    band = max(1.0, 0.005 * abs(total))
+    if features:
+        band = min(band, max(1.0, 0.25 * min(features)))
+    return band
+
+
 def panel(*, width: float, depth: float, thickness: float,
           openings: tuple[dict[str, Any], ...] = ()) -> Built:
     """A flat plate with openings: hive window, screen board, bottom board, lid.
@@ -260,15 +274,32 @@ def panel(*, width: float, depth: float, thickness: float,
     # Plate area less every hole cut in it. This is the number that catches an
     # opening at the wrong size, a duplicate opening, or a cutter that took more
     # than its own footprint -- none of which move the bounding box.
-    cut = sum(math.pi * (float(o["d"]) / 2.0) ** 2 if o.get("kind") == "round"
-              else float(o["w"]) * float(o["h"]) for o in openings)
-    plate = float(width) * float(depth) - cut
-    return Built(
-        part=part, params=params, notes=tuple(notes),
-        expected=({"kind": "solid_region", "id": "plate-mid",
-                   "z": float(thickness) / 2.0, "area_mm2": plate},
-                  {"kind": "bed_footprint", "area_mm2": plate}),
-    )
+    areas = [math.pi * (float(o["d"]) / 2.0) ** 2 if o.get("kind") == "round"
+             else float(o["w"]) * float(o["h"]) for o in openings]
+    plate = float(width) * float(depth) - sum(areas)
+
+    # A tolerance scaled off the plate is no tolerance at all for one opening.
+    # The default is half a percent of the *total*, which on a 300 x 200 panel is
+    # 299 mm2 -- so four M5 holes, 78 mm2 of material between them, could be
+    # missing entirely and land inside it. Bound it by a quarter of the smallest
+    # feature declared, so no single opening can hide in the whole-plate number.
+    tol = area_tolerance_for(plate, areas)
+    plate_rows: list[dict[str, Any]] = [
+        {"kind": "solid_region", "id": "plate-mid", "z": float(thickness) / 2.0,
+         "area_mm2": plate, "tol_mm2": tol},
+        {"kind": "bed_footprint", "area_mm2": plate, "tol_mm2": tol},
+    ]
+    # Round openings get measured individually as well: an area can be right in
+    # total while a hole is in the wrong place or the wrong size, and a bolt does
+    # not care about the total.
+    for index, opening in enumerate(openings, start=1):
+        if opening.get("kind") == "round":
+            plate_rows.append({
+                "kind": "through_hole", "id": f"hole-{index:02d}",
+                "at": (float(opening["x"]), float(opening["y"])),
+                "d_mm": float(opening["d"]), "z_from": 0.0, "z_to": float(thickness)})
+    return Built(part=part, params=params, notes=tuple(notes),
+                 expected=tuple(plate_rows))
 
 
 def _rounded_slab(width: float, depth: float, height: float, radius: float,
@@ -294,8 +325,19 @@ def _rounded_slab(width: float, depth: float, height: float, radius: float,
     return slab
 
 
+def _rounded_area(width: float, length: float, radius: float) -> float:
+    """Plan area of a rounded rectangle, clamped the same way the solid is.
+
+    `_rounded_slab` silently caps the radius at half the shorter side, so an
+    expectation computed from the requested radius would disagree with the part
+    over a value the geometry never used.
+    """
+    r = min(float(radius), float(width) / 2.0, float(length) / 2.0)
+    return float(width) * float(length) - (4.0 - math.pi) * r * r
+
+
 def device_case(*, device: tuple[float, float, float], wall: float, clearance: float,
-                corner_radius: float = 8.0, lip: float = 1.5,
+                corner_radius: float = 8.0,
                 openings: tuple[dict[str, Any], ...] = ()) -> Built:
     """A shelled wrap around a slab device: phone case, remote sleeve, boot.
 
@@ -342,6 +384,22 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
     # clearance" already means.
     reference = _rounded_slab(dw, dl, dt, corner_radius,
                               centre=(0.0, 0.0, wall + clearance + dt / 2))
+    # The cavity is the part. Everything else -- bounding box, watertightness,
+    # body count, bed contact, overhang -- is identical whether the device drops
+    # in or jams, so a case cut 0.75 mm per side undersize passed every check
+    # this gate had. Both areas are closed form from the caller's numbers: the
+    # outer slab, and the wall ring left once the cavity is taken out of it.
+    outer_area = _rounded_area(outer_w, outer_l, corner_radius + clearance + wall)
+    cavity_area = _rounded_area(dw + 2 * clearance, dl + 2 * clearance,
+                                corner_radius + clearance)
+    # Openings are cut right through, so they come off the ring as well.
+    cut_area = sum(float(o["w"]) * float(o["h"]) for o in openings or ())
+    case_expected = (
+        {"kind": "solid_region", "id": "wall-ring",
+         "z": float(wall) + float(dt) / 2.0,
+         "area_mm2": outer_area - cavity_area - cut_area},
+        {"kind": "bed_footprint", "area_mm2": outer_area},
+    )
     return Built(
         part=part,
         params={
@@ -350,9 +408,9 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
             "overall_mm": {"x": float(outer_w), "y": float(outer_l), "z": float(outer_t)},
         },
         reference=reference,
+        expected=case_expected,
         notes=(f"cavity {dw + 2 * clearance:.2f} x {dl + 2 * clearance:.2f} mm around a "
-               f"{dw} x {dl} x {dt} mm device at {clearance} mm per side, {wall} mm wall"
-               + (f", {lip} mm retention lip" if lip else ""),),
+               f"{dw} x {dl} x {dt} mm device at {clearance} mm per side, {wall} mm wall",),
     )
 
 
@@ -749,15 +807,19 @@ def _stacked_expectations(builts: tuple[Built, ...], offsets: list[float]) -> tu
       that is nearly right would pass a defect while reading like a check.
     """
     carried: list[dict[str, Any]] = []
-    footprint = 0.0
-    has_footprint = False
+    # Bed contact is additive, and that is exactly why it needs the same
+    # all-or-nothing rule as a section: the plate touches the bed on the sum of
+    # everything on it, so summing only the parts that happened to declare a
+    # footprint measures a number nothing has. A plate of one boss and one case
+    # declared 36 mm2 against an actual 2848 and failed a correct part.
+    footprints = [float(row["area_mm2"]) for b in builts for row in b.expected
+                  if row.get("kind") == "bed_footprint"]
+    has_footprint = len(footprints) == len(builts)
+    footprint = sum(footprints) if has_footprint else 0.0
     for built, shift in zip(builts, offsets):
         for row in built.expected:
             kind = row.get("kind")
-            if kind == "bed_footprint":
-                footprint += float(row["area_mm2"])
-                has_footprint = True
-            elif kind in ("through_hole", "countersink"):
+            if kind in ("through_hole", "countersink"):
                 moved = dict(row)
                 moved["at"] = (float(row["at"][0]) + shift, float(row["at"][1]))
                 moved["id"] = f"{row.get('id', kind)}-{builts.index(built)}"

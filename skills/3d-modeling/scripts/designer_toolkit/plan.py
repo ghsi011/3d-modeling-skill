@@ -177,6 +177,30 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
         )
     elif any(float(bbox.get(axis, 0.0)) <= 0 for axis in "xyz"):
         problems.append(f"expected_bbox_mm must be positive in every axis, got {bbox}")
+    else:
+        # A tolerance nobody bounds is a check nobody performs. `--tolerance 1e9`
+        # validated clean and then passed a part 100% over its envelope, with the
+        # receipt counting `envelope` as having run -- which defeats the one
+        # check whose reason for existing is a candidate that shipped 31% too
+        # thick. Ten percent of the smallest declared axis is far looser than any
+        # real band and still forbids that.
+        band = plan.get("bbox_tolerance_mm")
+        smallest = min(float(bbox[axis]) for axis in "xyz")
+        if band is None or float(band) <= 0:
+            problems.append(
+                f"bbox_tolerance_mm must be positive, got {band}: a zero or absent band "
+                "makes the envelope check unable to fail")
+        elif float(band) > 0.1 * smallest:
+            problems.append(
+                f"bbox_tolerance_mm {band} is more than a tenth of the smallest declared "
+                f"axis ({smallest}), so the envelope check cannot reject anything a "
+                "reader would call the wrong size")
+
+    bodies = plan.get("expected_bodies")
+    if bodies is not None and (not isinstance(bodies, int) or bodies < 1):
+        problems.append(
+            f"expected_bodies must be a positive whole number, got {bodies!r}: it says how "
+            "many solids the part is meant to be, and the `solid` check compares against it")
 
     return problems
 

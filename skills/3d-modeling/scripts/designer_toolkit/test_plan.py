@@ -184,3 +184,38 @@ class ValidatePlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnboundedThresholdTest(unittest.TestCase):
+    """A threshold nobody bounds is a check nobody performs."""
+
+    def test_a_vast_tolerance_is_refused(self) -> None:
+        """`--tolerance 1e9` validated clean and then passed a part 100% over its
+        envelope, with the receipt counting `envelope` as having run -- which
+        defeats the one check whose reason for existing is a candidate that
+        shipped 31% too thick."""
+        built = plan.direct_template((30.0, 30.0, 10.0), tolerance_mm=1e9, job_id="t")
+
+        problems = plan.validate_plan(built)
+
+        self.assertTrue(any("bbox_tolerance_mm" in p for p in problems), problems)
+
+    def test_a_zero_tolerance_is_refused(self) -> None:
+        built = plan.direct_template((30.0, 30.0, 10.0), tolerance_mm=0.0, job_id="t")
+        self.assertTrue(any("bbox_tolerance_mm" in p for p in plan.validate_plan(built)))
+
+    def test_an_ordinary_tolerance_passes(self) -> None:
+        built = plan.direct_template((30.0, 30.0, 10.0), tolerance_mm=0.5, job_id="t")
+        self.assertEqual([], [p for p in plan.validate_plan(built) if "tolerance" in p])
+
+    def test_a_body_count_that_is_not_a_positive_whole_number_is_refused(self) -> None:
+        for bad in (0, -2, 1.5, "six"):
+            with self.subTest(bodies=bad):
+                built = plan.direct_template((30.0, 30.0, 10.0), job_id="t")
+                built["expected_bodies"] = bad
+                self.assertTrue(any("expected_bodies" in p
+                                    for p in plan.validate_plan(built)))
+
+    def test_a_real_body_count_passes(self) -> None:
+        built = plan.direct_template((30.0, 30.0, 10.0), job_id="t", bodies=6)
+        self.assertEqual([], [p for p in plan.validate_plan(built) if "expected_bodies" in p])
