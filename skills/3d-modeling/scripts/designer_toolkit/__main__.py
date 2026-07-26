@@ -57,6 +57,18 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "validate":
+        # `python -m team_tools.contracts` only resolves with the scripts
+        # directory on sys.path. From the repo you are already there; from an
+        # installed bundle you are not, and the charter's command failed until a
+        # reader worked out it needed PYTHONPATH. `dt.py` puts its own directory
+        # on the path, so routing through it works from anywhere -- which is the
+        # whole reason the launcher exists.
+        from team_tools.contracts import main as contracts_main
+        raise SystemExit(contracts_main(["validate", *argv[1:]]))
+    if argv and argv[0] == "status":
+        from team_tools.contracts import main as contracts_main
+        raise SystemExit(contracts_main(["status", *argv[1:]]))
     if argv and argv[0] == "screen":
         from .screen import main as screen_main
         raise SystemExit(screen_main(argv[1:]))
@@ -108,6 +120,11 @@ def main(argv=None):
                         "recomputation, leaving every judgment blank")
     sub.add_parser("templates", add_help=False,
                    help="the parametric starting points and the shapes they cover")
+    sub.add_parser("validate", add_help=False,
+                   help="contract validation, reachable from anywhere: "
+                        "validate <project> --require all")
+    sub.add_parser("status", add_help=False,
+                   help="stale and invalidated bindings across a project's contracts")
     sub.add_parser("screen", add_help=False,
                    help="the one question no check can ask: what is here that "
                         "nobody declared")

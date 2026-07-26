@@ -128,3 +128,14 @@ def test_render_without_a_gl_context_names_what_is_missing(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError, match="pyrender"):
         render._render_view(None, None)
+
+
+def test_contract_checks_are_reachable_from_the_launcher() -> None:
+    """`python -m team_tools.contracts` only resolves with the scripts directory
+    on sys.path. From the repo you are already there; from an installed bundle
+    you are not, and the charter's command failed until a reader worked out it
+    needed PYTHONPATH. The launcher puts its own directory on the path, which is
+    the whole reason it exists."""
+    listing = _run("--help")
+    assert "validate" in listing.stdout
+    assert "status" in listing.stdout

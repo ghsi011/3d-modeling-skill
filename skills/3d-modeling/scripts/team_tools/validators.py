@@ -255,6 +255,12 @@ def validate_print_plan(
             # rather than skips without it, so the contract has to name it.
             "expected_bbox_mm": dict,
             "bbox_tolerance_mm": (int, float),
+            # How many separate solids the delivered STL should contain. Added to
+            # the plan generator and read by the `solid` check before it was
+            # named here, so a conformant plan validated with an unknown-field
+            # warning -- a schema that does not know a field its own tooling
+            # writes teaches readers to ignore its warnings.
+            "expected_bodies": int,
             "interfaces": list,
             "threshold_source": str,
         },

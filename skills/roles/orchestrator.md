@@ -138,7 +138,7 @@ and it decides which phases run, not how verbose the record is.
   python $DT templates                                   # which starting point fits
   python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
   python $DT screen <project> --out <project>/screen      # what nobody declared
-  python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
+  python $DT validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
   **Budget: about ten tool calls.** Read the brief, run `doctor` once if you are unsure of the
@@ -312,7 +312,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    before verifier dispatch, including complete edge/comfort and support-sensitivity
    preflight tables. Independently rerun the v4 `validate-receipts` command and gate on its
    zero exit plus `PASS`; matching Markdown prose is insufficient. Also run
-   `python -m team_tools.contracts status <project-dir>` and require a zero exit: it is the
+   `dt.py status <project-dir>` and require a zero exit: it is the
    only check that compares each contract's `revision` against what the downstream contracts
    bound to, so a `dimensions.md` revised after the plan cited it shows up as `STALE` here and
    nowhere else. `validate` does not do this. `NOT_READY` remains inside
