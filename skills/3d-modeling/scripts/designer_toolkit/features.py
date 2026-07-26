@@ -62,8 +62,12 @@ AREA_TOL_MM2 = 1.0
 AREA_TOL_FRAC = 0.005
 DIAMETER_TOL_MM = 0.12
 DIAMETER_TOL_FRAC = 0.01
+# How far a void window may reach past the material's own footprint before the
+# reading is refused. One slab thickness: enough to forgive a window declared
+# flush with an outer wall, far too little to hide a window sitting off the part.
+_VOID_EDGE_TOL_MM = SLAB_MM
 
-KINDS = ("solid_region", "bed_footprint", "through_hole", "countersink")
+KINDS = ("solid_region", "void_region", "bed_footprint", "through_hole", "countersink")
 
 
 def area_tolerance(expected: float) -> float:
@@ -86,16 +90,33 @@ def _slab_volume(mesh: Any, window: Any) -> float:
     return float(solid.volume)
 
 
+def _plane_solid(mesh: Any, z: float, *, thickness: float = SLAB_MM) -> Any:
+    """The part's material on a Z plane, as a solid. `None` when the plane is empty."""
+    import trimesh
+    span = float(max(mesh.extents)) * 4.0 + 10.0
+    window = trimesh.creation.box(extents=(span, span, thickness))
+    window.apply_translation([float(mesh.centroid[0]), float(mesh.centroid[1]), z])
+    solid = trimesh.boolean.intersection([mesh, window])
+    return None if solid is None or solid.is_empty else solid
+
+
 def solid_area_mm2(mesh: Any, z: float, *, thickness: float = SLAB_MM) -> float:
     """Material area on a Z plane, net of every hole through it.
 
     An empty slab returns 0.0 rather than raising, which reads as a loud
     disagreement with the expected area instead of a silent skip.
     """
+    solid = _plane_solid(mesh, z, thickness=thickness)
+    return 0.0 if solid is None else float(solid.volume) / thickness
+
+
+def material_in_window_mm2(mesh: Any, *, z: float, at: tuple[float, float],
+                           size: tuple[float, float],
+                           thickness: float = SLAB_MM) -> float:
+    """Material area inside one axis-aligned rectangle on a Z plane."""
     import trimesh
-    span = float(max(mesh.extents)) * 4.0 + 10.0
-    window = trimesh.creation.box(extents=(span, span, thickness))
-    window.apply_translation([float(mesh.centroid[0]), float(mesh.centroid[1]), z])
+    window = trimesh.creation.box(extents=(float(size[0]), float(size[1]), thickness))
+    window.apply_translation([float(at[0]), float(at[1]), z])
     return _slab_volume(mesh, window) / thickness
 
 
@@ -202,6 +223,73 @@ def _check_solid_region(mesh: Any, row: dict) -> Check:
         "is meant to have. A cutter larger than the feature it was cutting is the "
         "usual cause. Do not widen the tolerance to admit the measurement.",
     )
+
+
+def _check_void_region(mesh: Any, row: dict) -> Check:
+    """Assert that a declared rectangle on a Z plane is empty.
+
+    Every other kind here asserts that material is *present*. Nothing asserted
+    absence, so a cavity could only be declared through the total area of its
+    plane -- one scalar for the whole section, in which a rib standing in a
+    compartment cancels against a wall that came out thin. A segmented hive body
+    carried a full-height tongue slab straight across the brood chamber, 6575 mm2
+    of it, and every check was green because nothing was declared at that plane
+    at all; the fix was to declare its area, which does catch a slab that size.
+    This is the part that fix does not reach. An area expectation is satisfiable
+    from anywhere in the section, and where it carries a budget -- the segmented
+    box's grows with the seam count -- there is room in it to buy. A void row is
+    local: it reads the named rectangle, so nothing outside can pay for what is
+    inside it.
+
+    The reading is refused rather than passed when the window does not lie
+    within the material's own footprint at that height. An empty window is
+    otherwise indistinguishable from fresh air, so a row whose z is above the
+    part, or whose rectangle hangs off the side of it, would report the cleanest
+    possible cavity while measuring nothing at all -- the same trap the bore's
+    two-radius cross-check exists to close, arrived at from the other side.
+    """
+    ident = row.get("id", "void_region")
+    z = float(row["z"])
+    cx, cy = float(row["at"][0]), float(row["at"][1])
+    dx, dy = float(row["size_mm"][0]), float(row["size_mm"][1])
+    label = f"Void {dx:.1f} x {dy:.1f} mm at z={z:.2f}"
+
+    plane = _plane_solid(mesh, z)
+    if plane is None:
+        return Check(
+            f"feature-{ident}", label, _FAIL,
+            f"no material anywhere on z={z:.2f}, so an empty window there is not "
+            "evidence of a cavity",
+            "Declare the void at a height that cuts the part. Above or below the "
+            "solid every window is empty and the check is vacuous.")
+    lo, hi = plane.bounds[0], plane.bounds[1]
+    if (cx - dx / 2.0 < lo[0] - _VOID_EDGE_TOL_MM or cx + dx / 2.0 > hi[0] + _VOID_EDGE_TOL_MM
+            or cy - dy / 2.0 < lo[1] - _VOID_EDGE_TOL_MM
+            or cy + dy / 2.0 > hi[1] + _VOID_EDGE_TOL_MM):
+        return Check(
+            f"feature-{ident}", label, _FAIL,
+            f"the window spans x {cx - dx / 2.0:.2f}..{cx + dx / 2.0:.2f}, "
+            f"y {cy - dy / 2.0:.2f}..{cy + dy / 2.0:.2f}, outside the material's "
+            f"own footprint at this height (x {lo[0]:.2f}..{hi[0]:.2f}, "
+            f"y {lo[1]:.2f}..{hi[1]:.2f})",
+            "Shrink the window or correct its centre. A rectangle reaching past "
+            "the part reads empty because it is outside, not because the cavity is "
+            "clear.")
+
+    allowed = float(row.get("max_area_mm2", 0.0))
+    tolerance = float(row.get("tol_mm2") or AREA_TOL_MM2)
+    measured = material_in_window_mm2(mesh, z=z, at=(cx, cy), size=(dx, dy))
+    detail = (f"{measured:.2f} mm2 of material inside a {dx * dy:.2f} mm2 window, "
+              f"allowed {allowed:.2f} +/- {tolerance:.2f}")
+    if measured - allowed <= tolerance:
+        return Check(f"feature-{ident}", label, _PASS, detail)
+    return Check(
+        f"feature-{ident}", label, _FAIL,
+        f"{detail} (excess {measured - allowed:+.2f})",
+        "Something is standing in a space the part says is empty. Find it in a "
+        "section render at this height before changing any number: a cutter that "
+        "missed, a body that was never subtracted, and a wall on the wrong side of "
+        "its own datum all look identical in the scalar.")
 
 
 def _check_bed_footprint(row: dict, bed_contact_mm2: float | None) -> Check:
@@ -334,6 +422,8 @@ def check_features(mesh: Any, rows, *, bed_contact_mm2: float | None = None) -> 
         try:
             if kind == "solid_region":
                 checks.append(_check_solid_region(mesh, row))
+            elif kind == "void_region":
+                checks.append(_check_void_region(mesh, row))
             elif kind == "bed_footprint":
                 checks.append(_check_bed_footprint(row, bed_contact_mm2))
             elif kind in ("through_hole", "countersink"):

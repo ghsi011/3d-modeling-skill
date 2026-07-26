@@ -83,14 +83,29 @@ transform explicitly, or use `solid_area_mm2`, which already does.
 
 ## What to declare in `EXPECTED`
 
-Enough that a wrong number cannot hide. The kinds are `solid_region`, `bed_footprint`,
-`through_hole` and `countersink`; see [`designer-toolkit.md`](designer-toolkit.md).
+Enough that a wrong number cannot hide.
+
+| kind | asserts | keys |
+|---|---|---|
+| `solid_region` | material area on a Z plane, net of holes | `z`, `area_mm2`, opt. `tol_mm2` |
+| `void_region` | a rectangle on a Z plane is **empty** | `z`, `at`, `size_mm`, opt. `max_area_mm2`, `tol_mm2` |
+| `bed_footprint` | the area meeting the bed | `area_mm2`, opt. `tol_mm2` |
+| `through_hole` | bore diameter and centre, at three depths | `at`, `d_mm`, `z_from`, `z_to`, opt. `window_r` |
+| `countersink` | the mouth opening out, plus the shaft below it | `at`, `shaft_d`, `head_d`, `face_z`, opt. `included_angle` (90), `from_face` (`+z`), `window_r` |
+
+An unknown kind is a FAIL, not a skip: a row nobody measures reads as a check and is not one.
 
 A hole's row is measured **where you declare it**, and its position is checked as well as its
 size — a run building to the Gridfinity standard put its magnet pockets 0.25 mm out on both
 axes, declared them in the same wrong place, and eight checks agreed before a fresh reader
 compared the sheet against the standard.
 
-Two things nothing here covers, so say them in `print_notes.md` rather than leaving them
-silent: a blind pocket or a rabbet has no expectation kind, and a feature you added after the
-fact may have changed a number some other row asserts.
+**Declare your cavities, not just your walls.** `solid_region` is one number for a whole
+section, so anything that thins a wall buys room for something standing inside the box.
+`void_region` reads the named rectangle alone. Use it for a pocket, a rabbet, a compartment —
+anywhere the point of the feature is that something else has to fit in it. It refuses rather
+than passes when the window is not inside the material's own footprint at that height, because
+an empty window off the side of the part is not evidence of anything.
+
+One thing nothing here covers, so say it in `print_notes.md` rather than leaving it silent: a
+feature you added after the fact may have changed a number some other row asserts.

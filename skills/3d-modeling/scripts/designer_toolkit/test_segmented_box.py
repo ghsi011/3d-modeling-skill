@@ -69,24 +69,34 @@ class TestSegmentedBox(unittest.TestCase):
         self.assertFalse(any(inside),
                          "a point inside the brood cavity must not be solid")
 
-    def test_the_wall_ring_is_declared_and_catches_a_rib(self) -> None:
-        """The first draft declared no area expectation, on the argument that a
+    def test_the_cavity_plane_is_declared_and_catches_a_rib(self) -> None:
+        """The first draft declared nothing at this plane, on the argument that a
         jointed section has no exact closed form. It has one to within the joint
-        clearance, and while nothing measured it the rib above went unnoticed."""
+        clearance, and while nothing measured it the rib above went unnoticed.
+
+        Two rows now stand there and they fail differently: the ring is the whole
+        section against a budget that scales with the seam count, the void is the
+        chamber alone against nothing. A rib big enough to matter trips both; one
+        small enough to fit the joint budget trips only the second.
+        """
         built = self._hive()
         ring = next(r for r in built.expected if r["id"] == "wall-ring")
         self.assertAlmostEqual(406.4 * 504.8 - 374.7 * 466.7, ring["area_mm2"], places=3)
 
         from . import features as F
 
-        clean = F.check_features(built.part, built.expected)
-        self.assertEqual(["PASS"], [c.result for c in clean])
+        def results(mesh):
+            return {c.id: c.result for c in F.check_features(mesh, built.expected)}
+
+        self.assertEqual({"feature-wall-ring": "PASS", "feature-cavity": "PASS"},
+                         results(built.part))
 
         ribbed = trimesh.boolean.union([
             built.part,
             trimesh.creation.box(extents=(5.3, 466.7, 244.5)).apply_translation(
                 [203.2, 252.4, 122.25])])
-        self.assertEqual(["FAIL"], [c.result for c in F.check_features(ribbed, built.expected)])
+        self.assertEqual({"feature-wall-ring": "FAIL", "feature-cavity": "FAIL"},
+                         results(ribbed))
 
     def test_every_segment_is_a_watertight_solid(self) -> None:
         for index, piece in enumerate(self._hive().part.split(only_watertight=False)):
@@ -139,7 +149,6 @@ class TestSegmentedBox(unittest.TestCase):
         notes = " ".join(self._hive().notes).lower()
         self.assertIn("seam", notes)
         self.assertIn("nothing here checks", notes)
-
 
 
 @unittest.skipIf(trimesh is None, "needs trimesh + manifold3d")

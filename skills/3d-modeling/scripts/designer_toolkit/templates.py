@@ -149,6 +149,13 @@ def box_shell(*, inner: tuple[float, float, float], wall: float, floor: float = 
     expected: list[dict[str, Any]] = [
         {"kind": "solid_region", "id": "wall-ring",
          "z": float(floor) + float(ih) / 2.0, "area_mm2": ring},
+        # The ring is one scalar for the whole section, so anything that thins a
+        # wall pays for something standing inside the box. This reads the cavity
+        # alone: `inner` is what the caller asked to be able to put things in,
+        # and nothing may be in the way of it.
+        {"kind": "void_region", "id": "cavity",
+         "z": float(floor) + float(ih) / 2.0,
+         "at": (outer[0] / 2.0, outer[1] / 2.0), "size_mm": (float(iw), float(id_))},
         # With a floor the part meets the bed on solid material; without one it
         # meets it on the ring, and confusing the two is how a part gets printed
         # upside down without anything noticing.
@@ -431,10 +438,19 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
                                 corner_radius + clearance)
     # Openings are cut right through, so they come off the ring as well.
     cut_area = sum(float(o["w"]) * float(o["h"]) for o in openings or ())
+    # The largest axis-aligned rectangle inside the rounded cavity: a corner arc
+    # of radius r admits a square corner inset by r*(1 - 1/sqrt2). Declared this
+    # way the window never clips the fillets, so the row means "the pocket is
+    # clear" and not "the corners are round", which is not in dispute.
+    cavity_r = float(corner_radius) + float(clearance)
+    inset = cavity_r * (1.0 - 2.0 ** -0.5)
     case_expected = (
         {"kind": "solid_region", "id": "wall-ring",
          "z": float(wall) + float(dt) / 2.0,
          "area_mm2": outer_area - cavity_area - cut_area},
+        {"kind": "void_region", "id": "cavity",
+         "z": float(wall) + float(dt) / 2.0, "at": (0.0, 0.0),
+         "size_mm": (dw + 2 * clearance - 2 * inset, dl + 2 * clearance - 2 * inset)},
         {"kind": "bed_footprint", "area_mm2": outer_area},
     )
     return Built(
@@ -859,6 +875,18 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
             {"kind": "solid_region", "id": "wall-ring",
              "z": float(floor) + float(ih) / 2.0,
              "area_mm2": ring_area, "tol_mm2": joint_budget},
+            # This template is why the kind exists: its tongue slabs once ran the
+            # full height of the wall and straight across the cavity, 6575 mm2 of
+            # material where a frame was meant to hang, and nothing was declared
+            # at this plane at all. The ring above was the answer to that, and it
+            # does catch a rib that size. What it cannot catch is one paid for
+            # from elsewhere in the same section -- and its budget is not small,
+            # since it scales with the seam count. The row below is local to the
+            # cavity, so no allowance outside it applies.
+            {"kind": "void_region", "id": "cavity",
+             "z": float(floor) + float(ih) / 2.0,
+             "at": (outer_x / 2.0, outer_y / 2.0),
+             "size_mm": (float(iw), float(id_))},
         ),
         notes=(
             f"{outer_x:.1f} x {outer_y:.1f} mm box on a {bed:.0f} mm bed, so {nx} x {ny} "

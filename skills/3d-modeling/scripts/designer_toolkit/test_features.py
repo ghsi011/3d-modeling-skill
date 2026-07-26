@@ -295,3 +295,68 @@ class TestDefectsFoundByAdversarialReview(unittest.TestCase):
                            bed_contact_mm2=footprint["area_mm2"])
 
         self.assertEqual("FAIL", results["feature-wall-ring"])
+
+
+@_needs_trimesh
+class VoidRegionTest(unittest.TestCase):
+    """A rib standing in a cavity nobody declared as a cavity.
+
+    Reproduced from the segmented hive body, whose tongue slab ran the full
+    height of the wall and straight across the brood chamber. In-memory
+    watertight, one body, exact bounding box, correct bed contact, no overhang
+    above the rule -- and no frame could have been hung in it. Every kind that
+    existed asserted material was *present* somewhere; the defect was material
+    present where the part was supposed to be air.
+    """
+
+    def _box(self, *, rib: bool):
+        outer = trimesh.creation.box(extents=(60.0, 40.0, 30.0))
+        outer.apply_translation([30.0, 20.0, 15.0])
+        cavity = trimesh.creation.box(extents=(54.0, 34.0, 28.0))
+        cavity.apply_translation([30.0, 20.0, 16.0])
+        part = trimesh.boolean.difference([outer, cavity])
+        if not rib:
+            return part
+        slab = trimesh.creation.box(extents=(54.0, 4.0, 27.0))
+        slab.apply_translation([30.0, 20.0, 15.5])
+        return trimesh.boolean.union([part, slab])
+
+    _CAVITY = {"kind": "void_region", "id": "chamber", "z": 15.0,
+               "at": (30.0, 20.0), "size_mm": (54.0, 34.0)}
+
+    def test_clear_cavity_passes_and_a_rib_in_it_fails(self) -> None:
+        clean, ribbed = self._box(rib=False), self._box(rib=True)
+        self.assertEqual([round(float(v), 3) for v in clean.extents],
+                         [round(float(v), 3) for v in ribbed.extents],
+                         "the reproduction must be one a bounding box cannot separate")
+        self.assertTrue(ribbed.is_watertight)
+        self.assertEqual(1, ribbed.body_count)
+
+        self.assertEqual("PASS", _results(clean, [self._CAVITY])["feature-chamber"])
+        self.assertEqual("FAIL", _results(ribbed, [self._CAVITY])["feature-chamber"])
+
+    def test_a_plane_area_that_admits_the_rib_still_fails_the_void(self) -> None:
+        """Why the kind had to exist rather than a tighter `solid_region`.
+
+        A plane's total area is one scalar for the whole section, so anything
+        that costs 216 mm2 elsewhere on it -- thinner walls, a pocket, one more
+        chamfer -- buys the rib a place to hide. Here the expectation is simply
+        sized to admit it, and the scalar agrees with a part whose chamber is
+        blocked end to end. The void row reads the chamber and nothing else, so
+        no error outside it can pay for one inside.
+        """
+        ring = 60.0 * 40.0 - 54.0 * 34.0
+        rib = 54.0 * 4.0
+        blocked = self._box(rib=True)
+        admits = {"kind": "solid_region", "id": "ring", "z": 15.0, "area_mm2": ring + rib}
+        self.assertEqual("PASS", _results(blocked, [admits])["feature-ring"])
+        self.assertEqual("FAIL", _results(blocked, [self._CAVITY])["feature-chamber"])
+
+    def test_a_window_off_the_part_is_refused_not_passed(self) -> None:
+        clean = self._box(rib=False)
+        for row in ({**self._CAVITY, "z": 90.0},
+                    {**self._CAVITY, "at": (200.0, 20.0)},
+                    {**self._CAVITY, "size_mm": (400.0, 34.0)}):
+            with self.subTest(row=row):
+                self.assertEqual("FAIL", _results(clean, [row])["feature-chamber"],
+                                 "an empty window outside the material is not a cavity")
