@@ -60,6 +60,9 @@ def main(argv=None):
     if argv and argv[0] == "audit":
         from .audit import main as audit_main
         raise SystemExit(audit_main(argv[1:]))
+    if argv and argv[0] == "intake":
+        from .intake import main as intake_main
+        raise SystemExit(intake_main(argv[1:]))
     if argv and argv[0] == "build":
         from .build import main as build_main
         raise SystemExit(build_main(argv[1:]))
@@ -102,6 +105,9 @@ def main(argv=None):
     sub.add_parser("audit", add_help=False,
                    help="everything a verifier can settle mechanically, in one call: "
                         "binding, raw parse, recomputation, contracts")
+    sub.add_parser("intake", add_help=False,
+                   help="job_state.md and dimensions.md for a no-dispatch job, with "
+                        "every judgment left blank")
     sub.add_parser("build", add_help=False,
                    help="write model.py for a template-covered part, with the "
                         "parameters checked by building it once")

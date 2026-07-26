@@ -131,12 +131,20 @@ and it decides which phases run, not how verbose the record is.
   ```bash
   DT=<skill>/scripts/dt.py
   python $DT templates                                   # which starting point fits
+  python $DT intake --job-id <job> --template <name> --param k=v ...         --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE --updated-utc <iso> --out <project>
   python $DT plan template --bbox X Y Z --job-id <job>         --updated-utc <iso> --out <project>/print_plan_checks.json
   python $DT plan check <project>/print_plan_checks.json
   python $DT build --template <name> --param k=v ... --out model.py
   python $DT commission --model model.py --plan print_plan_checks.json         --out . --job-id <job> --updated-utc <iso>
   python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest
   ```
+
+  `intake` writes `job_state.md` and `dimensions.md` with every mechanical field filled and
+  every judgment left as `<!-- REQUIRED -->`. Answer those — the consequence-class rationale
+  is yours and no tool can supply it — and do not let the scaffold's confidence stand in for
+  a decision you did not make. What it saves is typing: one measured run hand-wrote 246 lines
+  of contract, almost none of it judgment, and the completeness table it laboured over is
+  just the template's own declaration of what it built.
 
   Name the contracts rather than passing `--require all`: this route dispatches nobody, so no
   `verification_report.md` is ever written, and `all` demands one. Those four are what a
