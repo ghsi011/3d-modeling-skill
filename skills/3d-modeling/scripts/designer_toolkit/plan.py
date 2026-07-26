@@ -112,7 +112,14 @@ def direct_template(
     }
 
 
-_DISPOSITIONS = ("SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED")
+# `BRIDGED_NO_SUPPORT` is a third thing, and the schema had no room for it. A
+# magnet-pocket roof spans a gap with no scaffold under it: the slicer prints no
+# support, so `SUPPORT_ALLOWED` is false, and the area is not zero, so
+# `SELF_SUPPORT_REQUIRED` is false too. A Gridfinity bin hit this and had to
+# declare SUPPORT_ALLOWED and then write an `allowed_contact_class` saying no
+# face may take support -- a field used for the exact opposite of its purpose,
+# on a feature that is on tens of thousands of published parts.
+_DISPOSITIONS = ("SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED", "BRIDGED_NO_SUPPORT")
 
 
 def validate_plan(plan: dict[str, Any]) -> list[str]:
@@ -146,6 +153,18 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
                     f"{rule_id}: SELF_SUPPORT_REQUIRED means zero out-of-limit area, "
                     f"but declares {rule['max_out_of_limit_area_mm2']} mm2"
                 )
+        elif disposition == "BRIDGED_NO_SUPPORT":
+            if float(rule.get("max_out_of_limit_area_mm2", 0.0)) <= 0:
+                problems.append(
+                    f"{rule_id}: BRIDGED_NO_SUPPORT needs a positive "
+                    "max_out_of_limit_area_mm2 -- it is the budget for area that bridges, "
+                    "and a zero budget is SELF_SUPPORT_REQUIRED under another name")
+            if rule.get("allowed_contact_class"):
+                problems.append(
+                    f"{rule_id}: BRIDGED_NO_SUPPORT must not name an allowed_contact_class. "
+                    "Nothing touches these faces -- that is what distinguishes it from "
+                    "SUPPORT_ALLOWED, and declaring one asks a print engineer to review "
+                    "support contacts that will never exist")
         elif not rule.get("allowed_contact_class"):
             problems.append(
                 f"{rule_id}: SUPPORT_ALLOWED needs allowed_contact_class naming which "

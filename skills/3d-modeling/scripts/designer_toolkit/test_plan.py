@@ -219,3 +219,46 @@ class UnboundedThresholdTest(unittest.TestCase):
     def test_a_real_body_count_passes(self) -> None:
         built = plan.direct_template((30.0, 30.0, 10.0), job_id="t", bodies=6)
         self.assertEqual([], [p for p in plan.validate_plan(built) if "expected_bodies" in p])
+
+
+class BridgeDispositionTest(unittest.TestCase):
+    """A magnet-pocket roof spans a gap with no scaffold under it. The slicer
+    prints no support, so `SUPPORT_ALLOWED` is false; the area is not zero, so
+    `SELF_SUPPORT_REQUIRED` is false. A Gridfinity bin had to declare
+    SUPPORT_ALLOWED and then write a contact class saying no face may take
+    support -- a field used for the opposite of its purpose."""
+
+    def _rule(self, **patch):
+        built = plan.direct_template((84.0, 42.0, 28.0), job_id="bin")
+        built["support_rules"][0].update(patch)
+        return built
+
+    def test_a_bridge_with_a_budget_is_accepted(self) -> None:
+        built = self._rule(disposition="BRIDGED_NO_SUPPORT",
+                           max_out_of_limit_area_mm2=320.0)
+        self.assertEqual([], [p for p in plan.validate_plan(built) if "S-01" in p])
+
+    def test_a_bridge_with_no_budget_is_refused(self) -> None:
+        """Zero budget is SELF_SUPPORT_REQUIRED under another name."""
+        built = self._rule(disposition="BRIDGED_NO_SUPPORT",
+                           max_out_of_limit_area_mm2=0.0)
+        self.assertTrue(any("max_out_of_limit_area_mm2" in p
+                            for p in plan.validate_plan(built)))
+
+    def test_a_bridge_may_not_name_a_contact_class(self) -> None:
+        """Nothing touches these faces, which is what separates it from
+        SUPPORT_ALLOWED -- and naming one asks a print engineer to review
+        contacts that will never exist."""
+        built = self._rule(disposition="BRIDGED_NO_SUPPORT",
+                           max_out_of_limit_area_mm2=320.0,
+                           allowed_contact_class="COSMETIC_NON_MATING")
+        self.assertTrue(any("allowed_contact_class" in p
+                            for p in plan.validate_plan(built)))
+
+    def test_the_other_two_still_behave(self) -> None:
+        self.assertTrue(any("SELF_SUPPORT_REQUIRED" in p for p in plan.validate_plan(
+            self._rule(disposition="SELF_SUPPORT_REQUIRED",
+                       max_out_of_limit_area_mm2=50.0))))
+        self.assertTrue(any("allowed_contact_class" in p for p in plan.validate_plan(
+            self._rule(disposition="SUPPORT_ALLOWED",
+                       max_out_of_limit_area_mm2=50.0))))

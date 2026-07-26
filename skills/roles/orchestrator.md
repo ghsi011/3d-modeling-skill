@@ -324,7 +324,9 @@ checks as "n/a for this interface type", and only a fresh context catches that.
     details in `final_print_prep.md`, require `READY_FOR_REVIEW`, and dispatch the verifier to
     write `final_prep_review.md` before delivery. A support-free candidate with no deferred
     visual predicate finishes on the plan's own final-prep placeholders -- do not spend a
-    dispatch producing a native project for ceremony.
+    dispatch producing a native project for ceremony. `BRIDGED_NO_SUPPORT` is support-free
+    for this purpose: nothing touches those faces, so there are no support contacts to
+    review and no reason to spend the dispatch.
 11. Enforce the plan-revision rule in
     [`../3d-modeling/references/team-contracts-v4.md`](../3d-modeling/references/team-contracts-v4.md#plan-revision-rule).
     Any changed candidate predicate requires a new readiness receipt and a new fresh full

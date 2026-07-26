@@ -224,11 +224,24 @@ anything, is deferred:
   later owner for the same candidate hash.
 
 Classify every transformed downface, bridge, roof, or layer-transition predicate as
-`SELF_SUPPORT_REQUIRED` or `SUPPORT_ALLOWED`. `SELF_SUPPORT_REQUIRED` requires a zero
-out-of-limit result in both readiness and check 7. `SUPPORT_ALLOWED` requires a named mesh
-region, exact transform/nozzle/line-width/layer range, quantified footprint or interval,
-one permitted nonfunctional contact class, enumerated forbidden faces, and named post-print
-artifacts. No unplanned region may become support-allowed after it fails verification.
+`SELF_SUPPORT_REQUIRED`, `BRIDGED_NO_SUPPORT` or `SUPPORT_ALLOWED`.
+`SELF_SUPPORT_REQUIRED` requires a zero out-of-limit result in both readiness and check 7.
+`SUPPORT_ALLOWED` requires a named mesh region, exact transform/nozzle/line-width/layer
+range, quantified footprint or interval, one permitted nonfunctional contact class,
+enumerated forbidden faces, and named post-print artifacts. No unplanned region may become
+support-allowed after it fails verification.
+
+`BRIDGED_NO_SUPPORT` is for area that spans unsupported and prints anyway — a bore roof, a
+pocket ceiling, a short flat lintel. It needs a positive `max_out_of_limit_area_mm2`, which
+is the budget for how much may bridge, and it must **not** name an `allowed_contact_class`:
+nothing touches these faces, and that is exactly what separates it from `SUPPORT_ALLOWED`.
+For the same reason it does not trigger `PRINT_PREP` — there are no support contacts to
+review. It exists because neither of the other two describes a magnet pocket: the slicer
+lays no scaffold, so it is not support-allowed, and the area is not zero, so it is not
+self-supporting. A run building to the Gridfinity standard had to declare `SUPPORT_ALLOWED`
+and then write a contact class saying no face may take support, which is a field used for
+the opposite of its purpose on a feature that appears on tens of thousands of published
+parts.
 
 Support-free is the **default, not a hard constraint.** Do not classify a face
 `SELF_SUPPORT_REQUIRED` when meeting it forces a *functional* surface (a mating wall, fit

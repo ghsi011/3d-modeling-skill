@@ -374,6 +374,12 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
         # The contract says SELF_SUPPORT_REQUIRED means zero out-of-limit area, and
         # the gate accepted any non-negative ceiling. Two archived runs declared
         # SELF_SUPPORT_REQUIRED with ceilings of 1850 and 2150 mm2 and passed.
+        if disposition == "BRIDGED_NO_SUPPORT" and ceiling <= 0:
+            commission.add(Check(
+                f"support-ceiling-{rule_id}", f"{rule_id} ceiling matches disposition", _FAIL,
+                "BRIDGED_NO_SUPPORT declared with no bridging budget",
+                "The budget is the area allowed to span unsupported. Zero of it is "
+                "SELF_SUPPORT_REQUIRED under another name; say which you mean."))
         if disposition == "SELF_SUPPORT_REQUIRED" and ceiling > 0:
             commission.add(Check(
                 f"support-ceiling-{rule_id}", f"{rule_id} ceiling matches disposition", _FAIL,

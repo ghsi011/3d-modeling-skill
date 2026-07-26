@@ -39,7 +39,11 @@ RISK_CLASS = frozenset(
 )
 
 PRINT_PLAN_STATUS = frozenset({"DRAFT", "ACCEPTED", "BLOCKED"})
-SUPPORT_DISPOSITION = frozenset({"SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED"})
+SUPPORT_DISPOSITION = frozenset(
+    # BRIDGED_NO_SUPPORT: area that spans unsupported and prints anyway, with no
+    # scaffold and nothing touching it. Neither of the other two describes it,
+    # and a Gridfinity magnet pocket had to misuse SUPPORT_ALLOWED to get through.
+    {"SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED", "BRIDGED_NO_SUPPORT"})
 EXPOSURE_CLASS = frozenset(
     {"EXPOSED_FUNCTIONAL", "EXPOSED_COMFORT", "HIDDEN", "BED_CONTACT", "PERMITTED_SUPPORT_CONTACT"}
 )
