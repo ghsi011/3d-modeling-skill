@@ -26,9 +26,8 @@ the contracts.
   The readiness document is explicitly non-acceptance evidence and leaves exactly two fields
   blank, `visual_accept` and `fit_band_ok`; fill those and nothing else. See
   [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#artifact_manifestjson)
-  for the manifest's field list, and confirm it with
-  `python -m team_tools.contracts validate <project-dir> --require artifact_manifest` (from
-  `skills/3d-modeling/scripts/`) before handoff.
+  for the manifest's field list if you need to add a row for evidence the commission did not
+  produce.
 
 ## Required reading
 
@@ -60,15 +59,26 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    dropped a datum check on learning mid-build that its environment could not section.
 2. Keep all design-driving values as named parameters derived from contracts; no unexplained
    magic numbers or scattered coordinate arithmetic. Expose them as a module-level `PARAMS`
-   dict in `model.py` — `wall_mm`, `nozzle_mm`, `cavity_clearance_mm`,
-   `cavity_mouth_fillet_mm`, `edge_treatments: {edge_id: mm}`, `overall_mm: {x,y,z}` — and the
-   commission checks them *before* it builds anything. `designer_toolkit.templates` returns
-   both together (`box_shell`, `panel`, `bolt_boss`, `stack`) and computes them from the same
-   arithmetic that built the solid, so they cannot drift — prefer a template where one fits. That is not bookkeeping: a wall thinner
-   than two extrusions, a mouth fillet larger than its own clearance, and a size that already
-   disagrees with the plan are arithmetic, and arithmetic should not cost an export. One
+   dict in `model.py`:
+
+   ```python
+   PARAMS = {
+       "wall_mm": 3.0, "nozzle_mm": 0.4, "overall_mm": {"x": 40, "y": 22, "z": 14},
+       "cavity_clearance_mm": 0.3, "cavity_mouth_fillet_mm": 0.3,
+       "edge_treatments": {"E-01": 0.4},
+       "horizontal_bores": [{"id": "B1", "d_mm": 12.0, "roof": "teardrop"}],
+   }
+   ```
+
+   Declare only what the part has. The commission checks these *before* it builds anything,
+   which is the difference between a defect costing microseconds and costing an export: one
    archived run bisected four full build/export/measure cycles toward a boundary that is
-   exactly "clearance ≥ fillet radius".
+   exactly "clearance ≥ fillet radius", and another spent three reshaping geometry around a
+   horizontal bore whose round roof was never going to clear a zero ceiling at any threshold.
+
+   `designer_toolkit.templates` (`box_shell`, `panel`, `bolt_boss`, `stack`) returns geometry
+   and its `PARAMS` together, computed from the same arithmetic, so the two cannot drift.
+   Prefer a template where one fits.
 3. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
 4. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,

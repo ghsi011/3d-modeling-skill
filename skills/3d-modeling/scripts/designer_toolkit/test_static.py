@@ -97,6 +97,55 @@ class EdgeBudgetTest(unittest.TestCase):
         self.assertEqual("PASS", checks["static-edge-E-02"].result)
 
 
+class UnsupportableFeatureTest(unittest.TestCase):
+    """The 47-minute run, as three checks that cost no build.
+
+    It converged on zero unsupported area across three full build/export/measure
+    cycles: a pie-slice mouth at 293.82 mm2, then the bore's own crown at 218.98,
+    then a teardrop roof. The bore's roof shape was declared before the first
+    build; only the consequence was not.
+    """
+
+    def _bore(self, roof: str, job=None):
+        job = job or plan.direct_template((40.0, 22.0, 14.0))
+        checks = static.check({"horizontal_bores": [{"id": "B1", "roof": roof}]}, job)
+        return next(c for c in checks if c.id == "static-bore-B1")
+
+    def test_a_round_bore_cannot_meet_a_zero_ceiling(self) -> None:
+        """Measured on a real bore: 207 mm2 at the 45 deg screen, still 39 mm2 at
+        -0.99. A downward face is unsupported at every threshold."""
+        check = self._bore("round")
+
+        self.assertEqual("FAIL", check.result)
+        self.assertIn("every screen threshold", check.detail)
+        self.assertIn("teardrop", check.action)
+
+    def test_a_flat_roof_cannot_either(self) -> None:
+        self.assertEqual("FAIL", self._bore("flat").result)
+
+    def test_a_teardrop_or_diamond_roof_is_fine(self) -> None:
+        for roof in ("teardrop", "diamond"):
+            with self.subTest(roof=roof):
+                self.assertEqual("PASS", self._bore(roof).result)
+
+    def test_a_budgeted_ceiling_makes_the_crown_affordable(self) -> None:
+        """This is a conflict between a feature and a zero ceiling, not a claim
+        that round bores are bad. Given a support budget there is nothing to say."""
+        job = plan.direct_template((40.0, 22.0, 14.0))
+        job["support_rules"][0].update(disposition="SUPPORT_ALLOWED",
+                                       allowed_contact_class="nonfunctional underside",
+                                       max_out_of_limit_area_mm2=600.0)
+
+        checks = static.check({"horizontal_bores": [{"id": "B1", "roof": "round"}]}, job)
+
+        self.assertEqual([], [c for c in checks if c.id.startswith("static-bore")])
+
+    def test_it_says_not_to_iterate_on_the_surrounding_geometry(self) -> None:
+        """What the 47-minute run actually did: two cycles reshaping everything
+        around a crown that was never going away."""
+        self.assertIn("crown belongs to the bore", self._bore("round").action)
+
+
 class EnvelopeArithmeticTest(unittest.TestCase):
     def test_declared_size_disagreeing_with_the_plan_fails_before_any_build(self) -> None:
         job = plan.direct_template((40.0, 22.0, 14.0))

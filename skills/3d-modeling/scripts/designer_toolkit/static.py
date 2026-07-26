@@ -127,6 +127,57 @@ def _check_edge_budget(params: dict[str, Any]) -> list[Check]:
     return checks
 
 
+# A downward face is unsupported whatever the screen threshold, so any feature
+# that necessarily has one cannot reach a ceiling of zero. Measured on a plain
+# horizontal bore: 207 mm2 at the bare 45 deg screen, still 39 mm2 at -0.99.
+_ROOFS_THAT_OVERHANG = {
+    "round": "a round roof's crown faces straight down",
+    "flat": "a flat roof faces straight down along its whole span",
+}
+
+
+def _check_unsupportable_features(params: dict[str, Any], plan: dict[str, Any]) -> list[Check]:
+    """Features that cannot clear a zero ceiling, whatever the geometry around them.
+
+    One measured run spent three full build/export/measure cycles learning that
+    its horizontal bore had a crown -- 293 mm2, then 218 mm2, then a teardrop and
+    zero. The bore's roof shape was known before the first build; only the
+    consequence was not.
+    """
+    bores = params.get("horizontal_bores")
+    if not isinstance(bores, list) or not bores:
+        return []
+    ceilings = [float(r.get("max_out_of_limit_area_mm2", 0.0))
+                for r in (plan.get("support_rules") or [])]
+    if not ceilings or min(ceilings) > 0:
+        return []  # support is budgeted; a crown is affordable
+
+    checks: list[Check] = []
+    for index, bore in enumerate(bores):
+        if not isinstance(bore, dict):
+            continue
+        bore_id = str(bore.get("id") or f"bore[{index}]")
+        roof = str(bore.get("roof", "round")).lower()
+        why = _ROOFS_THAT_OVERHANG.get(roof)
+        if why is None:
+            checks.append(Check(
+                f"static-bore-{bore_id}", f"Bore {bore_id} can meet a zero support ceiling",
+                PASS, f"roof '{roof}' is self-supporting"))
+            continue
+        checks.append(Check(
+            f"static-bore-{bore_id}", f"Bore {bore_id} can meet a zero support ceiling",
+            FAIL,
+            f"a '{roof}' roof on a horizontal bore: {why}, so its area is above zero at "
+            "every screen threshold and no surrounding geometry changes that",
+            "The plan allows no unsupported area, so this bore cannot pass as drawn. Give "
+            "it a teardrop or diamond roof, or -- if it has to stay round because something "
+            "round passes through it -- say so in your handoff and let the print engineer "
+            "budget support on a nonfunctional region. Do not iterate on the surrounding "
+            "geometry: the crown belongs to the bore.",
+        ))
+    return checks
+
+
 def _check_envelope_arithmetic(params: dict[str, Any], plan: dict[str, Any]) -> Check | None:
     """The declared size against the planned size, before anything is built.
 
@@ -168,8 +219,8 @@ def check(params: dict[str, Any] | None, plan: dict[str, Any]) -> list[Check]:
             "static", "Pre-build checks on declared parameters", SKIP,
             "the model declares no PARAMS",
             "Give model.py a PARAMS dict (wall_mm, cavity_clearance_mm, "
-            "cavity_mouth_fillet_mm, edge_treatments, overall_mm) and these run before "
-            "the first CAD call instead of after an export.",
+            "cavity_mouth_fillet_mm, edge_treatments, overall_mm, horizontal_bores) and "
+            "these run before the first CAD call instead of after an export.",
         )]
 
     nozzle = _number(params.get("nozzle_mm")) or _nozzle_from_plan(plan)
@@ -180,6 +231,7 @@ def check(params: dict[str, Any] | None, plan: dict[str, Any]) -> list[Check]:
     ]
     checks = [c for c in found if c is not None]
     checks.extend(_check_edge_budget(params))
+    checks.extend(_check_unsupportable_features(params, plan))
     if not checks:
         return [Check(
             "static", "Pre-build checks on declared parameters", SKIP,
