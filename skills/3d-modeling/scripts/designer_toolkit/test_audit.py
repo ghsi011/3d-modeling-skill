@@ -102,6 +102,46 @@ class TestAudit(unittest.TestCase):
             self.assertEqual("FAIL", repair["result"], repair["detail"])
             self.assertIn("raw_integrity", payload["evidence"])
 
+    def test_a_receipt_claiming_the_wrong_verdict_is_caught(self) -> None:
+        """`recompute` is the whole disagreement path, and nothing asserted it
+        could fail. Its comparison rules have been changed twice -- once to
+        excuse checks a verifying run structurally cannot have, once to stop the
+        render row counting as a difference -- and either edit could have made it
+        agree with everything. Here the bytes are untouched and the designer's
+        own receipt is altered, which is the one thing re-measuring exists to
+        notice."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            receipt = project / "commission.json"
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            flipped = next(c for c in payload["checks"] if c["id"] == "solid")
+            flipped["result"] = "FAIL"
+            receipt.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            done, audit = _audit(project, root / "verify")
+
+            self.assertEqual(1, done.returncode)
+            recompute = next(c for c in audit["checks"] if c["id"] == "recompute")
+            self.assertEqual("FAIL", recompute.get("result"), recompute)
+            self.assertIn("solid", recompute["detail"])
+
+    def test_a_check_the_designer_never_ran_is_caught(self) -> None:
+        """The other direction: a receipt quieter than the recomputation."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            receipt = project / "commission.json"
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            payload["checks"] = [c for c in payload["checks"] if c["id"] != "envelope"]
+            receipt.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            _done, audit = _audit(project, root / "verify")
+
+            recompute = next(c for c in audit["checks"] if c["id"] == "recompute")
+            self.assertEqual("FAIL", recompute["result"])
+            self.assertIn("envelope", recompute["detail"])
+
     def test_a_swapped_stl_fails_the_binding(self) -> None:
         """The one thing re-measuring was actually for. A part 2% taller is the
         same shape, passes every check on its own terms, and is not the part the
