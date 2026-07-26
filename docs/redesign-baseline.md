@@ -91,3 +91,47 @@ declaration, so geometry nobody declared is invisible to all of them — a 4 mm
 post standing in a bin floor once passed twenty-seven green checks, an exact
 bounding box and a matching bed-contact area. Removing the look without a
 detector removes the only unconditioned evidence in the route.
+
+
+---
+
+# After iterations 1-5
+
+Re-measured on the same machine, same method (n=5).
+
+| operation | median | p95 | target | |
+|---|---:|---:|---|---|
+| `c_clip` (trimesh) end to end | 0.17 s | 0.19 s | < 5 s | met |
+| `box_shell` | 0.04 s | 0.04 s | < 5 s | met |
+| `l_bracket` | 0.13 s | 0.14 s | < 5 s | met |
+| `trim_ring` (build123d) | 0.22 s | 3.27 s | < 10 s | met — p95 is the cold kernel import |
+| `trim_ring` + STEP | 0.25 s | — | < 20 s | met |
+
+Dispatches on a clean `INCONSEQUENTIAL DIRECT` job: **0**. On `FITTED`: **1**.
+On `CONSEQUENTIAL`: exactly one more, for the mandatory safety pass.
+
+Mesh loads per job: **1**, counted rather than declared.
+
+## What the numbers rest on
+
+Zero-dispatch is gated on the mutation corpus, not on the detectors existing:
+58 mutants across all four certified templates and five defect classes, with
+screening's own false-negative rate on defects fused to the part at 0.0 and false
+positives at 0.0. `python -m pipeline.corpus` reproduces it and
+`CalibrationTest` fails the build if it stops passing.
+
+That gate rejected two earlier attempts, which is the only reason the number is
+worth anything:
+
+* The first measured `caught_by_contract or caught_by_screening` — the whole
+  pipeline — and reported 0.0 while the screen itself missed 46.7%.
+* The second scored disconnected solids as screening catches; on fused defects
+  only, the rate was 87.5%.
+
+## Still not met
+
+* The `< 2 s` cached-validation target has no cache to measure — content-addressed
+  caching is unbuilt.
+* Wall clock on a real agent-driven job is still unmeasured against the new
+  pipeline. The deterministic compute is 0.17 s; the previous end-to-end
+  measurement of 3.1 minutes was against the retired route.
