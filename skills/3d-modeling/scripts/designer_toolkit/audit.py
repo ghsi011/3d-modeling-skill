@@ -166,7 +166,8 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
                                 f"recomputation exited {code}",
                                 "The delivered part fails a deterministic check."))
 
-    for command, label in ((["team_tools.contracts", "validate", str(project), "--require", "all"],
+    for command, label in ((["team_tools.contracts", "validate", str(project),
+                             "--require", _required_contracts(project)],
                             "contracts-validate"),
                            (["team_tools.contracts", "status", str(project)], "contracts-status")):
         code, stdout, stderr = _run(command, scripts)
@@ -204,6 +205,24 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
             "Whether the thing solves the problem it was built for.",
         ],
     }
+
+
+# A DIRECT job dispatches nobody, so no verification_report.md is ever written
+# and `all` demands one. Hardcoding `all` made `audit` exit 1 on a clean DIRECT
+# candidate for a reason that had nothing to do with the part -- which is how a
+# gate teaches people to ignore it.
+_DIRECT_CONTRACTS = "job_state,dimensions,print_plan,artifact_manifest"
+
+
+def _required_contracts(project: Path) -> str:
+    """What this project's own route says it should contain."""
+    try:
+        for line in (project / "job_state.md").read_text(encoding="utf-8").splitlines():
+            if line.startswith("profile:"):
+                return _DIRECT_CONTRACTS if line.split(":", 1)[1].strip() == "DIRECT" else "all"
+    except OSError:
+        pass
+    return "all"
 
 
 def _gather_views(project: Path, out_dir: Path) -> list[str]:
@@ -269,11 +288,17 @@ def _compare(theirs: dict[str, Any], mine: dict[str, Any]) -> list[str]:
     a, b = by_id(theirs), by_id(mine)
     out = []
     for check_id in sorted(set(a) | set(b)):
+        if _structurally_absent(check_id):
+            # Asymmetric on purpose, and in both directions: a successful render
+            # adds no check at all, while this recomputation passes --no-render
+            # and therefore always reports one. Comparing those two would
+            # manufacture a disagreement out of the fact that the verifier is
+            # not the one drawing the pictures.
+            continue
         if check_id not in a:
             out.append(f"{check_id}: designer did not run it")
         elif check_id not in b:
-            if not _structurally_absent(check_id):
-                out.append(f"{check_id}: absent from the recomputation")
+            out.append(f"{check_id}: absent from the recomputation")
         elif a[check_id] != b[check_id]:
             out.append(f"{check_id}: designer {a[check_id]}, recomputed {b[check_id]}")
     return out

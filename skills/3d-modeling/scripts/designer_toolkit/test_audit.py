@@ -132,6 +132,31 @@ class TestAudit(unittest.TestCase):
             self.assertIn("feature-screw", ids)
             self.assertIn("feature-flange-mid", ids)
 
+    def test_a_direct_project_is_not_asked_for_a_report_nobody_writes(self) -> None:
+        """DIRECT dispatches nobody, so no verification_report.md exists and
+        `--require all` demands one. A measured run watched `audit` exit 1 on a
+        clean candidate for a reason that had nothing to do with the part, which
+        is how a gate teaches people to ignore it."""
+        from .audit import _required_contracts
+
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw)
+            job_state = project / "job_state.md"
+
+            job_state.write_text("---\nprofile: DIRECT\n---\n", encoding="utf-8")
+            self.assertNotIn("verification_report", _required_contracts(project))
+
+            job_state.write_text("---\nprofile: FULL\n---\n", encoding="utf-8")
+            self.assertEqual("all", _required_contracts(project))
+
+    def test_an_unreadable_job_state_requires_everything(self) -> None:
+        """Failing toward the stricter set: a project whose route cannot be read
+        is not a project whose route is DIRECT."""
+        from .audit import _required_contracts
+
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertEqual("all", _required_contracts(Path(raw)))
+
     def test_writing_over_the_project_is_refused(self) -> None:
         """The comparison is against the designer's receipts. A run that writes
         into the project root destroys what it came to check -- and one did."""
@@ -187,6 +212,19 @@ class TestAudit(unittest.TestCase):
 
 
 class TestStructuralAbsence(unittest.TestCase):
+    def test_the_render_row_is_ignored_in_both_directions(self) -> None:
+        """A successful render adds no check at all; this recomputation passes
+        --no-render and always reports one. Comparing them manufactures a
+        disagreement out of the verifier not being the one drawing pictures."""
+        from .audit import _compare
+
+        designer = {"checks": [{"id": "solid", "result": "PASS"}]}
+        mine = {"checks": [{"id": "solid", "result": "PASS"},
+                           {"id": "render", "result": "SKIPPED"}]}
+
+        self.assertEqual([], _compare(designer, mine))
+        self.assertEqual([], _compare(mine, designer))
+
     def test_only_named_checks_may_go_missing(self) -> None:
         """Treating "absent" as "fine" in general is how a recomputation comes
         back quietly emptier than the run it is checking."""
