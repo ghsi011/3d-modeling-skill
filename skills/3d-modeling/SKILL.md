@@ -104,9 +104,20 @@ and it decides which phases run, not how verbose the record is.
 
   **The express variant, only if the user asks for it by name.** Both dispatches together are
   about fifteen minutes, and roughly four of those are the build. A user who wants the part
-  faster than that can have `DIRECT_EXPRESS`: you run the verification steps yourself — the
-  raw-mesh read, the one deterministic command against the delivered STL, the renders, and
-  `validate --require all` — instead of dispatching a fresh verifier. You did not author the
+  faster can have `DIRECT_EXPRESS`: you run the verification steps yourself instead of
+  dispatching a fresh verifier —
+
+  ```bash
+  V=<your-own-dir>
+  python <skill>/scripts/dt.py integrity <candidate>.stl --out $V/integrity.json
+  python <skill>/scripts/dt.py commission --stl <candidate>.stl         --plan print_plan_checks.json --out $V --job-id <job>         --updated-utc <iso8601> --no-receipts
+  python -m team_tools.contracts validate <project-dir> --require all
+  python -m team_tools.contracts status <project-dir>
+  ```
+
+  — then look at `$V/renders/`, zooming with `dt.py crop` where a view is too small to settle
+  a question. That chain measures 4.4 seconds of computation, so what it costs is your own
+  turns, not the tooling. You did not author the
   geometry, so this is not the designer marking its own work; but you *have* read the brief
   and the dispatch, so it is not fresh eyes either.
 
