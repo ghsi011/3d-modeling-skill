@@ -94,6 +94,26 @@ one, so reading its patterns is a page bought and unused:
    axis because six separate runs each rediscovered that a horizontal bore's crown cannot be
    removed by any surrounding geometry.
 
+   Where a shape fits, the whole deliverable is this — and nothing more is expected of it:
+
+   ```python
+   """Cable-management clip: C-channel over a countersunk mounting flange."""
+   from designer_toolkit.templates import c_clip
+
+   _built = c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0,
+                   flange=(40.0, 22.0, 5.0),
+                   screw_d=4.5, screw_at=(8.0, 11.0), countersink_d=9.0)
+
+   PARAMS = _built.params
+   part = _built.part
+   ```
+
+   Every number traced from `dimensions.md`; `PARAMS` comes back from the template rather than
+   being maintained by hand. Then run the gate once. A `DIRECT` job that fits a template is
+   this file, one gate call, a look at the two renders, two judgment fields and a short
+   `print_notes.md` — if you find yourself exploring well beyond that, the shape probably does
+   not fit after all, and hand-writing it is the faster answer than fighting the parameters.
+
    Where no shape fits, hand-write it in the commissioned backend and read that backend's
    patterns. Everything else about the commission is identical either way.
 4. Reference commission: use no photos or hidden dimensions. Model all specified mating
