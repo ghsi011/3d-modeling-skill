@@ -96,7 +96,7 @@ def export_and_hash(model: Any, out_stem: str | Path, *, tolerance: float = 0.01
     re-import the STL with the authoritative raw loader, and return an
     :class:`ExportReport`.
 
-    ``model`` may be a CadQuery ``Workplane``/``Shape``, a ``trimesh.Trimesh``,
+    ``model`` may be a build123d part, a ``trimesh.Trimesh``,
     or a path to an already-exported STL (re-hashed and re-measured as-is).
     """
     out_stem = Path(out_stem)

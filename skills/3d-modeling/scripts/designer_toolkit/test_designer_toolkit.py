@@ -30,7 +30,6 @@ from designer_toolkit import (  # noqa: E402
     metrics,
 )
 
-_HAS_CADQUERY = importlib.util.find_spec("cadquery") is not None
 _HAS_SECTION = all(importlib.util.find_spec(name) is not None
                    for name in metrics._SECTION_STACK)
 
@@ -79,12 +78,17 @@ class TestExport(unittest.TestCase):
             r2 = exporter.export_and_hash(stl, os.path.join(d, "a"), also_step=False)
             self.assertEqual(r1.geometry_sha256, r2.geometry_sha256)
 
-    @unittest.skipUnless(_HAS_CADQUERY, "cadquery not installed")
-    def test_cadquery_solid_export_writes_step(self):
-        import cadquery as cq
+    def test_a_brep_part_export_writes_step(self):
+        """The STEP branch of the exporter, on the kernel that is actually here.
+
+        build123d is a core dependency now, so this no longer needs a skip: a
+        test that only runs where an optional package happens to be installed is
+        a test that does not run.
+        """
+        from build123d import Align, Box
 
         with tempfile.TemporaryDirectory() as d:
-            model = cq.Workplane("XY").box(10, 10, 10, centered=(True, True, False))
+            model = Box(10, 10, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
             rep = exporter.export_and_hash(model, os.path.join(d, "c"))
             self.assertTrue(rep.watertight)
             self.assertIsNotNone(rep.step_path)

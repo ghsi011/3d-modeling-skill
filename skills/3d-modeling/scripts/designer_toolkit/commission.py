@@ -592,7 +592,7 @@ def run(
     expected_features: tuple[dict[str, Any], ...] = ()
     if stl is not None and not Path(stl).is_file():
         # Without this the path falls through to the exporter's CAD-kernel
-        # branch and the caller is told "No module named 'cadquery'" -- which
+        # branch and the caller is told "No module named 'build123d'" -- which
         # sends them installing a kernel to fix a typo.
         raise FileNotFoundError(f"no such STL: {stl}")
     if model is not None:

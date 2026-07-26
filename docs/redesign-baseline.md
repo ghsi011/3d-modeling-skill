@@ -5,7 +5,8 @@ Everything here is measured, not estimated. Re-run the same commands after each
 phase and compare against this file rather than against memory.
 
 Machine: Windows 11, Python 3.12.6, trimesh + manifold3d + numpy + pillow.
-No CAD kernel installed (`dt.py doctor`: cadquery NO, build123d NO).
+No CAD kernel installed at baseline time (build123d was added to the core as
+the first act of iteration 1).
 
 ## Deterministic compute, today
 
