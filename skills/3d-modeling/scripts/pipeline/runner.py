@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, commission, contract as C, fitted, intent, safety, schemas as S
+from . import analysis, cache as K, commission, contract as C, fitted, intent, safety
+from . import schemas as S
 from . import screening, status, templates as T, verification, witness as W
 from .backends import get as get_backend
 
@@ -52,6 +53,10 @@ class JobRequest:
     verify_call: Callable[[verification.Packet], dict[str, Any]] | None = None
     evidence: tuple[str, ...] = ()
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
+    # Where build artifacts are reused from. None disables caching entirely,
+    # which is the right default for a test: a cache that is on by default makes
+    # every test depend on what a previous one left behind.
+    cache_dir: Path | None = None
 
 
 @dataclasses.dataclass
@@ -63,6 +68,11 @@ class JobResult:
     timings: dict[str, float]
     llm_calls: int
     final_status: dict[str, Any] | None
+
+
+def _repo_root() -> Path:
+    """Where `uv.lock` lives, for the toolchain half of the cache key."""
+    return Path(__file__).resolve().parents[4]
 
 
 def _write(path: Path, payload: dict[str, Any]) -> Path:
@@ -180,15 +190,39 @@ def run(request: JobRequest) -> JobResult:
                          "the contract is not complete enough to build against:\n  - "
                          + "\n  - ".join(problems), written, timings, llm_calls, None)
 
-    # ---- build ------------------------------------------------------------
+    # ---- build, or the same bytes from a previous one ---------------------
     mark = time.perf_counter()
     backend = get_backend(model_contract.backend)
+    cache_status, cache_key = "disabled", None
     try:
         built = backend.build(model_contract, out)
     except Exception as exc:                        # noqa: BLE001 - a build failure is a
         return JobResult(False, "build", f"{type(exc).__name__}: {exc}",   # receipt, not a crash
                          written, timings, llm_calls, None)
     timings["build"] = time.perf_counter() - mark
+
+    if request.cache_dir is not None:
+        cache_key = K.key_for(model_contract, backend_version=built.backend_version,
+                              tessellation=built.tessellation, root=_repo_root())
+        store = K.Cache(request.cache_dir)
+        hit = store.lookup(cache_key)
+        if hit is not None:
+            # The build already ran -- this is a rebuild whose result matched, and
+            # the useful part is the confirmation, not the saving. Caching the
+            # build *before* running it would mean trusting the key to be complete;
+            # comparing after means a key that misses something shows up as a
+            # mismatch here rather than as a stale artifact downstream.
+            cached_stl = store._slot(cache_key) / built.stl_path.name
+            cache_status = ("hit" if S.sha256_file(cached_stl) == S.sha256_file(built.stl_path)
+                            else "hit-mismatch")
+        else:
+            files = {built.stl_path.name: built.stl_path,
+                     built.source_path.name: built.source_path}
+            if built.step_path:
+                files[built.step_path.name] = built.step_path
+            store.store(cache_key, files=files,
+                        payloads={"contract": model_contract.as_payload()})
+            cache_status = "stored"
 
     artifact = {
         "schema_version": S.ARTIFACT_SCHEMA,
@@ -203,6 +237,8 @@ def run(request: JobRequest) -> JobResult:
         "boolean_ops": list(built.boolean_ops),
         "boolean_engine": "manifold3d" if built.backend == "trimesh-manifold" else "n/a (B-rep)",
         "units": "mm",
+        "cache": {"status": cache_status,
+                  "key": cache_key.as_dict() if cache_key else None},
         "updated_utc": request.updated_utc,
     }
 

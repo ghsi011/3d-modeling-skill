@@ -1149,5 +1149,111 @@ class IndependentVerificationTest(unittest.TestCase):
             self.assertIn("requires independent verification", result.message)
 
 
+
+class CacheTest(unittest.TestCase):
+    """A cache is a claim that two runs would agree. The key has to name every
+    input that could make them differ, or it is a way of serving a stale answer
+    with a fresh-looking receipt."""
+
+    def _job(self, out: Path, cache: Path, **kw):
+        return runner.run(_request(out, cache_dir=cache, **kw))
+
+    def _status(self, out: Path) -> str:
+        return json.loads(
+            (out / "artifact_manifest.json").read_text(encoding="utf-8"))["cache"]["status"]
+
+    def test_a_second_identical_run_hits(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            cache = Path(raw) / "cache"
+            first, second = Path(raw) / "a", Path(raw) / "b"
+            self._job(first, cache)
+            self._job(second, cache)
+            self.assertEqual("stored", self._status(first))
+            self.assertEqual("hit", self._status(second))
+
+    def test_a_changed_parameter_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            cache = Path(raw) / "cache"
+            self._job(Path(raw) / "a", cache)
+            other = Path(raw) / "b"
+            self._job(other, cache, params={**CLIP, "wall": 3.5})
+            self.assertEqual("stored", self._status(other))
+
+    def test_the_key_names_everything_that_could_change_the_answer(self) -> None:
+        """Each of these has produced a different mesh or a different measurement
+        at some point; a key blind to any of them serves the wrong bytes."""
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+            base = K.key_for(contract, backend_version="v1",
+                             tessellation={"sections": 96}, root=Path(raw))
+            for field, value in (("backend_version", "v2"),
+                                 ("tessellation", {"sections": 32}),
+                                 ("schema_version", 99),
+                                 ("generation", 2),
+                                 ("domain_id", "other"),
+                                 ("step_required", True),
+                                 ("lock_sha256", "moved")):
+                with self.subTest(differs=field):
+                    other = dataclasses.replace(base, **{field: value})
+                    self.assertNotEqual(base.digest(), other.digest())
+
+    def test_a_corrupt_entry_is_a_miss_not_a_failure(self) -> None:
+        """A cache that raises on a bad byte turns a stale file into a failed job.
+        A miss costs one rebuild and cannot be worse than not caching."""
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            cache = Path(raw) / "cache"
+            out = Path(raw) / "a"
+            self._job(out, cache)
+
+            contract = _contract(out)
+            key = K.key_for(contract, backend_version="x", tessellation={}, root=Path(raw))
+            store = K.Cache(cache)
+            slot = next(p for p in cache.iterdir() if p.is_dir())
+            (slot / "cache_receipt.json").write_text("{ not json", encoding="utf-8")
+            self.assertIsNone(store.lookup(key))
+
+    def test_a_tampered_artifact_is_a_miss(self) -> None:
+        """Hashes are recomputed from the bytes. This pipeline exists because an
+        entered hash is not a hash."""
+        with tempfile.TemporaryDirectory() as raw:
+            cache = Path(raw) / "cache"
+            first = Path(raw) / "a"
+            self._job(first, cache)
+            slot = next(p for p in cache.iterdir() if p.is_dir())
+            stl = next(p for p in slot.iterdir() if p.suffix == ".stl")
+            stl.write_bytes(stl.read_bytes() + b"\n")
+
+            second = Path(raw) / "b"
+            self._job(second, cache)
+            self.assertEqual("stored", self._status(second),
+                             "tampered bytes must not be served as a hit")
+
+    def test_caching_is_off_unless_asked_for(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            _run(out)
+            self.assertEqual("disabled", self._status(out))
+
+    def test_a_geometry_hit_is_not_a_safety_hit(self) -> None:
+        """Reusing a safety review because the mesh matched answers 'is this part
+        safe' with 'this is the same part'."""
+        from . import cache as K
+        from . import safety as SF
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+            key = K.key_for(contract, backend_version="v", tessellation={}, root=Path(raw))
+            packet = SF.Packet(stage=1, payload={"a": 1})
+            reviewer = {"model_snapshot": "m", "prompt_hash": "p", "policy_version": "1",
+                        "reasoning_settings": "none", "inference_config": "{}",
+                        "image_preprocessing": "none"}
+            self.assertNotEqual(key.digest(),
+                                SF.cache_identity(packet, reviewer=reviewer))
+
+
 if __name__ == "__main__":
     unittest.main()
