@@ -564,6 +564,13 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
                  (centre[0] + outer_d / 2, centre[1], base_h + mouth_h / 2))
     part = _seated(trimesh.boolean.difference([part, mouth]))
 
+    if screw_d > 0 and flange is None:
+        # Silently identical geometry either way, which is the worst kind of
+        # accepted argument: the caller asked for a fastening and got none, and
+        # nothing anywhere said so.
+        raise ValueError(
+            f"screw_d={screw_d} was given with no flange to put a screw through; "
+            "either add a flange or drop the screw")
     if screw_d > 0 and flange is not None:
         # Positioned by the caller. A fixed position is what makes a template
         # half-fit: a run reached for this one, found the hole in the wrong
@@ -638,6 +645,16 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
         notes=tuple(
             [f"channel bore {bore_d} mm, {wall} mm wall, {mouth_gap} mm mouth, axis along "
              "Z so every wall is a vertical extrusion"]
+            # Both of these drop an expectation, and a check that quietly does
+            # not exist is not listed in `coverage.skipped` either -- so without
+            # saying so here, nothing at all would tell a reader that the
+            # feature went unmeasured.
+            + ([f"countersink_d {countersink_d} is not larger than screw_d {screw_d}, so no "
+                "countersink was cut and none is checked: the hole is a plain bore"]
+               if screw_d > 0 and flange is not None and countersink_d <= screw_d else [])
+            + ([f"the {mouth_gap} mm mouth is not narrower than the {bore_d} mm bore, so the "
+                "channel cross-section has no closed form here and is not measured"]
+               if mouth_gap > bore_d else [])
             + ([f"the {mouth_gap} mm mouth is narrower than the {bore_d} mm bore, so this "
                 "retains by elastic snap: it is a fit interface, and a plan declaring none "
                 "leaves it with no band, no coupon and no acceptance method. Say so in your "

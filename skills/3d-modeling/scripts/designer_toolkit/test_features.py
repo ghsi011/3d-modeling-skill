@@ -222,6 +222,25 @@ class TestDefectsFoundByAdversarialReview(unittest.TestCase):
 
         self.assertEqual("FAIL", results["feature-hole-01"])
 
+    def test_a_dropped_feature_says_so_or_refuses(self) -> None:
+        """Three parameters were accepted and then ignored. A check that quietly
+        does not exist is not listed in `coverage.skipped` either, so without a
+        word here nothing at all tells a reader the feature went unmeasured."""
+        from .templates import c_clip
+
+        base = dict(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0)
+        with self.assertRaises(ValueError):
+            c_clip(screw_d=4.5, countersink_d=9.0, **base)
+
+        plain = c_clip(flange=(40.0, 22.0, 5.0), screw_d=4.5, screw_at=(8.0, 11.0),
+                       countersink_d=4.5, **base)
+        self.assertNotIn("countersink", {row["kind"] for row in plain.expected})
+        self.assertTrue(any("no countersink was cut" in note for note in plain.notes))
+
+        wide = c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=14.0)
+        self.assertNotIn("channel-mid", {row.get("id") for row in wide.expected})
+        self.assertTrue(any("not measured" in note for note in wide.notes))
+
     def test_a_case_cavity_cut_undersize_fails(self) -> None:
         """`device_case` declared nothing at all, so a cavity 0.75 mm per side
         undersize -- the phone physically will not go in -- left the bounding
