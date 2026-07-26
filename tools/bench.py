@@ -15,10 +15,11 @@ its directory. Snapshot it there, and a later run can be handed that state and
 asked for only the next phase. Changing the verifier's charter no longer costs a
 build; changing a template no longer costs a routing decision.
 
-    python tools/bench.py save   --project <dir> --as routed
-    python tools/bench.py restore --snapshot routed --to <fresh-dir>
+    python tools/bench.py save     --project <dir> --as routed
+    python tools/bench.py restore   --snapshot routed --to <fresh-dir>
     python tools/bench.py list
-    python tools/bench.py diff   --snapshot routed --project <dir>
+    python tools/bench.py diff     --snapshot routed --project <dir>
+    python tools/bench.py preamble               # paste into every benchmark prompt
 
 A snapshot is a plain directory copy under the snapshot root, so it can be read,
 diffed and edited by hand. Nothing here is clever, and that is the point: the
@@ -44,6 +45,20 @@ DEFAULT_ROOT = Path(os.environ.get("BENCH_SNAPSHOT_ROOT")
 # a resumed run that has to re-render has paid for a build it was meant to skip.
 # Only caches are dropped.
 SKIP_DIRS = {"__pycache__", ".git"}
+
+# Handed to every benchmark agent, because a measurement of this skill has to be
+# a measurement of *this* skill. A host can have other skills installed whose
+# trigger descriptions cover the same ground -- one here fires on "3D print",
+# "STL", "enclosure", "bracket" and "CadQuery" and opens by telling the reader to
+# pip install a CAD kernel, which is the opposite of the design being measured.
+# Nothing in a subagent's environment stops both loading, and a run that followed
+# the wrong one would look like a result rather than a mistake.
+PREAMBLE = """Use only the skill at the path this prompt names. Your host may have other skills
+installed whose descriptions cover 3D printing, STL, CAD or parametric modelling;
+they are not what is being measured here. Do not load, read or follow any of them.
+If one loads on its own, say so in your report and name it -- that is a finding
+about the measurement, and I would rather know than have it quietly average in.
+"""
 
 
 def _files(project: Path) -> list[Path]:
@@ -160,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--to", dest="destination", type=Path, required=True)
 
     sub.add_parser("list", help="what snapshots exist")
+    sub.add_parser("preamble", help="the isolation text every benchmark prompt needs")
 
     d = sub.add_parser("diff", help="what a project changed since a snapshot")
     d.add_argument("--snapshot", required=True)
@@ -172,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
         return restore(args.snapshot, args.destination, args.root)
     if args.cmd == "list":
         return listing(args.root)
+    if args.cmd == "preamble":
+        sys.stdout.write(PREAMBLE)
+        return 0
     return diff(args.snapshot, args.project, args.root)
 
 

@@ -98,6 +98,15 @@ class TestSnapshot(unittest.TestCase):
 
             self.assertEqual(0, bench.diff("gated", project, snapshots))
 
+    def test_the_preamble_names_the_confound_it_exists_for(self) -> None:
+        """A measurement of this skill has to be a measurement of *this* skill.
+        A host can have another installed whose triggers cover the same ground --
+        one does, and it opens by telling the reader to pip install a CAD kernel,
+        which is the opposite of the design being measured."""
+        self.assertIn("only the skill at the path this prompt names", bench.PREAMBLE)
+        self.assertIn("say so in your report", bench.PREAMBLE,
+                      "a contaminated run must be reportable, not silently averaged in")
+
     def test_an_unknown_snapshot_is_an_error_not_an_empty_restore(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
