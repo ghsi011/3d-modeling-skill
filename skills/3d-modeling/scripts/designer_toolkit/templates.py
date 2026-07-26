@@ -140,8 +140,25 @@ def box_shell(*, inner: tuple[float, float, float], wall: float, floor: float = 
                   (outer[0] / 2, outer[1] / 2, floor + cavity_height / 2))
     part = _seated(trimesh.boolean.difference([shell, cavity]))
 
+    # The wall ring, in closed form: the footprint less the cavity it encloses.
+    # A cavity cut larger than it should be, or a wall that silently thinned,
+    # changes this and changes nothing else the gate measures -- the bounding box
+    # is set by the outside, and a box stays watertight and single-bodied either
+    # way. Sampled inside the cavity, where the ring is all that is left.
+    footprint = float(outer[0]) * float(outer[1])
+    ring = footprint - float(iw) * float(id_)
+    expected: list[dict[str, Any]] = [
+        {"kind": "solid_region", "id": "wall-ring",
+         "z": float(floor) + float(ih) / 2.0, "area_mm2": ring},
+        # With a floor the part meets the bed on solid material; without one it
+        # meets it on the ring, and confusing the two is how a part gets printed
+        # upside down without anything noticing.
+        {"kind": "bed_footprint", "area_mm2": footprint if floor > 0 else ring},
+    ]
+
     return Built(
         part=part,
+        expected=tuple(expected),
         params={
             "wall_mm": float(wall),
             "overall_mm": {"x": float(outer[0]), "y": float(outer[1]), "z": float(outer[2])},
@@ -240,7 +257,18 @@ def panel(*, width: float, depth: float, thickness: float,
     else:
         params["wall_mm"] = float(thickness)
 
-    return Built(part=part, params=params, notes=tuple(notes))
+    # Plate area less every hole cut in it. This is the number that catches an
+    # opening at the wrong size, a duplicate opening, or a cutter that took more
+    # than its own footprint -- none of which move the bounding box.
+    cut = sum(math.pi * (float(o["d"]) / 2.0) ** 2 if o.get("kind") == "round"
+              else float(o["w"]) * float(o["h"]) for o in openings)
+    plate = float(width) * float(depth) - cut
+    return Built(
+        part=part, params=params, notes=tuple(notes),
+        expected=({"kind": "solid_region", "id": "plate-mid",
+                   "z": float(thickness) / 2.0, "area_mm2": plate},
+                  {"kind": "bed_footprint", "area_mm2": plate}),
+    )
 
 
 def _rounded_slab(width: float, depth: float, height: float, radius: float,
@@ -353,8 +381,31 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
     notes = [f"annulus wall {annulus:.2f} mm, aspect {aspect:.1f}"]
     if aspect > 4.0:
         notes.append("aspect over 4: add a gusset or ribs, the base layer line is the hinge")
+    # The annulus, in closed form. A bore drilled oversize thins the wall that
+    # carries the whole load of a standoff, and moves neither the bounding box
+    # nor the component count -- the two numbers a boss otherwise offers.
+    ring = math.pi * ((outer_d / 2.0) ** 2 - (bore_d / 2.0) ** 2)
+    boss_expected: list[dict[str, Any]] = [
+        {"kind": "solid_region", "id": "annulus", "z": float(height) / 2.0,
+         "area_mm2": float(ring)},
+        {"kind": "bed_footprint", "area_mm2": float(ring)},
+    ]
+    # A bore diameter is read from the material missing inside a window, and the
+    # reading is only meaningful while two windows of different radius both
+    # enclose the whole bore and both stay inside the post. On a thin annulus no
+    # such pair exists -- the narrower window falls entirely inside the bore, the
+    # two disagree, and the check reports indeterminate forever. Declaring it
+    # anyway would be a permanent FAIL on a correct part, which is worse than not
+    # declaring it: the annulus above already catches an oversize bore, at 30 mm2
+    # on a boss whose bounding box does not move at all.
+    if outer_d >= bore_d * 1.8:
+        boss_expected.append(
+            {"kind": "through_hole", "id": "bore", "at": (float(x), float(y)),
+             "d_mm": float(bore_d), "z_from": 0.0, "z_to": float(height),
+             "window_r": float(bore_d) / 2.0 * 1.35})
     return Built(
         part=part,
+        expected=tuple(boss_expected),
         params={
             "wall_mm": float(annulus),
             "overall_mm": {"x": float(outer_d), "y": float(outer_d), "z": float(height)},
@@ -499,6 +550,137 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
     )
 
 
+def segmented_box(*, inner: tuple[float, float, float], wall: float, bed: float,
+                  floor: float = 0.0, tongue: float = 0.0, clearance: float = 0.25,
+                  gap: float = 6.0) -> Built:
+    """A walled box too big for the bed, split into corner pieces that fit it.
+
+    Some sizes are not chosen. A Langstroth hive body is 406.4 x 504.8 mm because
+    every frame and every other beekeeper's box says so, and no common printer
+    bed is over 256 -- so the box is printed in pieces or it is not printed. The
+    decomposition is arithmetic, not taste: ceil(outer / bed) cells per axis, cut
+    on plane boundaries, which for a Langstroth deep is exactly four quadrant
+    corners of 203.2 x 252.4.
+
+    Segments meet on a vertical tongue and groove. Vertical because it is the
+    whole reason `c_clip` stands its channel on end: a horizontal alignment pin
+    has a crown no surrounding geometry can support, and six separate runs
+    rediscovered that before it was written down. A tongue running the full
+    height is a vertical extrusion and prints with no support, and it registers
+    the joint in both directions across the wall.
+
+    Returns the segments laid out for one plate.
+
+    It declares no area expectation, deliberately. Every other template here
+    derives one in closed form, but the section area of a jointed plate depends
+    on how many seams cross how many walls and in which direction, and a formula
+    that is *nearly* right is worse than none: it would pass a defect while
+    reading like a check. What guards this shape instead is that a segment
+    reaching past the bed raises rather than returns, every segment is gated for
+    watertightness on its own, and `evidence.slice_profile` shows the whole plate
+    to whoever is looking.
+    """
+    # A scalar wall cannot describe a real Langstroth box: the standard fixes
+    # both the inside (frames must drop in) and the outside (boxes must stack on
+    # each other's rims), and 406.4/374.7 implies 15.85 mm across while
+    # 504.8/466.7 implies 19.05 along. Timber gets there with rabbet joints. A
+    # caller reproducing an existing standard needs to say both.
+    wall_x, wall_y = (float(wall), float(wall)) if isinstance(wall, (int, float))         else (float(wall[0]), float(wall[1]))
+    if min(wall_x, wall_y) <= 0:
+        raise ValueError(f"wall must be positive, got {wall}")
+    if bed <= 0:
+        raise ValueError(f"bed must be positive, got {bed}")
+    iw, id_, ih = (float(v) for v in inner)
+    outer_x, outer_y = iw + 2 * wall_x, id_ + 2 * wall_y
+    height = floor + ih
+    tongue = float(tongue) if tongue > 0 else max(min(wall_x, wall_y) / 3.0, 1.2)
+    if tongue >= min(wall_x, wall_y):
+        raise ValueError(f"tongue {tongue} must be thinner than the "
+                         f"{min(wall_x, wall_y)} mm wall")
+
+    # Sized against what a segment may actually reach, not against the cell it
+    # started as. A tongue is added outside the cut plane, so cells laid out to
+    # exactly fill the bed produce pieces that overhang it -- 259.8 mm on a
+    # 256 mm bed, which is the one failure this template exists to prevent.
+    usable = bed - 2.0 * (tongue + clearance)
+    if usable <= 0:
+        raise ValueError(f"a {tongue} mm tongue leaves no usable width on a {bed} mm bed")
+    nx, ny = math.ceil(outer_x / usable), math.ceil(outer_y / usable)
+    if nx * ny == 1:
+        raise ValueError(f"{outer_x:.1f} x {outer_y:.1f} mm already fits a {bed} mm bed; "
+                         "use box_shell")
+    cell_x, cell_y = outer_x / nx, outer_y / ny
+
+    shell = _box((outer_x, outer_y, height), (outer_x / 2, outer_y / 2, height / 2))
+    lid = max(wall_x, wall_y)
+    cavity = _box((iw, id_, ih + lid), (outer_x / 2, outer_y / 2, floor + (ih + lid) / 2))
+    ring = trimesh.boolean.difference([shell, cavity])
+
+    segments: list[Built] = []
+    for j in range(ny):
+        for i in range(nx):
+            x0, y0 = i * cell_x, j * cell_y
+            cell = _box((cell_x, cell_y, height * 3),
+                        (x0 + cell_x / 2, y0 + cell_y / 2, height / 2))
+            piece = trimesh.boolean.intersection([ring, cell])
+            if piece.is_empty:
+                continue
+            # One side of every internal seam grows a tongue, the other loses a
+            # groove, so each seam is registered exactly once.
+            adds, cuts = [], []
+            for axis, index, count, span, extent in (
+                    (0, i, nx, cell_x, outer_y), (1, j, ny, cell_y, outer_x)):
+                for edge, sign in ((index > 0, -1.0), (index < count - 1, 1.0)):
+                    if not edge:
+                        continue
+                    at = (x0 + (0.0 if sign < 0 else cell_x)) if axis == 0 else                          (y0 + (0.0 if sign < 0 else cell_y))
+                    size = ((tongue, extent * 3, height) if axis == 0
+                            else (extent * 3, tongue, height))
+                    grown = tuple(v + 2 * clearance if k < 2 else v for k, v in enumerate(size))
+                    centre = ((at, outer_y / 2, height / 2) if axis == 0
+                              else (outer_x / 2, at, height / 2))
+                    (adds if sign > 0 else cuts).append(
+                        (_box(size, centre), _box(grown, centre)))
+            piece = _cut_with(piece, [g for _, g in cuts])
+            if adds:
+                piece = trimesh.boolean.union([piece] + [s for s, _ in adds])
+            piece = trimesh.boolean.intersection([piece, _box(
+                (cell_x + 2 * tongue, cell_y + 2 * tongue, height * 3),
+                (x0 + cell_x / 2, y0 + cell_y / 2, height / 2))])
+            # Refuse rather than hand back something unprintable. The whole
+            # promise of this template is that every piece fits, and a caller who
+            # discovers otherwise at the slicer has been told a comfortable lie.
+            reach = piece.bounds[1] - piece.bounds[0]
+            if max(float(reach[0]), float(reach[1])) > bed:
+                raise ValueError(
+                    f"segment {i},{j} reaches {float(reach[0]):.1f} x {float(reach[1]):.1f} mm, "
+                    f"over the {bed} mm bed; reduce the tongue or pass a smaller bed")
+            segments.append(Built(part=_seated(piece),
+                                  params={"wall_mm": float(min(wall_x, wall_y))}))
+
+    laid = stack(*segments, gap=gap)
+    extents = laid.part.bounds[1] - laid.part.bounds[0]
+    return Built(
+        part=laid.part,
+        params={
+            "wall_mm": float(min(wall_x, wall_y)),
+            "overall_mm": {"x": float(extents[0]), "y": float(extents[1]),
+                           "z": float(extents[2])},
+            "segment_count": len(segments),
+            "assembled_mm": {"x": outer_x, "y": outer_y, "z": height},
+        },
+        notes=(
+            f"{outer_x:.1f} x {outer_y:.1f} mm box on a {bed:.0f} mm bed, so {nx} x {ny} "
+            f"corner segments of {cell_x:.1f} x {cell_y:.1f}",
+            f"segments register on a {tongue:.2f} mm vertical tongue and groove with "
+            f"{clearance} mm per-side clearance; both are vertical extrusions and need no "
+            "support",
+            "the seams are a light and weather path: the plan owes them a sealing method, "
+            "and nothing here checks that one exists",
+        ),
+    )
+
+
 def stack(*builts: Built, gap: float = 0.0) -> Built:
     """Lay several parts out side by side along X, all seated on the bed.
 
@@ -553,6 +735,12 @@ CATALOGUE: dict[str, tuple[str, str]] = {
     "bolt_boss": (
         "a screw boss or standoff, reporting its annulus wall and aspect ratio",
         "bolt_boss(outer_d=8.0, bore_d=4.2, height=10.0)",
+    ),
+    "segmented_box": (
+        "a walled box too big for the bed, split into corner pieces that fit it: "
+        "hive body, large enclosure, planter -- per-axis walls, so it can reproduce "
+        "a standard that fixes both the inside and the outside",
+        "segmented_box(inner=(374.7, 466.7, 244.5), wall=(15.85, 19.05), bed=256.0)",
     ),
     "stack": (
         "several parts laid out side by side for one plate, thinnest wall governing",
