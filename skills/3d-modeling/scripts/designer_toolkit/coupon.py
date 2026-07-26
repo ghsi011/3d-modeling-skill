@@ -49,7 +49,11 @@ def fit_coupon(interfaces, out_path, *, plate_thickness: float = 4.0,
     """
     interfaces = list(interfaces)
     if not interfaces:
-        raise ValueError("fit_coupon needs at least one interface")
+        raise ValueError(
+            "no interfaces in the plan, so there is nothing to print a coupon of. "
+            "`plan template` emits an empty `interfaces` list on purpose -- the print "
+            "engineer owns the fit strategy and fills it in. A coupon is only meaningful "
+            "once a declared fit band exists to bracket.")
     offsets = list(offsets_mm)
     n_lanes = len(interfaces)
     n_feat = len(offsets)

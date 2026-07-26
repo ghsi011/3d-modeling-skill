@@ -41,7 +41,7 @@
   "owner": "orchestrator",
   "profile": "FITTED",
   "revision": 3,
-  "route": "PIPELINE / FITTED example fixture for team_tools tests.",
+  "route": "PIPELINE / FITTED worked example: a project that validates clean.",
   "state": "CANDIDATE_BUILD",
   "updated_utc": "2026-01-01T00:00:00Z"
 }

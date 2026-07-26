@@ -36,7 +36,9 @@ Give the orchestrator the request plus any reference photos and caliper reads. I
 picks the pipeline profile, dispatches specialists, and gates each phase on the
 contract files — see [Install](#install) if the agents are not discovered yet.
 
-The contract-automation CLI also runs standalone on any project directory:
+The contract-automation CLI also runs standalone on any project directory.
+`examples/project_ok` is a complete set of v4 contracts that validates clean, so
+this is also the fastest way to see what a passing receipt looks like:
 
 ```bash
 cd skills/3d-modeling/scripts
