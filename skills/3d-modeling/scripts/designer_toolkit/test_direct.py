@@ -141,6 +141,28 @@ class TestDirect(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 direct.main(_argv(Path(raw)) + ["--risk", "R2_ENGINEERING_REVIEW"])
 
+    def test_it_writes_the_screen_question(self) -> None:
+        """The one question no check here can ask, and it used to be a separate
+        command and a separate turn. It takes no decision from the caller -- it
+        reads the inventory this call just wrote -- so the only thing the
+        separation bought was a chance to skip the look by forgetting it."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            self.assertEqual(0, direct.main(_argv(out)))
+
+            question = (out / "screen" / "question.md").read_text(encoding="utf-8")
+            self.assertIn("not on that list", question)
+
+    def test_the_question_is_written_even_when_the_gate_fails(self) -> None:
+        """A failing part is the one most worth looking at, and by then the
+        renders are already on disk."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            argv = [a if a != "22" else "30" for a in _argv(out)]
+
+            self.assertNotEqual(0, direct.main(argv))
+            self.assertTrue((out / "screen" / "question.md").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

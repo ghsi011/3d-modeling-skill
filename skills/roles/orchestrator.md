@@ -133,21 +133,35 @@ and it decides which phases run, not how verbose the record is.
   and a look, so two dispatches spend eleven minutes of overhead on under four seconds of
   computation. That is the whole reason this route exists.
 
+  The starting points, so that choosing one is not a round trip. Generated from the
+  templates themselves, and `gen_harness --check` fails when it drifts — `dt.py templates`
+  prints this same list and you should not need to spend a turn on it.
+
+<!-- TEMPLATE-TABLE -->
+
   ```bash
   DT=<skill>/scripts/dt.py
-  python $DT templates                                   # which starting point fits
   python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
-  python $DT screen <project> --out <project>/screen      # what nobody declared
   python $DT validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
-  **Budget: about ten tool calls.** Read the brief, run `doctor` once if you are unsure of the
-  interpreter, pick a template, run `direct`, run `validate`, look at both renders, deliver.
-  A measured run of this route took 13.5 minutes across 59 calls to do 5.1 seconds of work,
-  which is the whole reason the commands were collapsed. If you find yourself well past ten,
-  something is wrong with the inputs rather than the part — say so, because that is a finding.
-  Do not re-read a file you just wrote, and do not re-run a command to confirm it worked: it
-  told you.
+  **Budget: four turns.** Not four commands — four round trips, because that is what the
+  clock actually charges for:
+
+  1. Read the brief.
+  2. Run `direct`. It is intake, plan, build, gate and the screen question in one call.
+  3. **One turn, three reads in parallel**: `renders/multi.png`, `renders/section_x.png`,
+     and `screen/question.md`. They do not depend on each other, so reading them one per
+     turn spends two turns buying nothing.
+  4. Answer the judgments, run `validate`, deliver.
+
+  A measured run of this route took 13.5 minutes across 59 calls to do 5.1 seconds of work.
+  Each round trip costs 8 to 47 seconds of inference before the shell is even reached, so
+  the count of turns *is* the runtime — the arithmetic has never been the cost. If you find
+  yourself past six, something is wrong with the inputs rather than the part; say so,
+  because that is a finding. Do not re-read a file you just wrote, do not re-run a command
+  to confirm it worked, and do not run `doctor` unless something has already failed in a
+  way that suggests the interpreter.
 
   `direct` is intake, plan, build and gate in one call — about four seconds, renders included.
   One call because the cost is turns, not work: the whole deterministic route is 5.1 seconds
@@ -168,16 +182,14 @@ and it decides which phases run, not how verbose the record is.
   `DIRECT` job produces, and naming them keeps an absent contract loud — without `--require`
   at all, a missing file exits zero and reads as a pass.
 
-  Then look at `renders/multi.png` and `renders/section_x.png`, zooming with `dt.py crop`
-  where a view is too small, and fill the two judgment fields the receipt leaves blank.
-
-  `screen` writes the one question no check in this toolkit can ask. Every check is
-  conditioned on a declaration — `feature-*` measures what the plan named, `envelope` a
-  declared size — so geometry nobody declared is invisible to all of them: a 4 mm post
-  standing in a bin floor passed twenty-seven green checks, an exact bounding box and a
-  matching bed-contact area. The command states what the part is supposed to be and asks
-  what else is visible. Answer it against the renders: ten seconds, now that the question is
-  written down rather than worked out each time.
+  `screen/question.md` is the one question no check in this toolkit can ask, and `direct`
+  writes it for you. Every check is conditioned on a declaration — `feature-*` measures what
+  the plan named, `envelope` a declared size — so geometry nobody declared is invisible to
+  all of them: a 4 mm post standing in a bin floor passed twenty-seven green checks, an
+  exact bounding box and a matching bed-contact area. The file states what the part is
+  supposed to be and asks what else is visible. Answer it against the two renders in the
+  same turn you read them, zooming with `dt.py crop` only where a view is genuinely too
+  small to judge, and fill the two judgment fields the receipt leaves blank.
 
   **If `dt.py doctor` reports no renderer, this route cannot finish.** Nothing else in the
   pipeline is going to look: there is no verifier here, and a verifier looks at renders that do

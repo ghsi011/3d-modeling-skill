@@ -244,6 +244,37 @@ def render_agent(role: Role) -> GeneratedFile:
 SKILL_DIR = ROOT / "skills" / "3d-modeling"
 
 
+TEMPLATE_MARKER = "<!-- TEMPLATE-TABLE -->"
+
+
+def _template_table() -> str:
+    """The shipped templates, listed from the templates themselves.
+
+    `dt.py templates` exists and prints exactly this, and asking for it cost a
+    round trip -- 8 to 47 seconds -- to learn something that changes only when
+    this repo changes. On the `DIRECT` route, where the whole job is four
+    commands, one of them was a lookup.
+
+    Hand-copying the list into the charter would have traded that turn for the
+    drift this repo keeps finding, so it is generated and `--check` fails the
+    build when it moves.
+    """
+    import sys
+    sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
+    try:
+        from designer_toolkit.templates import CATALOGUE
+    finally:
+        sys.path.pop(0)
+    rows = ["| template | covers | call |", "|---|---|---|"]
+    rows += [f"| `{name}` | {covers} | `{call}` |"
+             for name, (covers, call) in CATALOGUE.items()]
+    return "\n".join(rows)
+
+
+def _expand(body: str) -> str:
+    return body.replace(TEMPLATE_MARKER, _template_table())
+
+
 def _rewrite_shared_links(body: str, prefix: str) -> str:
     """Repoint `../3d-modeling/...` at its place inside the single skill.
 
@@ -268,7 +299,7 @@ def render_skill(role: Role) -> GeneratedFile:
     return GeneratedFile(
         SKILL_DIR / "roles" / f"{role.role}.md",
         f"# 3D {role.display_name.removeprefix('3D ')}\n\n"
-        f"{_rewrite_shared_links(role.body, '../')}",
+        f"{_rewrite_shared_links(_expand(role.body), '../')}",
     )
 
 

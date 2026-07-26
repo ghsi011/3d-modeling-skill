@@ -7,10 +7,10 @@ dispatch -- this route dispatches nobody. It is turns. Every command is a round
 trip costing 8 to 47 seconds of inference before the shell is even reached, so
 five commands cost minutes to deliver five seconds of work.
 
-So the five become one. `intake`, `plan template`, `build` and `commission`
-always run in that order with the same job id, the same clock and the same
-parameters; there is no branch between them a caller could usefully take. What
-was five decisions is one.
+So they become one. `intake`, `plan template`, `build`, `commission` and the
+`screen` question always run in that order with the same job id, the same clock
+and the same parameters; there is no branch between them a caller could usefully
+take. What was five decisions is one.
 
 It stops at the first failure and hands back that step's own message, because a
 chain that continues past a broken link produces receipts describing a part that
@@ -34,6 +34,7 @@ from . import build as build_module
 from . import commission as commission_module
 from . import intake as intake_module
 from . import plan as plan_module
+from . import screen as screen_module
 
 
 def _params(raw: list[str]) -> dict[str, Any]:
@@ -107,6 +108,22 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
         gate.append("--no-render")
     code = commission_module.main(gate)
     log.append(f"commission  {'PASS' if code == 0 else 'FAIL'}")
+
+    # The screen question, from artefacts that now exist. It was a separate
+    # command and a separate turn, and it takes no decision from the caller: it
+    # reads the declared inventory this call just wrote and states the one
+    # question no check here can ask. A turn costs 8 to 47 seconds and the
+    # question costs milliseconds, so the only thing the separation bought was
+    # a chance to skip the look entirely by forgetting the command.
+    #
+    # Run even when the gate fails. A failing part is exactly the one worth
+    # looking at, and the renders are already on disk.
+    try:
+        result = screen_module.bundle(out, out / "screen")
+        log.append(f"screen      {len(result['images'])} renders, "
+                   f"{result['declared_features']} declared features")
+    except (OSError, ValueError) as exc:
+        log.append(f"screen      unavailable: {exc}")
     return code, log
 
 
@@ -177,9 +194,10 @@ def main(argv: list[str] | None = None) -> int:
         # Windows console on a legacy code page raises UnicodeEncodeError on an
         # em-dash -- which would turn a finished, passing job into a traceback
         # at the final line.
-        + ".\nStill yours: look at the renders and read `evidence.slice_profile`. Nothing "
-        "above\nwas measured that nobody declared. Then answer `visual_accept` and "
-        "`fit_band_ok`"
+        + ".\nStill yours, and it is one turn: read the renders and "
+        f"{args.out / 'screen' / 'question.md'}\ntogether. Nothing above was measured that "
+        "nobody declared, and that file is the\nquestion no check here can ask. Then answer "
+        "`visual_accept` and `fit_band_ok`"
         + (f",\nand the {outstanding} remaining <!-- REQUIRED --> field"
            f"{'s' if outstanding != 1 else ''} in the contracts" if outstanding else "")
         + ".\n")

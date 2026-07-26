@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -117,3 +118,28 @@ def test_missing_role_metadata_raises_clear_error(tmp_path: Path) -> None:
     # When / Then: parsing fails with the missing metadata named in the error.
     with pytest.raises(gen_harness.RoleParseError, match="can_spawn"):
         gen_harness.parse_role(malformed)
+
+
+def test_the_template_table_is_expanded_and_matches_the_templates() -> None:
+    """The charter lists the templates so that choosing one is not a round trip.
+
+    Hand-copying that list would have traded the turn for drift, so it is
+    injected from `templates.CATALOGUE` at generation time. Two ways this can
+    fail silently: the marker survives into the output, in which case the reader
+    sees an HTML comment where the table should be; or the injection stops
+    happening and the charter simply has no list. Both look fine in a diff.
+    """
+    roles = gen_harness.load_roles()
+    charter = next(f for f in gen_harness.generate(roles)
+                   if f.path.name == "orchestrator.md" and f.path.parent.name == "roles")
+
+    assert gen_harness.TEMPLATE_MARKER not in charter.content
+    assert "| template | covers | call |" in charter.content
+
+    sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
+    try:
+        from designer_toolkit.templates import CATALOGUE
+    finally:
+        sys.path.pop(0)
+    for name in CATALOGUE:
+        assert f"| `{name}` |" in charter.content, f"{name} is missing from the charter"
