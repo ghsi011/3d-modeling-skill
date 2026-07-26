@@ -255,14 +255,21 @@ class ReadinessTest(unittest.TestCase):
             self.assertIn("CANNOT BE ANSWERED HERE", text)
             self.assertIn("Do not write a verdict you did not see", text)
 
-    def test_the_judgments_are_left_blank(self) -> None:
-        """A receipt that fills itself in completely has stopped being one."""
+    def test_the_judgments_are_never_answered_here(self) -> None:
+        """A receipt that fills itself in completely has stopped being one.
+
+        `fit_band_ok` is always left for a reader. `visual_accept` is left blank
+        when there are renders and explicitly blocked when there are none -- the
+        one thing it must never be is decided, and this fixture does not render,
+        so it must come back blocked."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             text = receipts.build_readiness(_run(work), job_id="t", updated_utc=_WHEN)
 
-            self.assertIn("`visual_accept`: <!-- REQUIRED", text)
             self.assertIn("`fit_band_ok`: <!-- REQUIRED", text)
+            self.assertIn("`visual_accept`: <!-- CANNOT BE ANSWERED HERE", text)
+            for verdict in ("`visual_accept`: yes", "`visual_accept`: no"):
+                self.assertNotIn(verdict, text)
 
 
 class CliTest(unittest.TestCase):

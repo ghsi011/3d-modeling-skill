@@ -411,6 +411,28 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class VisualEvidenceTest(unittest.TestCase):
+    def test_not_rendering_blocks_the_visual_verdict(self) -> None:
+        """`--no-render` leaves exactly as little to look at as a renderer that
+        crashed, and the receipt has to say so either way. Keyed off the SKIPPED
+        check alone it did not: no render was attempted, so no check was added,
+        so the receipt invited a verdict on images that did not exist -- which is
+        the defect the block was written to prevent, arriving by another door."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(), render=False)
+
+            render = next(c for c in result.checks if c.id == "render")
+            self.assertEqual("SKIPPED", render.result)
+
+            from . import receipts
+            text = receipts.build_readiness(result.as_dict(), job_id="t",
+                                            updated_utc="2026-01-01T00:00:00Z")
+            self.assertIn("CANNOT BE ANSWERED HERE", text)
+            self.assertNotIn("- `visual_accept`: <!-- REQUIRED", text)
+
+
 class RepairCheckTest(unittest.TestCase):
     """The gate measures watertightness on the *normalized* mesh, which is right
     -- an STL is a vertex soup and the raw parse calls every correct solid open.

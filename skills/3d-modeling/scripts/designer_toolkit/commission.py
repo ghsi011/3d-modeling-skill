@@ -669,6 +669,18 @@ def run(
                 "Install the `visual` extra or run where a GL context exists. Visual "
                 "acceptance cannot be signed off without looking at something.",
             ))
+    else:
+        # Not rendering at all leaves exactly as little to look at as a renderer
+        # that failed, and the receipt has to say so either way. Keyed off the
+        # SKIPPED check alone, `--no-render` produced no check, so the receipt
+        # invited a visual verdict with no image in existence -- which is the
+        # defect that made this block exist, arriving by a different door.
+        commission.add(Check(
+            "render", "Renders for visual acceptance", _SKIP,
+            "not rendered: --no-render was passed",
+            "Nothing was drawn, so there is nothing to accept visually. Re-run without "
+            "--no-render before anyone signs off on the look.",
+        ))
 
     (out_dir / "commission.json").write_text(
         json.dumps(commission.as_dict(), indent=2, default=str), encoding="utf-8")
