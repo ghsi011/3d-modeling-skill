@@ -392,34 +392,26 @@ updated_utc: <iso-8601>
 The orchestrator recomputes presence and hashes. `NOT_READY` stays inside the same designer
 commission until corrected; no verifier is dispatched.
 
-The designer also writes `candidate_preflight.json`, one shared support-audit JSON per
-support rule, `candidate_preflight_validation.json`, and `artifact_manifest.json` (see below)
-covering every produced STL/STEP/render artifact. It must run:
+The designer also writes `artifact_manifest.json` and `candidate_readiness.md`, and does not
+write either by hand: `dt.py commission` derives both from the measurements it just took on
+the re-imported STL. The designer runs nothing else. `team_preflight.py` and the contract
+commands re-screen the same mesh from the same numbers -- a second reading of one instrument,
+not a second opinion -- and belong to the fresh verifier, where a disagreement between two
+implementations means something. This spec used to require a `candidate_preflight.json` and a
+`candidate_preflight_validation.json` from the designer as well; nothing in the pipeline
+writes either, a measured run burned turns hand-assembling one to feed a validator, and the
+designer charter now forbids it in as many words. The requirement is gone rather than
+reconciled, because there was nothing on the other side of it.
 
-```text
-python skills/3d-modeling/scripts/team_preflight.py support-audit \
-  --stl <candidate.stl> --plan print_plan_checks.json --rule-id <S-ID> \
-  --output <S-ID>-support-audit.json
-
-python skills/3d-modeling/scripts/team_preflight.py validate-receipts \
-  --stl <candidate.stl> --plan print_plan_checks.json \
-  --readiness candidate_preflight.json \
-  --output candidate_preflight_validation.json
-```
-
-`support-audit` (subcommand name kept for backward compatibility; its result `kind` is
-`downward-facing-surface-screen`) is a **conservative downward-facing-surface orientation
-screen** — it measures transformed non-bed-contact area whose normal faces down past a
-threshold. It does **not** prove slicer supportability, bridgeability, or print success; a
-face it flags as within limits can still fail to print cleanly, and slicer behavior (support
-generation, bridging, interface layers) is not modeled. Treat a PASS as necessary geometric
-evidence for the agent's supportability judgment, never as that judgment itself.
-
-`candidate_preflight.json` binds the STL and plan-check hashes, contains exactly every plan
-Edge ID with numeric `samples_mm`, method, and evidence, and exactly every support-rule ID
-with its shared audit path. The validator must exit zero and report `PASS` before Markdown
-readiness may say `READY`. After any correction, rerun the full Edge ID and support-rule
-sets, not only the last reported defect.
+`team_preflight.py support-audit` (subcommand name kept for backward compatibility; its
+result `kind` is `downward-facing-surface-screen`) is a **conservative downward-facing-surface
+orientation screen** -- it measures transformed non-bed-contact area whose normal faces down
+past a threshold. It does **not** prove slicer supportability, bridgeability, or print
+success; a face it flags as within limits can still fail to print cleanly, and slicer behavior
+(support generation, bridging, interface layers) is not modeled. Treat a PASS as necessary
+geometric evidence for the agent's supportability judgment, never as that judgment itself. It
+is the verifier's second implementation, and its value is precisely that it is not the code
+the gate ran.
 
 Give every opening boundary, protective lip, exterior user-touch boundary, removal/grip edge,
 and plan-named exposed edge an Edge ID. Classify it as `EXPOSED_FUNCTIONAL`,

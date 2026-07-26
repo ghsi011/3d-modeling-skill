@@ -310,8 +310,10 @@ checks as "n/a for this interface type", and only a fresh context catches that.
 8. Dispatch candidate designer(s) against the sheet, accepted reference, and print plan.
    Require a hash-bound `candidate_readiness.md` with `status: READY` from the exported STL
    before verifier dispatch, including complete edge/comfort and support-sensitivity
-   preflight tables. Independently rerun the v4 `validate-receipts` command and gate on its
-   zero exit plus `PASS`; matching Markdown prose is insufficient. Also run
+   preflight tables. `validate-receipts` is not yours to rerun here: it needs a
+   `candidate_preflight.json` the pipeline stopped producing, so the instruction was
+   unexecutable on any current job. The verifier runs the second implementation, on the
+   delivered bytes, where a disagreement between two instruments means something. Run
    `dt.py status <project-dir>` and require a zero exit: it is the
    only check that compares each contract's `revision` against what the downstream contracts
    bound to, so a `dimensions.md` revised after the plan cited it shows up as `STALE` here and
