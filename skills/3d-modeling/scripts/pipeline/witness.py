@@ -36,8 +36,7 @@ class Witness:
 
     def as_dict(self) -> dict[str, Any]:
         return {"level": self.level, "images": list(self.images),
-                "sections": list(self.sections), "seconds": round(self.seconds, 3),
-                "renderer": self.renderer,
+                "sections": list(self.sections), "renderer": self.renderer,
                 "budgets": {"ortho_views": MAX_ORTHO_VIEWS, "iso_views": MAX_ISO_VIEWS,
                             "resolution_px": MAX_RESOLUTION_PX, "sections": MAX_SECTIONS,
                             "seconds": MAX_SECONDS}}

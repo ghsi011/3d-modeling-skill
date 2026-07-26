@@ -29,6 +29,19 @@ SLICER_DEPENDENT = {
     "flexible-filament": "extrusion behaviour of a flexible under this geometry",
 }
 
+# Named in the plan, and not yet measured by anything here. They are DEFERRED
+# rather than SATISFIED: the earlier version returned SATISFIED with the reason
+# "settled from the mesh and the declared orientation" while nothing was
+# settling anything, which is a fabricated claim on a receipt.
+NOT_YET_MEASURED = {
+    "inserts": "insert-pocket reachability and retention",
+    "threads": "thread engagement and pitch as printed",
+    "captive-hardware": "whether the hardware can be placed and stays captive",
+    "split-body": "seam registration and the sealing method the plan owes",
+}
+
+KNOWN_MODIFIERS = frozenset(SLICER_DEPENDENT) | frozenset(NOT_YET_MEASURED)
+
 
 def manufacturing(contract: Contract, commission_report: dict[str, Any]) -> dict[str, Any] | None:
     """What the modifiers require, and how much of it geometry can settle."""
@@ -37,24 +50,31 @@ def manufacturing(contract: Contract, commission_report: dict[str, Any]) -> dict
 
     predicates: list[dict[str, Any]] = []
     for modifier in contract.modifiers:
-        need = SLICER_DEPENDENT.get(modifier)
-        if need:
+        if modifier in SLICER_DEPENDENT:
             predicates.append({
-                "modifier": modifier, "predicate": need, "result": "DEFERRED",
+                "modifier": modifier, "predicate": SLICER_DEPENDENT[modifier],
+                "result": "DEFERRED",
                 "reason": "no slicer adapter is configured; this stack is uv, build123d, "
                           "trimesh and manifold3d, none of which produces toolpaths"})
+        elif modifier in NOT_YET_MEASURED:
+            predicates.append({
+                "modifier": modifier, "predicate": NOT_YET_MEASURED[modifier],
+                "result": "DEFERRED",
+                "reason": "no check in this build measures it yet"})
         else:
             predicates.append({
-                "modifier": modifier,
-                "predicate": "geometry-derived consequences of this modifier",
-                "result": "SATISFIED",
-                "reason": "settled from the mesh and the declared orientation"})
+                "modifier": modifier, "predicate": "unknown modifier",
+                "result": "BLOCKED",
+                "reason": f"{modifier!r} is not one of {sorted(KNOWN_MODIFIERS)}; a "
+                          "modifier nobody implements cannot be reported as handled"})
 
     deferred = [p for p in predicates if p["result"] == "DEFERRED"]
     blocked = [p for p in predicates if p["result"] == "BLOCKED"]
     overall = "BLOCKED" if blocked else ("DEFERRED" if deferred else "SATISFIED")
     return {
         "schema_version": S.MANUFACTURING_SCHEMA,
+        "job_id": contract.job_id,
+        "contract_sha256": contract.contract_hash(),
         "modifiers": list(contract.modifiers),
         "slicer_adapter": None,
         "overall": overall,
@@ -87,6 +107,14 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         reasons.append("screening was indeterminate")
     else:
         final, claim = "COMMISSIONED", "geometrically commissioned against its contract"
+        if not screening.get("calibrated", False):
+            # Not a downgrade of the status -- the geometry really did match its
+            # contract. A correction to the claim, which otherwise reads as though
+            # something had looked at the part.
+            claim = ("geometrically commissioned against its contract; no calibrated "
+                     "broad screen and no independent look, so undeclared geometry "
+                     "cannot be ruled out")
+            reasons.append("screening is uncalibrated (see calibration_note)")
 
     if final in ("COMMISSIONED", "VERIFIED"):
         if manufacturing and manufacturing["overall"] == "DEFERRED":
@@ -134,6 +162,7 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         "domain_id": contract.domain_id,
         "commission_verdict": verdict,
         "screening": screening["overall"],
+        "screening_calibrated": screening.get("calibrated", False),
         "manufacturing": manufacturing["overall"] if manufacturing else None,
         "verification": verification["decision"] if verification else None,
         "safety_verification": safety["decision"] if safety else None,

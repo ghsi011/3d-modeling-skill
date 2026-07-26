@@ -8,6 +8,7 @@ would only prove the builder is consistent with itself.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import tempfile
@@ -18,6 +19,7 @@ import trimesh
 
 from . import analysis, commission, contract as C, intent, runner, safety, screening
 from . import status, templates as T
+from . import witness as W
 
 CLIP = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
         "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
@@ -522,6 +524,218 @@ class StatusTest(unittest.TestCase):
                                 verification=None, updated_utc="t")
         self.assertEqual("COMMISSIONED", ok["final_status"])
         self.assertEqual("NEEDS_MORE_EVIDENCE", flagged["final_status"])
+
+
+
+class FailClosedTest(unittest.TestCase):
+    """The property everything else rests on, which nothing was testing.
+
+    A mutation run found six survivors: fail-open verdicts, dropped repair
+    escalation, a removed coverage gate, an unpinned boolean engine, unenforced
+    witness budgets and a disabled unit check all left the suite green. A
+    property with no test is a comment.
+    """
+
+    def _feature(self, on_unrunnable: str) -> C.Feature:
+        return C.Feature(feature_id="f", kind="section_area", provenance="p",
+                         expectation={"at": {"z": 1.0}, "value_mm2": 1.0},
+                         tolerance={"abs": 1.0}, verified_by="section_area",
+                         on_unrunnable=on_unrunnable)
+
+    def test_an_unrunnable_check_never_reports_pass(self) -> None:
+        for mode, expected in (("ESCALATE", "ESCALATE"), ("FAIL", "FAIL")):
+            with self.subTest(on_unrunnable=mode):
+                self.assertEqual(expected,
+                                 commission._verdict(self._feature(mode), ok=True, ran=False),
+                                 "a check that did not run cannot pass, whatever ok says")
+
+    def test_a_runnable_check_still_decides_on_the_measurement(self) -> None:
+        self.assertEqual("PASS", commission._verdict(self._feature("ESCALATE"), ok=True, ran=True))
+        self.assertEqual("FAIL", commission._verdict(self._feature("ESCALATE"), ok=False, ran=True))
+
+    def test_a_measurement_that_did_not_happen_is_not_an_empty_cavity(self) -> None:
+        """The one check whose failure has the same numeric signature as success:
+        an engine that returned nothing reads as a perfectly clear void."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            contract = _contract(tmp)
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            path = tmp / "a.stl"
+            part.export(path)
+            ctx = analysis.load(path)
+
+            original = trimesh.boolean.intersection
+            try:
+                trimesh.boolean.intersection = lambda *a, **k: None
+                void = next(f for f in contract.features if f.kind == "void_region")
+                check = commission._feature_check(ctx, void, 100.0)
+            finally:
+                trimesh.boolean.intersection = original
+
+            self.assertFalse(check.ran)
+            self.assertNotEqual("PASS", check.result)
+            self.assertIn("returned nothing", check.reason)
+
+    def test_every_boolean_names_manifold3d(self) -> None:
+        """Automatic engine selection lets whichever engine happens to be
+        importable decide the result, and a receipt that does not name the
+        engine cannot be reproduced."""
+        import re
+
+        root = Path(__file__).resolve().parent
+        pattern = re.compile(r"trimesh\.boolean\.\w+\(")
+        for path in (root / "analysis.py", root / "backends" / "trimesh_manifold.py"):
+            source = path.read_text(encoding="utf-8")
+            for call in pattern.finditer(source):
+                tail = source[call.end():call.end() + 220]
+                with self.subTest(file=path.name, at=call.start()):
+                    self.assertIn('engine="manifold"', tail,
+                                  "every boolean must name its engine explicitly")
+
+    def test_a_witness_over_budget_fails_the_build(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            contract = _contract(tmp)
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            path = tmp / "a.stl"
+            part.export(path)
+            ctx = analysis.load(path)
+
+            original = W.MAX_SECONDS
+            try:
+                W.MAX_SECONDS = 0.0
+                with self.assertRaises(W.BudgetExceeded):
+                    W.generate(ctx, contract, tmp / "w", render=False)
+            finally:
+                W.MAX_SECONDS = original
+
+    def test_coverage_below_the_minimum_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            base = _contract(tmp)
+            ghost = C.Feature(
+                feature_id="ghost", kind="section_area", provenance="p",
+                expectation={"at": {"z": 999.0}, "value_mm2": 500.0},
+                tolerance={"abs": 1.0}, verified_by="section_area", on_unrunnable="FAIL")
+            contract = C.Contract(**{**base.__dict__, "features": base.features + (ghost,)})
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            _, report, _ = _measure(part, contract, tmp)
+            self.assertEqual("FAIL", report["verdict"])
+
+    def test_a_part_scaled_to_inches_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            contract = _contract(tmp)
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            part.apply_scale(1.0 / 25.4)
+            _, report, _ = _measure(part, contract, tmp)
+            units = next(c for c in report["checks"] if c["check_id"] == "unit_scale")
+            self.assertEqual("FAIL", units["result"], units)
+
+
+class DeterminismTest(unittest.TestCase):
+    def test_two_runs_of_one_job_produce_identical_artifacts(self) -> None:
+        """Durations used to be serialized into the manifest and the commission
+        report, which made every artifact byte-unstable -- so the safety cache
+        identity was a function of elapsed time and could never hit."""
+        runs = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as raw:
+                out = Path(raw)
+                _run(out)
+                runs.append({name: (out / (name + ".json")).read_text(encoding="utf-8")
+                             for name in ("intent_manifest", "model_contract",
+                                          "artifact_manifest", "commission_report",
+                                          "final_status")})
+        for name in runs[0]:
+            with self.subTest(artifact=name):
+                self.assertEqual(runs[0][name], runs[1][name])
+
+    def test_the_safety_packet_hash_is_stable_across_runs(self) -> None:
+        packets = []
+        response = {"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok"}
+
+        def call(packet):
+            packets.append(packet)
+            return response
+
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as raw:
+                runner.run(_request(Path(raw), consequence="CONSEQUENTIAL",
+                                    reviewer=SafetyTest.REVIEWER, safety_call=call))
+        self.assertEqual(packets[0].packet_hash(), packets[1].packet_hash())
+
+
+class DomainCompletenessTest(unittest.TestCase):
+    def test_every_parameter_a_template_takes_is_bounded(self) -> None:
+        """A domain with a hole in it certifies nothing: a c_clip with a
+        900 x 400 mm flange routed DIRECT and commissioned, while bore_d's own
+        basis says 'above 40 the flange leaves the bed'."""
+        for name, params in (("c_clip", CLIP), ("trim_ring", RING)):
+            with self.subTest(template=name):
+                template = T.get(name)
+                self.assertEqual(set(), set(params) - set(template.bounds),
+                                 name + " takes parameters it does not bound")
+
+    def test_an_unbounded_parameter_is_refused_rather_than_admitted(self) -> None:
+        template = T.get("c_clip")
+        stripped = dataclasses.replace(
+            template, bounds={k: v for k, v in template.bounds.items() if k != "flange_w"})
+        reasons = stripped.rejects(CLIP)
+        self.assertTrue(any("no certified range" in r for r in reasons), reasons)
+
+    def test_an_oversized_flange_no_longer_routes_direct(self) -> None:
+        decision = intent.select(requested_template="c_clip",
+                                 parameters={**CLIP, "flange_w": 900.0, "flange_d": 400.0},
+                                 external_geometry=False, ambiguities=())
+        self.assertNotEqual("DIRECT", decision.route)
+
+
+class ModifierTest(unittest.TestCase):
+    def test_a_modifier_nobody_measures_is_deferred_not_satisfied(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            runner.run(_request(out, modifiers=("inserts", "threads")))
+            report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
+            self.assertEqual("DEFERRED", report["overall"])
+            for row in report["predicates"]:
+                self.assertNotEqual("SATISFIED", row["result"], row)
+
+    def test_an_unknown_modifier_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_request(out, modifiers=("banana",)))
+            report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
+            self.assertEqual("BLOCKED", report["overall"])
+            self.assertEqual("FAILED", result.final_status["final_status"])
+
+    def test_the_manufacturing_report_binds_to_its_contract(self) -> None:
+        from . import schemas as S
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            runner.run(_request(out, modifiers=("supports",)))
+            report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
+            contract = json.loads((out / "model_contract.json").read_text(encoding="utf-8"))
+            self.assertEqual(S.payload_hash(contract), report["contract_sha256"])
+
+
+class CalibrationTest(unittest.TestCase):
+    def test_an_uncalibrated_screen_is_declared_in_the_status(self) -> None:
+        """The plan calls the measured false-negative rate a hard gate on
+        zero-dispatch. It has not been measured, so the claim must say so rather
+        than reading as though something had looked at the part."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = _run(out)
+            final = result.final_status
+            self.assertFalse(final["screening_calibrated"])
+            self.assertIn("cannot be ruled out", final["allowed_claim"])
 
 
 if __name__ == "__main__":

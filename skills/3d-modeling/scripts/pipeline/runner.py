@@ -129,7 +129,6 @@ def run(request: JobRequest) -> JobResult:
         "boolean_ops": list(built.boolean_ops),
         "boolean_engine": "manifold3d" if built.backend == "trimesh-manifold" else "n/a (B-rep)",
         "units": "mm",
-        "build_seconds": round(built.build_seconds, 4),
         "updated_utc": request.updated_utc,
     }
 
@@ -153,7 +152,11 @@ def run(request: JobRequest) -> JobResult:
     report["witness"] = witness.as_dict()
     timings["witness"] = time.perf_counter() - mark
 
-    artifact["commission_seconds"] = round(timings["commission"], 4)
+    # Durations live in their own file, deliberately unhashed. Serializing them
+    # into the manifest made every artifact byte-unstable, which broke the one
+    # property hashing exists for: `evidence_packet_sha256` and the safety
+    # cache identity became functions of elapsed time, so no two runs could ever
+    # match and the cache could never hit.
     written["artifact_manifest"] = _write(out / "artifact_manifest.json", artifact)
     written["commission_report"] = _write(out / "commission_report.json", report)
 
@@ -188,7 +191,12 @@ def run(request: JobRequest) -> JobResult:
                           verification=None, updated_utc=request.updated_utc)
     written["final_status"] = _write(out / "final_status.json", final)
 
+    timings["build"] = round(built.build_seconds, 4)
     timings["total"] = time.perf_counter() - started
+    _write(out / "timings.json", {"job_id": request.job_id,
+                                  "seconds": {k: round(v, 4) for k, v in timings.items()},
+                                  "note": "not hashed: durations are not part of any "
+                                          "artifact's identity"})
     ok = final["final_status"] in ("COMMISSIONED", "VERIFIED")
     return JobResult(ok, "complete", final["allowed_claim"], written, timings,
                      llm_calls, final)

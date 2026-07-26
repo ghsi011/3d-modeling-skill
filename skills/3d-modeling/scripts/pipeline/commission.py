@@ -17,7 +17,7 @@ import math
 from typing import Any
 
 from . import schemas as S
-from .analysis import MeshAnalysisContext
+from .analysis import MeasurementFailed, MeshAnalysisContext
 from .contract import Contract, Feature
 
 # Which check answers which declared kind. The preflight validates a feature's
@@ -148,7 +148,12 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                          "the window reaches outside the part's own footprint, so an "
                          "empty reading would be fresh air rather than a clear cavity",
                          allowed, None, tol, _verdict(feature, False, False))
-        got = ctx.window_area(z=z, at=(cx, cy), size=(float(size[0]), float(size[1])))
+        try:
+            got = ctx.window_area(z=z, at=(cx, cy), size=(float(size[0]), float(size[1])))
+        except MeasurementFailed as exc:
+            return Check(f"feature-{feature.feature_id}", feature.feature_id,
+                         "Void region", False, str(exc), allowed, None, tol,
+                         _verdict(feature, False, False))
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
                      "Void region", True, "material inside a declared-empty window",
                      allowed, round(got, 3), tol,

@@ -25,6 +25,10 @@ import trimesh
 SLAB_MM = 0.02
 
 
+class MeasurementFailed(RuntimeError):
+    """The instrument did not answer. Distinct from answering zero."""
+
+
 @dataclasses.dataclass
 class MeshAnalysisContext:
     path: Path
@@ -87,7 +91,16 @@ class MeshAnalysisContext:
             window = trimesh.creation.box(extents=(float(size[0]), float(size[1]), SLAB_MM))
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
             solid = trimesh.boolean.intersection([self.normalized, window], engine="manifold")
-            self._windows[key] = 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+            if solid is None:
+                # Not "no material" -- "no answer". For a void check the two have
+                # the same numeric signature and opposite meanings, so returning
+                # 0.0 here reports the cleanest possible cavity for a measurement
+                # that did not happen.
+                raise MeasurementFailed(
+                    f"the boolean engine returned nothing for the window at "
+                    f"z={z:.3f}, so this is an absent measurement rather than an "
+                    "empty one")
+            self._windows[key] = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
         return self._windows[key]
 
     def disc_area(self, *, z: float, at: tuple[float, float], diameter: float) -> float:
@@ -137,12 +150,21 @@ class MeshAnalysisContext:
         return float(solid.volume) / SLAB_MM
 
 
+# One file parse per job. Named rather than written as a literal because a test
+# asserting against a hardcoded 1 cannot fail -- and one did, while the code
+# parsed twice.
+_PARSES = 1
+
+
 def load(path: Path) -> MeshAnalysisContext:
     """Parse once, repair once, and report what the repair changed."""
     import mesh_io
 
+    # One parse. `load_mesh` would re-read the file from disk; `normalize_mesh`
+    # derives the repaired copy from the bytes already in hand, which is what
+    # "load each STL once" has to mean if the count is to be worth asserting.
     raw, integrity = mesh_io.load_mesh_raw(path)
-    normalized = mesh_io.load_mesh(path)
+    normalized, mutations = mesh_io.normalize_mesh(raw)
 
     # Vertex merging is not a repair -- it is the STL format. Every file stores
     # three unshared vertices per triangle, so the merge ratio is about 6:1 on
@@ -159,8 +181,8 @@ def load(path: Path) -> MeshAnalysisContext:
     volume_delta = abs(float(raw.volume) - float(normalized.volume))
     if volume_delta > max(1e-6, 1e-9 * abs(float(raw.volume))):
         actions.append(f"volume moved by {volume_delta:.6g} mm3 during normalization")
-    _ = integrity
+    _ = integrity, mutations
     return MeshAnalysisContext(
-        path=path, raw=raw, normalized=normalized, load_count=1,
+        path=path, raw=raw, normalized=normalized, load_count=_PARSES,
         repair_actions=tuple(actions),
         vertex_merge=(len(raw.vertices), len(normalized.vertices)))

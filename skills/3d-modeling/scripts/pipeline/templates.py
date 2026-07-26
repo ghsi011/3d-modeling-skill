@@ -67,8 +67,23 @@ class CertifiedTemplate:
     step_capable: bool = False
 
     def rejects(self, params: dict[str, Any]) -> list[str]:
-        """Why these parameters are outside the certified domain, if they are."""
+        """Why these parameters are outside the certified domain, if they are.
+
+        Iterating the *parameters*, not the bounds. Iterating the bounds meant a
+        parameter nobody had bounded was never checked: a c_clip with a
+        900 x 400 mm flange routed DIRECT and commissioned, while `bore_d`'s own
+        basis says "above 40 the flange leaves the bed". A domain with a hole in
+        it certifies nothing, so an unbounded parameter is a certification defect
+        rather than a permissive default.
+        """
         reasons: list[str] = []
+        for name in sorted(params):
+            if name not in self.bounds:
+                reasons.append(
+                    f"{name} has no certified range in {self.domain_id}; a domain that "
+                    "does not bound every parameter cannot say a job is inside it")
+        if reasons:
+            return reasons
         for name, bound in self.bounds.items():
             if name not in params:
                 reasons.append(f"{name} is required by {self.name} and was not given")
@@ -123,6 +138,9 @@ def _registry() -> dict[str, CertifiedTemplate]:
             "mouth_gap": Bound(2.0, 40.0, "mm", "narrower than 2 will not admit a bundle"),
             "flange_t": Bound(2.0, 10.0, "mm", "screw head bearing"),
             "screw_d": Bound(2.0, 8.0, "mm", "common wood-screw shanks"),
+            "flange_w": Bound(15.0, 200.0, "mm", "narrower will not take a screw beside "
+                                                 "the channel; wider leaves a 256 mm bed"),
+            "flange_d": Bound(10.0, 200.0, "mm", "same bed limit, across"),
         },
         constraints=(
             Constraint("mouth_gap < bore_d",
@@ -149,6 +167,8 @@ def _registry() -> dict[str, CertifiedTemplate]:
             "panel_t": Bound(3.0, 60.0, "mm", "panel thicknesses this reaches through"),
             "wall": Bound(1.2, 8.0, "mm", "three perimeters at a 0.4 mm nozzle"),
             "chamfer": Bound(0.4, 4.0, "mm", "below 0.4 the kernel drops the feature"),
+            "lip_t": Bound(1.2, 20.0, "mm", "three layers at 0.2 mm minimum; thicker is "
+                                            "a spacer, not a trim ring"),
         },
         constraints=(
             Constraint("chamfer < lip_w / 2",

@@ -29,6 +29,24 @@ from .contract import Contract
 # in a 2,000 mm2 floor is 0.6%, and an absolute millimetre threshold either
 # misses it on a large part or cries wolf on a small one.
 STEP_FRACTION = 0.08
+
+# Whether the screens have been measured against a mutation corpus across at
+# least three templates, with published false-negative and false-positive rates.
+# They have not. The plan calls this a hard gate on zero-dispatch DIRECT, and a
+# review demonstrated the cost of ignoring it: a 112 mm3 boss fused to the ring
+# between the two declared section heights commissioned CLEAR, because the
+# step-delta detector excuses any step near a declared mark and the contract
+# measures only two planes.
+#
+# So the flag stays False until the corpus exists, and `final_status` says in
+# words that nothing took a broad look. Flipping it without the measurement is
+# the failure the plan was written to prevent.
+CALIBRATED = False
+CALIBRATION_NOTE = (
+    "screening is uncalibrated: no mutation corpus, no measured false-negative rate, "
+    "and only the Z axis is screened. Undeclared material between declared section "
+    "heights can pass -- demonstrated with a 112 mm3 boss. Until the corpus exists, "
+    "a clean DIRECT job has had no broad look at it.")
 SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 
@@ -150,6 +168,8 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     return {
         "overall": overall,
         "escalates": overall != "CLEAR",
+        "calibrated": CALIBRATED,
+        "calibration_note": CALIBRATION_NOTE,
         "axes_screened": ["z"],
         # Stated rather than faked. An X/Y profile needs its own reference
         # envelope and its own calibrated threshold -- a round channel's area
