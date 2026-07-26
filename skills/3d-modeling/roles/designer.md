@@ -83,25 +83,32 @@ one, so reading its patterns is a page bought and unused:
    exactly "clearance ≥ fillet radius", and another spent three reshaping geometry around a
    horizontal bore whose round roof was never going to clear a zero ceiling at any threshold.
 
-   Ask `dt.py templates` what the parametric starting points cover before you author
-   anything — one call. Where a shape fits, the model is four lines and the whole
-   deterministic path takes about a second; `designer_toolkit.templates` returns geometry and
-   its `PARAMS` together, computed from the same arithmetic, so the two cannot drift. Where no
-   shape fits, hand-write the backend model and declare `PARAMS` yourself. Everything else
-   about the commission is identical either way.
-3. Reference commission: use no photos or hidden dimensions. Model all specified mating
+   `designer_toolkit.templates` returns geometry and its `PARAMS` together, computed from the
+   same arithmetic, so the two cannot drift. Hand-written models declare `PARAMS` themselves.
+3. **Before authoring any geometry, run `dt.py templates`.** One call, and it decides how the
+   next hour goes. Where a shape fits, the model is four lines and the whole deterministic
+   path takes about a second — measured runs that started here finished a fitted phone case in
+   11.9 minutes and five beehive parts in 15.3; a run that skipped it hand-wrote a part
+   `c_clip` already covered and took twice as long for the same result. A template also
+   carries decisions somebody already paid for: `c_clip` stands its channel along the print
+   axis because six separate runs each rediscovered that a horizontal bore's crown cannot be
+   removed by any surrounding geometry.
+
+   Where no shape fits, hand-write it in the commissioned backend and read that backend's
+   patterns. Everything else about the commission is identical either way.
+4. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
-4. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,
+5. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,
    overhangs, support access, shrink/clearance, elephant-foot chamfers, and multi-colour
    constraints geometric inputs from `print_plan.md`. Implement the plan's declared
    per-interface fit strategy geometrically: derive candidate mating geometry from the print
    plan's interface declarations and the metrologist's as-observed geometry in
    `dimensions.md`. The designer implements the declared fit intent; it does not choose it.
-5. Organize boolean operations robustly; preserve editable source; label bodies and exports.
-6. The commission exports, hashes and renders for you — a section and a six-view exterior
+6. Organize boolean operations robustly; preserve editable source; label bodies and exports.
+7. The commission exports, hashes and renders for you — a section and a six-view exterior
    sheet, both listed in the manifest it writes. Produce an extra view only when one of those
    cannot settle a question you actually have, and add its manifest row when you do.
-7. Verify with one call and iterate until it exits zero:
+8. Verify with one call and iterate until it exits zero:
 
    ```bash
    python <skill>/scripts/dt.py commission --model model.py        --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>        [--reference mating.stl]
@@ -138,30 +145,30 @@ one, so reading its patterns is a page bought and unused:
 
    Pass `--updated-utc` explicitly; the receipts never read the wall clock, so a rerun on
    unchanged inputs is byte-identical.
-8. Fix what it reports, in the geometry. Never by widening a limit: a threshold you
+9. Fix what it reports, in the geometry. Never by widening a limit: a threshold you
    authored after seeing the measurement is a receipt, not a gate. If you believe a limit
    is genuinely wrong, say so in your handoff and leave it to the print engineer — that
    number is theirs, not yours.
-9. Add a manifest row for any evidence file you produced outside the commission — an
+10. Add a manifest row for any evidence file you produced outside the commission — an
    artifact nothing hashes can silently describe a mesh you no longer ship. The candidate, its
    STEP, the renders and the `--reference` mating reference are already there. Do not
    re-validate what the commission emitted: it is generated from the measurements and covered
    by test, and the fresh verifier validates every contract anyway.
-10. Fill only the two judgments `commission.json` leaves open: `visual_accept` — look at the
+11. Fill only the two judgments `commission.json` leaves open: `visual_accept` — look at the
    render, actually look — and `fit_band_ok`. If the gate reported no render, `visual_accept`
    is not a blank to fill: say so and hand off with it unanswered. A verification caught a
    `visual_accept: yes` written where no renderer existed, and a sincere ungrounded claim is
    worse than an admitted gap. Never claim the Phase-4 gate passed.
-11. In `print_notes.md`, record **only what nothing else captures**: the choices no contract
+12. In `print_notes.md`, record **only what nothing else captures**: the choices no contract
    fixed and no measurement holds — where you put a feature the sheet did not locate, which
    way round an ambiguous datum was read, why this orientation over the alternative, which
    direction the part is weak in, and what a coupon should test. Parameters, orientation,
    overhang areas and hashes are already in `commission.json` and the emitted receipts;
    restating them is how a 131-line note grew beside a 131-line model, and a restated number
    is one more place for the record to disagree with the mesh.
-12. When a verifier rejects, change only the owned geometry, regenerate every derived
+13. When a verifier rejects, change only the owned geometry, regenerate every derived
     artifact, and cite each resolved defect in the next handoff.
-13. For FreeCAD commissions, require the orchestrator-held `.claude/3d-freecad.lock` mutation
+14. For FreeCAD commissions, require the orchestrator-held `.claude/3d-freecad.lock` mutation
     lease before any MCP call that can mutate a document. Never run two FreeCAD designer
     instances concurrently, across reference or candidate work and across jobs. Complete and
     pass metrologist review of the FreeCAD reference before candidate modeling continues in
