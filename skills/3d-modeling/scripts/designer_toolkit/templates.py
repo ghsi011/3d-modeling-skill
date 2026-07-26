@@ -941,8 +941,9 @@ def _stacked_expectations(builts: tuple[Built, ...], offsets: list[float]) -> tu
 
     Three kinds behave differently and the difference is not cosmetic:
 
-    * A hole keeps its size and moves with its part, so it carries over with the
-      layout offset applied.
+    * A hole, and a declared void, are **local**: they keep their size and move
+      with the part, so they carry over with the layout offset applied. Nothing
+      about a neighbour on the plate can affect either reading.
     * Bed contact is additive: the plate touches the bed on the sum of what its
       parts touch it with.
     * A section area is **not** additive unless every part declares one at that
@@ -965,7 +966,7 @@ def _stacked_expectations(builts: tuple[Built, ...], offsets: list[float]) -> tu
     for built, shift in zip(builts, offsets):
         for row in built.expected:
             kind = row.get("kind")
-            if kind in ("through_hole", "countersink"):
+            if kind in ("through_hole", "countersink", "void_region"):
                 moved = dict(row)
                 moved["at"] = (float(row["at"][0]) + shift, float(row["at"][1]))
                 moved["id"] = f"{row.get('id', kind)}-{builts.index(built)}"
