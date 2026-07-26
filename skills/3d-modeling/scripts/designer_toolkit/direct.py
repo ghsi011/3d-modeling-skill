@@ -146,7 +146,11 @@ def main(argv: list[str] | None = None) -> int:
     sys.stderr.write(
         f"\n{coverage.get('ran', '?')} of {coverage.get('declared', '?')} checks ran"
         + (f"; {', '.join(coverage['skipped'])} did not" if coverage.get("skipped") else "")
-        + ".\nStill yours: look at the renders and read `evidence.slice_profile` — nothing "
+        # ASCII only. This is the last thing a successful run prints, and a
+        # Windows console on a legacy code page raises UnicodeEncodeError on an
+        # em-dash -- which would turn a finished, passing job into a traceback
+        # at the final line.
+        + ".\nStill yours: look at the renders and read `evidence.slice_profile`. Nothing "
         "above\nwas measured that nobody declared. Then answer `visual_accept` and "
         "`fit_band_ok`"
         + (f",\nand the {outstanding} remaining <!-- REQUIRED --> field"

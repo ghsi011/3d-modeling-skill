@@ -40,7 +40,10 @@ def main():
         print(f'{name}: {len(m.vertices)} verts, {len(m.faces)} tris, '
               f'watertight={m.is_watertight}')
         if not m.is_watertight:
-            print(f'  WARNING: {name} is not watertight — check the source mesh')
+            # ASCII: this line fires exactly when something is already wrong, and
+            # a Windows console on a legacy code page raises UnicodeEncodeError
+            # on an em-dash -- turning a warning into a traceback that hides it.
+            print(f'  WARNING: {name} is not watertight - check the source mesh')
         objects.append(mesh_xml(i, name, m))
         comp.append(f'<component objectid="{i}"/>')
     asm_id = len(specs) + 1
