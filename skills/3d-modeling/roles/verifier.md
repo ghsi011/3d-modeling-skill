@@ -58,6 +58,10 @@ Only when the job has the evidence for it:
    already filled with your own measurements, so reading 592 lines of contract to obtain a
    thirty-line skeleton buys nothing.
 
+`dt.py crop` zooms a render or a photograph in one call, capped so the pixels are not paid
+for twice — reach for it rather than hand-rolling an image crop when a view is too small to
+settle a question.
+
 `team_tools.contracts` you run rather than read:
 `validate <project-dir> --require all` and `status <project-dir>`, both requiring exit zero.
 
@@ -78,6 +82,7 @@ to compare against.
   #   ^ expect it to agree with the designer. It is the same instrument on the
   #     same bytes; it has never once disagreed. Then LOOK at $V/renders/ —
   #     that is where every defect this role has found actually came from.
+  python <skill>/scripts/dt.py crop crop $V/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
   python -m team_tools.contracts validate <project-dir> --require all
   python -m team_tools.contracts status <project-dir>
   python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
