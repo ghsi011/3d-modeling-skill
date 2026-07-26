@@ -10,7 +10,7 @@ a round trip every time.
 Reports rather than raises: a missing optional extra is a fact about the
 environment, and the caller decides whether it matters for this commission.
 
-    python -m designer_toolkit doctor
+    python <skill>/scripts/dt.py doctor
 """
 from __future__ import annotations
 

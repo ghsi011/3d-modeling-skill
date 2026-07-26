@@ -195,7 +195,7 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
                              "the plan declares no support rules",
                              "Nothing constrains the print orientation, so this cannot "
                              "pass. Add a support rule, or generate a plan with "
-                             "`python -m designer_toolkit.plan template`."))
+                             "`dt.py plan template`."))
         return []
 
     placements = []
@@ -495,7 +495,7 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m designer_toolkit commission",
+        prog="dt.py commission",
         description="Build a candidate and run every deterministic check, in one call. "
                     "Exits non-zero if any check fails, so a failing candidate cannot "
                     "reach a verifier.",

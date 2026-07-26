@@ -1,8 +1,8 @@
 """CLI for designer_toolkit.
 
     python <skill>/scripts/dt.py doctor        # works from any directory
-    python -m designer_toolkit commission --model model.py --plan plan.json --out .              --job-id <job> --updated-utc <iso8601>
-    python -m designer_toolkit coupon --plan plan.json --out coupon.stl
+    python <skill>/scripts/dt.py commission --model model.py --plan plan.json --out .              --job-id <job> --updated-utc <iso8601>
+    python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
 
 Two subcommands, and that is deliberate. There used to be seven more --
 `measure`, `overhang`, `datums`, `interference`, `sweep`, `export`, `finalize`

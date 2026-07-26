@@ -56,8 +56,8 @@ Specialists communicate through project files and source photos only, never chat
 
 The four specialists are files beside this one, in the skill's `roles/` directory:
 `roles/metrologist.md`, `roles/designer.md`, `roles/print-engineer.md`, `roles/verifier.md`.
-(Written as paths rather than links on purpose: this text also renders into per-harness agent
-definitions that sit elsewhere in the tree, where a relative link would resolve to nothing.)
+(Written as paths rather than links on purpose: this text also renders into the generated
+agent definitions under `.claude/agents/`, where a relative link would resolve to nothing.)
 A dispatch spawns a subagent and gives it three things, in this order:
 
 1. **Its role.** "Read `roles/verifier.md` and follow it exactly." The file is the whole

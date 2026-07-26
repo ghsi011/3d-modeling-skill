@@ -1,4 +1,4 @@
-"""Smoke tests for `python -m designer_toolkit`.
+"""Smoke tests for the toolkit CLI.
 
 The designer's required reading tells it to run this CLI rather than re-author
 the measurement patterns, so broken wiring sends the role back to hand-rolling
