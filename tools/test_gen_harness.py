@@ -120,35 +120,35 @@ def test_missing_role_metadata_raises_clear_error(tmp_path: Path) -> None:
         gen_harness.parse_role(malformed)
 
 
-def test_the_template_table_is_expanded_and_matches_the_templates() -> None:
-    """The charter lists the templates so that choosing one is not a round trip.
+def test_the_template_table_is_expanded_and_matches_the_registry() -> None:
+    """The charter lists the certified templates so that choosing one is not a
+    round trip.
 
-    Hand-copying that list would have traded the turn for drift, so it is
-    injected from `templates.CATALOGUE` at generation time. Two ways this can
-    fail silently: the marker survives into the output, in which case the reader
-    sees an HTML comment where the table should be; or the injection stops
-    happening and the charter simply has no list. Both look fine in a diff.
+    Hand-copying that list would trade the turn for drift, so it is injected from
+    the certified registry at generation time. Two ways it can fail silently: the
+    marker survives into the output, leaving the reader an HTML comment where the
+    table should be; or injection stops and the charter simply has no list. Both
+    look fine in a diff.
     """
     roles = gen_harness.load_roles()
     charter = next(f for f in gen_harness.generate(roles)
                    if f.path.name == "orchestrator.md" and f.path.parent.name == "roles")
 
     assert gen_harness.TEMPLATE_MARKER not in charter.content
-    assert "| template | covers | parameters, as `dt.py` takes them |" in charter.content
+    assert "| template | backend | covers | parameters (all bounded) |" in charter.content
 
     sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
     try:
-        from designer_toolkit.templates import CATALOGUE
+        from pipeline.templates import registry
+        certified = registry()
     finally:
         sys.path.pop(0)
-    for name in CATALOGUE:
-        assert f"| `{name}` |" in charter.content, f"{name} is missing from the charter"
 
-    # The catalogue holds Python signatures and the reader is at a shell. A run
-    # spent two of its four budgeted turns working out whether tuples were
-    # accepted and how to quote them, so the table must be in CLI form.
-    assert "--param 'flange=(40, 22, 5)'" in charter.content
-    assert "c_clip(" not in charter.content
-    # `stack` takes built parts; no --param list can call it, and pretending
-    # otherwise sends a reader to a failure.
-    assert "not callable from `dt.py`" in charter.content
+    assert certified, "the registry must not be empty"
+    for name, template in certified.items():
+        assert f"| `{name}` |" in charter.content, f"{name} is missing from the charter"
+        assert template.backend in charter.content, f"{name}'s backend is not shown"
+        # Every parameter, because a value outside a bound is not DIRECT and a
+        # reader needs to know which knobs exist before choosing a template.
+        for parameter in template.bounds:
+            assert f"`{parameter}`" in charter.content,                 f"{name}.{parameter} is bounded but not listed"
