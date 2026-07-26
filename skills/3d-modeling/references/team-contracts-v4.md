@@ -310,11 +310,20 @@ mating object; there is no hash to bind.
       "motion_path": "insert along -Z, 12 mm travel",
       "material": "PETG on PETG",
       "coupon_required": true,
-      "acceptance_method": "gauge-pin pass/fail per lane"
+      "acceptance_method": "gauge-pin pass/fail per lane",
+      "reference": "mating_frame.stl"
     }
   ]
 }
 ```
+
+Each interface may carry its own `reference`: the path to the part it mates. One reference
+yields one measurement -- the tightest point of the assembly -- and cannot say which
+interface owns it, so a part with several fits needs several references. The gate refuses
+more than one unreferenced interface rather than intersecting their bands, which is what it
+used to do: six interfaces gave `[0.30, 0.25]`, a window no geometry can enter, and the only
+way past was deleting interfaces from the plan until one was left. Declare every fit the
+part has; an undeclared fit is an unverified fit either way, and a declared one is visible.
 
 Use `allowed_sharp: true` only with `allowed_sharp_reason`. A `SUPPORT_ALLOWED` row also
 names `allowed_contact_class` and forbidden faces in the Markdown plan. The print engineer
