@@ -54,6 +54,12 @@ def _seated(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     return mesh
 
 
+def _cylinder(radius: float, height: float, centre) -> trimesh.Trimesh:
+    mesh = trimesh.creation.cylinder(radius=radius, height=height, sections=48)
+    mesh.apply_translation(centre)
+    return mesh
+
+
 def _box(extents, centre) -> trimesh.Trimesh:
     mesh = trimesh.creation.box(extents=extents)
     mesh.apply_translation(centre)
@@ -316,11 +322,15 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
 
 def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
            flange: tuple[float, float, float] | None = None,
-           screw_d: float = 0.0) -> Built:
+           screw_d: float = 0.0, screw_at: tuple[float, float] | None = None) -> Built:
     """A C-shaped channel that snaps over a round thing, on an optional flange.
 
-    Cable clip, hose clamp, rail retainer, pen holder. The channel axis stands
-    along Z on purpose, which is the whole reason this template is worth having:
+    Cable clip, hose clamp, rail retainer, pen holder. A plain through-hole is
+    all this cuts: a countersink is the caller's to add, and it must open
+    *upward*, away from the bed, or it becomes a ceiling the zero-overhang
+    guarantee below cannot survive.
+
+    The channel axis stands along Z on purpose, which is the whole reason this template is worth having:
     a horizontal round bore carries an unsupported crown that no surrounding
     geometry can remove, and four archived runs each rediscovered that. Standing
     it up makes every wall a vertical extrusion, so the part is self-supporting
@@ -359,9 +369,13 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
     part = _seated(trimesh.boolean.difference([part, mouth]))
 
     if screw_d > 0 and flange is not None:
-        hole = trimesh.creation.cylinder(radius=screw_d / 2, height=base_h * 3, sections=48)
-        hole.apply_translation((outer_d / 2, flange[1] / 2, base_h / 2))
-        part = trimesh.boolean.difference([part, hole])
+        # Positioned by the caller. A fixed position is what makes a template
+        # half-fit: a run reached for this one, found the hole in the wrong
+        # place, and hand-built its own -- paying for the template and the
+        # authoring both.
+        sx, sy = screw_at if screw_at is not None else (outer_d / 2, flange[1] / 2)
+        part = trimesh.boolean.difference(
+            [part, _cylinder(screw_d / 2, base_h * 3, (sx, sy, base_h / 2))])
 
     extents = part.bounds[1] - part.bounds[0]
     return Built(
@@ -428,7 +442,7 @@ CATALOGUE: dict[str, tuple[str, str]] = {
         "a C-channel that snaps over a round thing, on an optional flange: cable "
         "clip, hose clamp, rail retainer -- axis along Z, so self-supporting",
         "c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0, "
-        "flange=(40, 22, 5), screw_d=4.5)",
+        "flange=(40, 22, 5), screw_d=4.5, screw_at=(8, 11))",
     ),
     "bolt_boss": (
         "a screw boss or standoff, reporting its annulus wall and aspect ratio",

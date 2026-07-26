@@ -113,6 +113,12 @@ lines to fill two fields is a page you pay for on every job to learn nothing you
    next action. It also writes `artifact_manifest.json` and `candidate_readiness.md` from
    those same measurements, so step 9 is a check, not an authoring job.
 
+   Run nothing else. `team_preflight.py` and `team_tools.contracts` re-screen the mesh this
+   just screened, from the same numbers — a second reading of one instrument, not a second
+   opinion. They belong to the fresh verifier, where a disagreement between two
+   implementations means something. A measured run spent turns hand-assembling a
+   `candidate_preflight.json` to feed one of them; that work bought nothing.
+
    **Do not write a verification script**, and do not retype its numbers into a receipt:
    they are a deterministic function of the exported mesh, and a hand-rolled copy drifts
    from the mesh it claims to describe. That is not hypothetical — one archived run's

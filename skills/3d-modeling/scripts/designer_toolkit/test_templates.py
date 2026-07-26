@@ -261,6 +261,20 @@ class CClipTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._clip(mouth_gap=30.0)
 
+    def test_the_screw_hole_goes_where_the_caller_says(self) -> None:
+        """A fixed position is what makes a template half-fit: a run reached for
+        this one, found the hole in the wrong place, and hand-built its own --
+        paying for the template and the authoring both."""
+        from designer_toolkit import metrics
+
+        here = self._clip(screw_at=(8.0, 11.0))
+        there = self._clip(screw_at=(30.0, 11.0))
+
+        self.assertNotAlmostEqual(here.part.volume, there.part.volume, places=6)
+        for built in (here, there):
+            self.assertAlmostEqual(0.0, metrics.overhang_area(built.part, threshold=-0.73),
+                                   places=6, msg="a repositioned hole must stay self-supporting")
+
     def test_it_works_without_a_flange(self) -> None:
         built = self._clip(flange=None, screw_d=0.0)
 
