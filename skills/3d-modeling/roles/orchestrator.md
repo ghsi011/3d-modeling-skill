@@ -108,7 +108,7 @@ and it decides which phases run, not how verbose the record is.
   DT=<skill>/scripts/dt.py
   python $DT templates                                   # which starting point fits
   python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --brief <project>/brief.md --updated-utc <iso> --out <project>
-  python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest
+  python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
 
   **Budget: about ten tool calls.** Read the brief, run `doctor` once if you are unsure of the

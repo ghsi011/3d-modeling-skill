@@ -37,16 +37,18 @@ def _dt(*args, cwd=None):
 
 
 def _built_project(root: Path) -> Path:
-    """A real gated candidate: the thing a verifier is handed."""
+    """A real gated candidate: the whole thing a verifier is handed.
+
+    Built through `direct` rather than build/plan/commission by hand, because
+    those three leave no `job_state.md` or `dimensions.md` -- an incomplete
+    project, which made the contract checks here fail for a reason that had
+    nothing to do with the audit.
+    """
     project = root / "job"
-    project.mkdir()
-    _dt("build", "--template", "c_clip", *_CLIP, "--out", str(project / "model.py"))
-    _dt("plan", "template", "--bbox", "40", "22", "14", "--job-id", "a",
-        "--updated-utc", "1970-01-01T00:00:00Z",
-        "--out", str(project / "print_plan_checks.json"))
-    _dt("commission", "--model", "model.py", "--plan", "print_plan_checks.json",
-        "--out", ".", "--job-id", "a", "--updated-utc", "1970-01-01T00:00:00Z",
-        "--no-render", cwd=project)
+    _dt("direct", "--job-id", "a", "--template", "c_clip", *_CLIP,
+        "--bbox", "40", "22", "14", "--updated-utc", "1970-01-01T00:00:00Z",
+        "--out", str(project), "--no-render",
+        "--rationale", "a benchmark fixture", "--acceptance", "nothing")
     return project
 
 
@@ -132,30 +134,29 @@ class TestAudit(unittest.TestCase):
             self.assertIn("feature-screw", ids)
             self.assertIn("feature-flange-mid", ids)
 
-    def test_a_direct_project_is_not_asked_for_a_report_nobody_writes(self) -> None:
-        """DIRECT dispatches nobody, so no verification_report.md exists and
-        `--require all` demands one. A measured run watched `audit` exit 1 on a
-        clean candidate for a reason that had nothing to do with the part, which
-        is how a gate teaches people to ignore it."""
+    def test_it_never_demands_the_report_it_is_the_input_to(self) -> None:
+        """`audit` produces the numbers a verification_report is written from, so
+        at audit time that report cannot exist. Requiring it made the first audit
+        of every job fail with REQUIRED_CONTRACT_MISSING -- which reads exactly
+        like a real defect, and was documented as the normal first pass."""
         from .audit import _required_contracts
 
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
-            job_state = project / "job_state.md"
+            for profile in ("DIRECT", "FULL"):
+                with self.subTest(profile=profile):
+                    (project / "job_state.md").write_text(
+                        "\n".join(["---", f"profile: {profile}", "---", ""]),
+                        encoding="utf-8")
+                    required = _required_contracts(project)
+                    self.assertNotIn("verification_report", required)
+                    self.assertIn("candidate_readiness", required)
 
-            job_state.write_text("---\nprofile: DIRECT\n---\n", encoding="utf-8")
-            self.assertNotIn("verification_report", _required_contracts(project))
-
-            job_state.write_text("---\nprofile: FULL\n---\n", encoding="utf-8")
-            self.assertEqual("all", _required_contracts(project))
-
-    def test_an_unreadable_job_state_requires_everything(self) -> None:
-        """Failing toward the stricter set: a project whose route cannot be read
-        is not a project whose route is DIRECT."""
-        from .audit import _required_contracts
-
+    def test_a_clean_project_audits_at_exit_zero_first_time(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            self.assertEqual("all", _required_contracts(Path(raw)))
+            root = Path(raw)
+            done, _payload = _audit(_built_project(root), root / "verify")
+            self.assertEqual(0, done.returncode, done.stderr[-600:])
 
     def test_writing_over_the_project_is_refused(self) -> None:
         """The comparison is against the designer's receipts. A run that writes

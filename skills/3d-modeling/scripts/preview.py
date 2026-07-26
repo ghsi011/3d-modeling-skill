@@ -356,15 +356,24 @@ def render_single(tm, output_path, title="Model Preview", width=_SINGLE_WIDTH, h
 
 
 def render_multi_view(tm, output_path, title="Model Preview", subtitle=None, view_size=DEFAULT_VIEW_SIZE):
-    """Render 6-view technical preview in a 3x2 grid.
+    """Render an 8-view technical preview in a 4x2 grid.
 
-    Views: isometric, front, right (top row), back-iso, top, bottom (bottom row).
+    All four sides get a square-on view, and that is the reason for eight rather
+    than six. The old set had `Right (X+)` and `Front (Y-)` orthogonal and left
+    -X and +Y to a single oblique isometric: a hive with its observation window
+    in the x=0 wall showed that window in none of the six frames. On `DIRECT`
+    this sheet is the entire visual guarantee -- no fresh context ever looks at
+    the part -- so a face no frame can see is a hole in the only evidence that is
+    conditioned on nothing.
+
     Builds the scene once and reuses a single renderer for all views.
     """
     views = [
         (25,  -60, "Isometric"),
         (5,   -90, "Front (Y-)"),
         (5,     0, "Right (X+)"),
+        (5,    90, "Back (Y+)"),
+        (5,   180, "Left (X-)"),
         (25,  120, "Back Isometric"),
         (90,  -90, "Top (Z+)"),
         (-90, -90, "Bottom (Z-)"),
@@ -384,8 +393,8 @@ def render_multi_view(tm, output_path, title="Model Preview", subtitle=None, vie
         if renderer is not None:
             renderer.delete()
 
-    # Compose 3x2 grid
-    cols = 3
+    # Compose 4x2 grid
+    cols = 4
     rows = 2
     gap = 4
     header_h = 40 + (20 if subtitle else 0)

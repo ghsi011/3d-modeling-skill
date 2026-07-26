@@ -52,7 +52,16 @@ def _cell(text: str) -> str:
 
 
 def build(commission: dict[str, Any], *, job_id: str, candidate_id: str,
-          revision: int, updated_utc: str) -> str:
+          revision: int, updated_utc: str, fresh_context: str | None = None) -> str:
+    """`fresh_context` is answered, never asserted.
+
+    It used to be the literal `true`, written by this tool on every report, and
+    validated by nothing. On a single-context run that is a straight falsehood in
+    a contract, produced by the pipeline itself -- and the whole charter rests on
+    a fresh context being able to disagree with the designer. No tool can know
+    whether the context invoking it has read the designer's reasoning, so it is
+    left for whoever does know, like every other judgment here.
+    """
     checks = commission.get("checks", [])
     export = commission.get("evidence", {}).get("export", {})
 
@@ -79,7 +88,7 @@ candidate_id: {candidate_id}
 candidate_stl_sha256: {export.get('file_sha256', '')}
 dimensions_revision: {_UNSET}
 print_plan_revision: {_UNSET}
-fresh_context: true
+fresh_context: {("true" if fresh_context == "yes" else "false") if fresh_context else _UNSET}
 updated_utc: {updated_utc}
 ---
 
@@ -114,16 +123,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--commission", type=Path, required=True,
                         help="the verifier's OWN commission.json, not the designer's")
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True, metavar="FILE",
+                        help="the report FILE to write, not a directory -- `commission` and "
+                             "`audit` both take a directory here, and passing `.` to this "
+                             "one raises PermissionError from inside pathlib, which says "
+                             "nothing about what went wrong")
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--candidate-id", default="candidate-01")
     parser.add_argument("--revision", type=int, default=1)
     parser.add_argument("--updated-utc", required=True)
+    parser.add_argument("--fresh-context", choices=("yes", "no"),
+                        help="whether the context writing this report is one that has not "
+                             "read the designer's reasoning. Omit it and the field is left "
+                             "for you to answer; a tool cannot know.")
     args = parser.parse_args(argv)
 
     commission = json.loads(args.commission.read_text(encoding="utf-8"))
+    if args.out.is_dir():
+        sys.stderr.write(
+            f"report: --out must be the report file, not a directory ({args.out}). "
+            "`commission` and `audit` both take a directory there, which is the trap; "
+            "pass e.g. --out verification_report.md\n")
+        return 2
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(build(commission, job_id=args.job_id,
+    args.out.write_text(build(commission, fresh_context=args.fresh_context, job_id=args.job_id,
                               candidate_id=args.candidate_id, revision=args.revision,
                               updated_utc=args.updated_utc), encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")

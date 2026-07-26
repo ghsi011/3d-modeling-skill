@@ -47,7 +47,11 @@ EXPOSURE_CLASS = frozenset(
 ARTIFACT_ROLE = frozenset(
     {"reference", "candidate", "coupon", "render", "source", "mating_reference", "other"}
 )
-ARTIFACT_TYPE = frozenset({"stl", "step", "svg", "png", "md", "json", "py", "3mf"})
+# `jpg` because `dt.py crop` writes JPEG, the orchestrator charter tells a reader
+# to zoom renders with it, and the contract says evidence a gate rests on must be
+# a manifest row or the citation "is prose" -- so the shipped zoom tool produced
+# output the shipped schema could not declare.
+ARTIFACT_TYPE = frozenset({"stl", "step", "svg", "png", "jpg", "md", "json", "py", "3mf"})
 UNITS = frozenset({"mm"})
 
 # Accepted contract_version values per contract. job_state/dimensions/print_plan/
@@ -59,6 +63,7 @@ ACCEPTED_CONTRACT_VERSIONS: dict[str, frozenset[int]] = {
     "print-plan": frozenset({4}),
     "verification-report": frozenset({4}),
     "artifact-manifest": frozenset({1}),
+    "candidate-readiness": frozenset({4}),
 }
 
 # Each contract is looked up in order: the Markdown the roles actually author
@@ -74,6 +79,12 @@ CANONICAL_FILENAMES: dict[str, tuple[str, ...]] = {
     "print_plan": ("print_plan.md", "print_plan.json", "print_plan_checks.json"),
     "verification_report": ("verification_report.md", "verification_report.json"),
     "artifact_manifest": ("artifact_manifest.json",),
+    # The designer's self-check. It is not an acceptance contract and carries no
+    # revision, but the verifier's checklist makes its presence a gate, so
+    # `--require` had to be able to name it -- and could not, which left the one
+    # step that says "treat this as untrusted completeness evidence" unable to
+    # confirm the evidence was even there.
+    "candidate_readiness": ("candidate_readiness.md",),
 }
 
 # Contracts with a full structural validator, which only runs on a JSON source.
@@ -86,6 +97,7 @@ CONTRACT_KIND_BY_KEY: dict[str, str] = {
     "print_plan": "print-plan",
     "verification_report": "verification-report",
     "artifact_manifest": "artifact-manifest",
+    "candidate_readiness": "candidate-readiness",
 }
 
 # Who may author each contract. Sets, not scalars, because two contracts have a
@@ -99,6 +111,7 @@ _EXPECTED_OWNERS: dict[str, frozenset[str]] = {
     "dimensions": frozenset({"metrologist", "orchestrator"}),
     "print_plan": frozenset({"print-engineer", "builtin-direct-template"}),
     "verification_report": frozenset({"verifier"}),
+    "candidate_readiness": frozenset({"cad-designer"}),
 }
 
 

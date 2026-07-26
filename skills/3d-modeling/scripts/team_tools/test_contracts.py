@@ -904,6 +904,24 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             verification_report=verification_report,
             artifact_manifest=manifest,
         )
+        # The designer's self-check. A project that reached verification has one,
+        # and `--require` can name it now, so a "full project" fixture without it
+        # is not full -- it is the shape that made the verifier's own checklist
+        # step unable to confirm the evidence it distrusts was even present.
+        (project_dir / "candidate_readiness.md").write_text(
+            "\n".join([
+                "---",
+                "contract: candidate-readiness",
+                "contract_version: 4",
+                "job_id: demo",
+                "revision: 1",
+                "owner: cad-designer",
+                "updated_utc: 1970-01-01T00:00:00Z",
+                "---",
+                "",
+                "# Candidate readiness",
+                "",
+            ]), encoding="utf-8")
         return {"reference_hash": reference_hash, "candidate_hash": candidate_hash}
 
     def test_full_project_validates_clean(self) -> None:

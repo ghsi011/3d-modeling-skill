@@ -206,22 +206,38 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
     }
 
 
-# A DIRECT job dispatches nobody, so no verification_report.md is ever written
-# and `all` demands one. Hardcoding `all` made `audit` exit 1 on a clean DIRECT
-# candidate for a reason that had nothing to do with the part -- which is how a
-# gate teaches people to ignore it.
-_DIRECT_CONTRACTS = "job_state,dimensions,print_plan,artifact_manifest"
+# Never `verification_report`: this command produces the numbers that report is
+# written from, so at audit time it cannot exist. Requiring it made the first
+# audit of every job fail with REQUIRED_CONTRACT_MISSING, which reads exactly
+# like a real defect and was documented as the normal first pass.
+_AT_AUDIT_TIME = "job_state,dimensions,print_plan,artifact_manifest,candidate_readiness"
 
 
 def _required_contracts(project: Path) -> str:
-    """What this project's own route says it should contain."""
-    try:
-        for line in (project / "job_state.md").read_text(encoding="utf-8").splitlines():
-            if line.startswith("profile:"):
-                return _DIRECT_CONTRACTS if line.split(":", 1)[1].strip() == "DIRECT" else "all"
-    except OSError:
-        pass
-    return "all"
+    """What this project should contain by the time an audit runs.
+
+    A DIRECT job also never has a verification_report, because it dispatches
+    nobody -- so both routes want the same set here, for different reasons.
+    """
+    return _AT_AUDIT_TIME
+
+
+def _delivered_candidate(project: Path) -> Path:
+    """The STL this project actually produced, not a guessed filename.
+
+    `commission --candidate-id C1` writes `C1.stl`, and this defaulted to
+    `candidate-01.stl` regardless -- so any job that named its candidate exited 2
+    here until the caller passed `--stl`. Two defaults that disagree about the
+    same file is a trap, so this one asks the manifest, which records what was
+    written, and only falls back to the conventional name.
+    """
+    manifest = _read_json(project / "artifact_manifest.json") or {}
+    for artifact in manifest.get("artifacts") or []:
+        if isinstance(artifact, dict) and artifact.get("role") == "candidate":
+            path = artifact.get("path")
+            if isinstance(path, str):
+                return project / path.replace("\\", "/")
+    return project / "candidate-01.stl"
 
 
 def _gather_views(project: Path, out_dir: Path) -> list[str]:
@@ -326,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     # straight through resolved against the wrong root.
     project = args.project.resolve()
     out = args.out.resolve()
-    stl = (args.stl or project / "candidate-01.stl").resolve()
+    stl = (args.stl or _delivered_candidate(project)).resolve()
     plan = (args.plan or project / "print_plan_checks.json").resolve()
     for path, what in ((stl, "candidate STL"), (plan, "print plan")):
         if not path.is_file():
