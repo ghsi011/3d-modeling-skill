@@ -140,5 +140,47 @@ class TestStackedExpectations(unittest.TestCase):
         self.assertEqual([], regions,
                          "the two parts declare regions at different heights")
 
+
+@unittest.skipIf(trimesh is None, "needs trimesh + manifold3d")
+class TestDegenerateParameters(unittest.TestCase):
+    """Each of these was reproduced returning a wrong answer rather than an
+    error. A template that builds a silently different part is worse than one
+    that refuses, because nothing downstream knows to look."""
+
+    CASES = (
+        ("an opening larger than the panel",
+         lambda: T.panel(width=100.0, depth=60.0, thickness=3.0,
+                         openings=({"kind": "rect", "x": 50.0, "y": 30.0,
+                                    "w": 200.0, "h": 200.0},))),
+        ("a negative diameter, which cut its absolute size and agreed with itself",
+         lambda: T.panel(width=100.0, depth=60.0, thickness=3.0,
+                         openings=({"kind": "round", "x": 50.0, "y": 30.0, "d": -5.0},))),
+        ("an opening hanging off the edge, reported as a negative wall",
+         lambda: T.panel(width=100.0, depth=60.0, thickness=3.0,
+                         openings=({"kind": "rect", "x": 95.0, "y": 30.0,
+                                    "w": 40.0, "h": 10.0},))),
+        ("a zero-width opening",
+         lambda: T.panel(width=100.0, depth=60.0, thickness=3.0,
+                         openings=({"kind": "rect", "x": 50.0, "y": 30.0,
+                                    "w": 0.0, "h": 10.0},))),
+        ("a negative corner radius",
+         lambda: T.device_case(device=(70.0, 150.0, 8.0), wall=2.0, clearance=0.25,
+                               corner_radius=-50.0)),
+        ("a negative floor, which shrank the box and reported the shrunken height",
+         lambda: T.segmented_box(inner=(374.7, 466.7, 100.0), wall=5.0, bed=256.0,
+                                 floor=-10.0)),
+        ("a negative inner size, which 'fitted the bed' by a sign accident",
+         lambda: T.segmented_box(inner=(-300.0, -300.0, 100.0), wall=5.0, bed=200.0)),
+        ("a negative tongue, silently replaced by the default",
+         lambda: T.segmented_box(inner=(374.7, 466.7, 100.0), wall=5.0, bed=256.0,
+                                 tongue=-3.0)),
+    )
+
+    def test_each_is_refused_with_a_message_naming_the_mistake(self) -> None:
+        for label, build in self.CASES:
+            with self.subTest(case=label):
+                with self.assertRaises(ValueError):
+                    build()
+
 if __name__ == "__main__":
     unittest.main()

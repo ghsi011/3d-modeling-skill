@@ -169,6 +169,38 @@ def box_shell(*, inner: tuple[float, float, float], wall: float, floor: float = 
     )
 
 
+def _check_opening(opening: dict[str, Any], index: int, width: float, depth: float) -> None:
+    """Refuse an opening that cannot mean what it says.
+
+    Every case here was reproduced returning a wrong answer rather than an
+    error: a negative diameter cut a hole of its absolute size *and* computed an
+    expectation from the square of it, so the two agreed and the gate passed; an
+    opening hanging off the edge produced `wall_mm = -15.0` and surfaced three
+    steps later as "wall -15.0 mm against a 0.80 mm floor", which describes a
+    placement mistake as a thickness one; and an opening larger than the panel
+    removed the whole plate, leaving a boolean result whose bounds are None and
+    a TypeError from deep inside the seating helper.
+    """
+    kind = opening.get("kind", "rect")
+    x, y = float(opening["x"]), float(opening["y"])
+    if kind == "round":
+        diameter = float(opening["d"])
+        if diameter <= 0:
+            raise ValueError(f"opening {index}: diameter must be positive, got {diameter}")
+        half_w = half_h = diameter / 2.0
+    else:
+        w, h = float(opening["w"]), float(opening["h"])
+        if min(w, h) <= 0:
+            raise ValueError(f"opening {index}: width and height must be positive, got {w} x {h}")
+        half_w, half_h = w / 2.0, h / 2.0
+    if not (0.0 <= x - half_w and x + half_w <= width
+            and 0.0 <= y - half_h and y + half_h <= depth):
+        raise ValueError(
+            f"opening {index} at ({x}, {y}) reaches outside the {width} x {depth} mm panel; "
+            "an opening that is not contained by the plate is a placement error, and the "
+            "wall report downstream will describe it as a negative thickness")
+
+
 def _opening_solid(opening: dict[str, Any], thickness: float) -> trimesh.Trimesh:
     kind = opening.get("kind", "rect")
     x, y = float(opening["x"]), float(opening["y"])
@@ -249,6 +281,8 @@ def panel(*, width: float, depth: float, thickness: float,
     """
     if min(width, depth, thickness) <= 0:
         raise ValueError(f"panel extents must be positive, got {(width, depth, thickness)}")
+    for index, opening in enumerate(openings, start=1):
+        _check_opening(opening, index, float(width), float(depth))
 
     plate = _box((width, depth, thickness), (width / 2, depth / 2, thickness / 2))
     if openings:
@@ -356,6 +390,10 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
     dw, dl, dt = (float(v) for v in device)
     if min(dw, dl, dt) <= 0:
         raise ValueError(f"device extents must be positive, got {device}")
+    if corner_radius < 0:
+        raise ValueError(f"corner_radius must not be negative, got {corner_radius}")
+    if clearance < 0:
+        raise ValueError(f"clearance must not be negative, got {clearance}")
 
     outer_w = dw + 2 * (clearance + wall)
     outer_l = dl + 2 * (clearance + wall)
@@ -649,6 +687,18 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
         raise ValueError(f"wall must be positive, got {wall}")
     if bed <= 0:
         raise ValueError(f"bed must be positive, got {bed}")
+    # The same guards `box_shell` has. Without them a negative inner size reached
+    # the cell arithmetic and came back as "already fits a 200 mm bed", which is
+    # true only by a sign accident, and a negative floor shrank the box while
+    # `assembled_mm` reported the shrunken height as if it were asked for.
+    if min(float(v) for v in inner) <= 0:
+        raise ValueError(f"inner extents must be positive, got {inner}")
+    if floor < 0:
+        raise ValueError(f"floor must not be negative, got {floor}")
+    if tongue < 0:
+        raise ValueError(f"tongue must not be negative, got {tongue}")
+    if clearance < 0:
+        raise ValueError(f"clearance must not be negative, got {clearance}")
     iw, id_, ih = (float(v) for v in inner)
     outer_x, outer_y = iw + 2 * wall_x, id_ + 2 * wall_y
     height = floor + ih
