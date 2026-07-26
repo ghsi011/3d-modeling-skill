@@ -446,8 +446,11 @@ python -m team_tools.contracts validate <project-dir> --require all
 
 `--require` promotes each named contract's absence to a `REQUIRED_CONTRACT_MISSING` error, so
 the exit code alone becomes a sound gate, and the names land in the receipt's
-`required_contracts` for review. At Phase 4 every contract should exist, so name them all;
-earlier phases name the subset that phase requires. Either way the verifier confirms the
+`required_contracts` for review. At Phase 4 of a dispatched job every contract should exist,
+so name them all; earlier phases name the subset that phase requires. `DIRECT` never names
+`all`: that route dispatches nobody, so no `verification_report.md` is ever written and `all`
+demands one — it names `job_state,dimensions,print_plan,artifact_manifest`, which is what it
+produces. Either way the verifier confirms the
 receipt's `validated_paths` names every contract it expected. (A project directory that does
 not exist is a hard exit `2` — a typo can never read as a pass.)
 
