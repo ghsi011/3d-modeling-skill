@@ -115,6 +115,7 @@ and it decides which phases run, not how verbose the record is.
 | `c_clip` | trimesh-manifold | a C-channel that snaps over a round bundle, on a mounting flange | `bore_d`, `flange_d`, `flange_t`, `flange_w`, `height`, `mouth_gap`, `screw_d`, `wall` |
 | `l_bracket` | trimesh-manifold | two plates at a right angle with a fastener hole through each: shelf bracket, mount, corner brace | `hole_d`, `hole_inset`, `leg_a`, `leg_b`, `thickness`, `width` |
 | `trim_ring` | build123d | a chamfered trim ring that drops into a round hole in a panel | `chamfer`, `hole_d`, `lip_t`, `lip_w`, `panel_t`, `wall` |
+| `vented_enclosure` | trimesh-manifold | a walled enclosure with a vent grid through one wall and four corner mounting bosses: electronics case, fan shroud, driver box | `boss_bore`, `boss_d`, `floor`, `inner_d`, `inner_h`, `inner_w`, `vent_cols`, `vent_h`, `vent_rows`, `vent_w`, `wall` |
 
   Write one `job.json` in the project directory and run one command:
 

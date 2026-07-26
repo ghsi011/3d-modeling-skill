@@ -130,6 +130,11 @@ def _bracket_build(params: dict[str, Any]):
     return build_l_bracket(params)
 
 
+def _vented_build(params: dict[str, Any]):
+    from .backends.trimesh_manifold import build_vented_enclosure
+    return build_vented_enclosure(params)
+
+
 def _ring_build(params: dict[str, Any]):
     from .backends.build123d_backend import build_trim_ring
     return build_trim_ring(params)
@@ -253,7 +258,54 @@ def _registry() -> dict[str, CertifiedTemplate]:
         profile_marks=X.l_bracket_profile_marks, volume=X.l_bracket_volume,
     )
 
-    return {t.name: t for t in (c_clip, box_shell, l_bracket, trim_ring)}
+    vented_enclosure = CertifiedTemplate(
+        name="vented_enclosure", version="1.0.0", domain_id="vented_enclosure@1.0.0/d1",
+        backend="trimesh-manifold",
+        covers="a walled enclosure with a vent grid through one wall and four "
+               "corner mounting bosses: electronics case, fan shroud, driver box",
+        bounds={
+            "inner_w": Bound(40.0, 230.0, "mm", "narrower will not take a vent grid; "
+                                                "wider leaves a 256 mm bed"),
+            "inner_d": Bound(30.0, 230.0, "mm", "same bed limit, across"),
+            "inner_h": Bound(20.0, 240.0, "mm", "shorter has no room for vent rows"),
+            "wall": Bound(1.6, 10.0, "mm", "four perimeters at 0.4; the vents cut "
+                                           "through it and a thinner wall tears"),
+            "floor": Bound(1.6, 20.0, "mm", "four layers at 0.2 mm minimum"),
+            "vent_cols": Bound(1, 40, "count", "one column is a slot; past 40 the "
+                                               "webs between vents drop under a nozzle"),
+            "vent_rows": Bound(1, 20, "count", "same web limit vertically"),
+            "vent_w": Bound(2.0, 40.0, "mm", "narrower than 2 will not print open"),
+            "vent_h": Bound(1.0, 40.0, "mm", "shorter than 1 closes up in the slicer"),
+            "boss_d": Bound(5.0, 30.0, "mm", "smaller cannot hold a fastener"),
+            "boss_bore": Bound(1.5, 20.0, "mm", "common self-tapping pilots"),
+        },
+        constraints=(
+            Constraint("boss_bore < boss_d - 2",
+                       lambda p: float(p["boss_bore"]) < float(p["boss_d"]) - 2.0,
+                       "less than a millimetre of boss wall each side splits"),
+            Constraint("4 * boss_d < min(inner_w, inner_d)",
+                       lambda p: 4.0 * float(p["boss_d"]) < min(float(p["inner_w"]),
+                                                                float(p["inner_d"])),
+                       "the bosses would meet in the middle and there would be no cavity"),
+            Constraint("vent_cols * (vent_w + 2) < inner_w + 2*wall",
+                       lambda p: int(p["vent_cols"]) * (float(p["vent_w"]) + 2.0)
+                       < float(p["inner_w"]) + 2.0 * float(p["wall"]),
+                       "the vents would run into each other with no web between"),
+            Constraint("vent_rows * (vent_h + 2) < inner_h",
+                       lambda p: int(p["vent_rows"]) * (float(p["vent_h"]) + 2.0)
+                       < float(p["inner_h"]),
+                       "the vent rows would merge into one opening"),
+            Constraint("wall < min(inner_w, inner_d) / 4",
+                       lambda p: float(p["wall"]) < min(float(p["inner_w"]),
+                                                        float(p["inner_d"])) / 4.0,
+                       "the walls would consume the cavity"),
+        ),
+        build=_vented_build, expectations=X.vented_enclosure_expectations,
+        bbox=X.vented_enclosure_bbox, profile_marks=X.vented_enclosure_profile_marks,
+        volume=X.vented_enclosure_volume,
+    )
+
+    return {t.name: t for t in (c_clip, box_shell, l_bracket, vented_enclosure, trim_ring)}
 
 
 _CACHE: dict[str, CertifiedTemplate] | None = None

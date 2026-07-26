@@ -23,6 +23,10 @@ ENGINE = "manifold"
 # import: the two sides must not be able to move together.
 SCREW_X_FRACTION = 0.2
 
+# How far a free-standing boss sits from the wall beside it. Not zero: see
+# `build_vented_enclosure` for what tangency costs.
+BOSS_CLEARANCE_MM = 1.0
+
 
 def _boolean(op: str, meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     fn = {"difference": trimesh.boolean.difference,
@@ -190,8 +194,65 @@ def build_l_bracket(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
     return seated(part), ops
 
 
+
+
+def build_vented_enclosure(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
+    """A walled box with a vent grid through one wall and mounting bosses inside.
+
+    The complex one, and complex in the way that matters: `cols * rows` cuts plus
+    four bosses is dozens of booleans against one solid, which is where a mesh
+    kernel actually gets tested. The vents go through the +Y wall only, so the
+    other three stay solid and the wall-ring expectation has something to hold.
+    """
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    cols, rows = int(p["vent_cols"]), int(p["vent_rows"])
+    vw, vh = float(p["vent_w"]), float(p["vent_h"])
+    boss_d, boss_bore = float(p["boss_d"]), float(p["boss_bore"])
+
+    ow, od, oh = iw + 2.0 * wall, id_ + 2.0 * wall, floor + ih
+    ops: list[str] = []
+
+    part = _boolean("difference", [
+        _box((ow, od, oh), (ow / 2.0, od / 2.0, oh / 2.0)),
+        _box((iw, id_, ih + wall), (ow / 2.0, od / 2.0, floor + (ih + wall) / 2.0)),
+    ])
+    ops.append("difference: shell - cavity")
+
+    # Every vent cut in one union, then one subtraction. A chain of `cols*rows`
+    # sequential differences costs the same booleans and gives the kernel more
+    # chances to leave a sliver between them.
+    pitch_x, pitch_z = ow / (cols + 1), ih / (rows + 1)
+    cutters = []
+    for i in range(cols):
+        for j in range(rows):
+            cutters.append(_box((vw, wall * 3.0, vh),
+                                (pitch_x * (i + 1), od - wall / 2.0,
+                                 floor + pitch_z * (j + 1))))
+    part = _boolean("difference", [part, _boolean("union", cutters)])
+    ops.append(f"difference: part - {cols * rows} vents, unioned first")
+
+    # Stood clear of the walls rather than tangent to them. A boss whose surface
+    # exactly touches the wall's produces an edge where three faces meet: the
+    # mesh has no open boundary and is still not a volume, so it exports fine,
+    # reimports fine, and the boolean engine then refuses to measure it. Tangency
+    # is the trap -- overlap or clearance, never touching.
+    inset = wall + boss_d / 2.0 + BOSS_CLEARANCE_MM
+    bosses = [_cylinder(boss_d / 2.0, ih, (x, y, floor + ih / 2.0))
+              for x in (inset, ow - inset) for y in (inset, od - inset)]
+    part = _boolean("union", [part, _boolean("union", bosses)])
+    ops.append("union: four corner bosses")
+
+    bores = [_cylinder(boss_bore / 2.0, ih + 2.0, (x, y, floor + ih / 2.0))
+             for x in (inset, ow - inset) for y in (inset, od - inset)]
+    part = _boolean("difference", [part, _boolean("union", bores)])
+    ops.append("difference: four boss bores, overshot")
+    return seated(part), ops
+
+
 _BUILDERS.update({"c_clip": build_c_clip, "box_shell": build_box_shell,
-                  "l_bracket": build_l_bracket})
+                  "l_bracket": build_l_bracket,
+                  "vented_enclosure": build_vented_enclosure})
 
 __all__ = ["TrimeshManifoldBackend", "build_c_clip", "build_box_shell",
-           "build_l_bracket", "seated", "ENGINE"]
+           "build_l_bracket", "build_vented_enclosure", "seated", "ENGINE"]

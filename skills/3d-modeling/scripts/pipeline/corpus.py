@@ -47,7 +47,7 @@ MAX_FALSE_NEGATIVE = 0.05
 MAX_FALSE_POSITIVE = 0.02
 # Every certified template, not a sample. A global flag covering a template the
 # corpus never saw is the same stale-True problem one level up.
-MIN_TEMPLATES = 4
+MIN_TEMPLATES = 5
 
 
 @dataclasses.dataclass
@@ -363,6 +363,13 @@ PARAMS = {
     # meant a global CALIBRATED covering a template nobody had measured.
     "trim_ring": {"hole_d": 60.0, "lip_w": 5.0, "panel_t": 18.0, "lip_t": 3.0,
                   "wall": 2.0, "chamfer": 1.0},
+    # The complex one: 72 vent cuts and four bosses, ~4,500 faces. A screen
+    # calibrated only on simple shapes says nothing about the parts that are
+    # actually hard to get right.
+    "vented_enclosure": {"inner_w": 180.0, "inner_d": 120.0, "inner_h": 90.0,
+                         "wall": 3.0, "floor": 3.0, "vent_cols": 12, "vent_rows": 6,
+                         "vent_w": 8.0, "vent_h": 4.0, "boss_d": 10.0,
+                         "boss_bore": 4.2},
 }
 
 

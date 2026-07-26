@@ -296,3 +296,100 @@ def trim_ring_volume(p: dict[str, Any]) -> float:
     chamfer_area = cham * cham / 2.0
     centroid_r = outer_r - cham / 3.0
     return skirt + lip - chamfer_area * 2.0 * math.pi * centroid_r
+
+
+# ---------------------------------------------------------------------------
+# vented_enclosure -- the complex one
+# ---------------------------------------------------------------------------
+#
+# Written the same way as every other closed form here: from the parameters,
+# never from the solid. The vents and bosses make the arithmetic longer, not
+# different -- and a template with 72 cuts is exactly where an expectation
+# derived from the mesh would start agreeing with whatever the boolean produced.
+
+# The bore overshoots the boss by this much at each end so its faces never land
+# coplanar with the floor. Written here independently of the builder's own
+# overshoot: if the two ever disagree the volume check says so, which is the
+# entire point of not sharing the constant.
+_BORE_OVERSHOOT_MM = 1.0
+
+
+def vented_enclosure_bbox(p: dict[str, Any]) -> dict[str, float]:
+    wall = float(p["wall"])
+    return {"x": float(p["inner_w"]) + 2.0 * wall,
+            "y": float(p["inner_d"]) + 2.0 * wall,
+            "z": float(p["floor"]) + float(p["inner_h"])}
+
+
+def _boss_annulus(p: dict[str, Any]) -> float:
+    """One boss's cross-section: its disc less its bore.
+
+    The bosses stand clear of the walls, so each contributes a whole annulus
+    rather than a lens overlapping one. That clearance is load-bearing in two
+    senses: it keeps this arithmetic exact, and it avoids tangency -- a boss
+    whose surface exactly touches a wall's makes an edge shared by three faces,
+    which is not a volume even though nothing about it is open.
+    """
+    return math.pi / 4.0 * (float(p["boss_d"]) ** 2 - float(p["boss_bore"]) ** 2)
+
+
+def vented_enclosure_expectations(p: dict[str, Any]) -> list[dict[str, Any]]:
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    boss_d = float(p["boss_d"])
+    ow, od = iw + 2.0 * wall, id_ + 2.0 * wall
+
+    footprint = ow * od
+    ring = footprint - iw * id_
+    # Sampled just above the floor, below the lowest vent: the first vent sits at
+    # `floor + ih/(rows+1)` and is `vent_h` tall, so half a millimetre up is clear
+    # of it by construction and the reading is the walls plus four bosses.
+    probe = floor + min(0.5, ih * 0.02)
+
+    return [
+        {"feature_id": "floor-section", "kind": "section_area",
+         "at": {"z": floor / 2.0}, "value_mm2": footprint,
+         "note": "solid floor below the cavity"},
+        {"feature_id": "wall-and-bosses", "kind": "section_area",
+         "at": {"z": probe}, "value_mm2": ring + 4.0 * _boss_annulus(p),
+         "note": "the four walls plus four boss annuli, below the lowest vent"},
+        {"feature_id": "bed-footprint", "kind": "bed_contact", "value_mm2": footprint,
+         "note": "the enclosure meets the bed on its whole floor"},
+        # Clear of the bosses on purpose: this asks whether the usable volume is
+        # usable, and a window overlapping a declared boss would answer a
+        # different question.
+        {"feature_id": "cavity", "kind": "void_region",
+         "at": {"x": ow / 2.0, "y": od / 2.0}, "z": floor + ih / 2.0,
+         "size_mm": [iw - 2.0 * boss_d, id_ - 2.0 * boss_d],
+         "note": "nothing may stand in the middle of the usable volume"},
+    ]
+
+
+def vented_enclosure_profile_marks(p: dict[str, Any]) -> dict[str, list[float]]:
+    """Every height the section legitimately jumps: the floor, each vent's top
+    and bottom, and the top of the walls."""
+    ih, floor = float(p["inner_h"]), float(p["floor"])
+    rows, vh = int(p["vent_rows"]), float(p["vent_h"])
+    pitch = ih / (rows + 1)
+    marks = [0.0, floor, floor + ih]
+    for j in range(rows):
+        centre = floor + pitch * (j + 1)
+        marks += [centre - vh / 2.0, centre, centre + vh / 2.0]
+    return {"z": sorted(marks)}
+
+
+def vented_enclosure_volume(p: dict[str, Any]) -> float:
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    cols, rows = int(p["vent_cols"]), int(p["vent_rows"])
+    vw, vh = float(p["vent_w"]), float(p["vent_h"])
+    boss_d, boss_bore = float(p["boss_d"]), float(p["boss_bore"])
+    ow, od = iw + 2.0 * wall, id_ + 2.0 * wall
+
+    shell = ow * od * (floor + ih) - iw * id_ * ih
+    vents = cols * rows * vw * vh * wall
+    bosses = 4.0 * math.pi / 4.0 * boss_d ** 2 * ih
+    # Each bore runs the boss height plus one overshoot into the floor; the other
+    # overshoot leaves the solid entirely and removes nothing.
+    bores = 4.0 * math.pi / 4.0 * boss_bore ** 2 * (ih + _BORE_OVERSHOOT_MM)
+    return shell - vents + bosses - bores
