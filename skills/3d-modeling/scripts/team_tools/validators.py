@@ -149,6 +149,13 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
         issues.append(error("MISSING_FIELD", f"{where}.job_id", "required non-empty string field is missing"))
     if key == "job_state" and "risk_class" in data:
         issues += check_enum(data, "risk_class", RISK_CLASS, where)
+    if key == "job_state" and "profile" in data:
+        # `PROFILE` sat here unused while `profile` went unchecked, so a job
+        # could declare a route that does not exist and validate clean. One did:
+        # an orchestrator wrote `COMPACT`, retired long before, and nothing
+        # objected -- the route decides which phases run, so an unknown value
+        # means nobody knows what the job is supposed to do.
+        issues += check_enum(data, "profile", PROFILE, where)
     if key != "artifact_manifest":
         revision = data.get("revision")
         if not isinstance(revision, int) or isinstance(revision, bool):

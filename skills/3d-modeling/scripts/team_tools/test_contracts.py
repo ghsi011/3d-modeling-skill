@@ -501,6 +501,26 @@ class PrintPlanValidatorTest(unittest.TestCase):
 
             self.assertEqual([], [r for r in rows if r["status"] == "MISMATCH"], rows)
 
+    def test_a_route_that_does_not_exist_is_rejected(self) -> None:
+        """`PROFILE` was defined and never checked. An orchestrator wrote
+        `COMPACT` -- retired long before -- and `validate` passed it. The profile
+        decides which phases run, so an unknown one means nobody knows what the
+        job is meant to do."""
+        job = clone(_JOB_STATE)
+        job["profile"] = "COMPACT"
+
+        issues = V.validate_contract_header(job, key="job_state", where="job_state")
+
+        self.assertIn("BAD_ENUM@job_state.profile", issue_ids(issues))
+
+    def test_each_real_route_validates(self) -> None:
+        for profile in sorted(V.PROFILE):
+            with self.subTest(profile=profile):
+                job = clone(_JOB_STATE)
+                job["profile"] = profile
+                issues = V.validate_contract_header(job, key="job_state", where="job_state")
+                self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
     def test_a_direct_jobs_plan_filename_is_recognised(self) -> None:
         """A DIRECT job has only `print_plan_checks.json`. While that was not a
         canonical name, `validate --require all` could never exit zero there --

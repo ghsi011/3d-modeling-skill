@@ -116,25 +116,23 @@ one, so reading its patterns is a page bought and unused:
    axis because six separate runs each rediscovered that a horizontal bore's crown cannot be
    removed by any surrounding geometry.
 
-   Where a shape fits, the whole deliverable is this — and nothing more is expected of it:
+   Where a shape fits, do not type the model at all — `build` writes it, and refuses parameters
+   the template rejects before any of them reach the gate:
 
-   ```python
-   """Cable-management clip: C-channel over a countersunk mounting flange."""
-   from designer_toolkit.templates import c_clip
-
-   _built = c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0,
-                   flange=(40.0, 22.0, 5.0),
-                   screw_d=4.5, screw_at=(8.0, 11.0), countersink_d=9.0)
-
-   PARAMS = _built.params
-   part = _built.part
+   ```bash
+   python <skill>/scripts/dt.py build --template c_clip \
+       --param bore_d=12.0 --param wall=3.0 --param height=9.0 --param mouth_gap=9.0 \
+       --param 'flange=(40.0, 22.0, 5.0)' --param screw_d=4.5 \
+       --param 'screw_at=(8.0, 11.0)' --param countersink_d=9.0 --out model.py
    ```
 
    Every number traced from `dimensions.md`; `PARAMS` comes back from the template rather than
-   being maintained by hand. Then run the gate once. A `DIRECT` job that fits a template is
-   this file, one gate call, a look at the two renders, two judgment fields and a short
-   `print_notes.md` — if you find yourself exploring well beyond that, the shape probably does
-   not fit after all, and hand-writing it is the faster answer than fighting the parameters.
+   being maintained by hand. What lands is ordinary readable source — read it, and edit it if
+   the part needs a feature the template does not carry. Then run the gate once. A `DIRECT` job
+   that fits a template is that one command, one gate call, a look at the two renders, two
+   judgment fields and a short `print_notes.md`; build through gate measures under four seconds
+   end to end. If you find yourself exploring well beyond that, the shape probably does not fit
+   after all, and hand-writing it is the faster answer than fighting the parameters.
 
    Where no shape fits, hand-write it in the commissioned backend and read that backend's
    patterns. Everything else about the commission is identical either way.

@@ -124,16 +124,16 @@ and it decides which phases run, not how verbose the record is.
   **You do the whole thing yourself. No dispatches.**
 
   A dispatch costs four to six minutes whatever it contains — measured: an agent asked to run
-  four commands totalling 4.4 seconds took 6.41. A `DIRECT` job's actual work is a six-line
-  model, one gate call and a look, so two dispatches spend eleven minutes of overhead on about
-  a second of computation. That is the whole reason this route exists.
+  four commands totalling 4.4 seconds took 6.41. A `DIRECT` job's actual work is four commands
+  and a look, so two dispatches spend eleven minutes of overhead on under four seconds of
+  computation. That is the whole reason this route exists.
 
   ```bash
   DT=<skill>/scripts/dt.py
   python $DT templates                                   # which starting point fits
   python $DT plan template --bbox X Y Z --job-id <job>         --updated-utc <iso> --out <project>/print_plan_checks.json
   python $DT plan check <project>/print_plan_checks.json
-  # write model.py: import the template, call it, expose PARAMS and part
+  python $DT build --template <name> --param k=v ... --out model.py
   python $DT commission --model model.py --plan print_plan_checks.json         --out . --job-id <job> --updated-utc <iso>
   python -m team_tools.contracts validate <project> --require all
   ```
