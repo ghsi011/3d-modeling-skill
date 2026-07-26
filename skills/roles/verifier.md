@@ -93,9 +93,15 @@ Read `job_state.md`'s profile first, because it decides which of these checks ha
 all — and a check with no input is not a check you owe more cheaply, it is one with nothing
 to compare against.
 
-- **`DIRECT`** — the dimensions were stated, not recovered, so there is no photograph to audit
-  a sheet against, no reference to overlay, and no metrologist judgment to re-derive. The whole
-  verification is these four commands and one look, in this order:
+- **`DIRECT`** — you are not normally dispatched on one. That route has the orchestrator build
+  and check the part in its own turns, and its delivery says so in as many words. So if you
+  are reading this, somebody wanted a fresh pair of eyes on a part its own author already
+  passed — which makes the look the entire point of your being here, not a formality after the
+  numbers.
+
+  The dimensions were stated rather than recovered, so there is no photograph to audit a sheet
+  against, no reference to overlay, and no metrologist judgment to re-derive. What is left is
+  one command and one long look:
 
   ```bash
   V=<your-own-dir>                       # never the project root
