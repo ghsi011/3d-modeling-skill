@@ -214,7 +214,7 @@ def compare_paired_stl_step(
     artifact (or vice versa) and both bounding boxes can be established, flag a
     mismatch. STEP loading commonly requires an optional OCC backend
     (e.g. cascadio) that may not be installed; when it cannot be loaded this is
-    silently skipped (informational), matching the "trimesh/cadquery only if
+    silently skipped (informational), matching the "trimesh only if
     trivially available, else STL bbox + declared" instruction -- it never
     blocks on a missing optional backend.
     """

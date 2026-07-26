@@ -56,7 +56,7 @@ _JOB_STATE = {
     "mode": "PIPELINE",
     "profile": "FITTED",
     "state": "CANDIDATE_BUILD",
-    "backend": "cadquery",
+    "backend": "build123d",
     "active_candidate": "none",
     "updated_utc": "2026-01-01T00:00:00Z",
     "route": "unit test route",
@@ -856,7 +856,7 @@ class ArtifactManifestFileChecksTest(unittest.TestCase):
         # STEP loading needs an optional OCC backend (e.g. cascadio) that is
         # not part of this project's dependency set; the pairing check must
         # skip, not crash or falsely report a mismatch, per the "trimesh/
-        # cadquery only if trivially available" instruction.
+        # only if trivially available" instruction.
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
             _write_box_stl(project_dir / "ref.stl", (2, 2, 2))

@@ -49,7 +49,7 @@ SKIP_DIRS = {"__pycache__", ".git"}
 # Handed to every benchmark agent, because a measurement of this skill has to be
 # a measurement of *this* skill. A host can have other skills installed whose
 # trigger descriptions cover the same ground -- one here fires on "3D print",
-# "STL", "enclosure", "bracket" and "CadQuery" and opens by telling the reader to
+# "STL", "enclosure" and "bracket" and opens by telling the reader to
 # pip install a CAD kernel, which is the opposite of the design being measured.
 # Nothing in a subagent's environment stops both loading, and a run that followed
 # the wrong one would look like a result rather than a mistake.
