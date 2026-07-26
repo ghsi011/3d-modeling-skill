@@ -95,8 +95,8 @@ updated_utc: {updated_utc}
 # Independent verification
 
 Numeric columns below are transcribed from this verifier's own recomputation
-against the delivered STL. Every `{_UNSET}` is yours to answer, and the report is
-not complete until none remain.
+against the delivered STL. Every field left blank below is yours to answer, and the
+report is not complete while any remain.
 
 ## Input/upstream audit
 | Input/claim | Expected revision/hash/datum | Independent observation | Result | Evidence |

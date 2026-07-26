@@ -118,3 +118,27 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlaceholderInProseTest(unittest.TestCase):
+    def test_the_marker_appears_only_in_fields_never_in_the_instructions(self) -> None:
+        """"Is anything still unanswered?" is a grep for the marker, and the
+        instructional sentence used to contain one -- so the answer was always
+        yes, however complete the report. A verifier had to delete the sentence
+        to satisfy its own completion check."""
+        drafted = report.build({"checks": [], "evidence": {"export": {}}},
+                               job_id="j", candidate_id="c", revision=1,
+                               updated_utc="t", fresh_context="no")
+
+        for line in drafted.splitlines():
+            if report._UNSET not in line:
+                continue
+            before = line.split(report._UNSET)[0]
+            with self.subTest(line=line[:60]):
+                self.assertTrue(
+                    line.startswith("|")            # a table cell to fill
+                    or line.startswith(report._UNSET)  # the answer slot itself
+                    or before.rstrip().endswith(":"),  # a frontmatter field
+                    "a marker must be a slot to answer, never part of a sentence "
+                    "explaining what the markers mean -- that sentence made "
+                    "'is anything unanswered?' always true")
