@@ -26,13 +26,27 @@ from designer_toolkit import commission  # noqa: E402
 
 
 def _plan(**overrides):
+    """A plan the gate can actually be run against.
+
+    This fixture used to omit `model_to_printer_matrix`, `bed_z_mm`,
+    `bed_tolerance_mm`, `allowed_contact_class` and `expected_bbox_mm` -- so
+    every test built on it was exercising `planned_placement`'s fallback to
+    `orient.best` rather than a declared orientation, and the envelope check
+    silently skipped. It was exactly the shape of plan `commission` accepted
+    without complaint until it started validating what it reads.
+    """
     plan = {
         "contract": "print-plan", "contract_version": 4, "job_id": "t", "revision": 1,
         "owner": "print-engineer",
         "support_rules": [{
             "id": "S-01", "disposition": "SUPPORT_ALLOWED",
+            "allowed_contact_class": "COSMETIC_NON_MATING",
             "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0,
+            "model_to_printer_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            "bed_z_mm": 0.0, "bed_tolerance_mm": 0.05,
         }],
+        "expected_bbox_mm": {"x": 30.0, "y": 20.0, "z": 10.0},
+        "bbox_tolerance_mm": 0.5,
         "interfaces": [], "edges": [],
     }
     plan.update(overrides)
@@ -80,8 +94,10 @@ class EnvelopeCheckTest(unittest.TestCase):
         nothing counted them, and the gate exited zero with status READY."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
+            plan = _plan()
+            del plan["expected_bbox_mm"]
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
-                                    plan=_plan(), render=False)
+                                    plan=plan, render=False)
 
             envelope = next(c for c in result.checks if c.id == "envelope")
             self.assertEqual("FAIL", envelope.result)
@@ -410,6 +426,50 @@ class CliTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             self.assertIn("FAIL envelope", completed.stderr)
             self.assertEqual(json.loads(completed.stdout)["verdict"], "FAIL")
+
+    def test_an_ungateable_plan_is_refused_before_any_geometry_is_built(self) -> None:
+        """`plan check` was a separate command somebody had to remember to run.
+        Skipped, a rule with no `model_to_printer_matrix` still reached
+        `planned_placement`, which falls back to `orient.best` and renames the
+        placement -- so the gate screened the orientation the part prints best
+        in, reported PASS, and said nothing about the one the plan asked for."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan()
+            del plan["support_rules"][0]["model_to_printer_matrix"]
+            plan_path = work / "plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "designer_toolkit.commission",
+                 "--stl", str(_box_stl(work)), "--plan", str(plan_path),
+                 "--out", str(work / "out"), "--no-render",
+                 "--updated-utc", "2026-01-01T00:00:00Z"],
+                cwd=_SCRIPTS, capture_output=True, text=True, check=False,
+            )
+
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("model_to_printer_matrix", completed.stderr)
+            self.assertFalse((work / "out").exists(), "nothing should have been built")
+
+    def test_the_receipt_says_how_much_of_the_gate_ran(self) -> None:
+        """PASS says nothing failed; it does not say much ran, and a reader
+        takes `status: READY` to mean both."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(), render=False)
+
+            coverage = result.as_dict()["coverage"]
+            self.assertEqual(coverage["declared"], coverage["ran"] + len(coverage["skipped"]))
+            self.assertIn("fit", coverage["skipped"],
+                          "a plan declaring no interfaces measures no fit")
+
+            from . import receipts
+            text = receipts.build_readiness(result.as_dict(), job_id="t",
+                                            updated_utc="2026-01-01T00:00:00Z")
+            self.assertIn(f"{coverage['ran']} of {coverage['declared']} checks ran", text)
+            self.assertIn("`fit`", text)
 
     def test_it_writes_the_evidence_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

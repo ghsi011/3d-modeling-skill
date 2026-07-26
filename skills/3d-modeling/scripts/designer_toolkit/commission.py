@@ -57,9 +57,29 @@ class Commission:
     def failed(self) -> list[Check]:
         return [c for c in self.checks if c.result == _FAIL]
 
+    @property
+    def coverage(self) -> dict[str, Any]:
+        """How much of the gate actually ran.
+
+        `PASS` and "every check ran and passed" are not the same statement, and
+        the receipt has only ever carried the first. A run whose STEP export,
+        interface fit and every edge treatment all SKIPPED still reported
+        `verdict: PASS` and `status: READY` -- true, and read by a human as far
+        more assurance than four executed checks can carry. On the `DIRECT`
+        route, where the built-in plan declares no interfaces and no edges and
+        no fresh verifier ever re-derives any of it, that is most of the gate.
+        """
+        skipped = [c.id for c in self.checks if c.result == _SKIP]
+        return {
+            "declared": len(self.checks),
+            "ran": len(self.checks) - len(skipped),
+            "skipped": skipped,
+        }
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "verdict": _FAIL if self.failed else _PASS,
+            "coverage": self.coverage,
             "checks": [c.as_dict() for c in self.checks],
             "evidence": self.evidence,
             "judgment_required": {
@@ -649,6 +669,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
+
+    # The gate reads this plan and never checked it, so `plan check` was a
+    # separate command somebody had to remember. Skip it and a rule missing
+    # `model_to_printer_matrix` still reached `planned_placement`, which falls
+    # back to `orient.best` and renames the placement -- so the run screened the
+    # orientation the part would print best in, reported PASS, and said nothing
+    # about the orientation the plan actually asked for. Answering a different
+    # question quietly is worse than refusing.
+    from .plan import validate_plan
+    plan_problems = validate_plan(plan)
+    if plan_problems:
+        sys.stderr.write("commission: the plan cannot be gated against:\n")
+        for problem in plan_problems:
+            sys.stderr.write(f"  {problem}\n")
+        sys.stderr.write("Fix the plan, or regenerate it with `dt.py plan template`.\n")
+        return 2
+
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
                          reference=args.reference, render=not args.no_render,

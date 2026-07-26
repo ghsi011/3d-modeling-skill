@@ -181,6 +181,21 @@ def build_readiness(
     rendered = any(c["id"] == "render" and c["result"] == "SKIPPED"
                    for c in commission.get("checks", []))
     visual = _BLOCKED if rendered else _UNSET
+
+    # `PASS` says nothing failed. It does not say much ran, and a reader takes
+    # `status: READY` to mean both. A run whose STEP export, interface fit and
+    # every edge treatment SKIPPED reported READY off four executed checks --
+    # and on the DIRECT route, whose built-in plan declares no interfaces and no
+    # edges, that is the normal case rather than an unlucky one.
+    coverage = commission.get("coverage") or {}
+    declared, ran = coverage.get("declared", 0), coverage.get("ran", 0)
+    skipped = coverage.get("skipped") or []
+    coverage_line = f"**{ran} of {declared} checks ran.**"
+    if skipped:
+        coverage_line += (
+            f" These did not, and this document asserts nothing about them: "
+            f"`{'`, `'.join(skipped)}`. Treat every one as an open question a "
+            f"reader has to close by other means.")
     revisions = source_revisions or {}
     # No default of 1. A binding invented here is worse than an absent one: it
     # asserts a revision nobody checked, and `contracts status` -- the only
@@ -211,6 +226,8 @@ re-imported exported STL, not on the in-memory model. This document never
 passes a Phase-4 gate on a verifier's behalf.
 
 ## Deterministic checks
+
+{coverage_line}
 
 | ID | Check | Result | Measured |
 |---|---|---|---|
