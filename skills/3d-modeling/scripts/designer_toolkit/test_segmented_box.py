@@ -199,6 +199,44 @@ class TestStackedExpectations(unittest.TestCase):
         self.assertEqual([], regions,
                          "the two parts declare regions at different heights")
 
+    def test_a_void_carries_over_where_a_section_cannot(self) -> None:
+        """The same plate the section rule has to give up on.
+
+        Two boxes of different heights declare their wall rings at different
+        planes, so no section survives the layout and the plate is left with one
+        bed-contact number for the whole thing. A void is local -- it reads its
+        own rectangle and nothing else on the plate can reach it -- so it moves
+        with its part exactly like a hole, and both cavities stay measured.
+        """
+        from . import features as F
+
+        plate = T.stack(T.box_shell(inner=(40.0, 30.0, 20.0), wall=2.0, floor=2.0),
+                        T.box_shell(inner=(30.0, 30.0, 15.0), wall=2.0, floor=2.0), gap=5.0)
+        self.assertEqual([], [r for r in plate.expected if r["kind"] == "solid_region"])
+
+        voids = [r for r in plate.expected if r["kind"] == "void_region"]
+        self.assertEqual(["cavity-0", "cavity-1"], sorted(r["id"] for r in voids))
+        xs = [r["at"][0] for r in voids]
+        self.assertEqual(xs, sorted(xs), "each cavity must sit where its part was laid")
+
+        footprint = next(r for r in plate.expected if r["kind"] == "bed_footprint")
+        results = {c.id: c.result for c in F.check_features(
+            plate.part, plate.expected, bed_contact_mm2=footprint["area_mm2"])}
+        self.assertEqual({"feature-cavity-0": "PASS", "feature-cavity-1": "PASS",
+                          "feature-bed_footprint": "PASS"}, results)
+
+        blocked = trimesh.boolean.union([
+            plate.part,
+            trimesh.creation.box(extents=(3.0, 30.0, 20.0)).apply_translation(
+                [66.0, 17.0, 10.0])])
+        self.assertEqual(
+            "FAIL",
+            {c.id: c.result for c in F.check_features(blocked, plate.expected)}
+            ["feature-cavity-1"],
+            "an obstruction in the second box must name the second box")
+
+
+
 
 @unittest.skipIf(trimesh is None, "needs trimesh + manifold3d")
 class TestDegenerateParameters(unittest.TestCase):
@@ -243,39 +281,3 @@ class TestDegenerateParameters(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-    def test_a_void_carries_over_where_a_section_cannot(self) -> None:
-        """The same plate the section rule has to give up on.
-
-        Two boxes of different heights declare their wall rings at different
-        planes, so no section survives the layout and the plate is left with one
-        bed-contact number for the whole thing. A void is local -- it reads its
-        own rectangle and nothing else on the plate can reach it -- so it moves
-        with its part exactly like a hole, and both cavities stay measured.
-        """
-        from . import features as F
-
-        plate = T.stack(T.box_shell(inner=(40.0, 30.0, 20.0), wall=2.0, floor=2.0),
-                        T.box_shell(inner=(30.0, 30.0, 15.0), wall=2.0, floor=2.0), gap=5.0)
-        self.assertEqual([], [r for r in plate.expected if r["kind"] == "solid_region"])
-
-        voids = [r for r in plate.expected if r["kind"] == "void_region"]
-        self.assertEqual(["cavity-0", "cavity-1"], sorted(r["id"] for r in voids))
-        xs = [r["at"][0] for r in voids]
-        self.assertEqual(xs, sorted(xs), "each cavity must sit where its part was laid")
-
-        footprint = next(r for r in plate.expected if r["kind"] == "bed_footprint")
-        results = {c.id: c.result for c in F.check_features(
-            plate.part, plate.expected, bed_contact_mm2=footprint["area_mm2"])}
-        self.assertEqual({"feature-cavity-0": "PASS", "feature-cavity-1": "PASS",
-                          "feature-bed_footprint": "PASS"}, results)
-
-        blocked = trimesh.boolean.union([
-            plate.part,
-            trimesh.creation.box(extents=(3.0, 30.0, 20.0)).apply_translation(
-                [66.0, 17.0, 10.0])])
-        self.assertEqual(
-            "FAIL",
-            {c.id: c.result for c in F.check_features(blocked, plate.expected)}
-            ["feature-cavity-1"],
-            "an obstruction in the second box must name the second box")
