@@ -39,6 +39,14 @@ class ExportReport:
     volume_mm3: float
     bbox_mm: dict           # {"x": .., "y": .., "z": ..}
     integrity: mesh_io.MeshIntegrity
+    # How much repair the normalized measurement depended on. Measuring
+    # watertightness after merging coincident vertices is right -- an STL is a
+    # vertex soup and the raw verdict is meaningless -- but it means the gate's
+    # headline number is a verdict about a repaired mesh. Without the log, a
+    # candidate needing structural repair and one needing none read identically,
+    # and only the verifier's `dt.py integrity` ever saw the difference. DIRECT
+    # jobs have no verifier.
+    mutation: mesh_io.MeshMutationLog
 
     def is_single_watertight_solid(self) -> bool:
         return self.watertight and self.components == 1
@@ -117,4 +125,5 @@ def export_and_hash(model: Any, out_stem: str | Path, *, tolerance: float = 0.01
         volume_mm3=float(abs(norm.volume)),
         bbox_mm={"x": float(ext[0]), "y": float(ext[1]), "z": float(ext[2])},
         integrity=integrity,
+        mutation=report.mutation_log,
     )

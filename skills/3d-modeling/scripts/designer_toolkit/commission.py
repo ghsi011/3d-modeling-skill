@@ -221,6 +221,40 @@ def _check_solid(commission: Commission, report) -> None:
     ))
 
 
+def _check_repair(commission: Commission, report) -> None:
+    """How much repair the watertight verdict rested on.
+
+    Measuring watertightness on the normalized mesh is correct: an STL is a
+    vertex soup, and the raw parse calls every correctly-exported solid open.
+    But it makes the gate's headline number a verdict about a repaired mesh, and
+    a candidate that needed structural repair to reach it read identically to
+    one that needed none. Merging coincident vertices is what the format
+    requires; dropping faces is geometry that was not exportable, and it is the
+    difference between a clean solid and one that only looks clean afterwards.
+
+    The exporter's own comment said the log mattered "if the amount of merging is
+    itself suspicious". Nothing had ever looked at it, and only the verifier's
+    `dt.py integrity` read the raw parse at all -- which the DIRECT route, having
+    no verifier, never runs.
+    """
+    mutation = report.mutation
+    dropped = int(mutation.degenerate_faces_removed)
+    if dropped == 0:
+        commission.add(Check(
+            "repair", "Export needed no structural repair", _PASS,
+            f"{mutation.vertices_merged} coincident vertices merged, no faces dropped"))
+        return
+    commission.add(Check(
+        "repair", "Export needed no structural repair", _FAIL,
+        f"{dropped} degenerate faces removed to make the mesh measurable "
+        f"({mutation.faces_before} faces exported, {mutation.faces_after} kept)",
+        "Every check above ran on the repaired mesh, so its verdicts describe a "
+        "solid that is not the one exported. Degenerate faces come from booleans "
+        "on coincident surfaces -- offset the cutter past the face it crosses "
+        "rather than landing exactly on it.",
+    ))
+
+
 def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> None:
     """The check whose absence shipped a case 31% too thick.
 
@@ -480,6 +514,7 @@ def run(
         _check_receipt_location(commission, out_dir, plan_path)
     _check_step(commission, report, stl is not None)
     _check_solid(commission, report)
+    _check_repair(commission, report)
     _check_envelope(commission, report, plan)
 
     placements = _check_support(commission, mesh, plan)

@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import trimesh
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -402,6 +403,49 @@ class SolidCheckTest(unittest.TestCase):
                                     plan=_plan(), render=False)
 
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
+
+
+class RepairCheckTest(unittest.TestCase):
+    """The gate measures watertightness on the *normalized* mesh, which is right
+    -- an STL is a vertex soup and the raw parse calls every correct solid open.
+    But it makes the headline verdict a statement about a repaired mesh, and a
+    candidate needing structural repair read identically to one needing none.
+    Only the verifier's `dt.py integrity` ever saw the raw parse, and the DIRECT
+    route has no verifier.
+    """
+
+    def test_a_clean_export_says_it_needed_no_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=_plan(), render=False)
+
+            repair = next(c for c in result.checks if c.id == "repair")
+            self.assertEqual("PASS", repair.result)
+            self.assertIn("no faces dropped", repair.detail)
+
+    def test_degenerate_faces_fail_rather_than_being_repaired_silently(self) -> None:
+        """Merging coincident vertices is what the format requires. Dropping
+        faces is geometry that was not exportable, and every check above this
+        one then describes a solid that is not the one exported."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            mesh = trimesh.creation.box(extents=(30, 20, 10))
+            # A zero-area triangle: three references to one corner. It survives
+            # the STL round trip and is removed during normalization.
+            faces = np.vstack([mesh.faces, [0, 0, 0]])
+            degenerate = trimesh.Trimesh(vertices=mesh.vertices, faces=faces,
+                                         process=False)
+            path = work / "degenerate.stl"
+            degenerate.export(path)
+
+            result = commission.run(model=None, stl=path, out_dir=work / "out",
+                                    plan=_plan(), render=False)
+
+            repair = next(c for c in result.checks if c.id == "repair")
+            self.assertEqual("FAIL", repair.result, repair.detail)
+            self.assertIn("degenerate", repair.detail)
+            self.assertIn("repair", [c.id for c in result.failed])
 
 
 class PlanDeclaredFeatureTest(unittest.TestCase):
