@@ -120,9 +120,24 @@ and it decides which phases run, not how verbose the record is.
 
   ```bash
   DT=<skill>/scripts/dt.py
-  python $DT direct --job-id <job> --template <name> --param k=v ...         --bbox X Y Z --material PLA --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE         --rationale "<why that class>" --acceptance "<what you did not get to choose>"         --stated <names the brief actually gives>         --brief <project>/brief.md --updated-utc <iso> --out <project>
-  python $DT validate <project>         --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
+  python $DT direct --job-id <job> --template <name> \
+    --param bore_d=12.0 --param 'flange=(40, 22, 5)' \
+    --stated bore_d,flange \
+    --bbox X Y Z --material PLA \
+    --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE \
+    --rationale "<why that class>" \
+    --acceptance "<what you did not get to choose>" \
+    --brief <project>/brief.md --updated-utc <iso> --out <project>
+
+  python $DT validate <project> \
+    --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
   ```
+
+  `--bbox` is the envelope **from the brief**, not the one you expect the template to
+  produce — it is the check, so deriving it from the parameters would be the part grading
+  its own homework. You do have to be right about it: a `c_clip` stands `flange_t + height`
+  tall, not `height`. If you get it wrong, `static-envelope` fails before anything is built
+  and names the delta, so the retry is informed rather than a guess.
 
   **Budget: four turns.** Not four commands — four round trips, because that is what the
   clock actually charges for:
@@ -132,7 +147,9 @@ and it decides which phases run, not how verbose the record is.
   3. **One turn, three reads in parallel**: `renders/multi.png`, `renders/section_x.png`,
      and `screen/question.md`. They do not depend on each other, so reading them one per
      turn spends two turns buying nothing.
-  4. Answer the judgments, run `validate`, deliver.
+  4. Answer the judgments and run `validate`, then deliver. `direct` printed each
+     unanswered field as `file:line` with what it is asking, so this is an edit per field
+     and not a hunt — do not re-read the contracts to find them.
 
   A measured run of this route took 13.5 minutes across 59 calls to do 5.1 seconds of work.
   Each round trip costs 8 to 47 seconds of inference before the shell is even reached, so

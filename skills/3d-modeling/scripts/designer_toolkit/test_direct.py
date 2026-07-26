@@ -163,6 +163,45 @@ class TestDirect(unittest.TestCase):
             self.assertNotEqual(0, direct.main(argv))
             self.assertTrue((out / "screen" / "question.md").is_file())
 
+    def test_it_says_where_every_unanswered_field_is(self) -> None:
+        """A measured run called this the biggest recoverable turn in the route.
+
+        The closing line counted the unanswered fields and the charter said
+        "answer the judgments", so finding them was a read and answering them
+        was an edit -- two turns on a route budgeted at four. The tool already
+        walked the files to produce the count.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            self.assertEqual(0, direct.main(_argv(out)))
+
+            rows = direct._outstanding(out)
+            self.assertTrue(rows, "a fresh project has judgments left to answer")
+            for row in rows:
+                name, _, rest = row.partition(":")
+                number, _, label = rest.partition("  ")
+                self.assertTrue((out / name).is_file(), f"{name} must exist")
+                line = (out / name).read_text(encoding="utf-8").splitlines()[int(number) - 1]
+                self.assertIn("<!-- REQUIRED", line,
+                              "the line named must be the one carrying the marker")
+                self.assertTrue(label.strip(), "each row must say what is being asked")
+
+    def test_a_field_that_cannot_be_answered_is_not_listed_as_one_that_can(self) -> None:
+        """With no renderer `visual_accept` carries a different marker saying so.
+
+        Listing it among the fields to answer would be an instruction to write a
+        verdict on a part nobody has seen, which is the one thing this route is
+        not allowed to do.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            self.assertEqual(0, direct.main(_argv(out) + ["--no-render"]))
+
+            readiness = (out / "candidate_readiness.md").read_text(encoding="utf-8")
+            self.assertIn("CANNOT BE ANSWERED HERE", readiness)
+            self.assertEqual([], [r for r in direct._outstanding(out)
+                                  if "visual_accept" in r])
+
 
 if __name__ == "__main__":
     unittest.main()

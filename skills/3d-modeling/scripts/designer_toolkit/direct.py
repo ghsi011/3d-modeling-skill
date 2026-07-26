@@ -130,6 +130,38 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
     return code, log
 
 
+def _outstanding(out: Path) -> list[str]:
+    """Where every unanswered field is, as `file:line` plus what it is asking.
+
+    Counted, not asserted: a closing line that demands the required fields be
+    answered when there are none left reads as boilerplate, and boilerplate is
+    what gets skimmed past on the run where there really is one.
+
+    Located, too, and that is the newer half. A measured run reported this as
+    the single biggest recoverable turn in the route -- the count said six, the
+    route said "answer the judgments", and nothing said where they were, so
+    finding them was a read and answering them was an edit. The tool already
+    walked the files to produce the number; handing back the line it found each
+    one on costs nothing and collapses the pair.
+    """
+    found: list[str] = []
+    for path in sorted(out.glob("*.md")):
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if intake_module.REQUIRED not in line and "<!-- REQUIRED" not in line:
+                continue
+            # The row's own first cell for a table, otherwise the line's opening
+            # words: enough for the reader to know which judgment is being asked
+            # for without opening the file to find out.
+            label = line.strip()
+            if label.startswith("|"):
+                label = label.strip("|").split("|")[0].strip()
+            label = " ".join(label.split())[:64]
+            found.append(f"{path.name}:{number}  {label}")
+    return found
+
+
 def _flatten(raw_params: list[str]) -> list[str]:
     out: list[str] = []
     for text in raw_params:
@@ -190,12 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     receipt = args.out / "commission.json"
     payload = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
     coverage = payload.get("coverage") or {}
-    # Counted, not asserted. A closing line that demands the required fields be
-    # answered when there are none left reads as boilerplate, and boilerplate is
-    # what gets skimmed past on the run where there really is one.
-    outstanding = sum(
-        path.read_text(encoding="utf-8").count(intake_module.REQUIRED)
-        for path in args.out.glob("*.md") if path.is_file())
+    outstanding = _outstanding(args.out)
     sys.stderr.write(
         f"\n{coverage.get('ran', '?')} of {coverage.get('declared', '?')} checks ran"
         + (f"; {', '.join(coverage['skipped'])} did not" if coverage.get("skipped") else "")
@@ -205,11 +232,11 @@ def main(argv: list[str] | None = None) -> int:
         # at the final line.
         + ".\nStill yours, and it is one turn: read the renders and "
         f"{args.out / 'screen' / 'question.md'}\ntogether. Nothing above was measured that "
-        "nobody declared, and that file is the\nquestion no check here can ask. Then answer "
-        "`visual_accept` and `fit_band_ok`"
-        + (f",\nand the {outstanding} remaining <!-- REQUIRED --> field"
-           f"{'s' if outstanding != 1 else ''} in the contracts" if outstanding else "")
-        + ".\n")
+        "nobody declared, and that file is the\nquestion no check here can ask."
+        + (f"\n\nThen answer these {len(outstanding)}, which is one more turn:\n"
+           + "\n".join(f"  {row}" for row in outstanding) if outstanding else
+           "\n\nNothing is left unanswered in the contracts.")
+        + "\n")
     return 0
 
 
