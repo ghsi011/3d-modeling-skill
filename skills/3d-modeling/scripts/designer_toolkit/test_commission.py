@@ -287,6 +287,41 @@ class EdgeCheckTest(unittest.TestCase):
             self.assertTrue(any(c.id == "solid" for c in result.checks))
 
 
+class ReceiptLocationTest(unittest.TestCase):
+    def test_receipts_written_below_the_project_are_refused(self) -> None:
+        """A run used `--out out`, produced a flawless candidate, and was
+        rejected for a missing manifest that existed one directory down.
+        `contracts validate` resolves <project-dir>/<name> and does not search."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10})),
+                                 encoding="utf-8")
+
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work / "out", render=False,
+                plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}),
+                plan_path=plan_path)
+
+            check = next(c for c in result.checks if c.id == "receipt-location")
+            self.assertEqual("FAIL", check.result)
+            self.assertIn("does not search subdirectories", check.action)
+
+    def test_receipts_beside_the_plan_are_fine(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10})),
+                                 encoding="utf-8")
+
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work, render=False,
+                plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}),
+                plan_path=plan_path)
+
+            self.assertEqual([], [c for c in result.checks if c.id == "receipt-location"])
+
+
 class StepCheckTest(unittest.TestCase):
     def test_a_mesh_built_part_says_it_has_no_step(self) -> None:
         """A five-part run wrote the same note by hand five times. A gap the

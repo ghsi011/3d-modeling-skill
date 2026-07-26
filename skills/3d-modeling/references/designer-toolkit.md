@@ -51,6 +51,10 @@ Then it exports, re-imports, and measures the whole set on the mesh that actuall
   interference does
 - every plan-named edge, against both ends of its band
 
+Point `--out` at the project directory itself. The receipts are contracts, and the contract
+gate resolves them by exact path without searching subdirectories, so receipts written below
+the project are invisible to it however correct their content.
+
 Then it renders a section and a six-view exterior sheet, writes `commission.json`,
 `artifact_manifest.json` and `candidate_readiness.md` -- the manifest listing the renders it
 produced -- and exits non-zero if any check failed. Each failure names

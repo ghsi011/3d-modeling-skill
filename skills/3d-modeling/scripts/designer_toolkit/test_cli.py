@@ -68,15 +68,16 @@ def test_commission_reaches_the_gate_with_its_flags_intact(box_stl: Path, tmp_pa
     this is what proves it has not drifted from the gate it fronts."""
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(_plan_for(10, 20, 30)), encoding="utf-8")
-    out = tmp_path / "out"
 
+    # `--out` is the project directory, beside the plan: the receipts are
+    # contracts and `contracts validate` resolves them by exact path.
     result = _run("commission", "--stl", str(box_stl), "--plan", str(plan_path),
-                  "--out", str(out), "--no-render", "--job-id", "t",
+                  "--out", str(tmp_path), "--no-render", "--job-id", "t",
                   "--updated-utc", "2026-01-01T00:00:00Z")
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["verdict"] == "PASS"
-    assert (out / "candidate_readiness.md").is_file()
+    assert (tmp_path / "candidate_readiness.md").is_file()
 
 
 def test_a_failing_candidate_exits_nonzero_through_the_wrapper(box_stl: Path,
@@ -85,7 +86,7 @@ def test_a_failing_candidate_exits_nonzero_through_the_wrapper(box_stl: Path,
     plan_path.write_text(json.dumps(_plan_for(10, 20, 99)), encoding="utf-8")
 
     result = _run("commission", "--stl", str(box_stl), "--plan", str(plan_path),
-                  "--out", str(tmp_path / "out"), "--no-render", "--job-id", "t",
+                  "--out", str(tmp_path), "--no-render", "--job-id", "t",
                   "--updated-utc", "2026-01-01T00:00:00Z")
 
     assert result.returncode == 1

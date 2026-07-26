@@ -154,6 +154,30 @@ def _check_step(commission: Commission, report, verifying: bool) -> None:
     ))
 
 
+def _check_receipt_location(commission: Commission, out_dir: Path, plan_path: Path | None) -> None:
+    """The receipts are contracts, and contracts are found by exact path.
+
+    `team_tools/project.py` resolves each contract as `project_dir / name` with
+    no recursive search, so receipts written to a subdirectory are invisible to
+    `contracts validate` however correct their content. A run used `--out out`,
+    produced a flawless candidate, and was rejected for a missing manifest that
+    existed one directory down.
+    """
+    if plan_path is None:
+        return
+    project = plan_path.resolve().parent
+    if out_dir.resolve() == project:
+        return
+    commission.add(Check(
+        "receipt-location", "Receipts land where the contract gate looks", _FAIL,
+        f"writing receipts to {out_dir} while the bound plan lives in {project}",
+        "`contracts validate` resolves contracts as <project-dir>/<name> and does not "
+        "search subdirectories, so artifact_manifest.json and candidate_readiness.md "
+        "would be invisible there. Re-run with `--out` set to the project directory "
+        "that holds the plan.",
+    ))
+
+
 def _check_solid(commission: Commission, report) -> None:
     ok = report.watertight and report.components == 1
     commission.add(Check(
@@ -369,6 +393,7 @@ def run(
     reference: str | None = None,
     render: bool = True,
     candidate_id: str = "candidate_01",
+    plan_path: Path | None = None,
 ) -> Commission:
     """Build (if given a model), verify everything deterministic, write evidence."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -417,6 +442,7 @@ def run(
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
 
+    _check_receipt_location(commission, out_dir, plan_path)
     _check_step(commission, report, stl is not None)
     _check_solid(commission, report)
     _check_envelope(commission, report, plan)
@@ -592,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
                          reference=args.reference, render=not args.no_render,
-                         candidate_id=args.candidate_id)
+                         candidate_id=args.candidate_id, plan_path=args.plan)
     except (FileNotFoundError, ValueError) as exc:
         sys.stderr.write("commission: " + str(exc) + "\n")
         return 2

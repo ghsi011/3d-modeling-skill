@@ -105,6 +105,12 @@ lines to fill two fields is a page you pay for on every job to learn nothing you
    invoked by absolute path and needs no particular working directory. Ask
    `dt.py doctor` for that path and for what this interpreter can do.
 
+   `--out .`, not a subdirectory. The receipts it writes are contracts, and
+   `contracts validate` resolves each one as `<project-dir>/<name>` without
+   searching below it — a run that used `--out out` built a flawless candidate
+   and was rejected for a manifest that existed one directory down. The gate now
+   refuses that rather than letting it reach a verifier.
+
    It exports, re-imports, and measures the whole deterministic set — single watertight
    solid, overall size against the plan's declared envelope, downward-facing area for
    *every* support rule in the orientation that rule declares, the seated per-side

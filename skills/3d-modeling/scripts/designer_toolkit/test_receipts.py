@@ -258,18 +258,17 @@ class CliTest(unittest.TestCase):
             plan_path = work / "plan.json"
             plan_path.write_text(json.dumps(plan.direct_template((30.0, 20.0, 10.0))),
                                  encoding="utf-8")
-            out = work / "out"
 
             completed = subprocess.run(
                 [sys.executable, "-m", "designer_toolkit.commission", "--stl", str(stl),
-                 "--plan", str(plan_path), "--out", str(out), "--no-render",
+                 "--plan", str(plan_path), "--out", str(work), "--no-render",
                  "--job-id", "t", "--updated-utc", _WHEN],
                 cwd=_SCRIPTS, capture_output=True, text=True, check=False,
             )
 
             self.assertEqual(0, completed.returncode, completed.stderr)
-            self.assertTrue((out / "artifact_manifest.json").is_file())
-            self.assertTrue((out / "candidate_readiness.md").is_file())
+            self.assertTrue((work / "artifact_manifest.json").is_file())
+            self.assertTrue((work / "candidate_readiness.md").is_file())
 
     def test_the_timestamp_is_injected_so_a_rerun_is_byte_identical(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
