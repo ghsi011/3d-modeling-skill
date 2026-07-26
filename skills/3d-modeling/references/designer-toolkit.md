@@ -51,8 +51,9 @@ Then it exports, re-imports, and measures the whole set on the mesh that actuall
   interference does
 - every plan-named edge, against both ends of its band
 
-Then it writes `commission.json`, `artifact_manifest.json` and
-`candidate_readiness.md`, and exits non-zero if any check failed. Each failure names
+Then it renders a section and a six-view exterior sheet, writes `commission.json`,
+`artifact_manifest.json` and `candidate_readiness.md` -- the manifest listing the renders it
+produced -- and exits non-zero if any check failed. Each failure names
 the action to take. Iterate until it exits zero.
 
 A verifier runs the same command with `--stl` against the delivered file, into its own

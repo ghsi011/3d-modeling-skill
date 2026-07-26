@@ -110,10 +110,9 @@ Read exactly one backend pattern file plus mandatory FDM guidance:
    plan's interface declarations and the metrologist's as-observed geometry in
    `dimensions.md`. The designer implements the declared fit intent; it does not choose it.
 5. Organize boolean operations robustly; preserve editable source; label bodies and exports.
-6. Generate deterministic exports from the source and render useful exterior, mating,
-   section, and print-orientation views. Use `designer_toolkit.export_and_hash` for the
-   export+re-import+hash and `designer_toolkit.render.compare_views`/`section_render` for
-   the views rather than re-authoring them.
+6. The commission exports, hashes and renders for you — a section and a six-view exterior
+   sheet, both listed in the manifest it writes. Produce an extra view only when one of those
+   cannot settle a question you actually have, and add its manifest row when you do.
 7. Verify with one call and iterate until it exits zero:
 
    ```bash

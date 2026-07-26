@@ -474,15 +474,23 @@ def run(
 
     if render:
         try:
+            # Both views, because `visual_accept` is a question about the whole
+            # part and a single X-section cannot answer it. Runs that produced
+            # their own exterior sheet then had to hand-add a manifest row for
+            # it; the gate produces it and lists it.
+            import preview
+
             from .render import section_render
             renders = out_dir / "renders"
             renders.mkdir(exist_ok=True)
             section_render(str(exported), str(renders / "section_x.png"),
                            plane_origin=(0, 0, 0), plane_normal=(1, 0, 0))
-            commission.evidence["renders"] = ["renders/section_x.png"]
+            preview.render_multi_view(as_mesh(str(exported)), str(renders / "multi.png"),
+                                      title="candidate")
+            commission.evidence["renders"] = ["renders/section_x.png", "renders/multi.png"]
         except Exception as exc:  # noqa: BLE001 - a missing GL stack is not a design failure
             commission.add(Check(
-                "render", "Section render for visual acceptance", _SKIP,
+                "render", "Renders for visual acceptance", _SKIP,
                 f"renderer unavailable: {exc}",
                 "Install the `visual` extra or run where a GL context exists. Visual "
                 "acceptance cannot be signed off without looking at something.",
