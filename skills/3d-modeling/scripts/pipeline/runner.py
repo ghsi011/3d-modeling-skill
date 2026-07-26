@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, commission, contract as C, intent, safety, schemas as S
+from . import analysis, commission, contract as C, fitted, intent, safety, schemas as S
 from . import screening, status, templates as T, witness as W
 from .backends import get as get_backend
 
@@ -43,6 +43,12 @@ class JobRequest:
     render: bool = True
     safety_call: Callable[[safety.Packet], dict[str, Any]] | None = None
     reviewer: dict[str, Any] | None = None
+    # FITTED only: the one bounded call that recovers externally owned geometry,
+    # and the evidence it is given. Absent on a DIRECT job, which owns everything
+    # it needs by definition.
+    spec_call: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    evidence: tuple[str, ...] = ()
+    interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -87,11 +93,73 @@ def run(request: JobRequest) -> JobResult:
     written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
     timings["intent"] = time.perf_counter() - mark
 
-    if decision.route != "DIRECT":
+    if decision.route == "FULL":
         return JobResult(False, "routing",
-                         f"route is {decision.route}, not DIRECT: {decision.condition}. "
-                         "This runner implements the DIRECT vertical slice.",
-                         written, timings, llm_calls, None)
+                         f"route is FULL: {decision.condition}. FULL is not implemented "
+                         "yet -- it needs independent verification, which this runner "
+                         "does not dispatch.", written, timings, llm_calls, None)
+
+    if decision.route == "FITTED":
+        if request.spec_call is None:
+            return JobResult(False, "routing",
+                             f"route is FITTED: {decision.condition}. This job needs one "
+                             "bounded call to recover geometry it does not own, and no "
+                             "spec reviewer was supplied.",
+                             written, timings, llm_calls, None)
+        mark = time.perf_counter()
+        template = T.get(decision.template or request.template)
+        spec = fitted.recover(
+            brief=brief_text, evidence=list(request.evidence), template=template.name,
+            template_covers=template.covers, bounds=template.bounds,
+            call=request.spec_call, reviewer=request.reviewer or {})
+        llm_calls += 1
+        timings["specification"] = time.perf_counter() - mark
+        written["specification"] = _write(out / "specification.json", spec)
+
+        if spec["unresolved"]:
+            unresolved = "\n  - ".join(spec["unresolved"])
+            return JobResult(False, "specification",
+                             f"the specification could not be completed:\n  - {unresolved}\n"
+                             "An unrecovered dimension stops the job; a fabricated one "
+                             "ships a part that does not fit.",
+                             written, timings, llm_calls, None)
+
+        # Every deterministic consequence of the measurement is computed here, so
+        # a parameter is a function of a reading anyone can re-check against the
+        # object rather than a number that arrived already decided.
+        measurements = [fitted.Measurement(**{k: v for k, v in row.items() if k != "band_mm"})
+                        for row in spec["measurements"]]
+        interfaces = [fitted.Interface(**{k: v for k, v in row.items()
+                                          if k not in ("clearance_mm", "clearance_owner")})
+                      for row in spec["interfaces"]]
+        derived = fitted.parameters_from(measurements, interfaces, request.interface_map)
+        request = dataclasses.replace(
+            request, parameters={**request.parameters, **derived},
+            external_geometry=False)
+
+        decision = intent.select(requested_template=request.template,
+                                 parameters=request.parameters,
+                                 external_geometry=False, ambiguities=())
+        if decision.route != "DIRECT":
+            return JobResult(False, "routing",
+                             "after recovering the specification the derived parameters "
+                             f"still do not route DIRECT: {decision.condition}",
+                             written, timings, llm_calls, None)
+        manifest["route_decision"] = {**decision.as_dict(), "recovered_via": "FITTED"}
+        # Rebuilt from the full parameter set, not patched over the old one: a
+        # recovered dimension is new, so a comprehension that only updates
+        # existing rows drops exactly the values this route exists to produce.
+        manifest["requirements"] = [
+            {"name": name, "value": value, "unit": "mm",
+             "provenance": ("recovered by measurement" if name in derived
+                            else ("stated in the brief" if name in request.stated
+                                  else "chosen by design")),
+             "source": ("metrologist" if name in derived
+                        else ("user" if name in request.stated else "designer"))}
+            for name, value in sorted(request.parameters.items())]
+        manifest["specification"] = {
+            "measurements": spec["measurements"], "interfaces": spec["interfaces"]}
+        written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
 
     template = T.get(decision.template)
 

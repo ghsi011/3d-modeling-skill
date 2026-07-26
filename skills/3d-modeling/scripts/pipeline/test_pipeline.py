@@ -17,7 +17,7 @@ from pathlib import Path
 
 import trimesh
 
-from . import analysis, commission, contract as C, intent, runner, safety, screening
+from . import analysis, commission, contract as C, fitted, intent, runner, safety, screening
 from . import status, templates as T
 from . import witness as W
 
@@ -786,6 +786,146 @@ class CalibrationTest(unittest.TestCase):
             tmp = Path(raw)
             _, _, screen = _measure(_clean_clip(), _contract(tmp), tmp)
             self.assertIn("cannot prove", screen["note"])
+
+
+
+class FittedRouteTest(unittest.TestCase):
+    """One bounded call recovers what the job does not own; everything else is
+    computed from it deterministically."""
+
+    SPEC = {"measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
+                              "uncertainty_mm": 0.15, "method": "caliper, three reads",
+                              "datum": "widest section", "confidence": "A"}],
+            "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
+                            "fit_class": "slip"}],
+            "unresolved": []}
+
+    BASE = {"wall": 3.0, "height": 9.0, "mouth_gap": 9.0, "flange_w": 40.0,
+            "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+
+    def _job(self, out: Path, response, **kw):
+        seen = []
+
+        def call(request):
+            seen.append(request)
+            return response
+
+        result = runner.run(runner.JobRequest(
+            job_id="fit", brief_path=out / "b.md", template="c_clip",
+            parameters=dict(self.BASE), stated=frozenset({"flange_w"}),
+            consequence="INCONSEQUENTIAL", out_dir=out,
+            updated_utc="1970-01-01T00:00:00Z", render=False,
+            external_geometry=True, evidence=("photo1.jpg",), spec_call=call,
+            interface_map={"channel": "bore_d"},
+            reviewer={"model_snapshot": "test"}, **kw))
+        return result, seen
+
+    def test_one_dispatch_recovers_the_spec_and_the_job_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result, seen = self._job(out, self.SPEC)
+
+            self.assertTrue(result.ok, result.message)
+            self.assertEqual(1, len(seen), "FITTED costs exactly one dispatch")
+            self.assertEqual(1, result.llm_calls)
+            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertTrue((out / "specification.json").is_file())
+
+    def test_the_recovered_dimension_reaches_the_manifest_with_its_provenance(self) -> None:
+        """A recovered parameter is new, so a manifest patched over the old one
+        drops exactly the value this route exists to produce."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            self._job(out, self.SPEC)
+            rows = {r["name"]: r for r in json.loads(
+                (out / "intent_manifest.json").read_text(encoding="utf-8"))["requirements"]}
+
+            self.assertEqual(13.0, rows["bore_d"]["value"])
+            self.assertEqual("metrologist", rows["bore_d"]["source"])
+            self.assertEqual("user", rows["flange_w"]["source"])
+            self.assertEqual("designer", rows["wall"]["source"])
+
+    def test_the_clearance_is_the_pipelines_not_the_models(self) -> None:
+        """A specification that arrived with its own clearance folded in could
+        not be checked against the object it came from."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            self._job(out, self.SPEC)
+            spec = json.loads((out / "specification.json").read_text(encoding="utf-8"))
+
+            interface = spec["interfaces"][0]
+            self.assertEqual("pipeline", interface["clearance_owner"])
+            self.assertEqual(list(fitted.FIT_CLEARANCE["slip"]), interface["clearance_mm"])
+            self.assertEqual(12.4, spec["measurements"][0]["nominal_mm"],
+                             "the measurement is reported as taken, not as adjusted")
+
+    def test_an_unresolved_dimension_stops_the_job(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result, _ = self._job(out, {**self.SPEC,
+                                        "unresolved": ["bundle is obscured in every photo"]})
+
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+            self.assertIn("obscured", result.message)
+
+    def test_a_fitted_job_without_a_reviewer_refuses_rather_than_guessing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(self.BASE), stated=frozenset(),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True))
+
+            self.assertFalse(result.ok)
+            self.assertIn("no spec reviewer was supplied", result.message)
+
+    def test_an_interface_to_an_unmeasured_feature_is_refused(self) -> None:
+        bad = {"measurements": [], "unresolved": [],
+               "interfaces": [{"interface_id": "x", "measurement": "ghost",
+                               "fit_class": "slip"}]}
+        with self.assertRaises(Exception) as caught:
+            fitted.validate(bad)
+        self.assertIn("no measurement reports", str(caught.exception))
+
+    def test_an_unknown_fit_class_is_refused_before_the_build(self) -> None:
+        bad = {"unresolved": [],
+               "measurements": [{"feature": "a", "nominal_mm": 10.0,
+                                 "uncertainty_mm": 0.1, "confidence": "A"}],
+               "interfaces": [{"interface_id": "x", "measurement": "a",
+                               "fit_class": "magic"}]}
+        with self.assertRaises(ValueError) as caught:
+            fitted.validate(bad)
+        self.assertIn("magic", str(caught.exception))
+
+    def test_an_impossible_measurement_is_refused(self) -> None:
+        for row, why in (({"feature": "a", "nominal_mm": -1.0, "uncertainty_mm": 0.1,
+                           "confidence": "A"}, "negative dimension"),
+                         ({"feature": "a", "nominal_mm": 10.0, "uncertainty_mm": -0.1,
+                           "confidence": "A"}, "negative uncertainty"),
+                         ({"feature": "a", "nominal_mm": 10.0, "uncertainty_mm": 0.1,
+                           "confidence": "Z"}, "confidence outside the grades")):
+            with self.subTest(case=why):
+                with self.assertRaises(Exception):
+                    fitted.validate({"measurements": [row], "interfaces": [],
+                                     "unresolved": []})
+
+    def test_the_band_carries_instrument_uncertainty_on_top_of_the_spread(self) -> None:
+        """A repeat spread bounds repeatability, not accuracy."""
+        m = fitted.Measurement(feature="a", nominal_mm=12.4, uncertainty_mm=0.15,
+                               method="caliper", datum="widest", confidence="A")
+        low, high = m.band()
+        self.assertAlmostEqual(12.4 - 0.15 - fitted.INSTRUMENT_UNCERTAINTY_MM, low)
+        self.assertAlmostEqual(12.4 + 0.15 + fitted.INSTRUMENT_UNCERTAINTY_MM, high)
+
+    def test_a_direct_job_never_calls_the_spec_reviewer(self) -> None:
+        called = []
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(Path(raw), spec_call=lambda r: called.append(r)))
+            self.assertEqual([], called)
+            self.assertEqual(0, result.llm_calls)
 
 
 if __name__ == "__main__":
