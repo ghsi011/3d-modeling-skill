@@ -110,7 +110,10 @@ gate. `R3` never receives a `PASS` under any profile.
    python <skill>/scripts/dt.py commission --stl <canonical.stl>      --plan print_plan_checks.json --out <verifier-dir> --job-id <job>      --updated-utc <iso8601> --no-receipts [--reference mating.stl]
    ```
 
-   Require exit zero. `--out` is **your own directory**, never the project root: your
+   Require exit zero — and expect it to agree. This step is cheap insurance against a
+   delivered STL that is not the one the designer measured, not the place your findings will
+   come from; budget accordingly and leave the time for step 7. `--out` is **your own
+   directory**, never the project root: your
    recomputation exists to be compared against the designer's `commission.json`, and writing
    over it destroys the comparison. `--no-receipts` is not optional either — the receipts are
    the designer's contracts and are not yours to reissue.
@@ -142,8 +145,15 @@ gate. `R3` never receives a `PASS` under any profile.
    verifier-owned JSON per support rule — it implements the bed/downward predicate
    independently of the toolkit's, so a silent disagreement between them is the cheapest bug
    detector available and costs one command.
-7. Check **4**, and it is yours alone: look at the images. The tool renders sections; it
-   cannot read them. Judge silhouette,
+7. Check **4**, and it is yours alone: look at the images. **Spend your effort here.** Across
+   every verification this pipeline has recorded, the deterministic recomputation in step 5
+   has never once disagreed with the designer's — it is the same instrument on the same bytes,
+   and agreement is what it is for. Every defect actually found was found by looking, or by
+   the contract checks in step 8. Two were parts that passed every scalar and were still
+   wrong: one missing a countersink its own sheet required, one whose mounting flange had a
+   slot cut clean through it. Both were visible; neither was a number.
+
+   So: the tool renders sections, it cannot read them. Judge silhouette,
    feature shape, count, position, and handedness against the reference and the original
    photographs, and say what each view actually shows. A green scalar bundle is necessary,
    never sufficient — no number in it distinguishes a correct part from a plausible wrong one.
