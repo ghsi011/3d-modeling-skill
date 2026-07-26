@@ -470,6 +470,18 @@ class PrintPlanValidatorTest(unittest.TestCase):
         issues, _ = V.validate_print_plan(broken)
         self.assertIn("DUPLICATE_ID@print_plan.edges", issue_ids(issues))
 
+    def test_the_express_profile_is_a_recognised_route(self) -> None:
+        """It trades fresh-context verification for about eleven minutes, so it
+        has to be a value the record can carry and the validator can check --
+        not an undeclared shortcut."""
+        job = clone(_JOB_STATE)
+        job["profile"] = "DIRECT_EXPRESS"
+
+        issues = V.validate_contract_header(job, key="job_state", where="job_state")
+
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+        self.assertIn("DIRECT_EXPRESS", V.PROFILE)
+
     def test_a_direct_jobs_plan_filename_is_recognised(self) -> None:
         """A DIRECT job has only `print_plan_checks.json`. While that was not a
         canonical name, `validate --require all` could never exit zero there --

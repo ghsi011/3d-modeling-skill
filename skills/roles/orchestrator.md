@@ -128,6 +128,25 @@ and it decides which phases run, not how verbose the record is.
   `METROLOGY`'s own load-bearing check is reconciling disagreeing sources, and a stated
   dimension has one source. Write the sheet yourself from the user's numbers, and ask the
   disambiguating question (units, ID vs OD, radius vs diameter) at `INTAKE` where it is cheap.
+
+  **The express variant, only if the user asks for it by name.** Both dispatches together are
+  about fifteen minutes, and roughly four of those are the build. A user who wants the part
+  faster than that can have `DIRECT_EXPRESS`: you run the verification steps yourself — the
+  raw-mesh read, the one deterministic command against the delivered STL, the renders, and
+  `validate --require all` — instead of dispatching a fresh verifier. You did not author the
+  geometry, so this is not the designer marking its own work; but you *have* read the brief
+  and the dispatch, so it is not fresh eyes either.
+
+  What that costs is specific, not hypothetical. Fresh-context verification has caught two
+  candidates that passed every deterministic check and were still wrong: one missing the
+  countersink its own sheet required, one whose mounting flange had a slot cut clean through
+  it. Both were found by a reader with no stake in the geometry looking at a render. Neither
+  was a number, so running the same commands yourself would not have caught them.
+
+  So never choose this silently. `job_state.md`'s `## Route` records `DIRECT_EXPRESS` and the
+  sentence "no independent fresh-context verification was performed", and the delivered summary
+  repeats it. An `R2`/`R3` job may never take it, and neither may a job whose part carries load,
+  mates to anything, or would be expensive to reprint.
 - **`FITTED`** — one real object is measured or photographed and the part must fit it.
   Single candidate.
   `INTAKE -> METROLOGY -> PRINT_PLAN -> CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION ->

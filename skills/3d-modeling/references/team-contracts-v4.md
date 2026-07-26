@@ -37,7 +37,7 @@ job_id: <slug>
 revision: <integer>
 owner: orchestrator
 mode: PIPELINE
-profile: DIRECT | FITTED | FULL
+profile: DIRECT | DIRECT_EXPRESS | FITTED | FULL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
 backend: cadquery | build123d | freecad
 active_candidate: <id-or-none>
@@ -71,7 +71,10 @@ The profile decides which phases run. `DIRECT`: every design-driving dimension i
 nothing is recreated from evidence, so `METROLOGY`, `REFERENCE_BUILD` and
 `REFERENCE_ACCEPTANCE` have no input and the orchestrator writes the sheet from the shipped
 plan template. `FITTED`: one measured real object, so the blind rebuild happens inside the
-candidate build and its overlay inside verification. `FULL`: multi-part/moving mechanisms,
+candidate build and its overlay inside verification. `DIRECT_EXPRESS`: `DIRECT`, but the orchestrator runs the verification steps itself instead
+of dispatching a fresh verifier — chosen only when the user asks for it by name, never for
+`R2`/`R3`, and recorded in `## Route` alongside the sentence "no independent fresh-context
+verification was performed". `FULL`: multi-part/moving mechanisms,
 safety/load consequences, several independent interfaces, multi-colour alignment, or parallel
 candidates -- every phase runs. See [`../SKILL.md`](../SKILL.md) for the deciding question and
 the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run under every profile.
