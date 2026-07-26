@@ -134,6 +134,70 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(0.0, built.params["wall_mm"])
 
 
+class DeviceCaseTest(unittest.TestCase):
+    """The shape two archived runs each hand-wrote, at 26 and 39 minutes."""
+
+    def _case(self, **kw):
+        args = dict(device=(73.56, 155.61, 8.5), wall=1.5, clearance=0.25,
+                    corner_radius=9.0)
+        args.update(kw)
+        return templates.device_case(**args)
+
+    def test_the_reference_is_the_device_it_was_given(self) -> None:
+        """Two runs hand-wrote a device proxy beside their case, and one debugged
+        a false interference caused by forgetting to round its corners."""
+        built = self._case()
+
+        measured = built.reference.bounds[1] - built.reference.bounds[0]
+        for expected, actual in zip((73.56, 155.61, 8.5), measured):
+            self.assertAlmostEqual(expected, actual, places=3)
+
+    def test_the_clearance_is_uniform_on_every_side_including_under(self) -> None:
+        """A device resting flush on the cavity floor touches it, so the
+        assembly's tightest point reads zero however correct the walls are."""
+        built = self._case(clearance=0.25)
+
+        case_low, case_high = built.part.bounds
+        ref_low, ref_high = built.reference.bounds
+        self.assertAlmostEqual(0.25, float(ref_low[2] - (case_low[2] + 1.5)), places=3)
+        self.assertAlmostEqual(1.75, float(ref_low[0] - case_low[0]), places=2)
+
+    def test_the_reported_size_is_the_size_it_built(self) -> None:
+        built = self._case()
+
+        measured = built.part.bounds[1] - built.part.bounds[0]
+        for axis, index in (("x", 0), ("y", 1), ("z", 2)):
+            # places=4, not 6: the rounded corners are tessellated, so the
+            # measured extent carries single-precision STL noise the arithmetic
+            # does not. Tighter than the gate's own tolerance either way.
+            self.assertAlmostEqual(built.params["overall_mm"][axis], measured[index], places=4)
+
+    def test_it_is_a_single_watertight_solid_seated_on_the_bed(self) -> None:
+        built = self._case()
+
+        self.assertTrue(built.part.is_watertight)
+        self.assertEqual(1, mesh_io.connected_component_count(built.part))
+        self.assertAlmostEqual(0.0, float(built.part.bounds[0][2]), places=9)
+
+    def test_an_opening_removes_material(self) -> None:
+        plain = self._case()
+        holed = self._case(openings=({"x": 0.0, "y": 50.0, "w": 30.0, "h": 25.0},))
+
+        self.assertLess(holed.part.volume, plain.part.volume)
+
+    def test_the_declared_clearance_reaches_the_pre_build_stage(self) -> None:
+        checks = {c.id: c for c in static.check(
+            {**self._case().params, "nozzle_mm": 0.4,
+             "cavity_mouth_fillet_mm": 0.5}, {})}
+
+        self.assertEqual("FAIL", checks["static-cavity-fillet"].result,
+                         "a 0.5 mm mouth fillet eats a 0.25 mm clearance")
+
+    def test_a_negative_clearance_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._case(clearance=-0.1)
+
+
 class BoltBossTest(unittest.TestCase):
     def test_the_annulus_is_reported_as_the_wall(self) -> None:
         built = templates.bolt_boss(outer_d=8.0, bore_d=4.2, height=10.0)

@@ -94,11 +94,20 @@ part, PARAMS = built.part, built.params
 That model is four lines, and the whole deterministic path from it — build, export,
 re-import, every check, both receipts — measures about one second.
 
-`box_shell`, `panel` (a plate with rectangular or round openings), `bolt_boss`, and `stack`
-(several parts laid out for one plate). Each returns geometry *and* the `PARAMS` describing it,
+`box_shell`, `panel` (a plate with rectangular or round openings), `device_case`,
+`bolt_boss`, and `stack` (several parts laid out for one plate). Each returns geometry *and*
+the `PARAMS` describing it,
 computed from the same arithmetic that built the solid — so `wall_mm` is the wall that exists
 and `overall_mm` is the size the part came out, neither able to drift the way a hand-maintained
 dict can.
+
+`device_case` goes further and returns the **mating reference** built from the same numbers,
+seated where the device actually sits, with the clearance uniform on every side including
+underneath. Two archived runs hand-wrote a device proxy beside their case; one debugged a
+false interference caused by forgetting to round its corners, and another added a relief gap
+by hand because a device resting flush on the cavity floor reads zero clearance however
+correct its walls are. A reference derived from the cavity's own arithmetic cannot describe a
+different device from the cavity.
 
 The point is not saved typing, it is that a hand-written model cannot be *asked* anything.
 `panel` reports the narrowest material left between its openings and the panel edge, so a plate

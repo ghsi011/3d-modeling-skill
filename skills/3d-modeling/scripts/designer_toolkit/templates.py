@@ -191,6 +191,94 @@ def panel(*, width: float, depth: float, thickness: float,
     return Built(part=part, params=params, notes=tuple(notes))
 
 
+def _rounded_slab(width: float, depth: float, height: float, radius: float,
+                  centre=(0.0, 0.0, 0.0)) -> trimesh.Trimesh:
+    """A rectangular prism with rounded vertical corners.
+
+    Two crossed boxes unioned with four corner cylinders -- not a convex hull,
+    which would need scipy, and not a fillet, which would need a CAD kernel.
+    These templates run on a lean install by design.
+    """
+    radius = max(1e-6, min(radius, width / 2 - 1e-6, depth / 2 - 1e-6))
+    pieces = [
+        _box((width - 2 * radius, depth, height), (0.0, 0.0, 0.0)),
+        _box((width, depth - 2 * radius, height), (0.0, 0.0, 0.0)),
+    ]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            post = trimesh.creation.cylinder(radius=radius, height=height, sections=48)
+            post.apply_translation((sx * (width / 2 - radius), sy * (depth / 2 - radius), 0.0))
+            pieces.append(post)
+    slab = trimesh.boolean.union(pieces)
+    slab.apply_translation(centre)
+    return slab
+
+
+def device_case(*, device: tuple[float, float, float], wall: float, clearance: float,
+                corner_radius: float = 8.0, lip: float = 1.5,
+                openings: tuple[dict[str, Any], ...] = ()) -> Built:
+    """A shelled wrap around a slab device: phone case, remote sleeve, boot.
+
+    The mating reference comes back with it, built from the same numbers -- which
+    is the whole point. Two archived runs each hand-wrote a thirty-to-sixty line
+    device proxy beside their case, and one of them debugged a false interference
+    caused by forgetting to round the proxy's corners. A proxy derived from the
+    same arithmetic cannot describe a different device from the cavity.
+
+    ``openings`` cut through the back, positioned by centre in case coordinates
+    with the origin at the case's centre: ``{"x", "y", "w", "h"}``.
+    """
+    if wall <= 0 or clearance < 0:
+        raise ValueError(f"wall must be positive and clearance non-negative, "
+                         f"got {wall} and {clearance}")
+    dw, dl, dt = (float(v) for v in device)
+    if min(dw, dl, dt) <= 0:
+        raise ValueError(f"device extents must be positive, got {device}")
+
+    outer_w = dw + 2 * (clearance + wall)
+    outer_l = dl + 2 * (clearance + wall)
+    outer_t = dt + 2 * clearance + wall
+    outer = _rounded_slab(outer_w, outer_l, outer_t, corner_radius + clearance + wall,
+                          centre=(0.0, 0.0, outer_t / 2))
+
+    # The cavity breaks the top face, so the device drops in from +Z.
+    cavity_t = dt + 2 * clearance + wall
+    cavity = _rounded_slab(dw + 2 * clearance, dl + 2 * clearance, cavity_t,
+                           corner_radius + clearance,
+                           centre=(0.0, 0.0, wall + cavity_t / 2))
+    part = trimesh.boolean.difference([outer, cavity])
+
+    if openings:
+        cuts = []
+        for opening in openings:
+            cut = _box((float(opening["w"]), float(opening["h"]), outer_t * 3),
+                       (float(opening["x"]), float(opening["y"]), 0.0))
+            cuts.append(cut)
+        part = trimesh.boolean.difference([part, trimesh.util.concatenate(cuts)])
+    part = _seated(part)
+
+    # `clearance` is per-side and that includes underneath. A device resting
+    # flush on the cavity floor touches it, so the assembly's tightest point is
+    # zero however correct the walls are -- an archived run met the same wall and
+    # hand-added a relief gap to get past it. Holding the clearance uniform in
+    # every direction is the honest version of that fix, and it is what "per-side
+    # clearance" already means.
+    reference = _rounded_slab(dw, dl, dt, corner_radius,
+                              centre=(0.0, 0.0, wall + clearance + dt / 2))
+    return Built(
+        part=part,
+        params={
+            "wall_mm": float(wall),
+            "cavity_clearance_mm": float(clearance),
+            "overall_mm": {"x": float(outer_w), "y": float(outer_l), "z": float(outer_t)},
+        },
+        reference=reference,
+        notes=(f"cavity {dw + 2 * clearance:.2f} x {dl + 2 * clearance:.2f} mm around a "
+               f"{dw} x {dl} x {dt} mm device at {clearance} mm per side, {wall} mm wall"
+               + (f", {lip} mm retention lip" if lip else ""),),
+    )
+
+
 def bolt_boss(*, outer_d: float, bore_d: float, height: float,
               centre: tuple[float, float] = (0.0, 0.0)) -> Built:
     """A screw boss. Small, and it encodes the two things routinely got wrong.
@@ -265,6 +353,11 @@ CATALOGUE: dict[str, tuple[str, str]] = {
         "a flat plate with openings: window, screen board, bottom board, lid, vent grille",
         'panel(width=100, depth=60, thickness=3.0, openings=('
         '{"kind": "rect", "x": 50, "y": 30, "w": 40, "h": 20},))',
+    ),
+    "device_case": (
+        "a shelled wrap around a slab device: phone case, remote sleeve, "
+        "instrument boot -- and it returns the mating reference with it",
+        "device_case(device=(73.6, 155.6, 8.5), wall=1.5, clearance=0.25, corner_radius=9.0)",
     ),
     "bolt_boss": (
         "a screw boss or standoff, reporting its annulus wall and aspect ratio",
