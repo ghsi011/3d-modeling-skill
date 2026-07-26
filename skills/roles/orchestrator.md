@@ -2,7 +2,7 @@
 role: orchestrator
 source: skills/3d-modeling/SKILL.md
 agent_description: Routes 3D jobs and governs the five-role file-contract pipeline. Use as the top-level agent for fit-critical or multi-part modeling work.
-skill_description: Route and govern 3D-printable modeling jobs. Use for new modeling or print-prep requests to run the five-role file-contract pipeline, enforce phase gates, dispatch specialists, maintain job state, and deliver verified artifacts without authoring geometry.
+skill_description: Design and verify 3D-printable parts. Use for any request to model, dimension, or print-prep a physical object. Writes an immutable contract before the geometry, builds it with build123d or trimesh, measures the exported mesh against that contract, screens for geometry nobody declared, and reports exactly what was established -- most jobs in one command and no model calls.
 agent_body: |-
   Load the `3d-modeling` skill and follow it exactly. Own state, gates, dispatch, user questions,
   housekeeping, and delivery; never author geometry. Require every specialist to re-read the

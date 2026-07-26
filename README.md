@@ -99,14 +99,15 @@ backends you actually use:
 
 | Extra           | Pulls in                                          | Needed for                                              |
 |-----------------|---------------------------------------------------|---------------------------------------------------------|
-| `cad-build123d` | build123d (heavy OCP stack)                       | build123d backend + patterns                            |
 | `section`       | scipy, networkx, shapely, rtree                   | `datum_features` / `finalize` datum blocks              |
 | `render`        | pyrender, PyOpenGL                                | `preview.py` offscreen renders                          |
 | `visual`        | pyrender, PyOpenGL, scipy, networkx, shapely, rtree | `overlay_photo.py`, `verify_visual.py`                |
 | `bambu`         | lxml                                              | `make_bambu_3mf.py` (3MF authoring / verify)            |
 
 ```bash
-pip install -e ".[section]"   # or .[cad], .[visual], .[all], ...
+uv sync --frozen              # the core: uv, build123d, trimesh, manifold3d
+uv sync --frozen --group dev  # plus the test runner
+# optional extras: .[render], .[section], .[visual], .[bambu], .[all]  ...
 ```
 
 
@@ -154,7 +155,7 @@ ruff check skills/3d-modeling/scripts
 pytest
 ```
 
-The `mcp` extra adds the MCP server smoke test, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
+The `bambu` extra adds multi-colour 3MF packing, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
 so the suites resolve their bare imports with no install step.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
