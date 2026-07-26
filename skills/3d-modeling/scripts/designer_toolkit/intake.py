@@ -55,6 +55,19 @@ def _built(template: str, params: dict[str, Any]):
     return getattr(_templates, template)(**params)
 
 
+def _brief_hash(brief: Path | None) -> str:
+    """The brief's hash, because it is arithmetic rather than judgment.
+
+    The sources table asked a reader to supply it, and a reader who types a
+    hash by hand has bound the sheet to whatever they typed. Absent a brief
+    path there is nothing honest to write, so the field stays demanded.
+    """
+    if brief is None or not brief.is_file():
+        return REQUIRED
+    from .receipts import sha256_file
+    return f"`{sha256_file(brief)[:16]}`"
+
+
 def _dimension_rows(params: dict[str, Any]) -> str:
     """Every parameter, as a row that says where the number came from.
 
@@ -163,7 +176,7 @@ this, and the receipt leaves `visual_accept` for a human who has actually seen a
 
 
 def dimensions(*, job_id: str, updated_utc: str, template: str, params: dict[str, Any],
-               built) -> str:
+               built, brief: Path | None = None) -> str:
     return f"""---
 contract: dimensions
 contract_version: 4
@@ -190,7 +203,7 @@ image-derived or measured, and none is graded `A`.
 ## Sources
 | ID | Evidence path/URL | Variant | SHA-256 or access date | Authority/limits |
 |---|---|---|---|---|
-| S-01 | brief.md | as supplied | {REQUIRED} | the user's statement is the only authority here |
+| S-01 | {brief.name if brief else "brief.md"} | as supplied | {_brief_hash(brief)} | the user's statement is the only authority here |
 
 ## Blind-build completeness
 | Feature ID | Name/count/function | Datum value or bounded envelope | Source | Confidence | Candidate response | Ready |
@@ -232,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
                                             "into a file this just wrote")
     parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
                                              "get to choose -- 'nothing' is a real answer")
+    parser.add_argument("--brief", type=Path,
+                        help="the brief this job was written from; hashed into the sources "
+                             "table, which otherwise asks a reader to type a hash by hand")
     args = parser.parse_args(argv)
 
     if args.risk == "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE":
@@ -255,7 +271,8 @@ def main(argv: list[str] | None = None) -> int:
                                    template=args.template, rationale=args.rationale,
                                    acceptance=args.acceptance)),
         ("dimensions.md", dimensions(job_id=args.job_id, updated_utc=args.updated_utc,
-                                     template=args.template, params=params, built=built)),
+                                     template=args.template, params=params, built=built,
+                                     brief=args.brief)),
     ):
         path = args.out / name
         if path.exists():

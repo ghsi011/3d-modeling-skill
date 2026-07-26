@@ -43,7 +43,7 @@ def _params(raw: list[str]) -> dict[str, Any]:
 def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float, float, float],
         risk: str, updated_utc: str, out: Path, material: str | None,
         rationale: str | None = None, acceptance: str | None = None,
-        render: bool = True) -> tuple[int, list[str]]:
+        brief: Path | None = None, render: bool = True) -> tuple[int, list[str]]:
     """Every step, in order, stopping at the first that fails."""
     log: list[str] = []
     out.mkdir(parents=True, exist_ok=True)
@@ -56,6 +56,8 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
         intake_argv += ["--rationale", rationale]
     if acceptance:
         intake_argv += ["--acceptance", acceptance]
+    if brief:
+        intake_argv += ["--brief", str(brief)]
     code = intake_module.main(intake_argv)
     if code != 0:
         return code, log + ["intake failed; nothing downstream ran"]
@@ -107,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rationale", help="why this consequence class; yours to decide")
     parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
                                              "get to choose -- 'nothing' is a real answer")
+    parser.add_argument("--brief", type=Path, help="hashed into the dimensions sources table")
     parser.add_argument("--updated-utc", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--no-render", action="store_true",
@@ -123,7 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     code, log = run(job_id=args.job_id, template=args.template, raw_params=args.param,
                     bbox=tuple(args.bbox), risk=args.risk, updated_utc=args.updated_utc,
                     out=args.out, material=args.material, rationale=args.rationale,
-                    acceptance=args.acceptance, render=not args.no_render)
+                    acceptance=args.acceptance, brief=args.brief,
+                    render=not args.no_render)
 
     sys.stderr.write("\n".join(f"  {line}" for line in log) + "\n")
     if code != 0:

@@ -100,6 +100,33 @@ class TestIntake(unittest.TestCase):
                             "## Dimensions", "## Open questions", "## Reference round trip"):
                 self.assertIn(section, sheet)
 
+    def test_the_briefs_hash_is_computed_rather_than_demanded(self) -> None:
+        """A reader who types a hash by hand has bound the sheet to whatever
+        they typed. With no brief there is nothing honest to write, so the
+        field stays demanded."""
+        try:
+            import trimesh  # noqa: F401
+        except ImportError:
+            self.skipTest("needs trimesh")
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            brief = out / "brief.md"
+            brief.write_text("a clip", encoding="utf-8")
+            _run(out, "--brief", str(brief))
+
+            sources = [line for line in
+                       (out / "dimensions.md").read_text(encoding="utf-8").splitlines()
+                       if line.startswith("| S-01")][0]
+            self.assertNotIn(intake.REQUIRED, sources)
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            _run(out)
+            sources = [line for line in
+                       (out / "dimensions.md").read_text(encoding="utf-8").splitlines()
+                       if line.startswith("| S-01")][0]
+            self.assertIn(intake.REQUIRED, sources)
+
     def test_it_will_not_overwrite_an_edited_contract(self) -> None:
         try:
             import trimesh  # noqa: F401
