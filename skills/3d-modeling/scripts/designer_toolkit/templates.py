@@ -41,6 +41,12 @@ class Built:
     reference: Any | None = None
     edge_samples: dict[str, tuple[float, float]] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
+    # What the solid must measure, derived from the caller's numbers rather than
+    # from the solid. The independence is the whole value: the mouth-cutter bug
+    # changed the boolean result and left `fw * fd - pi * r**2` untouched, so the
+    # two disagreed by 67 mm2. An expectation measured off the part it is
+    # checking would have agreed with the defect.
+    expected: tuple[dict[str, Any], ...] = ()
 
 
 def _seated(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -430,8 +436,25 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
         part = _cut_with(part, cuts)
 
     extents = part.bounds[1] - part.bounds[0]
+    expected: list[dict[str, Any]] = []
+    if flange is not None:
+        # Arithmetic, not measurement: the plate is its own rectangle less the
+        # screw shaft. This is the number that caught the mouth cutter slotting
+        # the flange -- 796.64 against 864.10 -- while bbox, watertightness,
+        # component count and overhang area were all identical to the good part.
+        plate = float(flange[0]) * float(flange[1]) - math.pi * (screw_d / 2.0) ** 2
+        expected.append({"kind": "solid_region", "id": "flange-mid",
+                         "z": float(base_h) / 2.0, "area_mm2": plate})
+        expected.append({"kind": "bed_footprint", "area_mm2": plate})
+        if screw_d > 0 and countersink_d > screw_d:
+            sx, sy = screw_at if screw_at is not None else (outer_d / 2, flange[1] / 2)
+            expected.append({"kind": "countersink", "id": "screw",
+                             "at": (float(sx), float(sy)),
+                             "shaft_d": float(screw_d), "head_d": float(countersink_d),
+                             "face_z": float(base_h)})
     return Built(
         part=part,
+        expected=tuple(expected),
         params={
             "wall_mm": float(wall),
             "overall_mm": {"x": float(extents[0]), "y": float(extents[1]),

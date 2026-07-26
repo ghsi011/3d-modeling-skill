@@ -71,7 +71,8 @@ class Commission:
 
 
 def load_model(model_path: Path):
-    """Import a model module and return its parameters and its part.
+    """Import a model module and return its parameters, its part and what it
+    expects to measure.
 
     The module must expose ``part`` or a zero-argument ``build()``. Anything
     else is a contract the caller has to guess at, and guessing is what the
@@ -80,6 +81,10 @@ def load_model(model_path: Path):
     ``PARAMS`` is read *before* ``build()`` runs, because the pre-build stage
     has to be able to reject the numbers without paying for the geometry they
     describe.
+
+    ``EXPECTED`` carries the template's own arithmetic for what the solid must
+    measure. It is the one thing here a hand-written model may not invent: an
+    expectation the author tuned until it passed measures nothing.
     """
     spec = importlib.util.spec_from_file_location(model_path.stem, model_path)
     if spec is None or spec.loader is None:
@@ -90,16 +95,18 @@ def load_model(model_path: Path):
     params = getattr(module, "PARAMS", None)
     if not isinstance(params, dict):
         params = None
+    expected = getattr(module, "EXPECTED", ())
+    expected = tuple(expected) if isinstance(expected, (list, tuple)) else ()
     if hasattr(module, "part"):
-        return params, module.part
+        return params, module.part, expected
     if hasattr(module, "build"):
-        return params, module.build
+        return params, module.build, expected
     raise ValueError(f"{model_path.name} must define `part` or `build()`")
 
 
 def load_part(model_path: Path) -> Any:
     """Back-compat shim for direct callers: just the part."""
-    _, part = load_model(model_path)
+    _, part, _ = load_model(model_path)
     return part() if callable(part) else part
 
 
@@ -407,6 +414,7 @@ def run(
 
     source: Any = stl
     params: dict[str, Any] | None = None
+    expected_features: tuple[dict[str, Any], ...] = ()
     if stl is not None and not Path(stl).is_file():
         # Without this the path falls through to the exporter's CAD-kernel
         # branch and the caller is told "No module named 'cadquery'" -- which
@@ -415,7 +423,7 @@ def run(
     if model is not None:
         if not Path(model).is_file():
             raise FileNotFoundError(f"no such model module: {model}")
-        params, source = load_model(model)
+        params, source, expected_features = load_model(model)
 
         # Pre-build stage. These read declared numbers only, so they cost
         # microseconds and, when they fail, they save the whole
@@ -521,6 +529,25 @@ def run(
                 "wall eats the wall. "
             ) + "Do not widen the band to fit the measurement.",
         ))
+
+    # Declared features, measured against the solid. Everything above this point
+    # is a scalar summary of the whole part -- bounding box, watertightness,
+    # component count, downward-facing area -- and all four were bit-identical
+    # across a correct clip, one missing its countersink, and one whose flange
+    # had been slotted through. A part is not the numbers that summarise it.
+    #
+    # The plan's rows come first so a print engineer can add expectations the
+    # template does not carry; neither source may be a dict the model author
+    # maintains by hand beside the geometry it checks.
+    feature_rows = list(expected_features) + list(plan.get("features") or [])
+    if feature_rows:
+        from . import features as _features
+        for check in _features.check_features(
+                mesh, feature_rows, bed_contact_mm2=placement.bed_contact_mm2):
+            commission.add(check)
+        commission.evidence["expected_features_source"] = (
+            "template+plan" if expected_features and plan.get("features")
+            else "template" if expected_features else "plan")
 
     bundle = finalize(
         str(exported), str(stem),

@@ -66,6 +66,12 @@ def render_model(template: str, params: dict[str, Any], *, title: str | None = N
         "# solid, so they cannot drift from the geometry they describe.\n"
         "PARAMS = _built.params\n"
         "part = _built.part\n"
+        "\n"
+        "# What the solid must measure, derived from the parameters above rather\n"
+        "# than from the geometry. Do not edit these to make a failing check pass:\n"
+        "# the number is worth something only because nothing measured the part to\n"
+        "# arrive at it.\n"
+        "EXPECTED = _built.expected\n"
     )
 
 
