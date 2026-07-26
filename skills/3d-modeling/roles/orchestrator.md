@@ -151,13 +151,17 @@ and it decides which phases run, not how verbose the record is.
   and an unbanded fit costs a reprint.
 
   **What this route does not have, said plainly.** No fresh context ever looks at the part.
-  That has caught two candidates which passed every deterministic check and were still wrong:
-  one missing the countersink its own sheet required, one whose mounting flange had a slot cut
-  clean through it. You are the author here, and authors are blind to their own errors — so
-  measure rather than admire: section the part where a feature should be and check the number,
-  rather than glancing at a render you already expect to look right. `job_state.md`'s `## Route`
-  records "built and checked by the orchestrator; no independent fresh-context verification",
-  and the delivery repeats it.
+  You are the author, and authors are blind to their own errors.
+
+  The gate has grown teeth since that trade was struck — two candidates once shipped with a
+  missing countersink and a slot cut through a mounting flange, and both would now fail a
+  `feature-*` check in about 40 ms. What has not changed, and cannot, is that every one of
+  those checks is conditioned on somebody having declared what to measure. A render is
+  conditioned on nothing. So look at `renders/multi.png` and the section, and read
+  `evidence.slice_profile` — a curve over the whole part that nobody had to anticipate — and
+  compare what you see against the brief's feature list rather than against your own
+  expectation. `job_state.md`'s `## Route` records "built and checked by the orchestrator; no
+  independent fresh-context verification", and the delivery repeats it.
 
 - **`FITTED`** — one real object is measured or photographed and the part must fit it.
   Single candidate.
@@ -219,11 +223,8 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    chamfering is not a `DIRECT` part — re-route to `FITTED` and dispatch a print engineer
    rather than relaxing the number.
 
-   Then look, and look sceptically. You wrote this part, so you already believe it is right,
-   which is exactly the state in which two archived candidates shipped with a missing
-   countersink and a slot cut through a mounting flange. Both passed every deterministic
-   check. Section the part where each stated feature should be and check the number; do not
-   settle for a render matching your expectation.
+   Then look, and look sceptically — on `DIRECT` nobody else will, for the reasons the route
+   profile sets out. Compare the brief's features against what the images show, one by one.
 
 5. `FITTED`/`FULL` only: dispatch the metrologist to create `dimensions.md`; gate on complete
    datum/provenance, confidence grades, resolved blockers, and one blind-build-completeness row

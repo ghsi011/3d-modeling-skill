@@ -111,15 +111,15 @@ to compare against.
   ```
 
   `audit` settles the binding, the recomputation and both contract checks in one call, because
-  none of that is where your findings come from. **Then LOOK at the
-  designer's `renders/`** — that is. Two candidates have passed every deterministic check and
-  been wrong anyway: one missing the countersink its own sheet required, one with a slot cut
-  clean through its mounting flange. Neither was findable in a number nobody had thought to
-  compute.
+  none of that is where your findings come from. **Then LOOK at the images it names in
+  `evidence.look_at`** — that is. Step 7 sets out why in full; the short version is that every
+  number in the audit was computed because somebody asked for it, and a picture was not.
 
   `audit`'s `still_requires_a_look` lists what it did not settle, and it is not a formality:
   nothing in that call reads `dimensions.md`, so a part that measures self-consistently and
-  disagrees with what was asked for passes all of it.
+  disagrees with what was asked for passes all of it. `evidence.slice_profile` is the one
+  number in there that nobody conditioned — a curve over the whole part at a fixed pitch —
+  so read it alongside the renders rather than instead of them.
 
   Then answer every `<!-- REQUIRED -->` in the draft, and record steps 3 and 6 as *no evidence
   to consult* rather than as passed — there is none under this profile. That is the whole job.
