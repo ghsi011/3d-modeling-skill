@@ -8,12 +8,23 @@ plan is calibrated against: [`redesign-baseline.md`](redesign-baseline.md).
 
 | # | change | reason |
 |---|---|---|
-| 1 | The anomaly detector is **specified and deterministic** (§5), and zero-dispatch `DIRECT` is gated on it existing | The draft made clean `DIRECT` zero-dispatch while relying on "an anomaly detector fires" that it never defined. Without one, nothing unconditioned reads the witnesses. A 4 mm post once passed 27 green checks, an exact bbox and a matching bed-contact area. |
+| 1 | Broad geometry anomaly screening is **specified, deterministic, and bounded in what it claims** (§5); zero-dispatch `DIRECT` is gated on its **measured** false-negative rate | The draft made clean `DIRECT` zero-dispatch while relying on "an anomaly detector fires" that it never defined. A 4 mm post once passed 27 green checks, an exact bbox and a matching bed-contact area. Screening catches added material; it cannot prove absence. |
 | 2 | **Certified template** and **parameter domain** are defined (§4) | `DIRECT` is gated on both. Neither existed, and neither is inferable from a Python function. |
 | 3 | Manufacturing evidence gets an artifact and a phase (§3.7, §9.4) | The draft made supports/inserts/multi-material "modifiers" but deleted the phase where slicer-dependent evidence is produced. Modifiers are declarative; they don't answer "did the supports contact a non-functional face", which cannot be measured from the STL. |
 | 4 | Performance section split into **compute** and **wall clock**, and the implementation order is resequenced by measured value (§17, §18) | Every deterministic target in the draft's table is *already met* on the trimesh path. A real job is 3.1 min of wall clock for 3.5 s of compute. Optimizing compute further is worth ~1.5 s. |
 
-Consequence model is unchanged from the draft: exactly two levels, as specified.
+A second review pass (15 findings) is incorporated throughout; the substantive
+ones were: screening cannot prove absence, so the missing-countersink regression
+stays a contract test (§5.1, test 57); expectation generators must not share the
+build's arithmetic (§4); zero-dispatch is gated on a measured mutation corpus
+rather than on detector code existing (§5.4); out-of-domain routes normally
+instead of defaulting to `FITTED` (§4); the safety verifier decides before it is
+shown the normal verifier's conclusion (§10.1); toolpath predicates are always
+`DEFERRED` absent a named slicer adapter (§3.7).
+
+Consequence model is exactly two levels, as specified — including the removal of
+an automatic-`BLOCK` application list an earlier draft of this plan carried,
+which was a third tier in disguise.
 
 ---
 
@@ -46,8 +57,9 @@ request, not a keyword match.
   every proof obligation can be generated deterministically.
 * **`FITTED`** — acceptance depends on external geometry, measurements, material
   behaviour, movement, fit, or tolerances that must be recovered or interpreted.
-* **`FULL`** — novel geometry, coupled assemblies, uncertain interfaces, parallel
-  exploration, or anything else needing the complete workflow.
+* **`FULL`** — novel geometry, coupled assemblies, uncertain interfaces, or anything
+  else needing the complete workflow. **Not** parallel exploration: candidate
+  strategy is independent (§1.4) and `PARALLEL` applies to any route where it helps.
 
 Routing must not depend on whether the part touches or mates with something.
 The question is:
@@ -95,10 +107,10 @@ brief + evidence
     ↓ STL export + optional STEP             → artifact_manifest.json
     ↓ single mesh load (raw + normalized)
     ↓ deterministic commissioning            → commission_report.json
-    ↓ unconditioned anomaly detection        → folded into commission_report
+    ↓ broad geometry anomaly screening       → folded into commission_report
     ↓ minimal witness generation (W1)
     ↓ manufacturing evidence, if modifiers   → manufacturing_report.json
-    ↓ route-specific verification            → verification_report.json
+    ↓ route-specific verification            → verification_report.json (optional, §3.5)
     ↓ final safety verification if CONSEQUENTIAL → safety_verification_report.json
     ↓ final status                           → final_status.json
 ```
@@ -164,7 +176,14 @@ findings, **anomaly-detection results (§5)**, witness references, per-stage
 timing.
 
 ### 3.5 `verification_report.json`
-Route-specific verification result, visual anomalies, requirement mismatches,
+**Optional.** On a clean zero-dispatch `INCONSEQUENTIAL` `DIRECT` job no verifier
+runs, so this file is either absent — with `final_status.json` recording that the
+route carried no independent verification — or generated deterministically from
+the commissioning and screening results with `verifier: "deterministic"`. Pick one
+and hold to it. Never emit an empty report to satisfy an artifact list; a blank
+verification reads as a verification.
+
+When a verifier does run: route-specific verification result, visual anomalies, requirement mismatches,
 missing evidence, requested additional checks, final decision, model and prompt
 version where an LLM verifier was used, exact evidence-packet hash.
 
@@ -178,12 +197,30 @@ do toolpaths bridge as assumed, is the insert pocket reachable, does the
 multi-material boundary land where declared — are not measurable from geometry.
 
 Schema version, modifiers in force, required evidence list, evidence produced
-(paths + hashes), slicer/profile identification where used, per-predicate result,
-and `SATISFIED` / `DEFERRED` / `BLOCKED`.
+(paths + hashes), per-predicate result, and `SATISFIED` / `DEFERRED` / `BLOCKED`.
 
-`DEFERRED` is legitimate and must be surfaced in `final_status.json`: it means
-the part is geometrically sound and a manufacturing predicate has not been
-proven. It may not be silently upgraded.
+**Where the toolchain stops.** uv + build123d + trimesh + manifold3d contains no
+slicer, and the plan forbids adding GUI software to the core path. So:
+
+* **Geometry-derived predicates are `SATISFIED` deterministically** — downward
+  face area in the planned orientation, bed contact, overhang against the
+  declared rule, insert-pocket reachability, declared multi-material boundary
+  positions. These are measurable from the mesh and the orientation, and
+  commissioning already does most of them.
+* **Toolpath and actual support-contact predicates are always `DEFERRED`** unless
+  a named slicer adapter exists. There is no adapter today, and none is in scope.
+  Claiming otherwise promises verification this stack cannot produce.
+
+If a slicer adapter is ever added, it is named and versioned here, its outputs are
+hashed into the report, and only then may those predicates be `SATISFIED`.
+
+**Effect of `DEFERRED`, precisely.** A job with a *required* deferred predicate
+may not reach `VERIFIED`. It ends at `COMMISSIONED` — geometry proven, a
+manufacturing predicate unproven — and `final_status.json` states the allowed
+claim in words: "geometrically commissioned; support-contact behaviour not
+verified." If the deferred predicate is one the safety verifier needs on a
+`CONSEQUENTIAL` job, that verifier returns `NEEDS_MORE_EVIDENCE` and the job ends
+there. `DEFERRED` is never silently upgraded and never rounds up to `VERIFIED`.
 
 ### 3.8 `final_status.json`
 Consequence level, geometry route, backend, commission result, anomaly result,
@@ -194,7 +231,9 @@ hashes.
 Statuses: `FAILED`, `NEEDS_MORE_EVIDENCE`, `COMMISSIONED`, `VERIFIED`.
 
 A `CONSEQUENTIAL` job may not reach `VERIFIED` without a passing safety
-verification. Never emit the words `certified` or `guaranteed safe`.
+verification. A job with a required-but-`DEFERRED` manufacturing predicate may
+not reach `VERIFIED` either; it ends `COMMISSIONED` with the allowed claim
+spelled out. Never emit the words `certified` or `guaranteed safe`.
 
 ---
 
@@ -210,11 +249,31 @@ the code:
    requires, as expressions over the parameters (`mouth_gap < bore_d`,
    `tongue < min(wall_x, wall_y)`).
 3. **Expectation generators** — functions from parameters to contract
-   expectations, derived from the same arithmetic that builds the solid but
-   **never** measured from the produced mesh.
+   expectations, **independently implemented** and never measured from the
+   produced mesh.
+
+   Independence is the whole value and it is easy to lose. "Derived from the same
+   arithmetic that builds the solid" recreates the common-mode failure: geometry
+   and expectation share a helper, a bug moves both, and they agree. This repo has
+   the failure documented — *"drop `countersink_d` and the expectation disappears
+   with the geometry, because one parameter drives both; the part is then
+   self-consistently wrong and this module says nothing."*
+
+   So: separate module, separate tests, no shared helper for any critical
+   dimension. The mouth-cutter bug is the model to preserve — it changed the
+   boolean result and left `fw * fd - pi * r**2` untouched, so the two disagreed
+   by 67 mm2. Where a relation is better stated than computed, let the template
+   author declare an acceptance relation instead.
 4. **A certification record** — domain id, template version, the commit that
    certified it, and the evidence: which parameter combinations were built and
-   commissioned green, including every boundary corner of the domain.
+   commissioned green.
+
+   **Not every corner.** Ten ranged parameters is 1,024 corners; `c_clip` has
+   eight, so 256 builds at ~3.5 s each. Exhaustive corners only for domains small
+   enough to enumerate cheaply (say ≤ 5 ranged parameters). Otherwise: every
+   per-parameter boundary, pairwise combinations, every cross-parameter
+   constraint boundary, randomized property tests across the domain, and targeted
+   mutation tests. Record which strategy was used and its coverage.
 
 ```json
 {
@@ -231,67 +290,104 @@ the code:
 ```
 
 **Rules.**
-A parameter outside its range, or a violated constraint, is not a `DIRECT` job —
-it escalates to `FITTED`. Widening a domain requires re-running the corner
-evidence and bumping `domain_id`; a domain may never be widened to admit a part
-that failed. An uncertified template is usable, but only on `FITTED`/`FULL`.
+A parameter outside its range, or a violated constraint, makes the job **not
+`DIRECT`**. It does not become `FITTED` by default — routing then runs normally
+and decides between `FITTED` and `FULL` on §1.2's question. A novel shape outside
+a template domain often has no external object to measure, and calling that
+"fitted" is wrong.
+
+Widening a domain requires re-running the evidence and bumping `domain_id`; a
+domain may never be widened to admit a part that failed. An uncertified template is usable, but only on `FITTED`/`FULL`.
 
 `domain_id` is part of the cache key (§8.9) and of `model_contract.json`.
 
 ---
 
-## 5. Unconditioned anomaly detection  *(new — the draft's missing piece)*
+## 5. Broad geometry anomaly screening
 
-Every check in this pipeline is conditioned on somebody declaring what to
-measure. Geometry nobody declared is invisible to all of them. This is not
-hypothetical: a 4 mm post standing in a bin floor passed twenty-seven green
-checks, an exact bounding box, a watertight verdict and a matching bed-contact
-area.
+*Renamed from "unconditioned anomaly detection", which overstated it. These are
+broad screens. They are not tied to individual declared semantic features, which
+is their value — but they are not unconditioned, and they do not solve
+undeclared-feature detection in general.*
 
-Zero-dispatch `DIRECT` is only defensible if something unconditioned reads the
-part. That something must be **deterministic**, or it is another dispatch.
+### 5.1 What this can and cannot do
 
-### 5.1 Detectors
+**Can:** catch material that should not be there — an undeclared post, a stray
+boolean fragment, a shell that broke into pieces, a part sitting under the bed.
+Added geometry leaves evidence.
 
-All operate on the commissioned mesh, all are cheap, none requires the contract
-to have anticipated the defect.
+**Cannot:** catch a *missing* internal feature. A deleted countersink leaves a
+plain bore: smooth, plausible, and anomalous only against the curve the part
+should have had. This repo already says so, in `slice_profile`'s own docstring —
+*"To turn a curve into a pass/fail you need the curve the part should have had,
+and the only thing that can produce it is the template that produced the part —
+so the comparison would be against itself."* Missing features are caught by
+contract feature-witnesses (§3.2), and only by those.
 
-1. **Slice-profile discontinuity.** `slice_profile` already walks 28 cross-sections
-   in 0.14 s. Material area as a function of Z is piecewise smooth for almost
-   every printable part; a step where the contract declares no feature at that
-   height is an anomaly. Flag |Δarea| between adjacent slices exceeding a
-   threshold, excluding heights within tolerance of a declared feature.
-2. **Silhouette vs. contract hull.** Render or project orthographic silhouettes
-   and compare against the hull the contract implies. Material outside it is
-   geometry nobody declared.
-3. **Connected-component and shell audit.** Component count against
-   `expected_bodies`, plus any component whose volume is a small fraction of the
-   largest — the shape a stray boolean fragment takes.
-4. **Void intrusion.** For every declared `void_region`, material inside it.
-   Already implemented.
-5. **Bed-plane sanity.** Lowest point versus the declared bed. Already implemented
-   as a refusal.
+Do not let a screening pass be read as coverage for absence.
 
-### 5.2 Output and control flow
+### 5.2 Detectors
 
-Each detector reports `CLEAR`, `ANOMALY`, or `INDETERMINATE` into
-`commission_report.json`. An `INDETERMINATE` detector is not a pass — a detector
-that could not run means the part was not screened.
+1. **Multi-axis profile screening.** Material area as a function of position along
+   **X, Y and Z**, not Z alone. Sampling is jittered or adaptive rather than a
+   fixed 28 slices, because a small local defect falls between fixed planes and a
+   fixed grid is easy to be unlucky with. Thresholds are **scale-normalized**
+   (fraction of local section area, not mm²) so a 12 mm² post in a 2,000 mm²
+   floor is not lost in the noise floor of a large part.
 
-* All `CLEAR` → clean `DIRECT` may complete with zero dispatches.
-* Any `ANOMALY` or `INDETERMINATE` → escalate: generate `W2`, and dispatch one
-  bounded visual verifier.
+   Legitimate parts step abruptly all the time — ribs, pockets, shoulders,
+   threads, mounting bosses. So the comparison is against a **template reference
+   envelope**: the profile band the certified template's own parameters imply,
+   generated independently of the build (§4.3). Absent a reference envelope the
+   detector reports `INDETERMINATE`, never `CLEAR`.
 
-### 5.3 Sequencing rule
+2. **Silhouette versus contract hull.** Orthographic silhouettes compared against
+   the hull the contract implies. Explicitly contract-conditioned — it screens for
+   material outside a declared envelope, not for undeclared features generally.
 
-**Zero-dispatch `DIRECT` may not ship before §5.1 detectors 1–3 exist and are
-green-tested against the two archived defects** (the missing countersink and the
-edge-open flange) plus a synthetic undeclared post. Until then, clean `DIRECT`
-keeps one bounded visual call. This is a hard gate, not a preference: removing
-the look without the detector removes the only unconditioned evidence on the
-route.
+3. **Component and shell audit.** Component count against `expected_bodies`, plus
+   any component whose volume is a small fraction of the largest — the shape a
+   stray boolean fragment takes. The least conditioned of the three.
 
----
+4. **Void intrusion.** Material inside a declared `void_region`. Implemented.
+
+5. **Bed-plane sanity.** Lowest point versus the declared bed. Implemented as a
+   refusal.
+
+### 5.3 Output
+
+Each reports `CLEAR`, `ANOMALY`, or `INDETERMINATE` into `commission_report.json`.
+**`INDETERMINATE` is not a pass** — a detector that could not run means the part
+was not screened on that axis.
+
+Any `ANOMALY` or `INDETERMINATE` **escalates**: generate `W2` and dispatch one
+bounded visual verifier. A screen never hard-fails a job on its own; it is a
+trigger, not a verdict. Broad screens have false positives, and a false positive
+that fails a correct part teaches its reader to widen the threshold.
+
+### 5.4 Gate on measured efficacy, not on existence
+
+Zero-dispatch `DIRECT` is **not** unlocked by these detectors existing. It is
+unlocked by measured performance against a mutation corpus.
+
+**Corpus.** For each certified template, generated mutants across five classes:
+undeclared additions (posts, ribs, bosses), missing features, wrong-face features
+(a countersink on the opposite face), edge-open cuts, and boolean debris. Include
+the archived real defects: the missing countersink, the edge-open flange, the rib
+across the brood cavity, the welded segments, the 0.25 mm-misplaced pockets.
+
+**Acceptance.** Measured across **at least three templates** and reported per
+class:
+
+| metric | requirement |
+|---|---|
+| false negatives, added-material classes | ≤ 5% |
+| false negatives, missing/wrong-face classes | not claimed — §5.1; these are the contract's job, and the corpus reports the contract's rate |
+| false positives on known-good parts across the certified domain | ≤ 2% |
+
+Below those numbers, clean `DIRECT` keeps one bounded visual call. This is a hard
+gate: removing the look without a measured screen removes the only broad evidence
+on the route, and the 4 mm post is what that costs.
 
 ## 6. Backend architecture
 
@@ -418,8 +514,11 @@ versions, schema versions, units, contract values, tessellation or backend
 versions.
 
 **A geometry cache hit is not a safety-verification cache hit.** A cached
-`CONSEQUENTIAL` job still runs §10 unless the identical evidence packet and
-verifier version already produced a valid cached safety result.
+`CONSEQUENTIAL` job still runs §10 unless a prior result matches on *every* one
+of: evidence-packet hash, prompt hash, model snapshot identifier, reasoning
+settings, output-schema version, and inference configuration. "Same verifier
+version" is not identity — the same version under different reasoning settings is
+a different reviewer.
 
 ---
 
@@ -465,7 +564,7 @@ complete inputs; complete immutable contract; no unresolved ambiguity; all
 mandatory checks pass; required coverage complete; no unexpected repair; all
 anomaly detectors `CLEAR`.
 
-`INCONSEQUENTIAL`: zero dispatches (once §5.3 is satisfied), one job command, one
+`INCONSEQUENTIAL`: zero dispatches (once §5.4 is satisfied), one job command, one
 worker, one mesh load, `W1` only, no STEP unless requested.
 
 `CONSEQUENTIAL`: identical deterministic path, then exactly one bounded final
@@ -488,8 +587,8 @@ hidden reasoning — only the brief, the immutable manifests and contract, expor
 artifacts, deterministic measurements, and witnesses.
 
 For `CONSEQUENTIAL` jobs, the safety verifier is separate from both the designer
-and the normal verifier. It may read the normal verifier's conclusions but must
-decide from the underlying evidence and name any disagreement.
+and the normal verifier, and runs in two stages (§10.1) so the normal verifier's
+conclusion cannot anchor its own.
 
 ### 9.4 Manufacturing evidence  *(added)*
 When any modifier in force requires evidence the STL cannot carry, produce
@@ -508,17 +607,25 @@ part looks simple, deterministic checks passed, another verifier reviewed it, th
 artifact came from cache, the user wants speed, or the route has no other
 dispatch.
 
-### 10.1 Independence
+### 10.1 Independence, in two stages
 Fresh context. Must not receive the designer's hidden chain of thought,
 self-justification, informal safety claims, or any instruction to confirm an
 existing answer.
 
-May receive: original brief, consequence classification, `intent_manifest.json`,
-`model_contract.json`, `artifact_manifest.json`, `commission_report.json`,
-`verification_report.json`, `manufacturing_report.json`, STL metadata, renders
-and silhouettes, relevant sections, material assumptions, print orientation,
-expected loads and force directions, fit and retention assumptions, physical
-testing recommendations.
+**Stage 1 — decide from the evidence alone.** Receives: original brief,
+consequence classification, `intent_manifest.json`, `model_contract.json`,
+`artifact_manifest.json`, `commission_report.json`, `manufacturing_report.json`,
+STL metadata, renders and silhouettes, relevant sections, material assumptions,
+print orientation, expected loads and force directions, fit and retention
+assumptions. It produces its decision here.
+
+**Stage 2 — compare, optionally.** Only then is it shown
+`verification_report.json`, and only to report agreement or disagreement. Its
+stage-1 decision is recorded and may not be revised upward by stage 2; a
+disagreement is an output, not a correction.
+
+Showing the normal verifier's conclusion first is anchoring by construction, and
+an anchored second opinion is not one.
 
 ### 10.2 Required questions
 Plausible failure modes; could it detach, fracture, deform, slip, jam, short,
@@ -531,11 +638,16 @@ or misplaced feature create a hazard; are external interfaces represented
 accurately; is physical testing required before use; is the evidence sufficient
 to pass at all.
 
-**Mandatory-block policy.** The verifier's policy list names applications it must
-return `BLOCK` for regardless of geometry quality — life-safety, load-bearing for
-a person, braking or steering, pressure vessels, mains-electrical barriers, fire
-containment, and regulated structural or medical use. This is verifier policy,
-not a consequence level: the pipeline still classifies with exactly two levels.
+**Mandatory review concerns.** Where the brief indicates life-safety,
+load-bearing for a person, braking or steering, a pressure vessel, a
+mains-electrical barrier, fire containment, or regulated structural or medical
+use, the verifier must address that application explicitly in
+`safety_concerns` and state what physical evidence would be needed. It decides
+`PASS`/`BLOCK`/`NEEDS_MORE_EVIDENCE` on the evidence like any other job.
+
+This is not a hidden third consequence level. An earlier draft made these an
+automatic `BLOCK` list, which is a third tier wearing a different hat — the
+pipeline classifies with exactly two levels and nothing here changes that.
 
 Strict structured output:
 
@@ -637,7 +749,8 @@ trimesh                         = mesh inspection and exported-artifact measurem
 manifold3d                      = the mesh boolean engine, always explicit
 model_contract.json             = requirement truth
 exported STL                    = commissioned artifact truth
-anomaly detectors               = the only checks nobody had to anticipate
+anomaly screening               = broad checks, not tied to declared features
+                                  (cannot prove absence -- see the contract for that)
 manufacturing_report.json       = evidence geometry cannot carry
 safety_verification_report.json = final safety review, CONSEQUENTIAL only
 ```
@@ -648,8 +761,8 @@ safety_verification_report.json = final safety review, CONSEQUENTIAL only
 
 The draft's 45, plus these, and all adversarial rather than happy-path:
 
-46. A certified template rejects a parameter outside its domain, and the job
-    escalates to `FITTED` rather than failing.
+46. A certified template rejects a parameter outside its domain, the job becomes
+    not-`DIRECT`, and routing then decides `FITTED` or `FULL` on its own merits.
 47. A violated cross-parameter constraint escalates identically.
 48. A domain may not be widened to admit a previously failing part.
 49. `domain_id` participates in the cache key.
@@ -660,9 +773,32 @@ The draft's 45, plus these, and all adversarial rather than happy-path:
 54. Zero-dispatch `DIRECT` is refused while any §5.1 detector 1–3 is absent.
 55. `manufacturing_report.json` is produced when a modifier requires it.
 56. `DEFERRED` manufacturing evidence reaches `final_status.json` unaltered.
-57. The archived missing-countersink and edge-open-flange defects are caught by
-    the anomaly detectors *without* a contract row naming them.
+57. The archived missing-countersink defect is caught by its **contract feature
+    witness**, and the screening detectors are asserted *not* to be relied on for
+    it — a deleted countersink leaves a plausible bore and no anomalous geometry.
+    A test claiming otherwise would be asserting something the geometry cannot
+    support.
 58. A part below the declared bed is refused, not measured.
+59. Mutation corpus (§5.4): per template, mutants across added-material,
+    missing-feature, wrong-face, edge-open and boolean-debris classes.
+60. Measured false-negative rate on added-material classes is at or under the
+    §5.4 threshold, across at least three templates.
+61. Measured false-positive rate on known-good parts sampled across the certified
+    domain is at or under the §5.4 threshold.
+62. Zero-dispatch `DIRECT` is refused while those measured rates are unmet — the
+    gate is efficacy, not the presence of detector code.
+63. A screening `ANOMALY` escalates and does not hard-fail the job.
+64. `INDETERMINATE` on any detector escalates rather than passing.
+65. A required-but-`DEFERRED` manufacturing predicate blocks `VERIFIED` and lands
+    the job at `COMMISSIONED` with the allowed claim stated.
+66. The safety verifier's stage-1 decision is recorded before
+    `verification_report.json` is shown to it.
+67. A safety cache entry is not reused when the prompt hash, model snapshot,
+    reasoning settings, schema version or inference configuration differ.
+68. Out-of-domain parameters produce a not-`DIRECT` job that then routes normally
+    — not an automatic `FITTED`.
+69. Expectation generators and geometry builders share no helper for any critical
+    dimension (import-graph assertion).
 
 ### Regression corpus
 Keep every historical defect as a test with its own reproduction: missing
@@ -711,7 +847,7 @@ The gap is agent round trips at 8–47 s each.
 
 | route | metric | target |
 |---|---|---|
-| `INCONSEQUENTIAL DIRECT` | dispatches | 0 (after §5.3) |
+| `INCONSEQUENTIAL DIRECT` | dispatches | 0 (after §5.4) |
 | | wall clock | < 60 s |
 | `CONSEQUENTIAL DIRECT` | dispatches | exactly 1 |
 | | wall clock | < 3 min |
@@ -742,8 +878,8 @@ this front-loads what unblocks correctness and what removes minutes.
 6. Certified templates: domain format, constraints, certification record (§4).
 
 **Phase C — the detector (gates zero-dispatch)**
-7. Anomaly detectors 1–3, tested against the archived defects and a synthetic
-   undeclared post.
+7. Screening detectors 1–3 (§5.2), plus the mutation corpus and the measured
+   false-negative/false-positive rates that gate zero-dispatch (§5.4).
 8. Escalation wiring: `ANOMALY`/`INDETERMINATE` → `W2` + one bounded verifier.
 
 **Phase D — backends**
@@ -767,8 +903,8 @@ this front-loads what unblocks correctness and what removes minutes.
 20. Charters, docs, CI.
 21. Re-benchmark; optimize only what profiling shows dominates.
 
-Run the relevant tests after each phase. Do not proceed past C without the
-detectors green.
+Run the relevant tests after each phase. Zero-dispatch `DIRECT` does not ship
+until Phase C's measured rates meet §5.4 — detector code existing is not the gate.
 
 ### Do not
 Rewrite unrelated code · add consequence levels · add legal acknowledgement or
