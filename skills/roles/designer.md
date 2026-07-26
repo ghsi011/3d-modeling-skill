@@ -69,11 +69,15 @@ Always:
 Only when you are hand-writing geometry in that backend — a template-built part never touches
 one, so reading its patterns is a page bought and unused:
 
-3. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
-4. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
+3. No CAD kernel, which `dt.py doctor` will tell you is the common case:
+   [`../3d-modeling/references/trimesh-patterns.md`](../3d-modeling/references/trimesh-patterns.md)
+   — the conventions the gate assumes, and the boolean traps that cost archived runs whole
+   build cycles.
+4. CadQuery: [`../3d-modeling/references/cadquery-patterns.md`](../3d-modeling/references/cadquery-patterns.md).
+5. build123d: [`../3d-modeling/references/build123d-patterns.md`](../3d-modeling/references/build123d-patterns.md)
    — read alongside the CadQuery patterns, which own everything downstream of the export.
-5. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
-6. A standard mechanism — snap-fit, hinge, thread, bearing seat:
+6. FreeCAD: [`../3d-modeling/references/freecad-mcp-patterns.md`](../3d-modeling/references/freecad-mcp-patterns.md).
+7. A standard mechanism — snap-fit, hinge, thread, bearing seat:
    [`../3d-modeling/references/mechanisms.md`](../3d-modeling/references/mechanisms.md).
 
 ## Checklist
@@ -131,8 +135,11 @@ one, so reading its patterns is a page bought and unused:
    end to end. If you find yourself exploring well beyond that, the shape probably does not fit
    after all, and hand-writing it is the faster answer than fighting the parameters.
 
-   Where no shape fits, hand-write it in the commissioned backend and read that backend's
-   patterns. Everything else about the commission is identical either way.
+   Where no shape fits, hand-write it — in the commissioned backend if there is one, and in
+   trimesh if `doctor` says there is not, which is the ordinary case. Read that path's
+   patterns first: a measured run spent its single largest block of time deriving the
+   trimesh conventions from template source because the charter pointed only at backends its
+   interpreter did not have. Everything else about the commission is identical either way.
 4. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
 5. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,
