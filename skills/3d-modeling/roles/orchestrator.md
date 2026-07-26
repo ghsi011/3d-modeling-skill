@@ -54,7 +54,7 @@ disk, not on how the context was named.
 1. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md)
    — **when you are dispatching.** It is the whole contract schema, and its job is to let
    you gate what a specialist hands back. On `DIRECT` you dispatch nobody and author no
-   contract by hand: `dt.py direct` writes them and `contracts validate` checks them, so
+   contract by hand: `design-tool run-job` writes them and validates them, so
    reading it there is a page paid for on every job to learn nothing you act on. Reach for it
    when a contract needs judging, not before.
 
@@ -105,106 +105,100 @@ and it decides which phases run, not how verbose the record is.
   computation. That is the whole reason this route exists.
 
   The starting points, so that choosing one is not a round trip. Generated from the
-  templates themselves, and `gen_harness --check` fails when it drifts — `dt.py templates`
-  prints this same list and you should not need to spend a turn on it.
+  certified registry, and `gen_harness --check` fails when it drifts. Every parameter
+  is bounded: a value outside its range is not a `DIRECT` job, and the routing decision
+  will say which parameter and which bound.
 
-| template | covers | parameters, as `dt.py` takes them |
-|---|---|---|
-| `box_shell` | any walled box: enclosure, hive body, tray, drawer, planter, open or lidded | `--param 'inner=(120, 80, 60)' --param wall=3.0 --param floor=3.0 --param open_top=True` |
-| `panel` | a flat plate with openings: window, screen board, bottom board, lid, vent grille | `--param width=100 --param depth=60 --param thickness=3.0 --param 'openings=({"kind": "rect", "x": 50, "y": 30, "w": 40, "h": 20},)'` |
-| `device_case` | a shelled wrap around a slab device: phone case, remote sleeve, instrument boot -- and it returns the mating reference with it | `--param 'device=(73.6, 155.6, 8.5)' --param wall=1.5 --param clearance=0.25 --param corner_radius=9.0` |
-| `c_clip` | a C-channel that snaps over a round thing, on an optional flange: cable clip, hose clamp, rail retainer -- axis along Z, so self-supporting | `--param bore_d=12.0 --param wall=3.0 --param height=9.0 --param mouth_gap=9.0 --param 'flange=(40, 22, 5)' --param screw_d=4.5 --param 'screw_at=(8, 11)' --param countersink_d=9.0` |
-| `bolt_boss` | a screw boss or standoff, reporting its annulus wall and aspect ratio | `--param outer_d=8.0 --param bore_d=4.2 --param height=10.0` |
-| `segmented_box` | a walled box too big for the bed, split into corner pieces that fit it: hive body, large enclosure, planter -- per-axis walls, so it can reproduce a standard that fixes both the inside and the outside | `--param 'inner=(374.7, 466.7, 244.5)' --param 'wall=(15.85, 19.05)' --param bed=256.0` |
-| `stack` | several parts laid out side by side for one plate, thinnest wall governing | **not callable from `dt.py`** — takes built parts; use it from Python |
+| template | backend | covers | parameters (all bounded) |
+|---|---|---|---|
+| `box_shell` | trimesh-manifold | a walled box with a floor and an open top: enclosure, tray, drawer, bin | `floor`, `inner_d`, `inner_h`, `inner_w`, `wall` |
+| `c_clip` | trimesh-manifold | a C-channel that snaps over a round bundle, on a mounting flange | `bore_d`, `flange_d`, `flange_t`, `flange_w`, `height`, `mouth_gap`, `screw_d`, `wall` |
+| `l_bracket` | trimesh-manifold | two plates at a right angle with a fastener hole through each: shelf bracket, mount, corner brace | `hole_d`, `hole_inset`, `leg_a`, `leg_b`, `thickness`, `width` |
+| `trim_ring` | build123d | a chamfered trim ring that drops into a round hole in a panel | `chamfer`, `hole_d`, `lip_t`, `lip_w`, `panel_t`, `wall` |
 
-  ```bash
-  DT=<skill>/scripts/dt.py
-  python $DT direct --job-id <job> --template <name> \
-    --param bore_d=12.0 --param 'flange=(40, 22, 5)' \
-    --stated bore_d,flange \
-    --bbox X Y Z --material PLA \
-    --risk R0_DECORATIVE|R1_LOW_CONSEQUENCE \
-    --rationale "<why that class>" \
-    --acceptance "<what you did not get to choose>" \
-    --brief <project>/brief.md --updated-utc <iso> --out <project>
+  Write one `job.json` in the project directory and run one command:
 
-  python $DT validate <project> \
-    --require job_state,dimensions,print_plan,artifact_manifest,candidate_readiness
+  ```json
+  {
+    "job_id": "clip-01",
+    "template": "c_clip",
+    "consequence": "INCONSEQUENTIAL",
+    "stated": ["bore_d", "flange_w"],
+    "parameters": {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                   "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8},
+    "updated_utc": "<iso8601>"
+  }
   ```
 
-  `--bbox` is the envelope **from the brief**, not the one you expect the template to
-  produce — it is the check, so deriving it from the parameters would be the part grading
-  its own homework. You do have to be right about it: a `c_clip` stands `flange_t + height`
-  tall, not `height`. If you get it wrong, `static-envelope` fails before anything is built
-  and names the delta, so the retry is informed rather than a guess.
+  ```bash
+  uv run design-tool run-job <project-dir>
+  ```
 
-  **Budget: four turns.** Not four commands — four round trips, because that is what the
-  clock actually charges for:
+  That is the whole route: intent, routing, the immutable contract, the
+  completeness preflight, build, export, one mesh load, commissioning, screening,
+  `W1` witnesses and the final status — one invocation, because the compute is
+  well under a second and every extra command pays interpreter start to do it.
+
+  **`stated` names the parameters the brief actually gives you.** Everything else is
+  recorded as chosen by the design. Omitting it understates your own numbers, which
+  is safe; the reverse claims the user said something they did not.
+
+  **Set `consequence` honestly.** `CONSEQUENTIAL` is failure that could injure
+  someone, damage equipment, start a fire, or make a machine misbehave. It does not
+  change the geometry route — it adds one mandatory safety pass at the end, and the
+  job cannot reach `VERIFIED` without it.
+
+  Read `final_status.json` when it finishes. Four outcomes and they mean different
+  things: `FAILED` (the geometry does not match its contract, or somebody rejected
+  it), `NEEDS_MORE_EVIDENCE` (a check could not run, or screening found something),
+  `COMMISSIONED` (the geometry was measured against its contract and matched — and
+  nobody independent looked), `VERIFIED` (somebody independent did). `allowed_claim`
+  says in words what was established, and it is the sentence to repeat to the user.
+
+  **Budget: three turns.** Not three commands — three round trips, because that is
+  what the clock actually charges for. Measured: the deterministic work is 0.18 s for
+  a trimesh template and 0.25 s for build123d with a STEP export, inside a job whose
+  wall clock is entirely round trips.
 
   1. Read the brief.
-  2. Run `direct`. It is intake, plan, build, gate and the screen question in one call.
-  3. **One turn, three reads in parallel**: `renders/multi.png`, `renders/section_x.png`,
-     and `screen/question.md`. They do not depend on each other, so reading them one per
-     turn spends two turns buying nothing.
-  4. Answer the judgments and run `validate`, then deliver. `direct` printed each
-     unanswered field as `file:line` with what it is asking, so this is an edit per field
-     and not a hunt — do not re-read the contracts to find them.
+  2. Write `job.json` and run `design-tool run-job`. One call.
+  3. Read `final_status.json` and the witnesses, and deliver.
 
-  A measured run of this route took 13.5 minutes across 59 calls to do 5.1 seconds of work.
-  Each round trip costs 8 to 47 seconds of inference before the shell is even reached, so
-  the count of turns *is* the runtime — the arithmetic has never been the cost. If you find
-  yourself past six, something is wrong with the inputs rather than the part; say so,
-  because that is a finding. Do not re-read a file you just wrote, do not re-run a command
-  to confirm it worked, and do not run `doctor` unless something has already failed in a
-  way that suggests the interpreter.
+  If you find yourself past four, something is wrong with the inputs rather than the
+  part — say so, because that is a finding. Do not re-read a file you just wrote, and
+  do not re-run a command to confirm it worked: it told you.
 
-  `direct` is intake, plan, build and gate in one call — about four seconds, renders included.
-  One call because the cost is turns, not work: the whole deterministic route is 5.1 seconds
-  of compute and a real run of it took 13.5 minutes, each command a round trip costing 8 to
-  47 seconds before the shell is even reached. There is no branch between those steps worth
-  taking separately. It stops at the first failure and
-  hands back that step's own message.
+  **When it is not `DIRECT`.** The runner decides and says why. Out-of-domain
+  parameters, an unresolved ambiguity, or geometry the certified templates do not
+  cover all stop the job with the exact condition named — `bore_d=60 is outside the
+  certified range [4, 40]`, not "try something else". Two things can follow:
 
-  **Pass `--stated` naming the parameters the brief actually gives you.** A brief asking for
-  a clip over a 12 mm bundle states three numbers; `c_clip` takes eight. Everything you do
-  not name is recorded as chosen by the design at confidence `D`, which is what it is — and
-  the sheet exists to record exactly that difference. Omitting the flag understates your own
-  numbers, which is safe; the sheet will never claim the user said something they did not.
+  * **`FITTED`** — acceptance depends on geometry somebody else owns, and one bounded
+    call recovers it from the photographs and calipers. Supply a spec reviewer and an
+    `interface_map` saying which template parameter each interface drives. The
+    clearances are the pipeline's, not the reviewer's: a measurement that arrives with
+    its clearance already folded in cannot be checked against the object it came from.
+  * **`FULL`** — novel geometry or coupled assemblies. Requires an independent
+    verifier, which is also the only way any route reaches `VERIFIED`.
 
-  It writes `job_state.md` and `dimensions.md` with every mechanical field filled. The two
-  judgments are still yours and nothing invents them: pass them in and they land in the file,
-  omit them and they stay `<!-- REQUIRED -->` for you to answer. Passing them is not a
-  shortcut past the decision — it is the same decision, delivered without spending turns
-  editing a file that was written a second ago. Do not let a scaffold's confidence stand in
-  for a judgment you have not actually made.
+  **The witnesses are the part nothing else can check.** Every check the gate runs is
+  conditioned on the contract naming a feature, so geometry nobody declared is
+  invisible to all of them — a 4 mm post standing in a bin floor once passed
+  twenty-seven green checks, an exact bounding box, a watertight verdict and a
+  matching bed-contact area.
 
-  `--require` names contracts, not filenames: `print_plan` resolves to whichever of
-  `print_plan.md` / `print_plan.json` / `print_plan_checks.json` is on disk, and a `DIRECT`
-  job has the last. Do not spend a turn checking.
+  Broad screening now covers part of that gap and says exactly how much: measured
+  against a 38-mutant corpus across three templates, it catches added material and
+  boolean debris at a 0.0 false-negative rate. What it cannot do is prove a feature is
+  *absent* — a deleted countersink leaves a plain bore, smooth and plausible, anomalous
+  only against the curve the part should have had. Absence is the contract's job.
 
-  Name the contracts rather than passing `--require all`: this route dispatches nobody, so no
-  `verification_report.md` is ever written, and `all` demands one. Those four are what a
-  `DIRECT` job produces, and naming them keeps an absent contract loud — without `--require`
-  at all, a missing file exits zero and reads as a pass.
+  So read `witness/` when the job finishes, and read `final_status.json`'s
+  `screening_calibrated` before trusting a `CLEAR`.
 
-  `screen/question.md` is the one question no check in this toolkit can ask, and `direct`
-  writes it for you. Every check is conditioned on a declaration — `feature-*` measures what
-  the plan named, `envelope` a declared size — so geometry nobody declared is invisible to
-  all of them: a 4 mm post standing in a bin floor passed twenty-seven green checks, an
-  exact bounding box and a matching bed-contact area. The file states what the part is
-  supposed to be and asks what else is visible. Answer it against the two renders in the
-  same turn you read them, zooming with `dt.py crop` only where a view is genuinely too
-  small to judge, and fill the two judgment fields the receipt leaves blank.
-
-  **If `dt.py doctor` reports no renderer, this route cannot finish.** Nothing else in the
-  pipeline is going to look: there is no verifier here, and a verifier looks at renders that do
-  not exist either. Every measurement the gate makes is conditioned on somebody having declared
-  what to measure, so with no image nothing at all is checking for what nobody named. Install
-  the visual extra, or deliver with `visual_accept` explicitly unanswered and say in as many
-  words that no one has seen the part — never write a verdict you did not see. One measured run
-  reached exactly this state and substituted its own hand-written sectioning script for the
-  look, which is the right instinct and not the same thing.
+  **If no renderer is available the witnesses are empty**, and the job says so rather
+  than pretending. A `CONSEQUENTIAL` job whose safety reviewer got no images has been
+  reviewed on numbers alone; say that when you deliver it.
 
   Calling a template with numbers off the sheet is not authoring geometry, so the charter's
   rule still holds: you are choosing parameters, and the template owns the shape. The moment

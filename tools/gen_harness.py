@@ -248,58 +248,29 @@ TEMPLATE_MARKER = "<!-- TEMPLATE-TABLE -->"
 
 
 def _template_table() -> str:
-    """The shipped templates, listed from the templates themselves.
+    """The certified templates, listed from the registry itself.
 
-    `dt.py templates` exists and prints exactly this, and asking for it cost a
-    round trip -- 8 to 47 seconds -- to learn something that changes only when
-    this repo changes. On the `DIRECT` route, where the whole job is four
-    commands, one of them was a lookup.
+    Choosing a starting point must not cost a round trip -- 8 to 47 seconds to
+    learn something that changes only when this repo changes. Hand-copying the
+    list would have traded that turn for drift, so it is generated and
+    `gen_harness --check` fails the build when it moves.
 
-    Hand-copying the list into the charter would have traded that turn for the
-    drift this repo keeps finding, so it is generated and `--check` fails the
-    build when it moves.
+    Parameters rather than a call signature: every one is bounded, and a job
+    outside a bound is not `DIRECT`, so the names are what a reader needs.
     """
     import sys
     sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
     try:
-        from designer_toolkit.templates import CATALOGUE
+        from pipeline.templates import registry
+        certified = registry()
     finally:
         sys.path.pop(0)
-    rows = ["| template | covers | parameters, as `dt.py` takes them |", "|---|---|---|"]
-    rows += [f"| `{name}` | {covers} | {_as_cli_params(call)} |"
-             for name, (covers, call) in CATALOGUE.items()]
+    rows = ["| template | backend | covers | parameters (all bounded) |",
+            "|---|---|---|---|"]
+    for name, template in sorted(certified.items()):
+        params = ", ".join(f"`{p}`" for p in sorted(template.bounds))
+        rows.append(f"| `{name}` | {template.backend} | {template.covers} | {params} |")
     return "\n".join(rows)
-
-
-def _as_cli_params(call: str) -> str:
-    """`c_clip(bore_d=12.0, flange=(40, 22, 5))` -> ``--param bore_d=12.0 --param 'flange=(40, 22, 5)'``.
-
-    The catalogue holds a Python signature because the templates are importable,
-    and the charter's reader is at a shell. A measured run spent two turns
-    working out whether tuples were accepted and how to quote them -- on a route
-    budgeted at four turns total, which is a quarter of the job spent on syntax.
-    """
-    inner = call[call.index("(") + 1: call.rindex(")")]
-    args, depth, current = [], 0, ""
-    for char in inner:
-        if char in "([{":
-            depth += 1
-        elif char in ")]}":
-            depth -= 1
-        if char == "," and depth == 0:
-            args.append(current.strip())
-            current = ""
-            continue
-        current += char
-    if current.strip():
-        args.append(current.strip())
-    if any("=" not in a for a in args):
-        # `stack` takes built parts, not values, so no `--param` list can call
-        # it. Saying so beats listing its one keyword and letting a reader spend
-        # a turn discovering the rest.
-        return "**not callable from `dt.py`** — takes built parts; use it from Python"
-    quoted = [f"'{a}'" if any(c in a for c in " ({[") else a for a in args]
-    return "`" + " ".join(f"--param {a}" for a in quoted) + "`"
 
 
 def _expand(body: str) -> str:
