@@ -105,16 +105,27 @@ class AgainstTheRealAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             stl = work / "box.stl"
-            trimesh.creation.box(extents=(40.0, 22.0, 14.0)).export(stl)
+            # Seated, because the plan's identity model-to-printer transform
+            # says the model sits where it is. Centred on the origin this box
+            # had half of itself under the bed -- the fixture defect that let a
+            # seating bug through once already -- and the assertion under it was
+            # only that the call did not raise, which such a box satisfies.
+            box = trimesh.creation.box(extents=(40.0, 22.0, 14.0))
+            box.apply_translation((0.0, 0.0, 7.0))
+            box.export(stl)
             plan_path = work / "print_plan_checks.json"
             plan_path.write_text(json.dumps(plan.direct_template((40.0, 22.0, 14.0))),
                                  encoding="utf-8")
 
-            # The assertion is simply that this does not raise.
             audit, _ = team_preflight.support_audit(
                 stl_path=stl, plan_path=plan_path, rule_id="S-01")
 
-            self.assertIn("out_of_limit_area_mm2", audit)
+            # A flat-bottomed box on the bed overhangs nothing, so the generated
+            # plan's self-support rule must be satisfiable by the shape it was
+            # generated for. If it is not, the template is asking for something
+            # no part of that size can give.
+            self.assertEqual("PASS", audit["result"], audit)
+            self.assertAlmostEqual(0.0, float(audit["out_of_limit_area_mm2"]), places=6)
 
     def test_validate_plan_rejects_what_the_audit_would_reject(self) -> None:
         for field in ("model_to_printer_matrix", "bed_z_mm", "bed_tolerance_mm"):

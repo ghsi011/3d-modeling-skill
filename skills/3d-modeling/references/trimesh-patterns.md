@@ -31,6 +31,36 @@ your numbers without paying for the geometry. `EXPECTED` is what the solid must 
 derived from the same named constants — never from the mesh you just made, or it agrees with
 whatever you built including the mistake.
 
+## Several parts on one plate
+
+A multi-part job is one model file, not one per part. Build each piece, lay them out with
+`stack`, and publish the plate's own `part`/`PARAMS`/`EXPECTED` — the layout carries each
+part's checks with it, so the plate is gated feature by feature rather than as one blob:
+
+```python
+from designer_toolkit.templates import box_shell, stack
+
+_a = box_shell(inner=(40.0, 30.0, 20.0), wall=2.0, floor=2.0)
+_b = box_shell(inner=(30.0, 30.0, 15.0), wall=2.0, floor=2.0)
+_plate = stack(_a, _b, gap=5.0)
+
+part, PARAMS, EXPECTED = _plate.part, _plate.params, _plate.expected
+```
+
+Declare the body count in the plan — `plan template --bodies 2` — or two parts that touch
+and weld into one on re-import will pass unnoticed.
+
+What survives the layout differs by kind, and the difference is not cosmetic. A hole and a
+declared void are **local**: they move with their part and nothing else on the plate can
+reach inside them. Bed contact is **additive**, summed across every part. A section area is
+**neither** — a plane through the plate cuts everything on it, so unless every part declares
+a region at that exact height the row is dropped rather than approximated. Two boxes of
+different heights therefore keep no section at all, which is precisely why declaring the
+cavities matters: they are what is left.
+
+`--bbox` is the whole plate, not a part: `44 + 5 + 34 = 83` wide here, and as tall as the
+tallest piece. Get it wrong and `static-envelope` says so before anything is built.
+
 ## Conventions the gate assumes
 
 **Seat the part.** Minimum Z at zero. The plan's identity model-to-printer transform places

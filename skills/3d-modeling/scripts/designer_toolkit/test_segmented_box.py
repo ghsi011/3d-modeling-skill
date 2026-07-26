@@ -232,6 +232,33 @@ class TestStackedExpectations(unittest.TestCase):
         self.assertEqual([], regions,
                          "the two parts declare regions at different heights")
 
+    def test_the_documented_multi_part_model_gates_feature_by_feature(self) -> None:
+        """The pattern trimesh-patterns.md prints for a plate of several parts.
+
+        It was undocumented while the code supported it, which is how a job with
+        the most to get wrong ends up hand-rolled. Pinned here because the one
+        other backend hand-off that nothing exercised -- build123d's -- had
+        drifted into naming a flag that could not work.
+        """
+        from . import commission as commission_module
+        from . import features as F
+
+        plate = T.stack(T.box_shell(inner=(40.0, 30.0, 20.0), wall=2.0, floor=2.0),
+                        T.box_shell(inner=(30.0, 30.0, 15.0), wall=2.0, floor=2.0), gap=5.0)
+
+        part, params, expected = plate.part, plate.params, plate.expected
+        self.assertEqual({"x": 83.0, "y": 34.0, "z": 22.0}, params["overall_mm"],
+                         "the documented --bbox arithmetic must be the real one")
+        self.assertEqual([83.0, 34.0, 22.0], [round(float(v), 3) for v in part.extents])
+
+        footprint = next(r for r in expected if r["kind"] == "bed_footprint")
+        results = {c.id: c.result for c in F.check_features(
+            part, expected, bed_contact_mm2=footprint["area_mm2"])}
+        self.assertEqual({"feature-cavity-0": "PASS", "feature-cavity-1": "PASS",
+                          "feature-bed_footprint": "PASS"}, results)
+        self.assertTrue(hasattr(commission_module, "load_model"),
+                        "the documented hand-off is `commission --model`")
+
     def test_a_void_carries_over_where_a_section_cannot(self) -> None:
         """The same plate the section rule has to give up on.
 
