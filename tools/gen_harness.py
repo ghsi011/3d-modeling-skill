@@ -258,23 +258,13 @@ def _rewrite_shared_links(body: str, prefix: str) -> str:
 
 
 def render_skill(role: Role) -> GeneratedFile:
-    """The orchestrator becomes the skill; every other role becomes a file the
-    orchestrator hands to a subagent.
+    """Every role is a file under `roles/`, the orchestrator included.
 
     One installable skill rather than five: the roles are not independently
     useful (a designer with no commission refuses to start, by design), and
     five sibling skills that reach each other by relative path break the moment
     a host installs one of them on its own.
     """
-    if role.role == "orchestrator":
-        content = (
-            "---\n"
-            "name: 3d-modeling\n"
-            f"description: {role.skill_description}\n"
-            "---\n"
-            f"{_rewrite_shared_links(role.body, '')}"
-        )
-        return GeneratedFile(SKILL_DIR / "SKILL.md", content)
     return GeneratedFile(
         SKILL_DIR / "roles" / f"{role.role}.md",
         f"# 3D {role.display_name.removeprefix('3D ')}\n\n"
@@ -282,8 +272,47 @@ def render_skill(role: Role) -> GeneratedFile:
     )
 
 
+def render_router(roles: tuple[Role, ...]) -> GeneratedFile:
+    """`SKILL.md`: which role you are, and where to read it.
+
+    Loading the skill used to load the orchestrator's entire charter -- routing
+    rules, consequence classes, the dispatch protocol -- into every specialist
+    context that requested it, because the orchestrator *was* `SKILL.md`. A
+    designer needs none of that and every dispatch paid for it. The entry point
+    is a router now, and the orchestrator reads its own file like everyone else.
+    """
+    orchestrator = next(r for r in roles if r.role == "orchestrator")
+    lines = [
+        "---",
+        "name: 3d-modeling",
+        f"description: {orchestrator.skill_description}",
+        "---",
+        "",
+        "# 3D modeling",
+        "",
+        "Five roles that speak to each other through file contracts rather than chat. Read the",
+        "one your dispatch names and only that one: each file is the whole charter for its job,",
+        "and the others are cost you carry without using.",
+        "",
+    ]
+    for role in sorted(roles, key=lambda r: (r.role != "orchestrator", r.role)):
+        tail = " Start here when you are governing a job." if role.role == "orchestrator" else ""
+        lines.append(
+            f"- [`roles/{role.role}.md`](roles/{role.role}.md) — {role.short_description}.{tail}"
+        )
+    lines += [
+        "",
+        "Shared assets sit beside them: [`references/`](references/) for the contract spec and",
+        "the design guidance, [`scripts/`](scripts/) for the deterministic tooling.",
+        "`scripts/dt.py` is the toolkit launcher — invoke it by absolute path from wherever the",
+        "job is, and ask `dt.py doctor` what the interpreter you have can actually do.",
+        "",
+    ]
+    return GeneratedFile(SKILL_DIR / "SKILL.md", "\n".join(lines))
+
+
 def generate(roles: tuple[Role, ...]) -> tuple[GeneratedFile, ...]:
-    files: list[GeneratedFile] = []
+    files: list[GeneratedFile] = [render_router(roles)]
     for role in roles:
         files.append(render_agent(role))
         files.append(render_skill(role))
