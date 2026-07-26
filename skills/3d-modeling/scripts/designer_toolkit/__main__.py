@@ -57,6 +57,9 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "probe":
+        from .probe import main as probe_main
+        raise SystemExit(probe_main(argv[1:]))
     if argv and argv[0] == "validate":
         # `python -m team_tools.contracts` only resolves with the scripts
         # directory on sys.path. From the repo you are already there; from an
@@ -120,6 +123,9 @@ def main(argv=None):
                         "recomputation, leaving every judgment blank")
     sub.add_parser("templates", add_help=False,
                    help="the parametric starting points and the shapes they cover")
+    sub.add_parser("probe", add_help=False,
+                   help="ask the delivered solid a question -- section area, a hole's "
+                        "size and position, the whole slice profile")
     sub.add_parser("validate", add_help=False,
                    help="contract validation, reachable from anywhere: "
                         "validate <project> --require all")

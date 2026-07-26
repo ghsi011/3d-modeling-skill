@@ -52,7 +52,7 @@ Only when the job has the evidence for it:
    [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
 6. A FreeCAD candidate:
    [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
-7. A conditional final-prep review, for the `final_prep_review.md` template:
+8. A conditional final-prep review, for the `final_prep_review.md` template:
    [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md).
    The `verification_report.md` template is **not** on this list: `dt.py report` emits it,
    already filled with your own measurements, so reading 592 lines of contract to obtain a
@@ -141,17 +141,34 @@ gate. `R3` never receives a `PASS` under any profile.
    instrument on the same bytes: it cannot catch a wrong instrument, and what it can catch — a
    delivered STL that is not the one measured — the hash binding catches first and more
    cheaply. It runs because it costs a second, not because it is where findings come from.
-   Budget accordingly and leave the time for step 7.
+   Budget accordingly and leave the time for step 8.
 
    **Do not hand-write a replacement.** Independence is a property of which inputs you
    consult, not of who wrote the code. A bespoke re-implementation is a second uncalibrated
    instrument, and that is not hypothetical — one archived run's hand-rolled sampler read up
    to 137% high against known nominals and the run widened its acceptance bands until its own
    wrong numbers passed.
-5. Read `still_requires_a_look` in the audit output before going further. Nothing in step 4
+5. Where the sheet declares a number, ask the solid for it rather than writing a sampler:
+
+   ```bash
+   python <skill>/scripts/dt.py probe <canonical.stl> --section 12.5
+   python <skill>/scripts/dt.py probe <canonical.stl> --hole=-8,13 --z 1.2 --nominal 6.5
+   ```
+
+   Ask at the position the *sheet* gives, not the one the model used — that is the whole
+   check. A run building to a published standard put its magnet pockets 0.25 mm off on both
+   axes and declared them in the same wrong place, so eight checks measured a correct hole at
+   an incorrect position and agreed. Probing at the standard's coordinate reports the drift
+   per axis.
+
+   This is the one instrument you may use freely, because it is the gate's own: a verifier
+   and a designer cannot disagree by instrument if they share one. Anything you write
+   yourself is a second uncalibrated instrument, and one archived run's own sampler read 137%
+   high against known nominals before the run widened its bands to suit.
+6. Read `still_requires_a_look` in the audit output before going further. Nothing in step 4
    reads `dimensions.md`, so a part that measures self-consistently and disagrees with what
    was asked for passes all of it.
-6. Cover the rest by hand, per plan: check **2**, the full-travel insertion sweep, for any
+7. Cover the rest by hand, per plan: check **2**, the full-travel insertion sweep, for any
    interface declaring a motion path; check **5**, feature positions and handedness from named
    datums (a mirrored layout fits the same magnitudes — compare with the datum coordinate
    negated); and the sheet half of check **6**, comparing `dimensions.md` values back to the
@@ -162,7 +179,7 @@ gate. `R3` never receives a `PASS` under any profile.
    verifier-owned JSON per support rule — it implements the bed/downward predicate
    independently of the toolkit's, so a silent disagreement between them is the cheapest bug
    detector available and costs one command.
-7. Check **4**, and it is yours alone: look at the images. **Spend your effort here.** Across
+8. Check **4**, and it is yours alone: look at the images. **Spend your effort here.** Across
    every verification this pipeline has recorded, the deterministic recomputation has never
    once disagreed with the designer's — it is the same instrument on the same bytes, and
    agreement is what it is for.
@@ -199,7 +216,7 @@ gate. `R3` never receives a `PASS` under any profile.
    against what you can see, item by item — that comparison is the one this role owns
    outright, and no future check will take it over, because a check has to be told what to
    look for and you do not.
-8. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
+9. Verify export completeness and consistency: STL/STEP/3MF identities, closed solids,
    intended bodies, units, and no missing or stray components. `audit` has already run
    `contracts validate --require all` and `status`; read their rows rather than repeating the
    commands. `--require` is load-bearing, not decoration: without it an absent contract is
@@ -222,24 +239,24 @@ gate. `R3` never receives a `PASS` under any profile.
    once came to describe a mesh nobody was shipping, and a report that arrived pre-concluded
    would be worse than that.
 
-9. A `PASS` requires every applicable check to pass with evidence and no open critical
+10. A `PASS` requires every applicable check to pass with evidence and no open critical
    upstream question.
-10. A `REJECT` must identify defect, evidence path, expected versus observed value/appearance,
+11. A `REJECT` must identify defect, evidence path, expected versus observed value/appearance,
    named datum or print-plan rule, severity, and owning loop (`METROLOGY`, `PRINT_PLAN`, or
     `CANDIDATE_BUILD`). Never prescribe an unverified geometry fix as acceptance. Every
     changed STL hash requires a new fresh verifier context and a full seven-check rerun.
-11. Enforce the shared plan-revision rule. A changed candidate predicate needs a new
+12. Enforce the shared plan-revision rule. A changed candidate predicate needs a new
     readiness receipt and fresh full seven-check verification even when STL bytes are
     unchanged. Bound P2 evidence added under an unchanged plan does not.
-12. When `final_print_prep.md` is `READY_FOR_REVIEW`, inspect actual support contacts,
+13. When `final_print_prep.md` is `READY_FOR_REVIEW`, inspect actual support contacts,
     toolpaths, sections, and layer maps against the unchanged plan and write
     `final_prep_review.md`. Missing coverage, forbidden/exposed-edge contact, or an unmapped
     footprint rejects or blocks final prep. This review never waives candidate verification.
-13. If required native slicer evidence is unavailable, return `FINAL_PRINT_BLOCKED`; do not
+14. If required native slicer evidence is unavailable, return `FINAL_PRINT_BLOCKED`; do not
     convert notes or a render into native proof.
-14. Never copy the canonical STL into your own folder — `audit` reads it in place, and a run
+15. Never copy the canonical STL into your own folder — `audit` reads it in place, and a run
     that duplicated it verified a copy of the thing it was sent to check. For a rejection,
     retain only the report, metrics, hashes, and defect-specific visual in addition to
     canonical artifacts.
-15. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
+16. For FreeCAD candidates, verify only staged exported STL/renders in this fresh context; do
     not acquire the FreeCAD mutation lease and do not mutate the `.FCStd`.
