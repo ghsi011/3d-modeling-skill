@@ -129,6 +129,31 @@ def planned_placement(rule: dict[str, Any], mesh, threshold: float) -> orient.Pl
     return orient.score(mesh, "plan model_to_printer_matrix", matrix, threshold=threshold)
 
 
+def _check_step(commission: Commission, report, verifying: bool) -> None:
+    """Say when no STEP was written, rather than leaving it to be noticed.
+
+    The trimesh path -- which every template uses -- exports STL only; STEP
+    needs a CAD kernel. A multi-part run spotted that and wrote the same note
+    into five `print_notes.md` by hand. A gap the receipt does not mention is a
+    gap somebody has to find.
+    """
+    if verifying:
+        return  # a verifier measures what was delivered; it exports nothing
+    if report.step_path:
+        commission.add(Check("step", "STEP exported alongside the STL", _PASS,
+                             Path(report.step_path).name))
+        return
+    commission.add(Check(
+        "step", "STEP exported alongside the STL", _SKIP,
+        "no STEP was written: this part was built through the mesh path, which "
+        "exports STL only",
+        "Nothing is wrong with the geometry. But a downstream consumer wanting "
+        "editable CAD will not find it, so either rebuild the part in the "
+        "commissioned kernel backend or record in your handoff that this part "
+        "ships as mesh only.",
+    ))
+
+
 def _check_solid(commission: Commission, report) -> None:
     ok = report.watertight and report.components == 1
     commission.add(Check(
@@ -392,6 +417,7 @@ def run(
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
 
+    _check_step(commission, report, stl is not None)
     _check_solid(commission, report)
     _check_envelope(commission, report, plan)
 

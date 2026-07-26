@@ -287,6 +287,39 @@ class EdgeCheckTest(unittest.TestCase):
             self.assertTrue(any(c.id == "solid" for c in result.checks))
 
 
+class StepCheckTest(unittest.TestCase):
+    def test_a_mesh_built_part_says_it_has_no_step(self) -> None:
+        """A five-part run wrote the same note by hand five times. A gap the
+        receipt does not mention is a gap somebody has to find."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            model = work / "model.py"
+            model.write_text(
+                "from designer_toolkit.templates import box_shell\n"
+                "_b = box_shell(inner=(24.0, 14.0, 7.0), wall=3.0, floor=3.0)\n"
+                "PARAMS, part = _b.params, _b.part\n",
+                encoding="utf-8")
+
+            result = commission.run(
+                model=model, stl=None, out_dir=work / "out", render=False,
+                plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}))
+
+            step = next(c for c in result.checks if c.id == "step")
+            self.assertIn(step.result, ("SKIPPED", "PASS"))
+            if step.result == "SKIPPED":
+                self.assertIn("STL only", step.detail)
+                self.assertIn("Nothing is wrong with the geometry", step.action)
+
+    def test_a_verifier_is_not_asked_for_a_step_it_never_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work / "out", render=False,
+                plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}))
+
+            self.assertEqual([], [c for c in result.checks if c.id == "step"])
+
+
 class SolidCheckTest(unittest.TestCase):
     def test_a_two_body_export_fails(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
