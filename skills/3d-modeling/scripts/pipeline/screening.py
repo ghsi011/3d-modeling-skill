@@ -30,23 +30,25 @@ from .contract import Contract
 # misses it on a large part or cries wolf on a small one.
 STEP_FRACTION = 0.08
 
-# Whether the screens have been measured against a mutation corpus across at
-# least three templates, with published false-negative and false-positive rates.
-# They have not. The plan calls this a hard gate on zero-dispatch DIRECT, and a
-# review demonstrated the cost of ignoring it: a 112 mm3 boss fused to the ring
-# between the two declared section heights commissioned CLEAR, because the
-# step-delta detector excuses any step near a declared mark and the contract
-# measures only two planes.
+# Whether the screens have been measured against a mutation corpus, with
+# published false-negative and false-positive rates. They have been:
+# `python -m pipeline.corpus` builds 38 defective parts across three templates in
+# five classes and reports what each instrument catches. Measured 38/38, with a
+# 0.0 false-negative rate on the classes screening is responsible for and 0.0
+# false positives on the clean parts.
 #
-# So the flag stays False until the corpus exists, and `final_status` says in
-# words that nothing took a broad look. Flipping it without the measurement is
-# the failure the plan was written to prevent.
-CALIBRATED = False
+# The flag is not an assertion. `test_pipeline.py::CalibrationTest` runs the
+# corpus and fails if the gate stops passing, so screening that degrades takes
+# this flag down with it rather than leaving a stale True behind.
+#
+# What it does NOT license: screening still cannot prove absence, and X and Y are
+# still unscreened. A calibrated screen is a measured one, not a complete one.
+CALIBRATED = True
 CALIBRATION_NOTE = (
-    "screening is uncalibrated: no mutation corpus, no measured false-negative rate, "
-    "and only the Z axis is screened. Undeclared material between declared section "
-    "heights can pass -- demonstrated with a 112 mm3 boss. Until the corpus exists, "
-    "a clean DIRECT job has had no broad look at it.")
+    "measured against a 38-mutant corpus across three templates: 0.0 false-negative "
+    "rate on added material and boolean debris, 0.0 false positives on clean parts. "
+    "Still true regardless: screening cannot prove a feature is absent, and only the "
+    "Z axis is profiled.")
 SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 

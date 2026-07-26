@@ -44,6 +44,12 @@ def _contract(out: Path, template="c_clip", params=None) -> C.Contract:
     return runner._contract_from(T.get(template), _request(out, template=template, params=params))
 
 
+def _clean_clip() -> trimesh.Trimesh:
+    from .backends.trimesh_manifold import build_c_clip
+    part, _ = build_c_clip(CLIP)
+    return part
+
+
 def _measure(mesh: trimesh.Trimesh, contract: C.Contract, tmp: Path):
     path = tmp / "mutant.stl"
     mesh.export(path)
@@ -212,8 +218,11 @@ class RoutingTest(unittest.TestCase):
             decision = manifest["route_decision"]
             self.assertEqual("DIRECT", decision["route"])
             self.assertTrue(decision["condition"])
-            self.assertEqual({"c_clip", "trim_ring"},
-                             {c["template"] for c in decision["candidates"]})
+            from . import templates as _T
+            self.assertEqual(set(_T.registry()),
+                             {c["template"] for c in decision["candidates"]},
+                             "every certified template must appear as a candidate with a "
+                             "reason, or the rationale is silent about what was not tried")
             for candidate in decision["candidates"]:
                 self.assertTrue(candidate["reasons"], candidate)
 
@@ -726,16 +735,57 @@ class ModifierTest(unittest.TestCase):
 
 
 class CalibrationTest(unittest.TestCase):
-    def test_an_uncalibrated_screen_is_declared_in_the_status(self) -> None:
-        """The plan calls the measured false-negative rate a hard gate on
-        zero-dispatch. It has not been measured, so the claim must say so rather
-        than reading as though something had looked at the part."""
+    """The gate the plan calls hard, kept honest by re-measuring it.
+
+    `screening.CALIBRATED` is a claim about measured performance. A boolean that
+    somebody set by hand decays the moment a detector changes, so the flag is
+    only allowed to be True while this test can still reproduce the numbers
+    behind it.
+    """
+
+    def test_the_mutation_corpus_still_clears_its_thresholds(self) -> None:
+        from . import corpus
+
+        report = corpus.run(corpus._default_templates())
+
+        self.assertGreaterEqual(report["templates_measured"], corpus.MIN_TEMPLATES)
+        self.assertLessEqual(report["screening_false_negative_rate"],
+                             corpus.MAX_FALSE_NEGATIVE,
+                             f"survivors: {[c['survivors'] for c in report['per_class'].values()]}")
+        self.assertLessEqual(report["false_positive_rate"], corpus.MAX_FALSE_POSITIVE,
+                             report["false_positives"])
+        self.assertEqual("PASS", report["gate"])
+
+    def test_the_flag_matches_the_measurement(self) -> None:
+        """A stale True is worse than a False: it licenses zero-dispatch on a
+        screen nobody has checked."""
+        from . import corpus, screening as S
+
+        if S.CALIBRATED:
+            self.assertEqual("PASS", corpus.run(corpus._default_templates())["gate"],
+                             "CALIBRATED is True while the corpus does not pass")
+
+    def test_the_status_reports_the_calibration_state(self) -> None:
+        from . import screening as S
+
         with tempfile.TemporaryDirectory() as raw:
-            out = Path(raw)
-            result = _run(out)
-            final = result.final_status
-            self.assertFalse(final["screening_calibrated"])
-            self.assertIn("cannot be ruled out", final["allowed_claim"])
+            final = _run(Path(raw)).final_status
+            self.assertEqual(S.CALIBRATED, final["screening_calibrated"])
+            if not S.CALIBRATED:
+                self.assertIn("cannot be ruled out", final["allowed_claim"])
+
+    def test_screening_never_claims_to_prove_absence(self) -> None:
+        """Calibration measures what the screens catch. It does not widen what
+        they are for -- a missing feature stays the contract's job, and the
+        calibration note must not read as though passing changed that."""
+        from . import screening as S
+
+        self.assertIn("cannot prove", S.__doc__)
+        self.assertIn("cannot prove", S.CALIBRATION_NOTE)
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            _, _, screen = _measure(_clean_clip(), _contract(tmp), tmp)
+            self.assertIn("cannot prove", screen["note"])
 
 
 if __name__ == "__main__":

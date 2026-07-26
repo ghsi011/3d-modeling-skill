@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import trimesh
 
 from . import BuildArtifacts
@@ -97,7 +96,7 @@ def build_c_clip(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
     return seated(part), ops
 
 
-_BUILDERS = {"c_clip": build_c_clip}
+_BUILDERS: dict = {}
 
 
 class TrimeshManifoldBackend:
@@ -142,4 +141,57 @@ class TrimeshManifoldBackend:
         )
 
 
-__all__ = ["TrimeshManifoldBackend", "build_c_clip", "seated", "ENGINE", "np"]
+
+
+def build_box_shell(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
+    """A walled box: enclosure, tray, drawer, bin. Open top."""
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    ow, od, oh = iw + 2.0 * wall, id_ + 2.0 * wall, floor + ih
+    ops: list[str] = []
+
+    shell = _box((ow, od, oh), (ow / 2.0, od / 2.0, oh / 2.0))
+    # Overshoot the cavity through the top so it breaks the surface cleanly: a
+    # cutter face landing exactly on the face it crosses leaves coplanar
+    # artifacts that survive as degenerate faces and fail repair on re-import.
+    cavity_h = ih + wall
+    cavity = _box((iw, id_, cavity_h), (ow / 2.0, od / 2.0, floor + cavity_h / 2.0))
+    part = _boolean("difference", [shell, cavity])
+    ops.append("difference: shell - cavity, overshot through the top")
+    return seated(part), ops
+
+
+def build_l_bracket(p: dict[str, Any]) -> tuple[trimesh.Trimesh, list[str]]:
+    """Two plates at a right angle, a fastener hole through each.
+
+    Printed with the corner in the bed plane so neither leg overhangs: the flat
+    leg lies down and the upright rises from it, which is why the expectations
+    section the two separately.
+    """
+    width = float(p["width"])
+    leg_a, leg_b, t = float(p["leg_a"]), float(p["leg_b"]), float(p["thickness"])
+    hole_d, inset = float(p["hole_d"]), float(p["hole_inset"])
+    ops: list[str] = []
+
+    flat = _box((width, leg_b, t), (width / 2.0, leg_b / 2.0, t / 2.0))
+    upright = _box((width, t, leg_a), (width / 2.0, t / 2.0, leg_a / 2.0))
+    part = _boolean("union", [flat, upright])
+    ops.append("union: flat leg + upright")
+
+    flat_hole = _cylinder(hole_d / 2.0, t + 2.0, (width / 2.0, leg_b - inset, t / 2.0))
+    part = _boolean("difference", [part, flat_hole])
+    ops.append("difference: fastener hole through the flat leg")
+
+    upright_hole = _cylinder(hole_d / 2.0, t + 2.0, (width / 2.0, t / 2.0, leg_a - inset))
+    upright_hole.apply_transform(trimesh.transformations.rotation_matrix(
+        3.141592653589793 / 2.0, [1, 0, 0], (width / 2.0, t / 2.0, leg_a - inset)))
+    part = _boolean("difference", [part, upright_hole])
+    ops.append("difference: fastener hole through the upright")
+    return seated(part), ops
+
+
+_BUILDERS.update({"c_clip": build_c_clip, "box_shell": build_box_shell,
+                  "l_bracket": build_l_bracket})
+
+__all__ = ["TrimeshManifoldBackend", "build_c_clip", "build_box_shell",
+           "build_l_bracket", "seated", "ENGINE"]

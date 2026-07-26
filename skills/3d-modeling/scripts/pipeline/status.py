@@ -111,9 +111,8 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             # Not a downgrade of the status -- the geometry really did match its
             # contract. A correction to the claim, which otherwise reads as though
             # something had looked at the part.
-            claim = ("geometrically commissioned against its contract; no calibrated "
-                     "broad screen and no independent look, so undeclared geometry "
-                     "cannot be ruled out")
+            claim = ("geometrically commissioned against its contract; the broad screen "
+                     "is uncalibrated, so undeclared geometry cannot be ruled out")
             reasons.append("screening is uncalibrated (see calibration_note)")
 
     if final in ("COMMISSIONED", "VERIFIED"):

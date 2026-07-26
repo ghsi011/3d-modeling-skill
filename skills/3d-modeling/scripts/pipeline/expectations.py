@@ -140,3 +140,97 @@ def trim_ring_profile_marks(p: dict[str, Any]) -> dict[str, list[float]]:
     """The lip underside steps out; the chamfer tapers in over its own length."""
     panel_t, lip_t, cham = float(p["panel_t"]), float(p["lip_t"]), float(p["chamfer"])
     return {"z": [0.0, panel_t, panel_t + lip_t - cham, panel_t + lip_t]}
+
+
+# ---------------------------------------------------------------------------
+# box_shell -- a walled box: enclosure, tray, drawer, bin
+# ---------------------------------------------------------------------------
+
+def box_shell_bbox(p: dict[str, Any]) -> dict[str, float]:
+    wall = float(p["wall"])
+    return {"x": float(p["inner_w"]) + 2.0 * wall,
+            "y": float(p["inner_d"]) + 2.0 * wall,
+            "z": float(p["floor"]) + float(p["inner_h"])}
+
+
+def box_shell_expectations(p: dict[str, Any]) -> list[dict[str, Any]]:
+    iw, id_, ih = float(p["inner_w"]), float(p["inner_d"]), float(p["inner_h"])
+    wall, floor = float(p["wall"]), float(p["floor"])
+    ow, od = iw + 2.0 * wall, id_ + 2.0 * wall
+    footprint = ow * od
+    ring = footprint - iw * id_
+
+    return [
+        {"feature_id": "floor-section", "kind": "section_area",
+         "at": {"z": floor / 2.0}, "value_mm2": footprint,
+         "note": "solid floor below the cavity"},
+        {"feature_id": "wall-ring", "kind": "section_area",
+         "at": {"z": floor + ih / 2.0}, "value_mm2": ring,
+         "note": "the four walls, with the cavity taken out of the footprint"},
+        {"feature_id": "bed-footprint", "kind": "bed_contact", "value_mm2": footprint,
+         "note": "a floored box meets the bed on solid material"},
+        # The cavity is what the caller asked to be able to put things in. The
+        # ring above is one scalar for the whole section, so a thinned wall buys
+        # room for something standing inside; this reads the cavity alone.
+        {"feature_id": "cavity", "kind": "void_region",
+         "at": {"x": ow / 2.0, "y": od / 2.0}, "z": floor + ih / 2.0,
+         "size_mm": [iw, id_],
+         "note": "nothing may stand in the usable volume"},
+    ]
+
+
+def box_shell_profile_marks(p: dict[str, Any]) -> dict[str, list[float]]:
+    floor = float(p["floor"])
+    return {"z": [0.0, floor, floor + float(p["inner_h"])]}
+
+
+# ---------------------------------------------------------------------------
+# l_bracket -- two plates at a right angle, with fastener holes in each
+# ---------------------------------------------------------------------------
+
+def l_bracket_bbox(p: dict[str, Any]) -> dict[str, float]:
+    return {"x": float(p["width"]), "y": float(p["leg_b"]), "z": float(p["leg_a"])}
+
+
+def l_bracket_expectations(p: dict[str, Any]) -> list[dict[str, Any]]:
+    width = float(p["width"])
+    leg_a, leg_b, t = float(p["leg_a"]), float(p["leg_b"]), float(p["thickness"])
+    hole_d = float(p["hole_d"])
+    hole_r = hole_d / 2.0
+
+    # The horizontal leg lies flat on the bed; the vertical leg stands from it.
+    #
+    # The flat section is the whole footprint less its hole -- a circle there,
+    # because that hole's axis is vertical.
+    #
+    # The standing section is sampled *at the upright hole's own height*, where
+    # the check is worth something. That hole's axis lies along Y, so a plane
+    # through its centreline cuts it as a full rectangle `hole_d x t`, not a
+    # circle. Sampling at the mid-leg instead measured a plane with no hole in it
+    # at all, and the expectation subtracted one anyway.
+    flat = width * leg_b - math.pi * hole_r ** 2
+    standing = t * (width - hole_d)
+
+    return [
+        {"feature_id": "flat-leg", "kind": "section_area",
+         "at": {"z": t / 2.0}, "value_mm2": flat,
+         "note": "the leg on the bed, less its fastener hole"},
+        {"feature_id": "standing-leg", "kind": "section_area",
+         "at": {"z": leg_a - float(p["hole_inset"])}, "value_mm2": standing,
+         "note": "the upright at its fastener hole, which the plane cuts as a slot"},
+        {"feature_id": "bed-footprint", "kind": "bed_contact",
+         "value_mm2": width * leg_b - math.pi * hole_r ** 2,
+         "note": "the flat leg meets the bed; its hole goes through"},
+        {"feature_id": "flat-hole", "kind": "through_hole",
+         "at": {"x": width / 2.0, "y": leg_b - float(p["hole_inset"])},
+         "d_mm": hole_d, "z_from": 0.0, "z_to": t},
+    ]
+
+
+def l_bracket_profile_marks(p: dict[str, Any]) -> dict[str, list[float]]:
+    """Where the section legitimately jumps: the flat leg ends, and the upright's
+    fastener hole opens and closes."""
+    t, leg_a = float(p["thickness"]), float(p["leg_a"])
+    hole_r = float(p["hole_d"]) / 2.0
+    centre = leg_a - float(p["hole_inset"])
+    return {"z": [0.0, t, centre - hole_r, centre, centre + hole_r, leg_a]}

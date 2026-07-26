@@ -118,6 +118,16 @@ def _clip_build(params: dict[str, Any]):
     return build_c_clip(params)
 
 
+def _box_build(params: dict[str, Any]):
+    from .backends.trimesh_manifold import build_box_shell
+    return build_box_shell(params)
+
+
+def _bracket_build(params: dict[str, Any]):
+    from .backends.trimesh_manifold import build_l_bracket
+    return build_l_bracket(params)
+
+
 def _ring_build(params: dict[str, Any]):
     from .backends.build123d_backend import build_trim_ring
     return build_trim_ring(params)
@@ -181,7 +191,67 @@ def _registry() -> dict[str, CertifiedTemplate]:
         build=_ring_build, expectations=X.trim_ring_expectations, bbox=X.trim_ring_bbox,
         profile_marks=X.trim_ring_profile_marks, step_capable=True,
     )
-    return {t.name: t for t in (c_clip, trim_ring)}
+    box_shell = CertifiedTemplate(
+        name="box_shell", version="1.0.0", domain_id="box_shell@1.0.0/d1",
+        backend="trimesh-manifold",
+        covers="a walled box with a floor and an open top: enclosure, tray, drawer, bin",
+        bounds={
+            "inner_w": Bound(10.0, 230.0, "mm", "usable width; above 230 the outside "
+                                                "leaves a 256 mm bed"),
+            "inner_d": Bound(10.0, 230.0, "mm", "same bed limit, across"),
+            "inner_h": Bound(5.0, 240.0, "mm", "taller than 240 exceeds common Z travel"),
+            "wall": Bound(1.2, 10.0, "mm", "three perimeters at a 0.4 mm nozzle"),
+            "floor": Bound(1.2, 20.0, "mm", "three layers at 0.2 mm minimum"),
+        },
+        constraints=(
+            Constraint("wall < inner_w / 4",
+                       lambda p: float(p["wall"]) < float(p["inner_w"]) / 4.0,
+                       "the walls would consume the cavity"),
+            Constraint("wall < inner_d / 4",
+                       lambda p: float(p["wall"]) < float(p["inner_d"]) / 4.0,
+                       "the walls would consume the cavity across"),
+        ),
+        build=_box_build, expectations=X.box_shell_expectations, bbox=X.box_shell_bbox,
+        profile_marks=X.box_shell_profile_marks,
+    )
+
+    l_bracket = CertifiedTemplate(
+        name="l_bracket", version="1.0.0", domain_id="l_bracket@1.0.0/d1",
+        backend="trimesh-manifold",
+        covers="two plates at a right angle with a fastener hole through each: "
+               "shelf bracket, mount, corner brace",
+        bounds={
+            "width": Bound(12.0, 200.0, "mm", "narrower will not take a fastener; "
+                                              "wider leaves the bed"),
+            "leg_a": Bound(15.0, 200.0, "mm", "the upright"),
+            "leg_b": Bound(15.0, 200.0, "mm", "the leg on the bed"),
+            "thickness": Bound(2.0, 20.0, "mm", "five perimeters at 0.4 mm; thinner "
+                                                "peels at the corner under load"),
+            "hole_d": Bound(2.0, 12.0, "mm", "common fastener shanks"),
+            "hole_inset": Bound(5.0, 60.0, "mm", "edge distance: closer than 5 mm and "
+                                                 "the hole breaks out"),
+        },
+        constraints=(
+            Constraint("hole_d < width / 3",
+                       lambda p: float(p["hole_d"]) < float(p["width"]) / 3.0,
+                       "the fastener would break out of the plate"),
+            Constraint("hole_inset > hole_d",
+                       lambda p: float(p["hole_inset"]) > float(p["hole_d"]),
+                       "less than one diameter of edge distance tears out"),
+            Constraint("hole_inset < min(leg_a, leg_b) - thickness",
+                       lambda p: float(p["hole_inset"]) < min(float(p["leg_a"]),
+                                                              float(p["leg_b"])) - float(p["thickness"]),
+                       "the hole would fall outside the plate or into the corner"),
+            Constraint("thickness < min(leg_a, leg_b) / 3",
+                       lambda p: float(p["thickness"]) < min(float(p["leg_a"]),
+                                                             float(p["leg_b"])) / 3.0,
+                       "a leg barely longer than it is thick is a block, not a bracket"),
+        ),
+        build=_bracket_build, expectations=X.l_bracket_expectations, bbox=X.l_bracket_bbox,
+        profile_marks=X.l_bracket_profile_marks,
+    )
+
+    return {t.name: t for t in (c_clip, box_shell, l_bracket, trim_ring)}
 
 
 _CACHE: dict[str, CertifiedTemplate] | None = None
