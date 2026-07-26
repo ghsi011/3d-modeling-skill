@@ -13,14 +13,22 @@ plan is calibrated against: [`redesign-baseline.md`](redesign-baseline.md).
 | 3 | Manufacturing evidence gets an artifact and a phase (§3.7, §9.4) | The draft made supports/inserts/multi-material "modifiers" but deleted the phase where slicer-dependent evidence is produced. Modifiers are declarative; they don't answer "did the supports contact a non-functional face", which cannot be measured from the STL. |
 | 4 | Performance section split into **compute** and **wall clock**, and the implementation order is resequenced by measured value (§17, §18) | Every deterministic target in the draft's table is *already met* on the trimesh path. A real job is 3.1 min of wall clock for 3.5 s of compute. Optimizing compute further is worth ~1.5 s. |
 
-A second review pass (15 findings) is incorporated throughout; the substantive
-ones were: screening cannot prove absence, so the missing-countersink regression
+Two review passes are incorporated throughout. From the second (15 findings), the
+substantive ones were: screening cannot prove absence, so the missing-countersink regression
 stays a contract test (§5.1, test 57); expectation generators must not share the
 build's arithmetic (§4); zero-dispatch is gated on a measured mutation corpus
 rather than on detector code existing (§5.4); out-of-domain routes normally
 instead of defaulting to `FITTED` (§4); the safety verifier decides before it is
 shown the normal verifier's conclusion (§10.1); toolpath predicates are always
 `DEFERRED` absent a named slicer adapter (§3.7).
+
+From the third pass: a contract-completeness preflight before any build (§3.2.1);
+route and template-selection rationale recorded so routing becomes auditable and
+regression-testable (§3.1); policy version and image preprocessing added to the
+safety-cache key (§7.9); `W1` given enforced budgets and measured inside the fused
+path rather than standalone (§7.7); and an **end-to-end vertical slice promoted to
+its own phase, before backends, caching or manufacturing** (§18, Phase D) — one
+thin path proven working beats six phases of components that have never met.
 
 Consequence model is exactly two levels, as specified — including the removal of
 an automatic-`BLOCK` application list an earlier draft of this plan carried,
@@ -100,8 +108,9 @@ force `FULL` by themselves.
 brief + evidence
     ↓ normalized intent                      → intent_manifest.json
     ↓ consequence classification
+    ↓ template matching + route selection    → recorded in intent_manifest
     ↓ immutable model contract               → model_contract.json
-    ↓ deterministic route selection
+    ↓ CONTRACT-COMPLETENESS PREFLIGHT        → fail here, before any geometry
     ↓ backend selection
     ↓ isolated geometry build                → model source, build receipt
     ↓ STL export + optional STEP             → artifact_manifest.json
@@ -142,6 +151,21 @@ Stated-vs-inferred is not decoration. Defaulting an unmarked value to "the user
 said this" fabricates authority; the default is **inferred**, which understates
 and invites scrutiny.
 
+**Route and template-selection rationale.** The manifest also records the decision,
+not just its outcome:
+
+* every template considered, with version and `domain_id`;
+* for the match: which requirements it covers;
+* for each rejection: the specific reason — no geometric coverage, a parameter
+  outside the certified domain (naming the parameter and the bound), a violated
+  cross-parameter constraint, or a missing capability;
+* the route chosen, and if not `DIRECT`, **the exact condition that caused it**.
+
+Routing is otherwise a judgment that leaves no trace, which makes it the one
+decision in the pipeline nobody can audit or regression-test. Recorded this way,
+"this brief must reject `c_clip` because `bore_d=60` exceeds the certified 40 mm
+bound" becomes an assertion.
+
 ### 3.2 `model_contract.json`
 Written **before** geometry generation, immutable once the build begins.
 
@@ -160,6 +184,31 @@ compatibility views. Deleting a feature or parameter from model code must not
 delete the expectation for it — that failure mode is documented in this repo:
 drop `countersink_d` and the geometry and its expectation vanish together, so the
 part is self-consistently wrong and nothing objects.
+
+### 3.2.1 Contract-completeness preflight
+
+Run **after** the contract is written and **before** any geometry is built. Every
+mandatory feature must carry all five of:
+
+1. **Provenance** — where the requirement came from, and whether stated or inferred.
+2. **An expectation** — the value or relation the solid must satisfy.
+3. **A tolerance** — a band, not a bare number. A tolerance-free expectation is
+   either untestable or secretly exact.
+4. **A verification method** — which check answers it, by id.
+5. **Defined behaviour when the check cannot run** — `ESCALATE` or `FAIL`.
+   Never "skip".
+
+A contract failing any of these is rejected before a build is paid for.
+
+This is the `static-envelope` lesson generalized: an archived run spent 39 minutes
+building against a plan whose only support rule declared `SUPPORT_ALLOWED` with no
+`allowed_contact_class`, passed commissioning, and was rejected for the plan
+afterwards. None of these five needs geometry to check.
+
+Point 5 exists because skipping is how defects ship here: a candidate once went
+out 31% too thick while three checks reported `SKIPPED`, nothing counted them, and
+the gate exited zero. Under this preflight a feature whose check cannot run has
+already declared what that means, so silence is not an option the runtime has.
 
 ### 3.3 `artifact_manifest.json`
 Schema version, source hashes, contract hash, backend + exact version, Python
@@ -491,6 +540,26 @@ needs a specific view.
   silhouettes, one or two isometrics, a small set of uniformly spaced sections,
   required feature sections, coverage report. Clean `DIRECT`, and the initial
   safety packet.
+
+  **`W1` carries fixed budgets, enforced in code, not conventions:**
+
+  | budget | limit |
+  |---|---|
+  | views | ≤ 8 orthographic + 2 isometric |
+  | image resolution | ≤ 512 px on the long edge |
+  | sections | ≤ 12, plus one per required feature |
+  | peak memory | ≤ 256 MB above the controller baseline |
+  | wall clock | ≤ 2 s |
+
+  Exceeding a budget is a build failure, not a slow run. A witness level with no
+  ceiling grows one view at a time until it is the dominant cost, and each
+  addition looks reasonable on its own.
+
+  **Benchmarked inside the fused path, never standalone.** The baseline's ~1.65 s
+  for witnesses was measured in isolation, which is the flattering number: it
+  excludes the mesh already being resident, the section cache being warm, and the
+  controller's own overhead. §17.1's target is on the end-to-end delta between a
+  `--no-witness` and a `W1` run of the same job.
 * **`W2`** expanded anomaly witness — sections near the suspicious region, higher
   resolution, difference views, extra orientations, accessibility/edge-opening
   evidence.
@@ -516,7 +585,10 @@ versions.
 **A geometry cache hit is not a safety-verification cache hit.** A cached
 `CONSEQUENTIAL` job still runs §10 unless a prior result matches on *every* one
 of: evidence-packet hash, prompt hash, model snapshot identifier, reasoning
-settings, output-schema version, and inference configuration. "Same verifier
+settings, **safety-policy version**, output-schema version, inference
+configuration, and **image preprocessing configuration**. The last matters because
+the verifier reads renders: a different downsampling or crop is a different
+reviewer looking at a different picture. "Same verifier
 version" is not identity — the same version under different reasoning settings is
 a different reviewer.
 
@@ -534,7 +606,8 @@ uv run design-tool commission --artifact body.stl \
 
 ### 8.1 Fail closed
 Fail or explicitly escalate on: missing contract; invalid schema; contract hash
-mismatch; missing mandatory feature declaration; mandatory check skipped;
+mismatch; missing mandatory feature declaration; a contract that did not pass the
+§3.2.1 preflight; mandatory check skipped;
 coverage below minimum; unknown unit scale; suspected 25.4× mismatch; a mesh path
 using any boolean engine other than Manifold3D; unexpected repair; artifact not
 traceable to the immutable contract; missing optional dependency required by a
@@ -799,6 +872,24 @@ The draft's 45, plus these, and all adversarial rather than happy-path:
     — not an automatic `FITTED`.
 69. Expectation generators and geometry builders share no helper for any critical
     dimension (import-graph assertion).
+70. Contract-completeness preflight rejects a feature missing provenance, an
+    expectation, a tolerance, a verification method, or cannot-run behaviour —
+    one test per omission, each asserting the build never started.
+71. A feature declaring `skip` as its cannot-run behaviour is rejected: the only
+    legal values are `ESCALATE` and `FAIL`.
+72. The preflight runs before geometry: on rejection, no STL and no build receipt
+    exist.
+73. `intent_manifest.json` records every template considered, the match reason,
+    and a specific rejection reason per candidate.
+74. An out-of-domain parameter's rejection reason names the parameter and the
+    bound it violated.
+75. A not-`DIRECT` decision records the exact condition that caused it.
+76. `W1` exceeding any budget (views, resolution, sections, memory, wall clock)
+    fails the build rather than running slowly.
+77. Witness cost is measured as the end-to-end delta between `--no-witness` and
+    `W1` on the same job, not standalone.
+78. The safety cache misses when policy version or image preprocessing
+    configuration differs.
 
 ### Regression corpus
 Keep every historical defect as a test with its own reproduction: missing
@@ -877,34 +968,54 @@ this front-loads what unblocks correctness and what removes minutes.
 5. Move expectations out of `model.py`; generate `PARAMS`/`EXPECTED` as views.
 6. Certified templates: domain format, constraints, certification record (§4).
 
-**Phase C — the detector (gates zero-dispatch)**
-7. Screening detectors 1–3 (§5.2), plus the mutation corpus and the measured
-   false-negative/false-positive rates that gate zero-dispatch (§5.4).
+**Phase C — screening (gates zero-dispatch)**
+7. Screening detectors 1–3 (§5.2), enough to run — the measured rates come in E.
 8. Escalation wiring: `ANOMALY`/`INDETERMINATE` → `W2` + one bounded verifier.
 
-**Phase D — backends**
-9. `GeometryBackend` interface; port the trimesh templates behind it.
-10. `Build123dBackend`, lazy-imported, with one certified exact-CAD template.
-11. Conditional STEP.
+**Phase D — end-to-end vertical slice** ← *the de-risking step*
+9. Take **one** part, on **one** template, on **one** backend, all the way
+   through: routing → contract → preflight → build → export → single load →
+   commission → screening → `W1` → verification → `final_status.json`.
+10. It must produce every artifact §19 demands for that route, and pass.
+11. Benchmark it end to end and record it beside the baseline.
 
-**Phase E — the fused runner**
-12. `run-job`, single mesh load, `MeshAnalysisContext`, lazy imports.
-13. Witness levels `W0`–`W3` and conditional generation.
-14. Isolated geometry worker with timeout and failure receipts.
+   Nothing else starts until this runs green. Six phases of components that have
+   never met each other is how a redesign discovers in week four that the contract
+   cannot express what the runner needs. One thin working path first, then widen
+   it — and every later phase has a working reference to regress against rather
+   than a specification to argue with.
 
-**Phase F — safety and manufacturing**
-15. Bounded safety verification, structured output, fresh context.
-16. Bounded deterministic evidence expansion.
-17. `manufacturing_report.json` and the modifier-driven evidence rules.
+**Phase E — proving the screen**
+12. Mutation corpus across five defect classes, three templates (§5.4).
+13. Measure false-negative and false-positive rates; publish them.
+14. Only now may clean `INCONSEQUENTIAL DIRECT` drop to zero dispatches — and
+    only if the rates clear §5.4. Until they do, the bounded visual call stays.
 
-**Phase G — cleanup and proof**
-18. Remove CadQuery and FreeCAD MCP everywhere.
-19. Content-addressed caching.
-20. Charters, docs, CI.
-21. Re-benchmark; optimize only what profiling shows dominates.
+**Phase F — backends**
+15. `GeometryBackend` interface; port the trimesh templates behind it.
+16. `Build123dBackend`, lazy-imported, with one certified exact-CAD template.
+17. Conditional STEP.
 
-Run the relevant tests after each phase. Zero-dispatch `DIRECT` does not ship
-until Phase C's measured rates meet §5.4 — detector code existing is not the gate.
+**Phase G — the full runner**
+18. `run-job` generalized, `MeshAnalysisContext`, lazy imports.
+19. Witness levels `W0`–`W3`, conditional generation, `W1` budgets enforced.
+20. Isolated geometry worker with timeout and failure receipts.
+
+**Phase H — safety and manufacturing**
+21. Bounded two-stage safety verification (§10.1), structured output.
+22. Bounded deterministic evidence expansion.
+23. `manufacturing_report.json`, the modifier-driven evidence rules, and the
+    `DEFERRED` status effect.
+
+**Phase I — cleanup and proof**
+24. Remove CadQuery and FreeCAD MCP everywhere.
+25. Content-addressed caching.
+26. Charters, docs, CI.
+27. Re-benchmark; optimize only what profiling shows dominates.
+
+Run the relevant tests after each phase. Two hard gates: **nothing proceeds past
+D until the vertical slice is green**, and **zero-dispatch `DIRECT` does not ship
+until E's measured rates meet §5.4** — detector code existing is not the gate.
 
 ### Do not
 Rewrite unrelated code · add consequence levels · add legal acknowledgement or
