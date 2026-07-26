@@ -85,5 +85,54 @@ class TestSegmentedBox(unittest.TestCase):
         self.assertIn("nothing here checks", notes)
 
 
+
+@unittest.skipIf(trimesh is None, "needs trimesh + manifold3d")
+class TestStackedExpectations(unittest.TestCase):
+    """Laying parts out for a plate used to discard every check they declared,
+    so the multi-part job -- the one with the most to get wrong -- reached the
+    gate with the least to gate."""
+
+    def _legs(self, bores=(12.0, 12.0, 12.0, 12.0)):
+        return T.stack(*[T.bolt_boss(outer_d=40.0, bore_d=b, height=60.0) for b in bores],
+                       gap=8.0)
+
+    def test_holes_carry_over_and_move_with_their_part(self) -> None:
+        plate = self._legs()
+        bores = [row for row in plate.expected if row["kind"] == "through_hole"]
+        self.assertEqual(4, len(bores))
+        xs = [row["at"][0] for row in bores]
+        self.assertEqual(xs, sorted(xs), "each hole must sit where its part was laid")
+        self.assertEqual(4, len({row["id"] for row in bores}), "ids must stay distinct")
+
+    def test_bed_contact_is_summed(self) -> None:
+        import math
+        ring = math.pi * (20.0 ** 2 - 6.0 ** 2)
+        footprint = next(r for r in self._legs().expected if r["kind"] == "bed_footprint")
+        self.assertAlmostEqual(4 * ring, footprint["area_mm2"], places=3)
+
+    def test_one_bad_part_among_four_is_named(self) -> None:
+        from . import features as F
+
+        good, bad = self._legs(), self._legs(bores=(12.0, 12.0, 15.0, 12.0))
+        self.assertEqual(list(good.part.extents), list(bad.part.extents),
+                         "the reproduction must be one a bounding box cannot separate")
+
+        failed = [c.id for c in F.check_features(bad.part, good.expected) if c.result == "FAIL"]
+
+        self.assertIn("feature-bore-2", failed, "the failing part must be identified")
+        self.assertNotIn("feature-bore-0", failed)
+        self.assertNotIn("feature-bore-1", failed)
+        self.assertNotIn("feature-bore-3", failed)
+
+    def test_a_section_is_dropped_unless_every_part_declares_one_there(self) -> None:
+        """A plane through the plate cuts everything on it, so summing only the
+        parts that happened to declare a region at that height measures a number
+        nothing has."""
+        mixed = T.stack(T.bolt_boss(outer_d=40.0, bore_d=12.0, height=60.0),
+                        T.box_shell(inner=(40.0, 40.0, 40.0), wall=3.0), gap=8.0)
+        regions = [row for row in mixed.expected if row["kind"] == "solid_region"]
+        self.assertEqual([], regions,
+                         "the two parts declare regions at different heights")
+
 if __name__ == "__main__":
     unittest.main()

@@ -690,10 +690,12 @@ def stack(*builts: Built, gap: float = 0.0) -> Built:
     """
     if not builts:
         raise ValueError("stack needs at least one part")
-    placed, cursor = [], 0.0
+    placed, cursor, offsets = [], 0.0, []
     for built in builts:
         mesh = built.part.copy()
-        mesh.apply_translation((cursor - float(mesh.bounds[0][0]), 0.0, 0.0))
+        shift = cursor - float(mesh.bounds[0][0])
+        offsets.append(shift)
+        mesh.apply_translation((shift, 0.0, 0.0))
         placed.append(mesh)
         cursor = float(mesh.bounds[1][0]) + gap
     combined = trimesh.util.concatenate(placed)
@@ -707,7 +709,58 @@ def stack(*builts: Built, gap: float = 0.0) -> Built:
         # its worst part.
         params["wall_mm"] = float(min(walls))
     return Built(part=combined, params=params,
+                 expected=_stacked_expectations(builts, offsets),
                  notes=tuple(n for b in builts for n in b.notes))
+
+
+def _stacked_expectations(builts: tuple[Built, ...], offsets: list[float]) -> tuple[dict, ...]:
+    """Carry each part's checks onto the plate, or drop them and say so.
+
+    Laying parts out used to discard every expectation its members declared, so
+    a plate of five gated parts arrived at the gate with nothing to gate -- the
+    multi-part job, which has the most to get wrong, had the emptiest checks.
+
+    Three kinds behave differently and the difference is not cosmetic:
+
+    * A hole keeps its size and moves with its part, so it carries over with the
+      layout offset applied.
+    * Bed contact is additive: the plate touches the bed on the sum of what its
+      parts touch it with.
+    * A section area is **not** additive unless every part declares one at that
+      exact height. A plane through the plate cuts everything on it, so summing
+      the two parts that declared a region at z and ignoring the third measures a
+      number nothing has. Where that holds the areas sum; where it does not the
+      row is dropped rather than approximated, because a section expectation
+      that is nearly right would pass a defect while reading like a check.
+    """
+    carried: list[dict[str, Any]] = []
+    footprint = 0.0
+    has_footprint = False
+    for built, shift in zip(builts, offsets):
+        for row in built.expected:
+            kind = row.get("kind")
+            if kind == "bed_footprint":
+                footprint += float(row["area_mm2"])
+                has_footprint = True
+            elif kind in ("through_hole", "countersink"):
+                moved = dict(row)
+                moved["at"] = (float(row["at"][0]) + shift, float(row["at"][1]))
+                moved["id"] = f"{row.get('id', kind)}-{builts.index(built)}"
+                carried.append(moved)
+
+    heights: dict[float, list[float]] = {}
+    for built in builts:
+        for row in built.expected:
+            if row.get("kind") == "solid_region":
+                heights.setdefault(round(float(row["z"]), 6), []).append(float(row["area_mm2"]))
+    for z, areas in sorted(heights.items()):
+        if len(areas) == len(builts):
+            carried.append({"kind": "solid_region", "id": f"plate-z{z:g}",
+                            "z": z, "area_mm2": sum(areas)})
+
+    if has_footprint:
+        carried.append({"kind": "bed_footprint", "area_mm2": footprint})
+    return tuple(carried)
 
 
 # name -> (what shapes it covers, the call)
