@@ -409,22 +409,21 @@ class HashFormatTest(unittest.TestCase):
             self.assertFalse(C.is_hash_format(value), value)
 class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
-        issues, index = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
+        issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
         self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
-        self.assertIn("S-01", index["support_rule_ids"])
 
     def test_second_structurally_different_fixture_support_allowed(self) -> None:
         alt = clone(_PRINT_PLAN)
         alt["support_rules"][0]["disposition"] = "SUPPORT_ALLOWED"
         alt["support_rules"][0]["allowed_contact_class"] = "nonfunctional plate land"
         alt["edges"][0]["exposure_class"] = "PERMITTED_SUPPORT_CONTACT"
-        issues, _ = V.validate_print_plan(alt, feature_ids={"F01": {}})
+        issues = V.validate_print_plan(alt, feature_ids={"F01": {}})
         self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
 
     def test_malformed_missing_support_rule_field(self) -> None:
         broken = clone(_PRINT_PLAN)
         del broken["support_rules"][0]["bed_z_mm"]
-        issues, _ = V.validate_print_plan(broken)
+        issues = V.validate_print_plan(broken)
         self.assertIn("MISSING_FIELD@print_plan.support_rules[S-01].bed_z_mm", issue_ids(issues))
 
     def test_adversarial_non_finite_matrix_entry(self) -> None:
@@ -438,7 +437,7 @@ class PrintPlanValidatorTest(unittest.TestCase):
     def test_bad_matrix_shape_named_exactly(self) -> None:
         broken = clone(_PRINT_PLAN)
         broken["support_rules"][0]["model_to_printer_matrix"] = [[1, 0, 0], [0, 1, 0, 0]]
-        issues, _ = V.validate_print_plan(broken)
+        issues = V.validate_print_plan(broken)
         self.assertTrue(
             any(i.code == "BAD_MATRIX" and "model_to_printer_matrix" in i.where for i in issues), issues
         )
@@ -446,13 +445,13 @@ class PrintPlanValidatorTest(unittest.TestCase):
     def test_allowed_sharp_without_reason_rejected(self) -> None:
         broken = clone(_PRINT_PLAN)
         broken["edges"][0]["allowed_sharp"] = True
-        issues, _ = V.validate_print_plan(broken)
+        issues = V.validate_print_plan(broken)
         self.assertIn("ALLOWED_SHARP_NEEDS_REASON@print_plan.edges[E-01].allowed_sharp_reason", issue_ids(issues))
 
     def test_support_allowed_without_contact_class_rejected(self) -> None:
         broken = clone(_PRINT_PLAN)
         broken["support_rules"][0]["disposition"] = "SUPPORT_ALLOWED"
-        issues, _ = V.validate_print_plan(broken)
+        issues = V.validate_print_plan(broken)
         self.assertIn(
             "SUPPORT_ALLOWED_NEEDS_CONTACT_CLASS@print_plan.support_rules[S-01].allowed_contact_class",
             issue_ids(issues),
@@ -461,13 +460,13 @@ class PrintPlanValidatorTest(unittest.TestCase):
     def test_fk_related_feature_id_missing(self) -> None:
         broken = clone(_PRINT_PLAN)
         broken["geometry_rules"][0]["related_feature_ids"] = ["F-GHOST"]
-        issues, _ = V.validate_print_plan(broken, feature_ids={"F01": {}})
+        issues = V.validate_print_plan(broken, feature_ids={"F01": {}})
         self.assertIn("FK_MISSING@print_plan.geometry_rules[G-01].related_feature_ids[0]", issue_ids(issues))
 
     def test_duplicate_edge_ids_rejected(self) -> None:
         broken = clone(_PRINT_PLAN)
         broken["edges"].append(clone(broken["edges"][0]))
-        issues, _ = V.validate_print_plan(broken)
+        issues = V.validate_print_plan(broken)
         self.assertIn("DUPLICATE_ID@print_plan.edges", issue_ids(issues))
 
     def test_contracts_naming_different_jobs_are_reported(self) -> None:
@@ -550,7 +549,7 @@ class PrintPlanValidatorTest(unittest.TestCase):
         built = clone(_PRINT_PLAN)
         built["owner"] = "builtin-direct-template"
 
-        issues, _ = V.validate_print_plan(built)
+        issues = V.validate_print_plan(built)
 
         self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
 

@@ -129,9 +129,9 @@ def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectV
     # agent; there is no schema to hold it to.
     print_plan_file = files["print_plan"]
     if print_plan_file.data is not None and print_plan_file.source_format == "json":
-        issues, index = V.validate_print_plan(print_plan_file.data, where="print_plan", feature_ids=None)
-        print_plan_file.issues += issues
-        print_plan_file.index = index
+        print_plan_file.issues += V.validate_print_plan(
+            print_plan_file.data, where="print_plan", feature_ids=None
+        )
 
     manifest_file = files["artifact_manifest"]
     if manifest_file.data is not None:

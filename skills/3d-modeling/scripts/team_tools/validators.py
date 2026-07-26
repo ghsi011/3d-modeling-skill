@@ -222,7 +222,7 @@ def validate_print_plan(
     *,
     where: str = "print_plan",
     feature_ids: dict[str, Any] | None = None,
-) -> tuple[list[Issue], dict[str, Any]]:
+) -> list[Issue]:
     issues: list[Issue] = []
     issues += _check_contract_header(
         data, contract_key="print-plan", expected_owners=_EXPECTED_OWNERS["print_plan"], where=where
@@ -387,19 +387,16 @@ def validate_print_plan(
             )
         return found
 
-    geometry_rule_ids: dict[str, Any] = {}
-    edge_ids: dict[str, Any] = {}
-    support_rule_ids: dict[str, Any] = {}
     if "geometry_rules" in data:
-        found, geometry_rule_ids = check_rows(
+        found, _ = check_rows(
             data["geometry_rules"], where=f"{where}.geometry_rules", row_validator=geometry_rule_row
         )
         issues += found
     if "edges" in data:
-        found, edge_ids = check_rows(data["edges"], where=f"{where}.edges", row_validator=edge_row)
+        found, _ = check_rows(data["edges"], where=f"{where}.edges", row_validator=edge_row)
         issues += found
     if "support_rules" in data:
-        found, support_rule_ids = check_rows(
+        found, _ = check_rows(
             data["support_rules"], where=f"{where}.support_rules", row_validator=support_rule_row
         )
         issues += found
@@ -420,12 +417,7 @@ def validate_print_plan(
         if "matrix" in transform:
             issues += _matrix_shape_issues(transform["matrix"], where=f"{where}.transform.matrix")
 
-    index = {
-        "geometry_rule_ids": geometry_rule_ids,
-        "edge_ids": edge_ids,
-        "support_rule_ids": support_rule_ids,
-    }
-    return issues, index
+    return issues
 
 
 
