@@ -111,6 +111,14 @@ and it decides which phases run, not how verbose the record is.
   python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest
   ```
 
+  **Budget: about ten tool calls.** Read the brief, run `doctor` once if you are unsure of the
+  interpreter, pick a template, run `direct`, run `validate`, look at both renders, deliver.
+  A measured run of this route took 13.5 minutes across 59 calls to do 5.1 seconds of work,
+  which is the whole reason the commands were collapsed. If you find yourself well past ten,
+  something is wrong with the inputs rather than the part — say so, because that is a finding.
+  Do not re-read a file you just wrote, and do not re-run a command to confirm it worked: it
+  told you.
+
   `direct` is intake, plan, build and gate in one call — about four seconds, renders included.
   They were four commands until it was measured that the whole deterministic route is 5.1
   seconds while a real run of it took 13.5 minutes: the cost is turns, not work, and every
