@@ -18,7 +18,7 @@ from pathlib import Path
 import trimesh
 
 from . import analysis, commission, contract as C, fitted, intent, runner, safety, screening
-from . import status, templates as T
+from . import status, templates as T, verification
 from . import witness as W
 
 CLIP = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
@@ -926,6 +926,131 @@ class FittedRouteTest(unittest.TestCase):
             result = runner.run(_request(Path(raw), spec_call=lambda r: called.append(r)))
             self.assertEqual([], called)
             self.assertEqual(0, result.llm_calls)
+
+
+
+class IndependentVerificationTest(unittest.TestCase):
+    """The only route to VERIFIED, and the one reading a gate cannot do.
+
+    A gate checks the part against its contract. It cannot ask whether the
+    contract was the right contract -- every check it runs is conditioned on one
+    somebody wrote, and a contract that misread the brief is satisfied exactly as
+    well by the wrong part.
+    """
+
+    DEFECT = {"summary": "mouth faces away from the desk", "owning_loop": "CONTRACT",
+              "expected_vs_observed": "opens outward; the brief says toward the run",
+              "evidence": "witness/multi.png", "severity": "blocks use"}
+
+    def _verify(self, out: Path, response, **kw):
+        seen = []
+
+        def call(packet):
+            seen.append(packet)
+            return response
+
+        result = runner.run(_request(out, verify_call=call,
+                                     reviewer={"model_snapshot": "test"}, **kw))
+        return result, seen
+
+    def _reply(self, decision, defects=(), unmet=()):
+        return {"decision": decision, "defects": list(defects),
+                "unmet_requirements": list(unmet), "missing_evidence": [],
+                "summary": "ok"}
+
+    def test_a_pass_is_the_only_way_to_reach_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result, seen = self._verify(out, self._reply("PASS"))
+            self.assertEqual("VERIFIED", result.final_status["final_status"])
+            self.assertEqual(1, len(seen))
+            self.assertTrue((out / "verification_report.json").is_file())
+
+    def test_without_a_verifier_no_job_reaches_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = _run(Path(raw))
+            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertIsNone(result.final_status["verification"])
+
+    def test_a_rejection_moves_the_status_and_names_the_loop(self) -> None:
+        """Leaving a rejection at COMMISSIONED read as 'geometrically commissioned
+        against its contract' while an independent reader had just said the part
+        was wrong: true about the geometry, silent about the finding."""
+        with tempfile.TemporaryDirectory() as raw:
+            result, _ = self._verify(Path(raw), self._reply("REJECT", [self.DEFECT]))
+            final = result.final_status
+            self.assertEqual("FAILED", final["final_status"])
+            self.assertIn("CONTRACT", final["allowed_claim"])
+            self.assertIn("rejected by independent verification", final["allowed_claim"])
+
+    def test_needs_more_evidence_does_not_round_up(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result, _ = self._verify(Path(raw), self._reply("NEEDS_MORE_EVIDENCE"))
+            self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+
+    def test_a_deferred_manufacturing_predicate_still_blocks_verified(self) -> None:
+        """Verification agreed about the geometry. It did not print the part."""
+        with tempfile.TemporaryDirectory() as raw:
+            result, _ = self._verify(Path(raw), self._reply("PASS"),
+                                     modifiers=("supports",))
+            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertIn("not verified", result.final_status["allowed_claim"])
+
+    def test_the_verifier_never_receives_the_designers_source(self) -> None:
+        """Reading model.py turns the second opinion into the designer's own
+        question asked again by someone with less context."""
+        with tempfile.TemporaryDirectory() as raw:
+            _, seen = self._verify(Path(raw), self._reply("PASS"))
+            payload = json.dumps(seen[0].payload)
+            self.assertNotIn("model.py", payload)
+            self.assertIn("brief", seen[0].payload)
+            self.assertIn("commission_report", seen[0].payload)
+
+    def test_a_rejection_with_no_defects_is_refused(self) -> None:
+        with self.assertRaises(Exception) as caught:
+            verification.validate(self._reply("REJECT"))
+        self.assertIn("name what is wrong", str(caught.exception))
+
+    def test_a_pass_carrying_defects_is_refused(self) -> None:
+        with self.assertRaises(Exception) as caught:
+            verification.validate(self._reply("PASS", [self.DEFECT]))
+        self.assertIn("decide", str(caught.exception))
+
+    def test_a_defect_missing_its_evidence_is_refused(self) -> None:
+        for field in ("summary", "expected_vs_observed", "evidence", "severity"):
+            with self.subTest(missing=field):
+                defect = {**self.DEFECT, field: ""}
+                with self.assertRaises(Exception):
+                    verification.validate(self._reply("REJECT", [defect]))
+
+    def test_an_unknown_owning_loop_is_refused(self) -> None:
+        defect = {**self.DEFECT, "owning_loop": "somebody else"}
+        with self.assertRaises(Exception):
+            verification.validate(self._reply("REJECT", [defect]))
+
+    def test_passing_while_listing_unmet_requirements_is_downgraded(self) -> None:
+        """The finding this pass exists for: the brief wants something the
+        contract never mentioned. A PASS alongside it is incoherent."""
+        result = verification.run(
+            verification.Packet({"a": 1}), {},
+            lambda p: self._reply("PASS", (), ["a strain relief nobody modelled"]))
+        self.assertEqual("NEEDS_MORE_EVIDENCE", result["decision"])
+        self.assertIn("downgraded", result["summary"])
+
+    def test_full_route_refuses_without_a_verifier(self) -> None:
+        decision = intent.select(requested_template=None,
+                                 parameters={"nothing": 1.0},
+                                 external_geometry=False, ambiguities=())
+        self.assertEqual("FULL", decision.route)
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(runner.JobRequest(
+                job_id="f", brief_path=out / "b.md", template=None,
+                parameters={"nothing": 1.0}, stated=frozenset(),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False))
+            self.assertFalse(result.ok)
+            self.assertIn("requires independent verification", result.message)
 
 
 if __name__ == "__main__":

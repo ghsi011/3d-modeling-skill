@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import analysis, commission, contract as C, fitted, intent, safety, schemas as S
-from . import screening, status, templates as T, witness as W
+from . import screening, status, templates as T, verification, witness as W
 from .backends import get as get_backend
 
 
@@ -47,6 +47,10 @@ class JobRequest:
     # and the evidence it is given. Absent on a DIRECT job, which owns everything
     # it needs by definition.
     spec_call: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    # The independent verifier. Optional on DIRECT -- the route's whole trade is
+    # that nobody independent looks, and its status says so. Required for FULL,
+    # and the only way any route reaches VERIFIED.
+    verify_call: Callable[[verification.Packet], dict[str, Any]] | None = None
     evidence: tuple[str, ...] = ()
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -74,6 +78,7 @@ def run(request: JobRequest) -> JobResult:
     out.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
     llm_calls = 0
+    specification: dict[str, Any] | None = None
 
     brief_text = request.brief_path.read_text(encoding="utf-8") if request.brief_path.is_file() else ""
     brief_hash = S.sha256_text(brief_text)
@@ -93,14 +98,14 @@ def run(request: JobRequest) -> JobResult:
     written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
     timings["intent"] = time.perf_counter() - mark
 
-    if decision.route == "FULL":
+    if decision.route == "FULL" and request.verify_call is None:
         return JobResult(False, "routing",
-                         f"route is FULL: {decision.condition}. FULL is not implemented "
-                         "yet -- it needs independent verification, which this runner "
-                         "does not dispatch.", written, timings, llm_calls, None)
+                         f"route is FULL: {decision.condition}. FULL requires independent "
+                         "verification and no verifier was supplied.",
+                         written, timings, llm_calls, None)
 
-    if decision.route == "FITTED":
-        if request.spec_call is None:
+    if decision.route in ("FITTED", "FULL"):
+        if request.spec_call is None and decision.route == "FITTED":
             return JobResult(False, "routing",
                              f"route is FITTED: {decision.condition}. This job needs one "
                              "bounded call to recover geometry it does not own, and no "
@@ -114,6 +119,7 @@ def run(request: JobRequest) -> JobResult:
             call=request.spec_call, reviewer=request.reviewer or {})
         llm_calls += 1
         timings["specification"] = time.perf_counter() - mark
+        specification = spec
         written["specification"] = _write(out / "specification.json", spec)
 
         if spec["unresolved"]:
@@ -137,6 +143,7 @@ def run(request: JobRequest) -> JobResult:
             request, parameters={**request.parameters, **derived},
             external_geometry=False)
 
+        recovered = decision.route
         decision = intent.select(requested_template=request.template,
                                  parameters=request.parameters,
                                  external_geometry=False, ambiguities=())
@@ -145,7 +152,7 @@ def run(request: JobRequest) -> JobResult:
                              "after recovering the specification the derived parameters "
                              f"still do not route DIRECT: {decision.condition}",
                              written, timings, llm_calls, None)
-        manifest["route_decision"] = {**decision.as_dict(), "recovered_via": "FITTED"}
+        manifest["route_decision"] = {**decision.as_dict(), "recovered_via": recovered}
         # Rebuilt from the full parameter set, not patched over the old one: a
         # recovered dimension is new, so a comprehension that only updates
         # existing rows drops exactly the values this route exists to produce.
@@ -247,16 +254,33 @@ def run(request: JobRequest) -> JobResult:
             brief=brief_text, intent=manifest, contract=model_contract.as_payload(),
             artifact=artifact, commission=report, manufacturing=manufacturing,
             witness=witness.as_dict())
+        # Stage 1 only: `verification_report` is deliberately not in the packet.
+        # Showing a second opinion the first one is anchoring by construction.
         safety_report = safety.run(packet, request.reviewer or {}, request.safety_call)
         llm_calls += 1
         timings["safety"] = time.perf_counter() - mark
         written["safety_verification_report"] = _write(
             out / "safety_verification_report.json", safety_report)
 
+    verification_report = None
+    if request.verify_call is not None:
+        mark = time.perf_counter()
+        packet = verification.build_packet(
+            brief=brief_text, intent=manifest, contract=model_contract.as_payload(),
+            artifact=artifact, commission=report, witness=witness.as_dict(),
+            specification=specification)
+        verification_report = verification.run(packet, request.reviewer or {},
+                                               request.verify_call)
+        llm_calls += 1
+        timings["verification"] = time.perf_counter() - mark
+        written["verification_report"] = _write(
+            out / "verification_report.json", verification_report)
+
     final = status.decide(contract=model_contract, commission_report=report,
                           screening=screen, manufacturing=manufacturing,
                           safety=safety_report, artifact=artifact,
-                          verification=None, updated_utc=request.updated_utc)
+                          verification=verification_report,
+                          updated_utc=request.updated_utc)
     written["final_status"] = _write(out / "final_status.json", final)
 
     timings["build"] = round(built.build_seconds, 4)

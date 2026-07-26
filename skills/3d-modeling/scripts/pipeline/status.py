@@ -145,10 +145,33 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             # brief. VERIFIED still requires a verifier.
             reasons.append("safety review passed; no independent geometric verification ran")
 
-    if verification is not None and verification.get("decision") == "PASS" and final == "COMMISSIONED":
-        if not (manufacturing and manufacturing["overall"] == "DEFERRED"):
-            final = "VERIFIED"
-            claim = "independently verified against its contract"
+    if verification is not None:
+        decision = verification.get("decision")
+        if decision == "REJECT":
+            # A rejection must move the status. Leaving it at COMMISSIONED read
+            # as "geometrically commissioned against its contract" while an
+            # independent reader had just said the part is wrong -- the claim was
+            # true about the geometry and silent about the finding, which is the
+            # worst combination a receipt can have.
+            defects = verification.get("defects") or []
+            loops = sorted({d.get("owning_loop", "?") for d in defects})
+            final = "FAILED"
+            claim = (f"rejected by independent verification ({len(defects)} defect(s), "
+                     f"owned by {', '.join(loops) or 'an unnamed loop'}): "
+                     f"{verification.get('summary', '')[:120]}")
+            reasons.append("independent verification returned REJECT")
+        elif decision == "NEEDS_MORE_EVIDENCE" and final in ("COMMISSIONED", "VERIFIED"):
+            final = "NEEDS_MORE_EVIDENCE"
+            claim = ("independent verification could not decide on the evidence this "
+                     "run produced")
+            reasons.append("independent verification needs more evidence")
+        elif decision == "PASS" and final == "COMMISSIONED":
+            if manufacturing and manufacturing["overall"] == "DEFERRED":
+                reasons.append("verified geometrically; a manufacturing predicate is "
+                               "still deferred, so the job stays COMMISSIONED")
+            else:
+                final = "VERIFIED"
+                claim = "independently verified against its contract"
 
     S.require_enum(final, S.FINAL_STATUS, what="final_status")
     return {
