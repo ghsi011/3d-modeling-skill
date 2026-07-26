@@ -3,7 +3,7 @@
 These checks require touching disk (existence, hashing, mesh bounds) and are
 therefore kept separate from the pure structural validators in validators.py,
 which only look at the parsed JSON. Uses trimesh/numpy only, per the
-dependency constraint (no cadquery/OCP dependency for STEP; STEP loading is
+dependency constraint (no OCP dependency for STEP; STEP loading is
 attempted opportunistically and skipped, not failed, when unavailable).
 """
 

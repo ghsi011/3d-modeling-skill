@@ -167,7 +167,7 @@ def compute_integrity(mesh: trimesh.Trimesh) -> MeshIntegrity:
     swallowed failure here would report "1 component" for a mesh nobody
     counted -- precisely the multi-body export the readiness gate exists to
     catch -- so the failure is re-raised with the mesh's shape attached
-    instead. Callers that already handle a bad mesh (run_cadquery_model,
+    instead. Callers that already handle a bad mesh (the job runner,
     preview) catch ValueError and surface the message.
     """
     try:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Render preview images of a CadQuery model for visual inspection.
+Render preview images of an exported mesh for visual inspection.
 
 Usage:
     python3 preview.py model.stl [output.png]
