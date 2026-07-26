@@ -921,6 +921,44 @@ class ProjectValidateReceiptTest(unittest.TestCase):
                 "# Candidate readiness",
                 "",
             ]), encoding="utf-8")
+        # The PRINT_PREP pair, and the same argument: a project that has been
+        # handed over has both, and they are the last gate before it is. The
+        # print engineer states the manufacturing evidence is complete and the
+        # verifier reads that file to decide. Neither could be checked at all
+        # until they were registered, so a fixture without them is not full.
+        (project_dir / "final_print_prep.md").write_text("\n".join([
+            "---",
+            "contract: final-print-prep",
+            "contract_version: 4",
+            "job_id: demo",
+            "owner: print-engineer",
+            "status: READY_FOR_REVIEW",
+            f"candidate_stl_sha256: {candidate_hash}",
+            "print_plan_revision: 1",
+            "verification_report_revision: 1",
+            "updated_utc: 1970-01-01T00:00:00Z",
+            "---",
+            "",
+            "# Final print preparation",
+            "",
+        ]), encoding="utf-8")
+        (project_dir / "final_prep_review.md").write_text("\n".join([
+            "---",
+            "contract: final-prep-review",
+            "contract_version: 4",
+            "job_id: demo",
+            "owner: verifier",
+            "status: FINAL_PRINT_PASS",
+            f"candidate_stl_sha256: {candidate_hash}",
+            "print_plan_revision: 1",
+            "final_print_prep_sha256: "
+            f"{C.sha256_file(project_dir / 'final_print_prep.md')}",
+            "updated_utc: 1970-01-01T00:00:00Z",
+            "---",
+            "",
+            "# Final prep review",
+            "",
+        ]), encoding="utf-8")
         return {"reference_hash": reference_hash, "candidate_hash": candidate_hash}
 
     def test_full_project_validates_clean(self) -> None:
@@ -932,6 +970,46 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             self.assertEqual([], receipt["error_ids"])
             self.assertIn("does NOT prove geometric or manufacturing correctness", receipt["disclaimer"])
             self.assertEqual(C.DEFAULT_TIMESTAMP, receipt["timestamp"])
+
+    def _corrupt_final_prep(self, project_dir: Path, field: str, value: str) -> list[str]:
+        """Rewrite one header field of `final_prep_review.md` and revalidate."""
+        self._build_full_project(project_dir)
+        path = project_dir / "final_prep_review.md"
+        lines = [f"{field}: {value}" if line.startswith(f"{field}:") else line
+                 for line in path.read_text(encoding="utf-8").splitlines()]
+        self.assertIn(f"{field}: {value}", lines, "the field to corrupt must exist")
+        path.write_text("\n".join(lines), encoding="utf-8")
+        receipt, _ = R.build_validate_receipt(project_dir, timestamp=None, argv=[])
+        return receipt["error_ids"]
+
+    def test_a_final_prep_verdict_outside_the_enum_is_rejected(self) -> None:
+        """`status` is the whole contract: it decides whether a part is handed
+        over. Until these two were registered, a review could say anything at
+        all -- `PASS`, `ok`, a typo for a reject -- and validate clean, because
+        no validator had ever heard of the file."""
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "status", "PASS")
+            self.assertIn("BAD_ENUM@final_prep_review.status", errors)
+
+    def test_a_final_prep_binding_hash_must_be_a_hash(self) -> None:
+        """The review binds to the prep file it reviewed. A placeholder there
+        binds to nothing, and reads exactly like a binding that holds."""
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "final_print_prep_sha256", "TBD")
+            self.assertIn("BAD_HASH@final_prep_review.final_print_prep_sha256", errors)
+
+    def test_a_final_prep_bound_revision_must_be_an_integer(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "print_plan_revision", "latest")
+            self.assertIn("MISSING_FIELD@final_prep_review.print_plan_revision", errors)
+
+    def test_the_final_prep_pair_may_not_swap_owners(self) -> None:
+        """The verifier writing the print engineer's evidence, or the reverse, is
+        the one thing this phase exists to prevent: the review is worth something
+        only because a second party wrote it."""
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "owner", "print-engineer")
+            self.assertIn("BAD_ENUM@final_prep_review.owner", errors)
 
     def test_absent_contract_is_silent_and_recorded_in_validated_paths(self) -> None:
         """An early-phase project holds only what its phase produced, so absence

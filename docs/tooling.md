@@ -111,9 +111,9 @@ Inputs:
   than a warning: `job_state`, `dimensions`, `print_plan`,
   `verification_report`, `artifact_manifest`, or `all`. Repeatable and
   comma-separated, from `job_state`, `dimensions`, `print_plan`,
-  `verification_report`, `artifact_manifest`, `candidate_readiness`, or `all`.
-  An unknown name is a usage error (exit `2`) rather than a silently dropped
-  requirement.
+  `verification_report`, `artifact_manifest`, `candidate_readiness`,
+  `final_print_prep`, `final_prep_review`, or `all`. An unknown name is a usage
+  error (exit `2`) rather than a silently dropped requirement.
 * Optional `--output` receipt path.
 * Optional `--timestamp`, injected into the receipt instead of reading wall
   clock time.

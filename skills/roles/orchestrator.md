@@ -331,7 +331,16 @@ checks as "n/a for this interface type", and only a fresh context catches that.
     verified candidate needs support contacts, toolpaths, or another slicer-dependent visual
     predicate, dispatch the print engineer for coupon, slicing, print order, and field-test
     details in `final_print_prep.md`, require `READY_FOR_REVIEW`, and dispatch the verifier to
-    write `final_prep_review.md` before delivery. A support-free candidate with no deferred
+    write `final_prep_review.md` before delivery. Then gate both:
+
+    ```bash
+    python $DT validate <project> --require final_print_prep,final_prep_review
+    ```
+
+    Require exit zero. This is the last gate before a part is handed over, and until these
+    two contracts were registered it was the only one nothing could check: a review could
+    carry any verdict at all, bind to a hash that was never a hash, or be written by the
+    same role that wrote the evidence it reviews. A support-free candidate with no deferred
     visual predicate finishes on the plan's own final-prep placeholders -- do not spend a
     dispatch producing a native project for ceremony. `BRIDGED_NO_SUPPORT` is support-free
     for this purpose: nothing touches those faces, so there are no support contacts to

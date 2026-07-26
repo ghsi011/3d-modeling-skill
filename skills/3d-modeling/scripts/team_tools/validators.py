@@ -68,6 +68,8 @@ ACCEPTED_CONTRACT_VERSIONS: dict[str, frozenset[int]] = {
     "verification-report": frozenset({4}),
     "artifact-manifest": frozenset({1}),
     "candidate-readiness": frozenset({4}),
+    "final-print-prep": frozenset({4}),
+    "final-prep-review": frozenset({4}),
 }
 
 # Each contract is looked up in order: the Markdown the roles actually author
@@ -83,12 +85,17 @@ CANONICAL_FILENAMES: dict[str, tuple[str, ...]] = {
     "print_plan": ("print_plan.md", "print_plan.json", "print_plan_checks.json"),
     "verification_report": ("verification_report.md", "verification_report.json"),
     "artifact_manifest": ("artifact_manifest.json",),
-    # The designer's self-check. It is not an acceptance contract and carries no
-    # revision, but the verifier's checklist makes its presence a gate, so
-    # `--require` had to be able to name it -- and could not, which left the one
-    # step that says "treat this as untrusted completeness evidence" unable to
-    # confirm the evidence was even there.
+    # The designer's self-check. Not an acceptance contract, but the verifier's
+    # checklist makes its presence a gate, so `--require` had to be able to name
+    # it -- and could not, which left the one step that says "treat this as
+    # untrusted completeness evidence" unable to confirm the evidence was there.
     "candidate_readiness": ("candidate_readiness.md",),
+    # The PRINT_PREP phase. These two ran unvalidated: the spec gives both a
+    # contract header, the print engineer writes one and the verifier reads it to
+    # decide FINAL_PRINT_PASS, and `--require` could name neither -- so the last
+    # gate before a part is handed over was the only one nothing could check.
+    "final_print_prep": ("final_print_prep.md",),
+    "final_prep_review": ("final_prep_review.md",),
 }
 
 # Contracts with a full structural validator, which only runs on a JSON source.
@@ -102,6 +109,8 @@ CONTRACT_KIND_BY_KEY: dict[str, str] = {
     "verification_report": "verification-report",
     "artifact_manifest": "artifact-manifest",
     "candidate_readiness": "candidate-readiness",
+    "final_print_prep": "final-print-prep",
+    "final_prep_review": "final-prep-review",
 }
 
 # Who may author each contract. Sets, not scalars, because two contracts have a
@@ -116,6 +125,36 @@ _EXPECTED_OWNERS: dict[str, frozenset[str]] = {
     "print_plan": frozenset({"print-engineer", "builtin-direct-template"}),
     "verification_report": frozenset({"verifier"}),
     "candidate_readiness": frozenset({"cad-designer"}),
+    "final_print_prep": frozenset({"print-engineer"}),
+    "final_prep_review": frozenset({"verifier"}),
+}
+
+# The `status` field is the verdict each of these contracts exists to carry, so
+# an unrecognised value is not a typo to shrug at: `FINAL_PRINT_BLOCKED` and
+# `FINAL_PRINT_PASS` decide whether a part is handed over.
+_STATUS_ENUM: dict[str, frozenset[str]] = {
+    "final_print_prep": frozenset(
+        {"COMPLETE", "READY_FOR_REVIEW", "BLOCKED_NATIVE_SLICER", "REJECTED"}),
+    "final_prep_review": frozenset(
+        {"FINAL_PRINT_PASS", "FINAL_PRINT_REJECT", "FINAL_PRINT_BLOCKED"}),
+}
+
+# Contracts whose header carries a `revision` of its own. The final-prep pair do
+# not: they are terminal, nothing binds to them, and they record the revisions
+# they were written against instead.
+_CARRIES_REVISION = frozenset(
+    {"job_state", "dimensions", "print_plan", "verification_report", "candidate_readiness"})
+
+# Header fields that bind one contract to another, and must therefore be the
+# shape a binding check can compare. A hash typed as a placeholder, or a bound
+# revision written as a string, silently binds to nothing.
+_BOUND_HASHES: dict[str, tuple[str, ...]] = {
+    "final_print_prep": ("candidate_stl_sha256",),
+    "final_prep_review": ("candidate_stl_sha256", "final_print_prep_sha256"),
+}
+_BOUND_REVISIONS: dict[str, tuple[str, ...]] = {
+    "final_print_prep": ("print_plan_revision", "verification_report_revision"),
+    "final_prep_review": ("print_plan_revision",),
 }
 
 
@@ -145,7 +184,26 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
         # objected -- the route decides which phases run, so an unknown value
         # means nobody knows what the job is supposed to do.
         issues += check_enum(data, "profile", PROFILE, where)
-    if key != "artifact_manifest":
+    if key in _STATUS_ENUM:
+        if "status" not in data:
+            issues.append(error("MISSING_FIELD", f"{where}.status",
+                                "required field is missing -- it is the verdict this contract carries"))
+        else:
+            issues += check_enum(data, "status", _STATUS_ENUM[key], where)
+    for field in _BOUND_HASHES.get(key, ()):
+        if field not in data:
+            issues.append(error("MISSING_FIELD", f"{where}.{field}",
+                                "required binding hash is missing"))
+        elif not is_hash_format(data[field]):
+            issues.append(error("BAD_HASH", f"{where}.{field}",
+                                "must be 64 lowercase hex characters"))
+    for field in _BOUND_REVISIONS.get(key, ()):
+        value = data.get(field)
+        if not isinstance(value, int) or isinstance(value, bool):
+            issues.append(error("MISSING_FIELD", f"{where}.{field}",
+                                "required integer field is missing -- it names the revision "
+                                "this contract was written against"))
+    if key in _CARRIES_REVISION:
         revision = data.get("revision")
         if not isinstance(revision, int) or isinstance(revision, bool):
             issues.append(
