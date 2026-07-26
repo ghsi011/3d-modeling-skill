@@ -36,8 +36,25 @@ def _request(out: Path, *, template="c_clip", params=None, consequence="INCONSEQ
         render=False, **kw)
 
 
+def _looked_at(packet):
+    """A stand-in for the bounded visual call.
+
+    Screening is uncalibrated (87.5% miss on fused undeclared material), so a
+    clean job does not complete without somebody looking. Tests that want a
+    finished job supply this; tests about the gate itself do not.
+    """
+    _ = packet
+    return {"decision": "PASS", "defects": [], "unmet_requirements": [],
+            "missing_evidence": [], "summary": "nothing undeclared visible"}
+
+
 def _run(out: Path, **kw):
     return runner.run(_request(out, **kw))
+
+
+def _run_looked(out: Path, **kw):
+    return runner.run(_request(out, verify_call=_looked_at,
+                               reviewer={"model_snapshot": "test"}, **kw))
 
 
 def _contract(out: Path, template="c_clip", params=None) -> C.Contract:
@@ -59,13 +76,19 @@ def _measure(mesh: trimesh.Trimesh, contract: C.Contract, tmp: Path):
 
 class VerticalSliceTest(unittest.TestCase):
     def test_a_clean_trimesh_job_runs_end_to_end_with_no_llm_calls(self) -> None:
+        """Zero dispatches is what the deterministic path costs. It does not by
+        itself finish the job: screening is uncalibrated, so the status says so
+        rather than reading as though something had looked."""
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
             result = _run(out)
 
-            self.assertTrue(result.ok, result.message)
             self.assertEqual(0, result.llm_calls)
-            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertEqual("PASS", json.loads(
+                (out / "commission_report.json").read_text(encoding="utf-8"))["verdict"])
+            self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+            self.assertIn("nobody independent looked",
+                          result.final_status["allowed_claim"])
             for name in ("intent_manifest", "model_contract", "artifact_manifest",
                          "commission_report", "final_status"):
                 self.assertIn(name, result.artifacts, f"missing {name}")
@@ -110,7 +133,7 @@ class VerticalSliceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = _run(out, template="trim_ring", params=RING, step=True)
+            result = _run_looked(out, template="trim_ring", params=RING, step=True)
             self.assertTrue((out / "candidate.step").is_file())
             self.assertTrue(result.ok, result.message)
 
@@ -433,7 +456,7 @@ class ManufacturingTest(unittest.TestCase):
     def test_a_deferred_predicate_blocks_verified_and_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = runner.run(_request(out, modifiers=("supports",)))
+            result = _run_looked(out, modifiers=("supports",))
             report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
 
             self.assertEqual("DEFERRED", report["overall"])
@@ -554,7 +577,8 @@ class StatusTest(unittest.TestCase):
             contract = _contract(Path(raw))
         report = {"verdict": "PASS"}
         artifact = {"contract_sha256": "a", "stl_sha256": "b", "source_sha256": "c"}
-        ok = status.decide(contract=contract, commission_report=report, screening=clean,
+        ok = status.decide(contract=contract, commission_report=report,
+                           screening={**clean, "calibrated": True},
                            manufacturing=None, safety=None, artifact=artifact,
                            verification=None, updated_utc="t")
         flagged = status.decide(contract=contract, commission_report=report, screening=anomaly,
@@ -747,7 +771,7 @@ class ModifierTest(unittest.TestCase):
     def test_an_unknown_modifier_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = runner.run(_request(out, modifiers=("banana",)))
+            result = _run_looked(out, modifiers=("banana",))
             report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
             self.assertEqual("BLOCKED", report["overall"])
             self.assertEqual("FAILED", result.final_status["final_status"])
@@ -772,27 +796,59 @@ class CalibrationTest(unittest.TestCase):
     behind it.
     """
 
-    def test_the_mutation_corpus_still_clears_its_thresholds(self) -> None:
+    def test_the_corpus_measures_screening_and_not_the_pipeline(self) -> None:
+        """The rate that decides the gate must be screening's own.
+
+        It was computed from `caught_by_contract or caught_by_screening`, so it
+        reported 0.0 while the screen itself missed 46.7% of added material --
+        and contract checks are conditioned on declared features, which is
+        exactly why they are not the broad evidence this gate is about.
+        """
         from . import corpus
 
         report = corpus.run(corpus._default_templates())
+        added = report["per_class"]["added-material"]
 
-        self.assertGreaterEqual(report["templates_measured"], corpus.MIN_TEMPLATES)
-        self.assertLessEqual(report["screening_false_negative_rate"],
-                             corpus.MAX_FALSE_NEGATIVE,
-                             f"survivors: {[c['survivors'] for c in report['per_class'].values()]}")
-        self.assertLessEqual(report["false_positive_rate"], corpus.MAX_FALSE_POSITIVE,
-                             report["false_positives"])
-        self.assertEqual("PASS", report["gate"])
+        self.assertNotEqual(added["pipeline_false_negative_rate"],
+                            added["screening_false_negative_rate"],
+                            "if these agree the corpus is not separating the two")
+        self.assertEqual(report["screening_false_negative_rate"],
+                         added["screening_false_negative_rate"])
+
+    def test_screening_is_scored_only_on_defects_it_could_see(self) -> None:
+        """A disconnected solid is debris whatever class it was filed under, and
+        the component detector sees it for free."""
+        from . import corpus
+
+        report = corpus.run(corpus._default_templates())
+        added = report["per_class"]["added-material"]
+        self.assertLess(added["fused_mutants"], added["mutants"],
+                        "the corpus should contain both fused and separate defects")
 
     def test_the_flag_matches_the_measurement(self) -> None:
-        """A stale True is worse than a False: it licenses zero-dispatch on a
+        """A stale True is worse than a False: it licenses dropping the look on a
         screen nobody has checked."""
         from . import corpus, screening as S
 
+        gate = corpus.run(corpus._default_templates())["gate"]
+        self.assertEqual(S.CALIBRATED, gate == "PASS",
+                         f"CALIBRATED={S.CALIBRATED} while the corpus gate is {gate}")
+
+    def test_an_uncalibrated_screen_stops_a_job_nobody_looked_at(self) -> None:
+        """The plan calls this a hard gate. It has to move the status, or it is a
+        string: an earlier version only edited the claim text, so flipping the
+        flag changed nothing about what shipped."""
+        from . import screening as S
+
         if S.CALIBRATED:
-            self.assertEqual("PASS", corpus.run(corpus._default_templates())["gate"],
-                             "CALIBRATED is True while the corpus does not pass")
+            self.skipTest("screening is calibrated; the gate does not apply")
+        with tempfile.TemporaryDirectory() as raw:
+            result = _run(Path(raw))
+            self.assertEqual("NEEDS_MORE_EVIDENCE",
+                             result.final_status["final_status"])
+        with tempfile.TemporaryDirectory() as raw:
+            looked = _run_looked(Path(raw))
+            self.assertEqual("VERIFIED", looked.final_status["final_status"])
 
     def test_the_status_reports_the_calibration_state(self) -> None:
         from . import screening as S
@@ -800,8 +856,6 @@ class CalibrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             final = _run(Path(raw)).final_status
             self.assertEqual(S.CALIBRATED, final["screening_calibrated"])
-            if not S.CALIBRATED:
-                self.assertIn("cannot be ruled out", final["allowed_claim"])
 
     def test_screening_never_claims_to_prove_absence(self) -> None:
         """Calibration measures what the screens catch. It does not widen what
@@ -854,10 +908,10 @@ class FittedRouteTest(unittest.TestCase):
             out = Path(raw)
             result, seen = self._job(out, self.SPEC)
 
-            self.assertTrue(result.ok, result.message)
             self.assertEqual(1, len(seen), "FITTED costs exactly one dispatch")
             self.assertEqual(1, result.llm_calls)
-            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertEqual("PASS", json.loads(
+                (out / "commission_report.json").read_text(encoding="utf-8"))["verdict"])
             self.assertTrue((out / "specification.json").is_file())
 
     def test_the_recovered_dimension_reaches_the_manifest_with_its_provenance(self) -> None:
@@ -998,7 +1052,7 @@ class IndependentVerificationTest(unittest.TestCase):
     def test_without_a_verifier_no_job_reaches_verified(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             result = _run(Path(raw))
-            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
+            self.assertNotEqual("VERIFIED", result.final_status["final_status"])
             self.assertIsNone(result.final_status["verification"])
 
     def test_a_rejection_moves_the_status_and_names_the_loop(self) -> None:

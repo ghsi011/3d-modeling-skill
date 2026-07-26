@@ -30,25 +30,28 @@ from .contract import Contract
 # misses it on a large part or cries wolf on a small one.
 STEP_FRACTION = 0.08
 
-# Whether the screens have been measured against a mutation corpus, with
-# published false-negative and false-positive rates. They have been:
-# `python -m pipeline.corpus` builds 38 defective parts across three templates in
-# five classes and reports what each instrument catches. Measured 38/38, with a
-# 0.0 false-negative rate on the classes screening is responsible for and 0.0
-# false positives on the clean parts.
+# Whether the broad screen is trustworthy enough to stand in for a look. It is
+# not, and the number is worth stating exactly: measured against the mutation
+# corpus, screening misses 87.5% of undeclared material that is *fused to the
+# part*. `python -m pipeline.corpus` reproduces it.
 #
-# The flag is not an assertion. `test_pipeline.py::CalibrationTest` runs the
-# corpus and fails if the gate stops passing, so screening that degrades takes
-# this flag down with it rather than leaving a stale True behind.
+# An earlier version of this flag said True on the strength of a 0.0 rate. That
+# rate was computed from `caught_by_contract or caught_by_screening`, so it
+# measured the whole pipeline -- and the contract catches these because they
+# happen to move a declared section. The screen itself does not see them, which
+# is the only thing that matters here: contract checks are conditioned on
+# declared features, which is exactly why they are not broad evidence, and
+# dropping the visual call was only ever justified by the screen's own rate.
 #
-# What it does NOT license: screening still cannot prove absence, and X and Y are
-# still unscreened. A calibrated screen is a measured one, not a complete one.
-CALIBRATED = True
+# Half the corpus's "added material" was also disconnected solids, caught by the
+# component detector for free. Fused defects are the ones a profile has to see.
+CALIBRATED = False
 CALIBRATION_NOTE = (
-    "measured against a 38-mutant corpus across three templates: 0.0 false-negative "
-    "rate on added material and boolean debris, 0.0 false positives on clean parts. "
-    "Still true regardless: screening cannot prove a feature is absent, and only the "
-    "Z axis is profiled.")
+    "screening misses 87.5% of undeclared material fused to the part, measured on the "
+    "mutation corpus. Only the Z axis is profiled, the positional slack around a "
+    "declared height is a fixed 1.0 mm rather than scale-normalized, and screening "
+    "cannot prove a feature is absent in any case. Until this is fixed a clean job "
+    "still needs somebody to look at it.")
 SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 

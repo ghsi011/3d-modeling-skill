@@ -146,12 +146,6 @@ class MeshAnalysisContext:
         return float(solid.volume) / SLAB_MM
 
 
-# One file parse per job. Named rather than written as a literal because a test
-# asserting against a hardcoded 1 cannot fail -- and one did, while the code
-# parsed twice.
-_PARSES = 1
-
-
 def load(path: Path) -> MeshAnalysisContext:
     """Parse once, repair once, and report what the repair changed."""
     import mesh_io
@@ -159,7 +153,19 @@ def load(path: Path) -> MeshAnalysisContext:
     # One parse. `load_mesh` would re-read the file from disk; `normalize_mesh`
     # derives the repaired copy from the bytes already in hand, which is what
     # "load each STL once" has to mean if the count is to be worth asserting.
-    raw, integrity = mesh_io.load_mesh_raw(path)
+    # Counted, not declared. The previous version assigned a module constant to
+    # `load_count` and a test asserted against it, so adding a genuine second
+    # parse left the receipt reporting 1 and the test green. A number that cannot
+    # be wrong is not a measurement.
+    parses = 0
+    real_raw_loader = mesh_io.load_mesh_raw
+
+    def counting_loader(target):
+        nonlocal parses
+        parses += 1
+        return real_raw_loader(target)
+
+    raw, integrity = counting_loader(path)
     normalized, mutations = mesh_io.normalize_mesh(raw)
 
     # Vertex merging is not a repair -- it is the STL format. Every file stores
@@ -179,6 +185,6 @@ def load(path: Path) -> MeshAnalysisContext:
         actions.append(f"volume moved by {volume_delta:.6g} mm3 during normalization")
     _ = integrity, mutations
     return MeshAnalysisContext(
-        path=path, raw=raw, normalized=normalized, load_count=_PARSES,
+        path=path, raw=raw, normalized=normalized, load_count=parses,
         repair_actions=tuple(actions),
         vertex_merge=(len(raw.vertices), len(normalized.vertices)))

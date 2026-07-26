@@ -109,13 +109,20 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         reasons.append("screening was indeterminate")
     else:
         final, claim = "COMMISSIONED", "geometrically commissioned against its contract"
-        if not screening.get("calibrated", False):
-            # Not a downgrade of the status -- the geometry really did match its
-            # contract. A correction to the claim, which otherwise reads as though
-            # something had looked at the part.
-            claim = ("geometrically commissioned against its contract; the broad screen "
-                     "is uncalibrated, so undeclared geometry cannot be ruled out")
-            reasons.append("screening is uncalibrated (see calibration_note)")
+        if not screening.get("calibrated", False) and verification is None:
+            # The plan's hard gate, and it has to move the status or it is a
+            # string. An uncalibrated screen plus nobody looking means the one
+            # question no declared check can ask went unasked -- and the measured
+            # miss rate on fused undeclared material is 87.5%.
+            final = "NEEDS_MORE_EVIDENCE"
+            claim = ("the geometry matches its contract, but the broad screen is "
+                     "uncalibrated and nobody independent looked, so undeclared "
+                     "geometry cannot be ruled out. Supply a verifier, or say plainly "
+                     "that nothing has looked at this part.")
+            reasons.append("screening is uncalibrated and no independent look ran")
+        elif not screening.get("calibrated", False):
+            reasons.append("screening is uncalibrated; the independent look is what "
+                           "covers undeclared geometry here")
 
     if final in ("COMMISSIONED", "VERIFIED"):
         if manufacturing and manufacturing["overall"] == "DEFERRED":

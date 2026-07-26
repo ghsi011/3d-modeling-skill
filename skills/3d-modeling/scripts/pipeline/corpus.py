@@ -61,6 +61,7 @@ class Outcome:
     mutant: Mutant
     commission_verdict: str
     screening_verdict: str
+    body_count: int = 1
 
     @property
     def caught_by_contract(self) -> bool:
@@ -72,7 +73,27 @@ class Outcome:
 
     @property
     def caught(self) -> bool:
+        """Anything at all flagged it. Useful, and NOT the calibration number.
+
+        The gate exists to decide whether the broad screen alone is trustworthy
+        enough to drop the visual call. Contract checks are conditioned on
+        declared features, which is precisely why they are not broad evidence --
+        so a rate computed from `caught` measures the whole pipeline and answers
+        a different question. It said 0.0 while screening's own rate on added
+        material was 0.467.
+        """
         return self.caught_by_contract or self.caught_by_screening
+
+    @property
+    def fused(self) -> bool:
+        """Whether the defect is continuous with the part.
+
+        A disconnected solid is debris, whatever class it was filed under, and
+        the component detector sees it for free. Half the added-material mutants
+        were separate bodies, so screening's apparent catches on that class were
+        mostly the debris detector wearing another label.
+        """
+        return self.body_count == 1
 
 
 def _cyl(radius: float, height: float, at, sections: int = 64) -> trimesh.Trimesh:
@@ -193,11 +214,14 @@ def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
     return out
 
 
-def _evaluate(mesh: trimesh.Trimesh, contract: Contract, tmp: Path) -> tuple[str, str]:
+def _evaluate(mesh: trimesh.Trimesh, contract: Contract,
+              tmp: Path) -> tuple[str, str, int]:
     path = tmp / "m.stl"
     mesh.export(path)
     ctx = analysis.load(path)
-    return commission.run(ctx, contract)["verdict"], screening.run(ctx, contract)["overall"]
+    return (commission.run(ctx, contract)["verdict"],
+            screening.run(ctx, contract)["overall"],
+            len(ctx.components))
 
 
 def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> dict[str, Any]:
@@ -214,7 +238,7 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
             clean, _ = T.get(name).build(params)
 
             clean_parts += 1
-            verdict, screen = _evaluate(clean, contract, tmp)
+            verdict, screen, _ = _evaluate(clean, contract, tmp)
             if verdict != "PASS" or screen != "CLEAR":
                 false_positives.append(f"{name}: clean part flagged "
                                        f"(commission {verdict}, screening {screen})")
@@ -223,31 +247,41 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
             if name == "c_clip":
                 mutants += c_clip_mutants(params, clean)
             for mutant in mutants:
-                v, s = _evaluate(mutant.mesh, contract, tmp)
+                v, s, bodies = _evaluate(mutant.mesh, contract, tmp)
                 rows.append(Outcome(Mutant(name + "/" + mutant.name, mutant.defect_class,
-                                           mutant.mesh, mutant.note), v, s))
+                                           mutant.mesh, mutant.note), v, s, bodies))
 
     per_class: dict[str, Any] = {}
     for defect in CLASSES:
         subset = [r for r in rows if r.mutant.defect_class == defect]
         if not subset:
             continue
-        missed = [r for r in subset if not r.caught]
-        screened = [r for r in subset if r.caught_by_screening]
+        # Fused only, for screening's own rate. A disconnected solid is debris
+        # whatever class it was filed under, and the component detector sees it
+        # for free -- counting those as profile catches flattered the screen.
+        fused = [r for r in subset if r.fused]
+        screening_missed = [r for r in fused if not r.caught_by_screening]
         per_class[defect] = {
             "mutants": len(subset),
-            "caught": len(subset) - len(missed),
-            "false_negative_rate": round(len(missed) / len(subset), 4),
-            "caught_by_screening": len(screened),
+            "fused_mutants": len(fused),
+            "caught_by_anything": len([r for r in subset if r.caught]),
+            "pipeline_false_negative_rate": round(
+                len([r for r in subset if not r.caught]) / len(subset), 4),
+            "screening_false_negative_rate": (
+                round(len(screening_missed) / len(fused), 4) if fused else None),
+            "caught_by_screening": len([r for r in subset if r.caught_by_screening]),
             "caught_by_contract_only": len([r for r in subset
                                             if r.caught_by_contract and not r.caught_by_screening]),
-            "survivors": [r.mutant.name for r in missed],
+            "survivors_of_everything": [r.mutant.name for r in subset if not r.caught],
+            "survivors_of_screening": [r.mutant.name for r in screening_missed],
             "screening_is_responsible": defect in SCREENING_CLASSES,
         }
 
-    screening_classes = [c for c in SCREENING_CLASSES if c in per_class]
+    screening_classes = [c for c in SCREENING_CLASSES if c in per_class
+                         and per_class[c]["screening_false_negative_rate"] is not None]
     worst_screening_fn = max(
-        (per_class[c]["false_negative_rate"] for c in screening_classes), default=1.0)
+        (per_class[c]["screening_false_negative_rate"] for c in screening_classes),
+        default=1.0)
     fp_rate = len(false_positives) / max(clean_parts, 1)
 
     return {
