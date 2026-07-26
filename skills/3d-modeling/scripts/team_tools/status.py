@@ -19,7 +19,7 @@ CONTRACT_ORDER = ("job_state", "dimensions", "print_plan", "verification_report"
 # is deliberately absent: an early-phase project is legitimately missing the
 # contracts later phases write, and `validate --require` is what names the ones
 # a given phase must have.
-BLOCKING_STATUSES = frozenset({"STALE", "INVALIDATED", "UNREADABLE", "AMBIGUOUS"})
+BLOCKING_STATUSES = frozenset({"STALE", "INVALIDATED", "UNREADABLE", "AMBIGUOUS", "MISMATCH"})
 
 
 def exit_code(rows: list[dict[str, Any]]) -> int:
@@ -78,6 +78,27 @@ def compute_status(project_dir: Path) -> list[dict[str, Any]]:
         revision = contract_file.data.get("revision")
         detail = f"revision {revision}" if revision is not None else "no revision field (artifact_manifest is unrevisioned)"
         rows.append({"contract": label, "status": "OK", "detail": detail})
+
+    # Every contract in a project must name the same job. `validate` checks each
+    # file alone, so a project assembled from two jobs' contracts passed it
+    # cleanly -- four files bound to `final4` under a `job_state` saying
+    # `express1`, with every hash and revision internally consistent. Only
+    # reading them side by side caught it, which is what this command is for.
+    named: dict[str, str] = {}
+    for key in CONTRACT_ORDER:
+        data = files[key].data
+        if data and isinstance(data.get("job_id"), str):
+            named[key] = data["job_id"]
+    if len(set(named.values())) > 1:
+        governing = named.get("job_state")
+        odd = sorted(k for k, v in named.items() if v != governing) if governing else []
+        rows.append({
+            "contract": "JOB_STATE" if governing else "PROJECT",
+            "status": "MISMATCH",
+            "detail": ("contracts name different jobs: "
+                       + ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
+                       + (f"; {', '.join(odd)} disagree with job_state" if odd else "")),
+        })
 
     job_state = files["job_state"].data
     dimensions = files["dimensions"].data

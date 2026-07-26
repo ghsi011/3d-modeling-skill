@@ -470,6 +470,37 @@ class PrintPlanValidatorTest(unittest.TestCase):
         issues, _ = V.validate_print_plan(broken)
         self.assertIn("DUPLICATE_ID@print_plan.edges", issue_ids(issues))
 
+    def test_contracts_naming_different_jobs_are_reported(self) -> None:
+        """A project assembled from two jobs' contracts passed `validate`
+        cleanly: four files bound to one job under a job_state naming another,
+        every hash and revision internally consistent. Only reading them side by
+        side catches it, which is what `status` is for.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            job_state["job_id"] = "this-job"
+            dimensions = clone(_DIMENSIONS)
+            dimensions["job_id"] = "some-other-job"
+            _write_project(project_dir, job_state=job_state, dimensions=dimensions)
+
+            rows = S.compute_status(project_dir)
+
+            mismatch = [r for r in rows if r["status"] == "MISMATCH"]
+            self.assertEqual(1, len(mismatch), rows)
+            self.assertIn("some-other-job", mismatch[0]["detail"])
+            self.assertEqual(1, S.exit_code(rows), "a split-brain project must not pass")
+
+    def test_one_job_across_every_contract_is_silent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            _write_project(project_dir, job_state=clone(_JOB_STATE),
+                           dimensions=clone(_DIMENSIONS))
+
+            rows = S.compute_status(project_dir)
+
+            self.assertEqual([], [r for r in rows if r["status"] == "MISMATCH"], rows)
+
     def test_the_express_profile_is_a_recognised_route(self) -> None:
         """It trades fresh-context verification for about eleven minutes, so it
         has to be a value the record can carry and the validator can check --
