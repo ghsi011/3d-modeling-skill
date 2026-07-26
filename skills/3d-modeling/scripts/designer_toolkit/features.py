@@ -128,6 +128,43 @@ def bore_diameter_mm(mesh: Any, x: float, y: float, z: float, radius: float) -> 
     return 2.0 * math.sqrt(max(wide, 0.0) / math.pi)
 
 
+# A hole 0.25 mm out of place reads as 0.246 here: the window's own tessellation
+# costs about 1.5%. The floor sits below that error and below the smallest
+# misplacement worth a reprint.
+POSITION_TOL_MM = 0.10
+POSITION_TOL_FRAC = 0.02
+
+
+def bore_offset_mm(mesh: Any, x: float, y: float, z: float, radius: float) -> tuple[float, float]:
+    """Where the void actually is, relative to where it was declared.
+
+    Every other check here samples *at the declared position*, which means a hole
+    the designer put in the wrong place and then declared in the wrong place
+    confirms itself: the diameter is right, the roundness is right, the section
+    area is right, and the bolt still misses. A run building to the Gridfinity
+    standard shipped its magnet pockets 0.25 mm off on both axes -- the 8 mm
+    inset taken from the 41.5 mm footprint instead of the 42 mm grid cell -- and
+    eight green checks agreed with it, because none of them asked where.
+
+    The void's centroid falls out of the same slab boolean the diameter comes
+    from: the window's area and centre are known, the material's are measured,
+    and what is left is the hole.
+    """
+    import trimesh
+    window = trimesh.creation.cylinder(radius=radius, height=SLAB_MM,
+                                       sections=WINDOW_SECTIONS)
+    window.apply_translation([x, y, z])
+    solid = trimesh.boolean.intersection([mesh, window])
+    material = 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+    window_area = math.pi * radius * radius
+    void = window_area - material
+    if void <= 1e-6:
+        raise Indeterminate(f"no void at ({x:.2f}, {y:.2f}, {z:.2f}) to locate")
+    centre = solid.centroid if material > 0 else (x, y, z)
+    return ((window_area * x - material * float(centre[0])) / void - x,
+            (window_area * y - material * float(centre[1])) / void - y)
+
+
 def _countersink_stations(row: dict) -> list[tuple[float, float]]:
     """Predicted (z, diameter) down a countersunk hole.
 
@@ -229,9 +266,23 @@ def _check_hole(mesh: Any, row: dict) -> Check:
             problems.append(f"z={z:.2f}: {measured:.2f} mm, expected {expected:.2f} "
                             f"+/- {tolerance:.2f}")
 
+    # Where, not just what. Taken at the middle station, where the bore is at its
+    # nominal diameter and the window is furthest from either face.
+    mid_z = stations[len(stations) // 2][0]
+    try:
+        off_x, off_y = bore_offset_mm(mesh, x, y, mid_z, radius)
+        drift = math.hypot(off_x, off_y)
+        allowed = max(POSITION_TOL_MM, POSITION_TOL_FRAC * largest)
+        if drift > allowed:
+            problems.append(f"centre is {drift:.3f} mm from where it was declared "
+                            f"({off_x:+.3f}, {off_y:+.3f}), tolerance {allowed:.3f}")
+    except Indeterminate as exc:
+        problems.append(f"position not measurable: {exc}")
+
     if not problems:
         return Check(f"feature-{ident}", label, _PASS,
-                     f"{len(stations)} stations along the axis all within tolerance")
+                     f"{len(stations)} stations along the axis, and its centre, "
+                     "all within tolerance")
     return Check(
         f"feature-{ident}", label, _FAIL, "; ".join(problems),
         "The hole is not the shape it was declared to be. A cylindrical mouth where "

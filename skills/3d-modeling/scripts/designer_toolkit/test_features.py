@@ -222,6 +222,35 @@ class TestDefectsFoundByAdversarialReview(unittest.TestCase):
 
         self.assertEqual("FAIL", results["feature-hole-01"])
 
+    def test_a_hole_in_the_wrong_place_is_caught(self) -> None:
+        """The pipeline's canonical blind spot, in literal form. Every other
+        check samples *at the declared position*, so a hole the designer put in
+        the wrong place and then declared in the wrong place confirms itself --
+        right diameter, right roundness, right section area, and the bolt still
+        misses.
+
+        The numbers are the real ones. A run building to the Gridfinity standard
+        shipped its magnet pockets at 12.75 mm from each unit centre where the
+        reference gives 13.0 two independent ways, because the 8 mm inset was
+        taken off the 41.5 mm footprint instead of the 42 mm grid cell. Eight
+        green checks agreed with it, and a fresh verifier caught it by hand."""
+        plate = trimesh.creation.box(extents=(60.0, 60.0, 4.0))
+        plate.apply_translation([0, 0, 2])
+        row = {"kind": "through_hole", "id": "H", "at": (0.0, 0.0), "d_mm": 6.5,
+               "z_from": 0.0, "z_to": 4.0}
+
+        for offset, expected in ((0.0, "PASS"), (0.10, "PASS"), (0.25, "FAIL")):
+            with self.subTest(offset=offset):
+                bore = trimesh.creation.cylinder(radius=3.25, height=20.0, sections=128)
+                bore.apply_translation([offset, 0, 2])
+                part = trimesh.boolean.difference([plate, bore])
+
+                check = F.check_features(part, [row])[0]
+
+                self.assertEqual(expected, check.result, check.detail)
+                if expected == "FAIL":
+                    self.assertIn("from where it was declared", check.detail)
+
     def test_a_dropped_feature_says_so_or_refuses(self) -> None:
         """Three parameters were accepted and then ignored. A check that quietly
         does not exist is not listed in `coverage.skipped` either, so without a
