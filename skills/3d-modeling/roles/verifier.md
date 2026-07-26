@@ -15,9 +15,8 @@ overlays, and issue a concrete file-contract verdict.
   `print_plan.md`, candidate source only for traceability, exported STL/STEP/3MF, renders,
   overlays, `candidate_readiness.md`, `commission.json`, and `print_notes.md`. A conditional
   final-prep review also reads `final_print_prep.md` and its actual contact/toolpath evidence.
-- Write: `verification_report.md` using the exact template in
-  [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md#verification_reportmd), plus verifier-owned
-  measurements and evidence images.
+- Write: `verification_report.md`, drafted by `dt.py report` from your own recomputation and
+  completed by you, plus verifier-owned measurements and evidence images.
 - Output is `PASS` or `REJECT`; never modified model artifacts.
 - For a conditional final-prep review, write `final_prep_review.md`; do not edit the print
   engineer's receipt.
@@ -26,16 +25,14 @@ overlays, and issue a concrete file-contract verdict.
 
 Always:
 
-1. [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md):
-   `verification_report.md` and `final_prep_review.md` only.
-2. [`../references/fdm-design.md`](../references/fdm-design.md) — you
+1. [`../references/fdm-design.md`](../references/fdm-design.md) — you
    judge printability, and this is what you judge it against.
-3. Shared raw-vs-normalized mesh loader:
+2. Shared raw-vs-normalized mesh loader:
    [`../scripts/mesh_io.py`](../scripts/mesh_io.py)
    (`load_mesh_report` / `load_mesh_raw`). Read its docstring before reading its numbers: an
    STL is a triangle soup, so a raw parse reporting many components is the format, not a
    defect, and `degenerate_face_count` is the metric that would catch a real one.
-4. Shared design/verify toolkit — run the same one command against the **delivered** STL,
+3. Shared design/verify toolkit — run the same one command against the **delivered** STL,
    into your own output directory:
    [`../references/designer-toolkit.md`](../references/designer-toolkit.md)
    (`dt.py commission --stl <canonical.stl> ...`, then `dt.py report`). Recomputing from the
@@ -46,15 +43,20 @@ Always:
 
 Only when the job has the evidence for it:
 
-5. `FITTED`/`FULL`, where photographs and a mating reference exist:
+4. `FITTED`/`FULL`, where photographs and a mating reference exist:
    [`../scripts/overlay_photo.py`](../scripts/overlay_photo.py),
    [`../scripts/verify_visual.py`](../scripts/verify_visual.py), and
    [`../references/cadquery-patterns.md`](../references/cadquery-patterns.md)
    for the insertion-sweep and datum-measurement patterns you author yourself.
-6. A `SUPPORT_ALLOWED` rule, whose contact class you inspect independently:
+5. A `SUPPORT_ALLOWED` rule, whose contact class you inspect independently:
    [`../scripts/team_preflight.py`](../scripts/team_preflight.py).
-7. A FreeCAD candidate:
+6. A FreeCAD candidate:
    [`../references/freecad-mcp-patterns.md`](../references/freecad-mcp-patterns.md).
+7. A conditional final-prep review, for the `final_prep_review.md` template:
+   [`../references/team-contracts-v4.md`](../references/team-contracts-v4.md).
+   The `verification_report.md` template is **not** on this list: `dt.py report` emits it,
+   already filled with your own measurements, so reading 592 lines of contract to obtain a
+   thirty-line skeleton buys nothing.
 
 `team_tools.contracts` you run rather than read:
 `validate <project-dir> --require all` and `status <project-dir>`, both requiring exit zero.
