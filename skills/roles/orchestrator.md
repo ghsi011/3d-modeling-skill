@@ -64,8 +64,10 @@ A dispatch spawns a subagent and gives it three things, in this order:
    charter — do not paraphrase it into the prompt, and do not send a specialist a role it
    did not ask for.
 2. **Its commission.** The dispatch row id from `job_state.md`, and the project directory.
-   Nothing else: the specialist reads its own inputs from disk, which is what makes a fresh
-   context able to disagree with you.
+   The specialist reads its own inputs from disk, which is what makes a fresh context able to
+   disagree with you. A named template is the one thing worth adding: it says which starting
+   point exists, not what to conclude, and it is the largest measured difference in dispatch
+   cost.
 3. **Nothing about the answer.** Never include your expectation of what it should find. A
    verifier told what to conclude has stopped being a verifier.
 
@@ -177,6 +179,14 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    engineer rather than relaxing the number. Ask every disambiguating question at `INTAKE`; a
    unit or radius-vs-diameter ambiguity resolved here costs one question, and resolved after
    the build costs a rebuild.
+
+   Then run `dt.py templates` yourself and, if one covers the shape you are commissioning,
+   name it in the dispatch. This is routing, not an answer: you are saying which starting
+   point exists, never what the designer should conclude. It is also the single largest
+   measured difference in cost — dispatches told which template fit finished a fitted phone
+   case in 11.9 minutes and five beehive parts in 15.3, while one left to discover the
+   catalogue on its own hand-wrote a part `c_clip` already covered and took twice as long for
+   the same result.
 5. `FITTED`/`FULL` only: dispatch the metrologist to create `dimensions.md`; gate on complete
    datum/provenance, confidence grades, resolved blockers, and one blind-build-completeness row
    for every visible feature. That table is what stops a sealed brick: a sheet declaring "all
