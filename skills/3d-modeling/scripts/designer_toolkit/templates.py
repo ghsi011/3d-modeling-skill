@@ -497,8 +497,7 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
     if outer_d >= bore_d * 1.8:
         boss_expected.append(
             {"kind": "through_hole", "id": "bore", "at": (float(x), float(y)),
-             "d_mm": float(bore_d), "z_from": 0.0, "z_to": float(height),
-             "window_r": float(bore_d) / 2.0 * 1.35})
+             "d_mm": float(bore_d), "z_from": 0.0, "z_to": float(height)})
     return Built(
         part=part,
         expected=tuple(boss_expected),

@@ -64,6 +64,19 @@ def fit_coupon(interfaces, out_path, *, plate_thickness: float = 4.0,
     pegs: list = []
     legend: list = []
     for li, iface in enumerate(interfaces):
+        # `nominal_mm` and `kind` are this command's own inputs, not fields of
+        # the v4 interface row -- that row carries a per-side clearance range and
+        # says nothing about the feature's size or whether it is a hole or a peg,
+        # because a band is a band whatever it is measured on. A conformant plan
+        # therefore reached here and died on `KeyError: 'nominal_mm'`, which
+        # names a key its author had no way to know they owed.
+        if "nominal_mm" not in iface:
+            raise ValueError(
+                f"interface {iface.get('id', li)!r} has no `nominal_mm`. A coupon prints "
+                "real features at graded sizes, so it needs the nominal dimension being "
+                "toleranced and whether it is a `hole` or a `peg` -- neither is part of the "
+                "v4 interface row, which carries only the band. Add `nominal_mm` (and "
+                "`kind`) to the interfaces you want lanes for.")
         nominal = float(iface["nominal_mm"])
         kind = iface.get("kind", "hole")
         y = margin + li * lane_pitch

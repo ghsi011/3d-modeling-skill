@@ -420,6 +420,37 @@ class SolidCheckTest(unittest.TestCase):
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
 
 
+class SharpEdgeTest(unittest.TestCase):
+    """The contract has a row for an edge left sharp on purpose, and
+    `validators` refuses one without a stated reason. Demanding `corner_xy` of
+    it made a conformant plan ungateable: there is no radius to measure."""
+
+    def test_a_declared_sharp_edge_carries_its_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(edges=[{"id": "E-01", "min_radius_mm": 0.0, "max_radius_mm": 0.0,
+                                 "allowed_sharp": True,
+                                 "allowed_sharp_reason": "mates flush to the bottom board"}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            edge = next(c for c in result.checks if c.id == "edge-E-01")
+            self.assertEqual("PASS", edge.result)
+            self.assertIn("bottom board", edge.detail)
+
+    def test_a_declared_radius_with_nowhere_to_measure_still_fails(self) -> None:
+        """The sharp-edge path must not become a way to skip a real radius."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan = _plan(edges=[{"id": "E-02", "min_radius_mm": 0.5, "max_radius_mm": 1.0}])
+
+            result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
+                                    plan=plan, render=False)
+
+            self.assertEqual("FAIL", next(c for c in result.checks if c.id == "edge-E-02").result)
+
+
 class SeatingTest(unittest.TestCase):
     """`bed_z_mm` and `bed_tolerance_mm` were required of every support rule and
     read by nothing. Bed contact is measured against the part's own lowest

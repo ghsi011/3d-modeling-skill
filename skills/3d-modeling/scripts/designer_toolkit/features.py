@@ -207,7 +207,12 @@ def _check_hole(mesh: Any, row: dict) -> Check:
         stations = [(z0 + f * (z1 - z0), diameter) for f in (0.1, 0.5, 0.9)]
         largest = diameter
         label = f"Bore {diameter:.2f} mm"
-    radius = float(row.get("window_r") or largest / 2.0 + 1.5)
+    # The window has to enclose the hole at *both* radii the cross-check uses, or
+    # it reports indeterminate on a perfectly good part. The old default added a
+    # flat 1.5 mm, which holds for an M5 and fails from about 12 mm up: the
+    # narrow window, at 0.8 of the wide one, lands inside the hole itself. Scaled
+    # instead, so the margin grows with the feature.
+    radius = float(row.get("window_r") or largest * 0.7)
 
     problems = []
     for z, expected in stations:

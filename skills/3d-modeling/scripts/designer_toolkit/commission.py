@@ -577,6 +577,20 @@ def run(
     for edge in plan.get("edges") or []:
         edge_id = edge.get("id", "E-??")
         corner = edge.get("corner_xy")
+        if corner is None and edge.get("allowed_sharp") is True:
+            # The contract has a row for an edge left sharp on purpose, and
+            # `validators` already refuses one without a stated reason. Demanding
+            # `corner_xy` of it made a conformant plan ungateable: there is no
+            # radius to measure, and the decision has already been taken and
+            # justified upstream. Recorded rather than passed over, so the reason
+            # travels with the receipt instead of living only in the plan.
+            commission.add(Check(
+                f"edge-{edge_id}", f"Edge {edge_id} left sharp by the plan", _PASS,
+                str(edge.get("allowed_sharp_reason") or "no reason given"),
+                "" if edge.get("allowed_sharp_reason") else
+                "The contract requires a reason for a sharp edge; this plan gives none.",
+            ))
+            continue
         if corner is None:
             # Never `continue`. The contract's edge row is {id, min_radius_mm,
             # max_radius_mm, samples_required} and says nothing about
