@@ -603,6 +603,14 @@ def run(
         commission.evidence["expected_features_source"] = (
             "template+plan" if expected_features and plan.get("features")
             else "template" if expected_features else "plan")
+        # Recorded because a verifier has the STL and the plan, never model.py --
+        # so a template's own expectations, which live in the model module, were
+        # invisible to it and its recomputation came back missing exactly the
+        # checks that catch a geometry regression. Writing the rows down does not
+        # make them the designer's word against the verifier's: the rows are
+        # inputs, the measurement is redone against the delivered bytes, and a
+        # row edited to fit a defective part reads as an edited row.
+        commission.evidence["features_checked"] = feature_rows
 
     bundle = finalize(
         str(exported), str(stem),

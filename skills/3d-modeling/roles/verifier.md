@@ -27,7 +27,7 @@ Always:
 
 1. [`../references/fdm-design.md`](../references/fdm-design.md) — you
    judge printability, and this is what you judge it against.
-2. Shared raw-vs-normalized mesh loader, behind `dt.py integrity`:
+2. Shared raw-vs-normalized mesh loader, which `dt.py audit` reads for you:
    [`../scripts/mesh_io.py`](../scripts/mesh_io.py). Read its
    docstring for why the raw side is authoritative — every shared tool downstream loads the
    normalized copy, so an export defect only ever shows on the raw side and normalization
@@ -35,9 +35,9 @@ Always:
 3. Shared design/verify toolkit — run the same one command against the **delivered** STL,
    into your own output directory:
    [`../references/designer-toolkit.md`](../references/designer-toolkit.md)
-   (`dt.py commission --stl <canonical.stl> ...`, then `dt.py report`). Recomputing from the
-   delivered bytes with the tested instrument *is* independence — it never reads the
-   designer's `commission.json`, which is the one input you distrust. Re-authoring the
+   (`dt.py audit <project> --out <your-dir> ...`, then `dt.py report`). Recomputing from the
+   delivered bytes with the tested instrument *is* independence — the recomputation never
+   reads the designer's verdicts, which is the input you distrust. Re-authoring the
    predicate in a bespoke script is not independence, it is a second uncalibrated instrument;
    the accept/reject and every visual judgment stay yours.
 
@@ -77,16 +77,21 @@ to compare against.
 
   ```bash
   V=<your-own-dir>                       # never the project root
-  python <skill>/scripts/dt.py integrity candidate-01.stl --out $V/integrity.json
-  python <skill>/scripts/dt.py commission --stl candidate-01.stl         --plan print_plan_checks.json --out $V --job-id <job>         --updated-utc <iso8601> --no-receipts
-  #   ^ expect it to agree with the designer. It is the same instrument on the
-  #     same bytes; it has never once disagreed. Then LOOK at $V/renders/ —
-  #     that is where every defect this role has found actually came from.
-  python <skill>/scripts/dt.py crop crop $V/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
-  python -m team_tools.contracts validate <project-dir> --require all
-  python -m team_tools.contracts status <project-dir>
+  python <skill>/scripts/dt.py audit <project-dir> --out $V --job-id <job>         --updated-utc <iso8601>
+  python <skill>/scripts/dt.py crop crop <project-dir>/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
   python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
   ```
+
+  `audit` settles the binding, the raw parse, the recomputation and both contract checks in
+  one call, because none of that is where your findings come from. **Then LOOK at the
+  designer's `renders/`** — that is. Two candidates have passed every deterministic check and
+  been wrong anyway: one missing the countersink its own sheet required, one with a slot cut
+  clean through its mounting flange. Neither was findable in a number nobody had thought to
+  compute.
+
+  `audit`'s `still_requires_a_look` lists what it did not settle, and it is not a formality:
+  nothing in that call reads `dimensions.md`, so a part that measures self-consistently and
+  disagrees with what was asked for passes all of it.
 
   Then answer every `<!-- REQUIRED -->` in the draft, and record steps 3 and 6 as *no evidence
   to consult* rather than as passed — there is none under this profile. That is the whole job.
@@ -106,52 +111,37 @@ gate. `R3` never receives a `PASS` under any profile.
    evidence only. It never passes a check on the verifier's behalf.
 3. Audit upstream: independently compare `dimensions.md` values, named datums, provenance,
    and feature inventory against the original evidence. Reject corrupted ground truth.
-4. Read the delivered STL's **raw, unrepaired** parse and use it, not the in-memory source,
-   for every acceptance decision:
+4. Settle the mechanical half in one call, against the **delivered** STL and into your own
+   output directory:
 
    ```bash
-   python <skill>/scripts/dt.py integrity <canonical.stl> --out <verifier-dir>/integrity.json
+   python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir>       --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
    ```
 
-   Do not hand-write this either. Read the note it prints before reading its numbers: an STL
-   stores no vertex sharing, so a raw parse of a sound part reports many components and
-   `watertight=False` — that is the format, and `degenerate_face_count` is what catches a real
-   export defect. Use the
-   **normalized** copy only for rendering, overlays, and other visuals — never for an
-   acceptance check. A repaired mesh must never stand in for the raw read: a genuine export
-   defect has to show up on the raw side before any repair runs, and the mutation log records
-   exactly what normalization changed.
-5. Recompute the deterministic set yourself, in one call, against the **delivered** STL and
-   into your own output directory:
+   It reports the hash binding, the raw un-repaired parse, an independent recomputation
+   compared against the designer's, and both contract checks. Require exit zero.
 
-   ```bash
-   python <skill>/scripts/dt.py commission --stl <canonical.stl>      --plan print_plan_checks.json --out <verifier-dir> --job-id <job>      --updated-utc <iso8601> --no-receipts [--reference mating.stl]
-   ```
+   `--out` is **your own directory**, never the project root: the recomputation exists to be
+   compared against the designer's receipts, and writing over them destroys what you came to
+   check. `audit` refuses that outright, because a run once did it.
 
-   Require exit zero — and expect it to agree. This step is cheap insurance against a
-   delivered STL that is not the one the designer measured, not the place your findings will
-   come from; budget accordingly and leave the time for step 7. `--out` is **your own
-   directory**, never the project root: your
-   recomputation exists to be compared against the designer's `commission.json`, and writing
-   over it destroys the comparison. `--no-receipts` is not optional either — the receipts are
-   the designer's contracts and are not yours to reissue.
-
-   This is an independent recomputation, not a borrowed verdict: it reads the delivered bytes
-   and never reads the designer's `commission.json` — the one input this step exists to
-   distrust. Do not open that file until you have your own; comparing
-   afterwards is free. Point at the canonical STL in place and never copy it.
+   Three things about the numbers it returns. An STL stores no vertex sharing, so the raw
+   parse of a sound part reports many components and `watertight=False` — that is the format;
+   `degenerate_face_count` is what catches a real export defect. The normalized copy is for
+   renders and overlays only, never for an acceptance decision. And the recomputation is the
+   same instrument on the same bytes: it cannot catch a wrong instrument, and what it can
+   catch — a delivered STL that is not the one measured — the hash binding catches first and
+   more cheaply. It runs because it costs a second, not because it is where findings come
+   from. Budget accordingly and leave the time for step 6.
 
    **Do not hand-write a replacement.** Independence is a property of which inputs you
    consult, not of who wrote the code. A bespoke re-implementation is a second uncalibrated
    instrument, and that is not hypothetical — one archived run's hand-rolled sampler read up
    to 137% high against known nominals and the run widened its acceptance bands until its own
    wrong numbers passed.
-
-   It settles report checks **1** (interference, as a seated per-side clearance against each
-   declared band), **3** (section render), the geometric half of **6** (envelope against the
-   plan, and every plan-named edge against both ends of its band), and **7** (downward-facing
-   area for every support rule, each in that rule's own declared orientation).
-
+5. Read `still_requires_a_look` in the audit output before going further. Nothing in step 4
+   reads `dimensions.md`, so a part that measures self-consistently and disagrees with what
+   was asked for passes all of it.
 6. Cover the rest by hand, per plan: check **2**, the full-travel insertion sweep, for any
    interface declaring a motion path; check **5**, feature positions and handedness from named
    datums (a mirrored layout fits the same magnitudes — compare with the datum coordinate

@@ -145,6 +145,25 @@ deterministic check reads that mesh. `commission` never trusts the kernel's own
 numbers — `.val().Volume()` misreports on periodic splines, and OCC can split one
 solid into phantom shells.
 
+## Verifying: `dt.py audit`
+
+    python <skill>/scripts/dt.py audit <project-dir> --out <your-own-dir>         --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
+
+One call for the whole mechanical half: the hash binding between the delivered
+STL and the receipt that claims to describe it, the raw un-repaired parse, an
+independent recomputation compared check-by-check against the designer's, and
+both contract checks. It refuses to write into the project root, because the
+receipts it compares against are what a run there would overwrite.
+
+It was six commands. Each was under a second of compute, and the pipeline's cost
+is agent turns rather than arithmetic — one measured dispatch spent 6 min 25 s
+running four commands totalling 4.4 seconds of work.
+
+Its `still_requires_a_look` field is the honest part: nothing in the call reads
+`dimensions.md`, and no measurement is taken of a feature nobody declared. Both
+defects this pipeline has shipped were invisible to every number and obvious in
+a render.
+
 ## What is still yours
 
 Interpreting photos, choosing datums and geometry, choosing the fit and manufacturing

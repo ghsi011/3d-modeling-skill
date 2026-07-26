@@ -57,6 +57,9 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "audit":
+        from .audit import main as audit_main
+        raise SystemExit(audit_main(argv[1:]))
     if argv and argv[0] == "build":
         from .build import main as build_main
         raise SystemExit(build_main(argv[1:]))
@@ -96,6 +99,9 @@ def main(argv=None):
                         "recomputation, leaving every judgment blank")
     sub.add_parser("templates", add_help=False,
                    help="the parametric starting points and the shapes they cover")
+    sub.add_parser("audit", add_help=False,
+                   help="everything a verifier can settle mechanically, in one call: "
+                        "binding, raw parse, recomputation, contracts")
     sub.add_parser("build", add_help=False,
                    help="write model.py for a template-covered part, with the "
                         "parameters checked by building it once")
