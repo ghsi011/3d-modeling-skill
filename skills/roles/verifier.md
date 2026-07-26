@@ -90,11 +90,24 @@ all — and a check with no input is not a check you owe more cheaply, it is one
 to compare against.
 
 - **`DIRECT`** — the dimensions were stated, not recovered, so there is no photograph to audit
-  a sheet against, no reference to overlay, and no metrologist judgment to re-derive. Your work
-  is step 4 (the raw-mesh read), step 5 (the one deterministic command), the render in step 7,
-  and step 8's contract validation. Steps 3 and 6 have no evidence to consult; say so in the
-  report rather than describing them as passed. Expect this to take a handful of turns; if it
-  is taking many, something is wrong with the inputs and that is itself the finding.
+  a sheet against, no reference to overlay, and no metrologist judgment to re-derive. The whole
+  verification is these four commands and one look, in this order:
+
+  ```bash
+  V=<your-own-dir>                       # never the project root
+  python <skill>/scripts/dt.py integrity candidate-01.stl --out $V/integrity.json
+  python <skill>/scripts/dt.py commission --stl candidate-01.stl         --plan print_plan_checks.json --out $V --job-id <job>         --updated-utc <iso8601> --no-receipts
+  #   ^ expect it to agree with the designer. It is the same instrument on the
+  #     same bytes; it has never once disagreed. Then LOOK at $V/renders/ —
+  #     that is where every defect this role has found actually came from.
+  python -m team_tools.contracts validate <project-dir> --require all
+  python -m team_tools.contracts status <project-dir>
+  python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
+  ```
+
+  Then answer every `<!-- REQUIRED -->` in the draft, and record steps 3 and 6 as *no evidence
+  to consult* rather than as passed — there is none under this profile. That is the whole job.
+  If it is running long, the inputs are wrong and that is itself the finding.
 - **`FITTED`** — everything above, plus the whole of steps 3, 6 and 7. This is where the folded
   reference round trip lands: you are the one who overlays the candidate's `mating_reference`
   on the original photographs, and handedness and feature registration are blocking.
