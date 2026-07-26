@@ -110,8 +110,8 @@ to compare against.
   python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
   ```
 
-  `audit` settles the binding, the raw parse, the recomputation and both contract checks in
-  one call, because none of that is where your findings come from. **Then LOOK at the
+  `audit` settles the binding, the recomputation and both contract checks in one call, because
+  none of that is where your findings come from. **Then LOOK at the
   designer's `renders/`** — that is. Two candidates have passed every deterministic check and
   been wrong anyway: one missing the countersink its own sheet required, one with a slot cut
   clean through its mounting flange. Neither was findable in a number nobody had thought to
@@ -146,21 +146,23 @@ gate. `R3` never receives a `PASS` under any profile.
    python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir>       --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
    ```
 
-   It reports the hash binding, the raw un-repaired parse, an independent recomputation
-   compared against the designer's, and both contract checks. Require exit zero.
+   It reports the hash binding, an independent recomputation compared check-by-check against
+   the designer's, and both contract checks, with the raw un-repaired parse alongside them as
+   evidence. Require exit zero.
 
    `--out` is **your own directory**, never the project root: the recomputation exists to be
    compared against the designer's receipts, and writing over them destroys what you came to
    check. `audit` refuses that outright, because a run once did it.
 
-   Three things about the numbers it returns. An STL stores no vertex sharing, so the raw
-   parse of a sound part reports many components and `watertight=False` — that is the format;
-   `degenerate_face_count` is what catches a real export defect. The normalized copy is for
-   renders and overlays only, never for an acceptance decision. And the recomputation is the
-   same instrument on the same bytes: it cannot catch a wrong instrument, and what it can
-   catch — a delivered STL that is not the one measured — the hash binding catches first and
-   more cheaply. It runs because it costs a second, not because it is where findings come
-   from. Budget accordingly and leave the time for step 7.
+   Two things about the numbers. The raw parse is reported, not judged: an STL stores no
+   vertex sharing, so a sound part reads as many components and `watertight=False`, and the
+   one number that means anything there — degenerate faces — is the same number the
+   recomputation's `repair` check already fails on. Use the normalized copy for renders and
+   overlays only, never for an acceptance decision. And the recomputation is the same
+   instrument on the same bytes: it cannot catch a wrong instrument, and what it can catch — a
+   delivered STL that is not the one measured — the hash binding catches first and more
+   cheaply. It runs because it costs a second, not because it is where findings come from.
+   Budget accordingly and leave the time for step 7.
 
    **Do not hand-write a replacement.** Independence is a property of which inputs you
    consult, not of who wrote the code. A bespoke re-implementation is a second uncalibrated

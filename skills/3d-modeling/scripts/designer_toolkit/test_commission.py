@@ -284,8 +284,14 @@ class EdgeCheckTest(unittest.TestCase):
         every other check's verdict along with it."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
+            # The band has to be one a sharp corner genuinely violates, or the
+            # assertion below asserts nothing: a plain box corner measures
+            # exactly 0.0 mm, which sits inside [0.0, 0.1]. This test passed for
+            # a while on an accident -- the fixture plan declared no
+            # `model_to_printer_matrix`, so the gate fell back to `orient.best`,
+            # rotated the box, and looked for a corner that was no longer there.
             plan = _plan(edges=[{"id": "E-01", "corner_xy": [15.0, 10.0],
-                                 "min_radius_mm": 0.0, "max_radius_mm": 0.1}])
+                                 "min_radius_mm": 0.5, "max_radius_mm": 1.0}])
 
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
                                     plan=plan, render=False)

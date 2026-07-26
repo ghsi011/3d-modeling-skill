@@ -52,13 +52,12 @@ def _bound_hash(readiness: Path) -> str | None:
     nothing.
     """
     try:
-        for line in readiness.read_text(encoding="utf-8").splitlines():
-            if line.startswith("candidate_stl_sha256:"):
-                return line.split(":", 1)[1].strip() or None
-            if line == "---" and "candidate_stl_sha256" in locals():
-                break
+        lines = readiness.read_text(encoding="utf-8").splitlines()
     except OSError:
         return None
+    for line in lines:
+        if line.startswith("candidate_stl_sha256:"):
+            return line.split(":", 1)[1].strip() or None
     return None
 
 
@@ -177,20 +176,43 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
             "" if code == 0 else "Fix the contracts before judging the geometry.",
         ))
 
+    evidence["look_at"] = _gather_views(project, out_dir)
+
     return {
         "verdict": _FAIL if any(c.result == _FAIL for c in checks) else _PASS,
         "checks": [c.as_dict() for c in checks],
         "evidence": evidence,
         "still_requires_a_look": [
-            "The renders. Every defect this role has ever found came from looking, "
-            "not from the numbers above -- two candidates passed every deterministic "
-            "check with a countersink missing and a flange slotted through.",
+            "The images in evidence.look_at. Every measurement above is conditioned on "
+            "somebody having declared what to measure; a render is conditioned on nothing, "
+            "which is why it is the only thing here that can show a feature nobody named.",
             "The sheet against the geometry. Nothing above reads dimensions.md, so a "
             "part that measures self-consistently and disagrees with what was asked "
             "for passes everything here.",
             "Whether the thing solves the problem it was built for.",
         ],
     }
+
+
+def _gather_views(project: Path, out_dir: Path) -> list[str]:
+    """The images to look at, tiled onto one page and listed by path.
+
+    Named rather than left to be found. A verifier that has to discover which
+    renders exist spends turns on directory listings before it has looked at
+    anything, and turns are the cost here. The contact sheet is a triage page,
+    not a substitute for the full-size views -- both are listed.
+    """
+    renders = sorted((project / "renders").glob("*.png")) if (project / "renders").is_dir() else []
+    if not renders:
+        return []
+    views = [str(path) for path in renders]
+    try:
+        import crop_evidence
+        sheet = crop_evidence.contact_sheet(renders, out_dir / "contact_sheet.jpg")
+        views.insert(0, str(sheet))
+    except Exception:  # noqa: BLE001 - a missing imaging extra must not fail the audit
+        pass
+    return views
 
 
 def _summarise_contracts(stdout: str, stderr: str) -> str:

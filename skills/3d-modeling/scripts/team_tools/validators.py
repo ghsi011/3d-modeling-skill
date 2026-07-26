@@ -20,30 +20,10 @@ from common import Issue, error, is_hash_format, normalize_project_path
 from schemas import NUMBER, check_enum, check_fk, check_object_fields, check_rows
 
 NULLABLE_NUMBER = (int, float, type(None))
-STRLIST = list
 
 # --- shared enumerations -----------------------------------------------------
 
-JOB_STATE_STATES = frozenset(
-    {
-        "INTAKE",
-        "METROLOGY",
-        "REFERENCE_BUILD",
-        "REFERENCE_ACCEPTANCE",
-        "PRINT_PLAN",
-        "CANDIDATE_BUILD",
-        "INDEPENDENT_VERIFICATION",
-        "PRINT_PREP",
-        "FINAL_PREP_REVIEW",
-        "DELIVERY",
-        "BLOCKED",
-    }
-)
-MODE = frozenset({"PIPELINE"})
 PROFILE = frozenset({"DIRECT", "FITTED", "FULL"})
-BACKEND = frozenset({"cadquery", "build123d", "freecad"})
-GATE_RESULT = frozenset({"PASS", "PENDING", "FAIL", "BLOCKED"})
-DISPATCH_STATUS = frozenset({"queued", "dispatched", "complete", "blocked"})
 
 # Consequence/escalation classification (3d-orchestrator/SKILL.md's "Consequence and
 # escalation gate", P-03). Optional on job_state for backward compatibility: existing
@@ -58,18 +38,11 @@ RISK_CLASS = frozenset(
     }
 )
 
-DIMENSIONS_STATUS = frozenset({"DRAFT", "REFERENCE_REVIEW", "ACCEPTED", "BLOCKED"})
-REF_VERDICT = frozenset({"ACCEPTED", "REJECTED"})
-
 PRINT_PLAN_STATUS = frozenset({"DRAFT", "ACCEPTED", "BLOCKED"})
 SUPPORT_DISPOSITION = frozenset({"SELF_SUPPORT_REQUIRED", "SUPPORT_ALLOWED"})
 EXPOSURE_CLASS = frozenset(
     {"EXPOSED_FUNCTIONAL", "EXPOSED_COMFORT", "HIDDEN", "BED_CONTACT", "PERMITTED_SUPPORT_CONTACT"}
 )
-
-VERIFICATION_STATUS = frozenset({"PASS", "REJECT"})
-CHECK_IDS = frozenset({"1", "2", "3", "4", "5", "6", "7"})
-CHECK_RESULT = frozenset({"PASS", "FAIL", "NA"})
 
 ARTIFACT_ROLE = frozenset(
     {"reference", "candidate", "coupon", "render", "source", "mating_reference", "other"}
@@ -106,7 +79,6 @@ CANONICAL_FILENAMES: dict[str, tuple[str, ...]] = {
 # Contracts with a full structural validator, which only runs on a JSON source.
 # A Markdown contract is header-validated instead: its body is prose for an
 # agent, and schema-checking prose reports nothing a reader could act on.
-DEEP_VALIDATED: frozenset[str] = frozenset({"print_plan", "artifact_manifest"})
 
 CONTRACT_KIND_BY_KEY: dict[str, str] = {
     "job_state": "job-state",

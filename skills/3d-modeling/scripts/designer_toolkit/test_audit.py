@@ -145,6 +145,35 @@ class TestAudit(unittest.TestCase):
             self.assertEqual(2, done.returncode)
             self.assertIn("must not be the project root", done.stderr)
 
+    def test_it_names_the_images_rather_than_leaving_them_to_be_found(self) -> None:
+        """A verifier that has to discover which renders exist spends turns on
+        directory listings before it has looked at anything, and turns are the
+        cost here."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = root / "job"
+            project.mkdir()
+            _dt("build", "--template", "c_clip", *_CLIP, "--out", str(project / "model.py"))
+            _dt("plan", "template", "--bbox", "40", "22", "14", "--job-id", "a",
+                "--updated-utc", "1970-01-01T00:00:00Z",
+                "--out", str(project / "print_plan_checks.json"))
+            _dt("commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+                "--out", ".", "--job-id", "a", "--updated-utc", "1970-01-01T00:00:00Z",
+                cwd=project)
+            if not (project / "renders").is_dir():
+                self.skipTest("this interpreter has no renderer")
+
+            _done, payload = _audit(project, root / "verify")
+
+            self.assertTrue(payload["evidence"]["look_at"],
+                            "renders exist and the audit did not name them")
+
+    def test_no_renders_names_no_images_rather_than_inventing_them(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            _done, payload = _audit(_built_project(root), root / "verify")
+            self.assertEqual([], payload["evidence"]["look_at"])
+
     def test_it_says_what_no_tool_settled(self) -> None:
         """Collapsing the chain must not read as "verification is done". Every
         defect this role ever found came from looking at renders."""
@@ -153,7 +182,7 @@ class TestAudit(unittest.TestCase):
             _done, payload = _audit(_built_project(root), root / "verify")
 
             remaining = " ".join(payload["still_requires_a_look"]).lower()
-            self.assertIn("render", remaining)
+            self.assertIn("image", remaining)
             self.assertIn("sheet", remaining)
 
 
