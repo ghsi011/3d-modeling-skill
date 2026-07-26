@@ -37,7 +37,6 @@ import numpy as np
 from ._bootstrap import as_mesh  # noqa: F401  (also puts scripts/ on sys.path)
 
 from . import edges, fit, orient, static  # noqa: E402
-from .bundle import finalize  # noqa: E402
 from .metrics import BARE_45_DEG, measure  # noqa: E402
 from .verdict import FAIL as _FAIL  # noqa: E402
 from .verdict import PASS as _PASS  # noqa: E402
@@ -612,20 +611,6 @@ def run(
         # row edited to fit a defective part reads as an edited row.
         commission.evidence["features_checked"] = feature_rows
 
-    bundle = finalize(
-        str(exported), str(stem),
-        reference=reference,
-        orientation_transform=placement.transform,
-        overhang_threshold=float((_plan_support_rules(plan) or [{}])[0].get(
-            "downward_normal_z_max", BARE_45_DEG)),
-        also_step=False,
-    )
-
-    # The *first* export's report, not the bundle's. `finalize` re-exports with
-    # `also_step=False`, so its block carries `step_path: None` -- and taking it
-    # dropped the STEP row from every derived manifest while the .step file sat
-    # on disk beside it. Two measured runs shipped a manifest that did not
-    # describe a file they delivered; a third hand-added the row.
     commission.evidence.update({
         "export": {
             "stl_path": report.stl_path,
@@ -638,8 +623,15 @@ def run(
             "volume_mm3": round(report.volume_mm3, 4),
             "bbox_mm": {k: round(v, 4) for k, v in report.bbox_mm.items()},
         },
-        "overhang_mm2": bundle["overhang_mm2"],
-        "datums": bundle["datums"],
+        # The placement's own figure. This used to come from a second call that
+        # re-parsed the STL, re-ran `metrics.overhang_area` with the same
+        # threshold and transform, and -- given a `--reference` -- repeated the
+        # boolean intersection, the most expensive operation in the gate, then
+        # discarded it. The two agreed to every decimal place either printed,
+        # because they were the same arithmetic on the same inputs. Beside it
+        # travelled a `datums` list that was empty on every run ever made: the
+        # call never passed any.
+        "overhang_mm2": round(placement.overhang_mm2, 4),
         "placement": placement.as_dict(),
         "placements_considered": [p.as_dict() for p in orient.sweep(mesh)],
         "edges": measured_edges,

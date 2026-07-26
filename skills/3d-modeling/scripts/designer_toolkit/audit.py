@@ -178,6 +178,18 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
 
     evidence["look_at"] = _gather_views(project, out_dir)
 
+    # Unconditioned, unlike every check above it: nobody declared these heights
+    # and nothing decides a verdict from them. It is here because the one thing
+    # measurement structurally cannot do is report a feature nobody named, and a
+    # curve over the whole part is the cheapest way to put that in front of the
+    # reader doing the looking.
+    try:
+        from . import features as _features
+        from ._bootstrap import as_mesh
+        evidence["slice_profile"] = _features.slice_profile(as_mesh(str(stl)))
+    except Exception:  # noqa: BLE001 - evidence, never a gate
+        evidence["slice_profile"] = []
+
     return {
         "verdict": _FAIL if any(c.result == _FAIL for c in checks) else _PASS,
         "checks": [c.as_dict() for c in checks],

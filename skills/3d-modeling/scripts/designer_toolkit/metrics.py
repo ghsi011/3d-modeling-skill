@@ -42,8 +42,8 @@ import mesh_io  # noqa: E402  (needs the sys.path insert the line above performs
 # which the authoritative gate reads per-rule. A plan shipping the bare 45deg
 # value (-0.7071) therefore screens strictly MORE area than this constant does,
 # so a self-check run at this default can read clean where the gate FAILs. Pass
-# the plan's value explicitly (``overhang_area(..., threshold=...)`` /
-# ``bundle.finalize(..., overhang_threshold=...)``) whenever the plan is known.
+# the plan's value explicitly (``overhang_area(..., threshold=...)``) whenever
+# the plan is known -- which is what `commission` does, per support rule.
 DEFAULT_DOWNWARD_NORMAL_Z_MAX = -0.73
 
 # -sin(45deg): the bare self-supporting chamfer, and the tightest value a print

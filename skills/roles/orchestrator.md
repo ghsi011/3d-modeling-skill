@@ -135,11 +135,25 @@ and it decides which phases run, not how verbose the record is.
   python $DT plan check <project>/print_plan_checks.json
   python $DT build --template <name> --param k=v ... --out model.py
   python $DT commission --model model.py --plan print_plan_checks.json         --out . --job-id <job> --updated-utc <iso>
-  python -m team_tools.contracts validate <project> --require all
+  python -m team_tools.contracts validate <project>         --require job_state,dimensions,print_plan,artifact_manifest
   ```
+
+  Name the contracts rather than passing `--require all`: this route dispatches nobody, so no
+  `verification_report.md` is ever written, and `all` demands one. Those four are what a
+  `DIRECT` job produces, and naming them keeps an absent contract loud — without `--require`
+  at all, a missing file exits zero and reads as a pass.
 
   Then look at `renders/multi.png` and `renders/section_x.png`, zooming with `dt.py crop`
   where a view is too small, and fill the two judgment fields the receipt leaves blank.
+
+  **If `dt.py doctor` reports no renderer, this route cannot finish.** Nothing else in the
+  pipeline is going to look: there is no verifier here, and a verifier looks at renders that do
+  not exist either. Every measurement the gate makes is conditioned on somebody having declared
+  what to measure, so with no image nothing at all is checking for what nobody named. Install
+  the visual extra, or deliver with `visual_accept` explicitly unanswered and say in as many
+  words that no one has seen the part — never write a verdict you did not see. One measured run
+  reached exactly this state and substituted its own hand-written sectioning script for the
+  look, which is the right instinct and not the same thing.
 
   Calling a template with numbers off the sheet is not authoring geometry, so the charter's
   rule still holds: you are choosing parameters, and the template owns the shape. The moment

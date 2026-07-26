@@ -112,6 +112,44 @@ class TestHoleProfile(unittest.TestCase):
 
 
 @_needs_trimesh
+class TestSliceProfile(unittest.TestCase):
+    """The one measurement here that nobody has to anticipate."""
+
+    def test_it_walks_the_whole_part(self) -> None:
+        profile = F.slice_profile(_clip().part, slices=28)
+        self.assertEqual(28, len(profile))
+        self.assertTrue(all(row["area_mm2"] > 0 for row in profile))
+
+    def test_both_shipped_defects_move_it_with_nothing_declared(self) -> None:
+        """Neither defect had to be predicted. That is the whole point: every
+        other check in this module reports only on features somebody named."""
+        from . import templates as T
+
+        good = _clip().part
+        original = T._frustum
+        try:
+            T._frustum = lambda *a, **k: trimesh.creation.box(extents=(1e-6, 1e-6, 1e-6))
+            no_countersink = _clip().part
+        finally:
+            T._frustum = original
+        slotted = trimesh.boolean.difference(
+            [good, trimesh.creation.box(extents=(9.0, 30.0, 60.0))])
+
+        baseline = [row["area_mm2"] for row in F.slice_profile(good)]
+        for name, part, least in (("countersink deleted", no_countersink, 20.0),
+                                  ("flange slotted", slotted, 40.0)):
+            with self.subTest(defect=name):
+                curve = [row["area_mm2"] for row in F.slice_profile(part)]
+                worst = max(abs(a - b) for a, b in zip(curve, baseline))
+                self.assertGreater(worst, least,
+                                   f"{name} barely moved the curve: {worst:.2f} mm2")
+
+    def test_a_degenerate_part_returns_nothing_rather_than_dividing_by_zero(self) -> None:
+        flat = trimesh.Trimesh(vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0]], faces=[[0, 1, 2]])
+        self.assertEqual([], F.slice_profile(flat))
+
+
+@_needs_trimesh
 class TestDeclarationHandling(unittest.TestCase):
     def test_an_unmeasurable_kind_fails_rather_than_skips(self) -> None:
         part = _clip().part

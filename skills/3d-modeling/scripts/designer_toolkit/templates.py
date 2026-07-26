@@ -437,6 +437,31 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
 
     extents = part.bounds[1] - part.bounds[0]
     expected: list[dict[str, Any]] = []
+
+    # The channel's own cross-section, in closed form. One number pins the bore,
+    # the wall and the mouth together, because all three set it: an annulus of
+    # pi*(Ro^2 - Ri^2) less the slab the mouth cutter takes out of it, and the
+    # slab's bite on a circle of radius R is the standard chord integral
+    # (g/2)*sqrt(R^2 - (g/2)^2) + R^2*asin(g/2R).
+    #
+    # Written down because a measured run reached this part with a gate that
+    # declared nothing about the channel, correctly distrusted that, and
+    # hand-wrote a thirteen-check sectioning script to cover it -- arriving at
+    # 112.275 mm2, which is what this returns. The instinct was right and the
+    # hand-rolling is exactly what the toolkit exists to stop: a bespoke
+    # instrument is an uncalibrated one, and one run's own sampler read 137%
+    # high against known nominals before it widened its bands to suit.
+    r_in, r_out = bore_d / 2.0, outer_d / 2.0
+    if 0.0 < mouth_gap <= bore_d:
+        def _chord_area(radius: float) -> float:
+            half = mouth_gap / 2.0
+            return half * math.sqrt(radius ** 2 - half ** 2) + radius ** 2 * math.asin(half / radius)
+
+        channel = math.pi * (r_out ** 2 - r_in ** 2) - (_chord_area(r_out) - _chord_area(r_in))
+        expected.append({"kind": "solid_region", "id": "channel-mid",
+                         "z": float(base_h) + float(height) / 2.0,
+                         "area_mm2": float(channel)})
+
     if flange is not None:
         # Arithmetic, not measurement: the plate is its own rectangle less the
         # screw shaft. This is the number that caught the mouth cutter slotting
