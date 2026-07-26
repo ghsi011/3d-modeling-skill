@@ -48,13 +48,20 @@ class Built:
     expected: tuple[dict[str, Any], ...] = ()
 
 
-def _seated(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+def seated(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     """Drop a solid onto z=0.
 
     Templates always return a part resting on the bed, because that is the
     convention the plan's identity model-to-printer transform assumes. A part
     centred on the origin has half of itself below the bed and every downward
     face reads as unsupported.
+
+    Public, and that is the point. `trimesh.creation.box()` returns a solid
+    centred on the origin, so the library default is the opposite of this
+    convention and anything built by hand starts wrong. While this was private
+    the convention existed as prose plus arithmetic retyped at each call site,
+    and three test fixtures encoded a shape the pipeline never produces --
+    passing, because every check they ran agreed with them.
     """
     mesh.apply_translation((0.0, 0.0, -float(mesh.bounds[0][2])))
     return mesh
@@ -137,7 +144,7 @@ def box_shell(*, inner: tuple[float, float, float], wall: float, floor: float = 
     cavity_height = ih + (wall if open_top else 0.0)  # overshoot to break the top
     cavity = _box((iw, id_, cavity_height),
                   (outer[0] / 2, outer[1] / 2, floor + cavity_height / 2))
-    part = _seated(trimesh.boolean.difference([shell, cavity]))
+    part = seated(trimesh.boolean.difference([shell, cavity]))
 
     # The wall ring, in closed form: the footprint less the cavity it encloses.
     # A cavity cut larger than it should be, or a wall that silently thinned,
@@ -296,7 +303,7 @@ def panel(*, width: float, depth: float, thickness: float,
         for cut in cuts:
             cut.apply_translation((0.0, 0.0, thickness / 2))
         plate = _cut_with(plate, cuts)
-    part = _seated(plate)
+    part = seated(plate)
 
     ligament = _min_ligament(openings, width, depth)
     params: dict[str, Any] = {
@@ -418,7 +425,7 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
         part = _cut_with(part, [
             _box((float(o["w"]), float(o["h"]), outer_t * 3),
                  (float(o["x"]), float(o["y"]), 0.0)) for o in openings])
-    part = _seated(part)
+    part = seated(part)
 
     # `clearance` is per-side and that includes underneath. A device resting
     # flush on the cavity floor touches it, so the assembly's tightest point is
@@ -485,7 +492,7 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
     post.apply_translation((x, y, height / 2.0))
     bore = trimesh.creation.cylinder(radius=bore_d / 2.0, height=height * 3.0, sections=64)
     bore.apply_translation((x, y, height / 2.0))
-    part = _seated(trimesh.boolean.difference([post, bore]))
+    part = seated(trimesh.boolean.difference([post, bore]))
 
     annulus = (outer_d - bore_d) / 2.0
     aspect = height / outer_d
@@ -576,7 +583,7 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
     mouth_h = height + 1.0
     mouth = _box((outer_d, mouth_gap, mouth_h),
                  (centre[0] + outer_d / 2, centre[1], base_h + mouth_h / 2))
-    part = _seated(trimesh.boolean.difference([part, mouth]))
+    part = seated(trimesh.boolean.difference([part, mouth]))
 
     if screw_d > 0 and flange is None:
         # Silently identical geometry either way, which is the worst kind of

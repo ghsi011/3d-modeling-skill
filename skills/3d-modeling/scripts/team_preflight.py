@@ -172,6 +172,29 @@ def support_audit(
     normals[valid] = crosses[valid] / double_areas[valid, None]
     areas = double_areas * 0.5
 
+    # Refuse a part that is not on the bed, rather than measuring it anyway.
+    #
+    # Everything below assumes the part rests at `bed_z`: faces within tolerance
+    # of it are contact and excluded, and what is left facing down is overhang.
+    # A part placed below the bed touches nothing, so its entire underside
+    # counts -- a plain 40x22 box reported 880 mm2 of overhang and FAILed, which
+    # sends a reader hunting a defect that is not there. That is not a stricter
+    # answer to the same question; it is a confident answer to a different one.
+    #
+    # The gate learned this (`seated-<rule>` in commission), but the lesson
+    # stayed there while this function -- reachable directly, and the one every
+    # hand-built caller reaches first -- kept answering.
+    lowest = float(vertices[:, 2].min())
+    if lowest < bed_z - bed_tolerance:
+        raise ValueError(
+            f"{rule_id}: the part sits {bed_z - lowest:.2f} mm below the declared bed "
+            f"(lowest point {lowest:.2f} mm, bed_z_mm {bed_z:.2f}). Nothing here is an "
+            "overhang measurement while the part is underground: no face reaches the bed, "
+            "so the whole underside reads as unsupported. Seat the model at the bed plane "
+            "-- minimum Z at zero for an identity transform -- or correct "
+            "model_to_printer_matrix."
+        )
+
     bed_contact = (
         np.max(np.abs(triangles[:, :, 2] - bed_z), axis=1) <= bed_tolerance
     )

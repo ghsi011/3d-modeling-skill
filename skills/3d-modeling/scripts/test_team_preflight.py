@@ -67,6 +67,34 @@ class TeamPreflightTest(unittest.TestCase):
             self.assertEqual(result["result"], "PASS")
             self.assertAlmostEqual(result["out_of_limit_area_mm2"], 0.0, places=6)
 
+    def test_a_part_below_the_bed_is_refused_not_measured(self) -> None:
+        """The root cause of a recurring fixture defect, fixed where it bites.
+
+        Everything in this screen assumes the part rests at `bed_z`: faces
+        within tolerance of it are contact and excluded, and what is left facing
+        down is overhang. A part placed *below* the bed touches nothing, so its
+        whole underside counts -- a plain box reported 880 mm2 and FAILed, which
+        sends a reader hunting a defect that is not there.
+
+        `trimesh.creation.box()` returns a solid centred on the origin, so this
+        is the default outcome of building a mesh by hand rather than an unlucky
+        one. The gate learned to refuse it (`seated-<rule>`); this function is
+        below the gate, which is exactly where hand-built callers arrive.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            stl_path = directory / "underground.stl"
+            trimesh.creation.box(extents=(40.0, 22.0, 14.0)).export(stl_path)
+            plan_path = self.write_plan(directory)
+
+            with self.assertRaises(ValueError) as caught:
+                team_preflight.support_audit(
+                    stl_path=stl_path, plan_path=plan_path, rule_id="S-01")
+
+            message = str(caught.exception)
+            self.assertIn("below the declared bed", message)
+            self.assertIn("Seat the model", message)
+
     def test_elevated_plate_fails_support_audit(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
             directory = Path(raw_directory)

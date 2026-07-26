@@ -62,10 +62,10 @@ def _box_stl(directory: Path, extents=(30, 20, 10)) -> Path:
     transform places underground. Harmless while nothing looked, and the moment
     something did, the whole suite failed at once.
     """
+    from designer_toolkit.templates import seated
+
     path = directory / "box.stl"
-    mesh = trimesh.creation.box(extents=extents)
-    mesh.apply_translation([0.0, 0.0, -float(mesh.bounds[0][2])])
-    mesh.export(path)
+    seated(trimesh.creation.box(extents=extents)).export(path)
     return path
 
 

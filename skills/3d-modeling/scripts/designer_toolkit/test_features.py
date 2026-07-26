@@ -274,7 +274,7 @@ class TestDefectsFoundByAdversarialReview(unittest.TestCase):
         """`device_case` declared nothing at all, so a cavity 0.75 mm per side
         undersize -- the phone physically will not go in -- left the bounding
         box, watertightness, body count, bed contact and overhang identical."""
-        from .templates import _rounded_slab, _seated, device_case
+        from .templates import _rounded_slab, device_case, seated
 
         device, wall, clearance, radius = (73.6, 155.6, 8.5), 1.5, 0.25, 9.0
         good = device_case(device=device, wall=wall, clearance=clearance,
@@ -285,7 +285,7 @@ class TestDefectsFoundByAdversarialReview(unittest.TestCase):
                               outer_t, radius + clearance + wall, centre=(0, 0, outer_t / 2))
         tight = _rounded_slab(dw + 2 * clearance - 1.5, dl + 2 * clearance - 1.5, outer_t,
                               radius + clearance, centre=(0, 0, wall + outer_t / 2))
-        undersize = _seated(trimesh.boolean.difference([outer, tight]))
+        undersize = seated(trimesh.boolean.difference([outer, tight]))
 
         self.assertEqual([round(float(v), 3) for v in good.part.extents],
                          [round(float(v), 3) for v in undersize.extents],

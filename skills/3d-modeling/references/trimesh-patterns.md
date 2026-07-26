@@ -14,13 +14,15 @@ installed.
 """What this part is."""
 import trimesh
 
+from designer_toolkit.templates import seated
+
 # Every design-driving number, named, at the top. Nothing derived by hand twice.
 BORE_D, WALL, HEIGHT = 12.0, 3.0, 9.0
 
 _body = trimesh.creation.box(extents=(40.0, 22.0, 5.0))
-_body.apply_translation([20.0, 11.0, 2.5])          # seated: min Z at zero
+_body.apply_translation([20.0, 11.0, 0.0])          # into the +XY quadrant
 
-part = _body
+part = seated(_body)                                # and onto the bed: min Z at zero
 PARAMS = {"wall_mm": WALL,
           "overall_mm": {"x": 40.0, "y": 22.0, "z": 5.0}}
 EXPECTED = ({"kind": "solid_region", "id": "plate", "z": 2.5, "area_mm2": 40.0 * 22.0},)
@@ -63,10 +65,22 @@ tallest piece. Get it wrong and `static-envelope` says so before anything is bui
 
 ## Conventions the gate assumes
 
-**Seat the part.** Minimum Z at zero. The plan's identity model-to-printer transform places
-the model where it sits, so a part centred on the origin has half of itself under the bed and
-its whole underside reads as unsupported. `seated-<rule>` fails on this now; before it did,
-one run shipped a bed face 16 mm off the bed.
+**Seat the part**, with the function rather than by hand:
+
+```python
+from designer_toolkit.templates import seated
+part = seated(trimesh.boolean.difference([shell, cavity]))
+```
+
+Minimum Z at zero. The plan's identity model-to-printer transform places the model where it
+sits, so a part centred on the origin has half of itself under the bed and its whole
+underside reads as unsupported — `seated-<rule>` fails on it, and the support screen refuses
+to measure it at all. Before either existed, one run shipped a bed face 16 mm off the bed.
+
+Call it even when you think you do not need to. `trimesh.creation.box()` returns a solid
+centred on the origin, so the library's default is the opposite of this convention: a mesh
+built by hand is underground unless you moved it, which makes forgetting the normal outcome
+rather than an unlucky one.
 
 **Union your cutters before subtracting.** `trimesh.util.concatenate` glues meshes into a
 non-manifold soup, and the boolean silently mishandles overlapping pieces — a countersink
