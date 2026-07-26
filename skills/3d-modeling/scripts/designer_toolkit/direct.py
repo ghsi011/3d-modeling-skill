@@ -40,14 +40,34 @@ def _params(raw: list[str]) -> dict[str, Any]:
     return dict(build_module.parse_param(text) for text in raw)
 
 
+def _instantiate(template: str, params: dict[str, Any]):
+    from . import templates as templates_module
+    return getattr(templates_module, template)(**params)
+
+
 def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float, float, float],
         risk: str, updated_utc: str, out: Path, material: str | None,
         rationale: str | None = None, acceptance: str | None = None,
-        brief: Path | None = None, bodies: int = 1,
+        brief: Path | None = None, bodies: int | None = None,
         render: bool = True) -> tuple[int, list[str]]:
     """Every step, in order, stopping at the first that fails."""
     log: list[str] = []
     out.mkdir(parents=True, exist_ok=True)
+
+    # How many solids the part is meant to be. A segmented box knows -- it is
+    # ceil(outer/usable) per axis, the same arithmetic that decided where to cut
+    # -- and a caller cannot know it without building first, which is exactly the
+    # trap the emergent bounding box already set once. Reading it from the
+    # template is not the part certifying itself: it is derived from the inner
+    # size, the wall and the bed, and is untouched by whatever the boolean
+    # actually produced. An explicit --bodies still wins, and then it is a claim
+    # the gate will hold the part to.
+    if bodies is None:
+        try:
+            built = _instantiate(template, _params(raw_params))
+            bodies = int(built.params.get("segment_count", 1))
+        except Exception:  # noqa: BLE001 - build failures are reported by build itself
+            bodies = 1
 
     intake_argv = [
         "--job-id", job_id, "--template", template, *_flatten(raw_params),
@@ -69,7 +89,7 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
                  "--updated-utc", updated_utc, "--out", str(plan_path)]
     if material:
         plan_argv += ["--material", material]
-    if bodies != 1:
+    if bodies and bodies != 1:
         plan_argv += ["--bodies", str(bodies)]
     if plan_module.main(plan_argv) != 0:
         return 1, log + ["plan failed; no candidate was built"]
@@ -113,9 +133,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--acceptance", help="what acceptance depends on that you did not "
                                              "get to choose -- 'nothing' is a real answer")
     parser.add_argument("--brief", type=Path, help="hashed into the dimensions sources table")
-    parser.add_argument("--bodies", type=int, default=1,
-                        help="separate solids the part is meant to be; more than one only "
-                             "when it is deliberately segmented for the bed")
+    parser.add_argument("--bodies", type=int, default=None,
+                        help="separate solids the part is meant to be. Omit it: a segmented "
+                             "template already knows, from the same arithmetic that decided "
+                             "where to cut. Pass it to make a claim the gate holds you to.")
     parser.add_argument("--updated-utc", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--no-render", action="store_true",

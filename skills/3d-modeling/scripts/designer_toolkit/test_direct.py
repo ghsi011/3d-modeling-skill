@@ -81,6 +81,39 @@ class TestDirect(unittest.TestCase):
             job = (out / "job_state.md").read_text(encoding="utf-8")
             self.assertIn(intake_module.REQUIRED, job)
 
+    def test_a_segmented_template_supplies_its_own_body_count(self) -> None:
+        """The count is emergent from bed and joint arithmetic, so a caller
+        cannot know it without building -- the same trap the emergent bounding
+        box set once. The template knows, because it is the arithmetic that
+        decided where to cut."""
+        import json
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            argv = ["--job-id", "seg", "--template", "segmented_box",
+                    "--param", "inner=(374.7, 466.7, 244.5)",
+                    "--param", "wall=(15.85, 19.05)", "--param", "bed=256.0",
+                    "--bbox", "406.4", "504.8", "244.5",
+                    "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+                    "--no-render"]
+
+            self.assertEqual(0, direct.main(argv))
+
+            plan = json.loads((out / "print_plan_checks.json").read_text(encoding="utf-8"))
+            self.assertEqual(6, plan["expected_bodies"])
+
+    def test_an_explicit_body_count_is_a_claim_the_gate_holds_you_to(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            argv = ["--job-id", "seg", "--template", "segmented_box",
+                    "--param", "inner=(374.7, 466.7, 244.5)",
+                    "--param", "wall=(15.85, 19.05)", "--param", "bed=256.0",
+                    "--bbox", "406.4", "504.8", "244.5", "--bodies", "4",
+                    "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+                    "--no-render"]
+
+            self.assertNotEqual(0, direct.main(argv))
+
     def test_a_bad_parameter_stops_before_anything_is_written(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
