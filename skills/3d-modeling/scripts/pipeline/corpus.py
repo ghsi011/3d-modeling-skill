@@ -154,7 +154,7 @@ def c_clip_mutants(params: dict[str, Any], clean: trimesh.Trimesh) -> list[Mutan
     return out
 
 
-def generic_mutants(clean: trimesh.Trimesh, contract: Contract) -> list[Mutant]:
+def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
     """Defects any part can have, derived from its own bounding box.
 
     Template-agnostic on purpose. The calibration gate asks whether the screens
@@ -190,7 +190,6 @@ def generic_mutants(clean: trimesh.Trimesh, contract: Contract) -> list[Mutant]:
         out.append(Mutant("edge-slot-%.0f%%" % (frac * 100), EDGE_OPEN,
                           _diff(clean, slot),
                           "a cut open to the edge, low on the part"))
-    _ = contract
     return out
 
 
@@ -220,7 +219,7 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
                 false_positives.append(f"{name}: clean part flagged "
                                        f"(commission {verdict}, screening {screen})")
 
-            mutants = generic_mutants(clean, contract)
+            mutants = generic_mutants(clean)
             if name == "c_clip":
                 mutants += c_clip_mutants(params, clean)
             for mutant in mutants:

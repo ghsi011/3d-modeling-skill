@@ -50,7 +50,6 @@ MANDATORY_CONCERNS = (
     "regulated structural or medical use",
 )
 
-MAX_EVIDENCE_CYCLES = 2
 
 
 @dataclasses.dataclass(frozen=True)

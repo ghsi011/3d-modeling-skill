@@ -6,7 +6,9 @@ cost, and every addition looks reasonable on its own. So the budgets below are
 checked in code and exceeding one is a build failure, not a slow run.
 
 W1 is what a clean `DIRECT` job produces and what the safety verifier gets first.
-W2 and W3 are generated only on escalation.
+W2 and W3 are specified in the plan and **not built yet**: `generate` takes a
+`level` and only ever receives the default. Escalation currently changes the
+status, not the evidence.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ class Witness:
     def as_dict(self) -> dict[str, Any]:
         return {"level": self.level, "images": list(self.images),
                 "sections": list(self.sections), "renderer": self.renderer,
+                "rendered": bool(self.images),
                 "budgets": {"ortho_views": MAX_ORTHO_VIEWS, "iso_views": MAX_ISO_VIEWS,
                             "resolution_px": MAX_RESOLUTION_PX, "sections": MAX_SECTIONS,
                             "seconds": MAX_SECONDS}}
@@ -64,8 +67,12 @@ def _sections(ctx, contract, limit: int) -> tuple[dict[str, Any], ...]:
         step = (high - low) / (room + 1)
         marks += [low + step * (i + 1) for i in range(room)]
 
+    # Not truncated here. Silently trimming to the budget made the budget check
+    # downstream structurally unreachable -- 500 declared features produced
+    # exactly 12 rows and the guard compared 12 > 12. A budget that cannot fire
+    # is a comment, and this module's docstring sells it as a build failure.
     rows = []
-    for z in sorted(set(round(v, 3) for v in marks))[:limit]:
+    for z in sorted(set(round(v, 3) for v in marks)):
         rows.append({"z": z, "area_mm2": round(ctx.section_area(z), 3)})
     return tuple(rows)
 
@@ -76,6 +83,13 @@ def generate(ctx, contract, out_dir: Path, *, level: str = "W1",
     out_dir.mkdir(parents=True, exist_ok=True)
 
     sections = _sections(ctx, contract, MAX_SECTIONS)
+    # Checked before anything is rendered: a part with more declared heights than
+    # the level allows is a contract to fix, not a witness to quietly shorten.
+    if len(sections) > MAX_SECTIONS:
+        raise BudgetExceeded(
+            f"{level}: {len(sections)} sections exceeds the {MAX_SECTIONS} budget. "
+            "Raise the level or declare fewer heights -- trimming silently would "
+            "drop exactly the sections somebody asked for.")
     images: list[str] = []
     renderer = "none"
 
@@ -97,8 +111,6 @@ def generate(ctx, contract, out_dir: Path, *, level: str = "W1",
     witness = Witness(level=level, images=tuple(images), sections=sections,
                       seconds=seconds, renderer=renderer)
 
-    if len(sections) > MAX_SECTIONS:
-        raise BudgetExceeded(f"{level}: {len(sections)} sections exceeds {MAX_SECTIONS}")
     if len(images) > MAX_ORTHO_VIEWS + MAX_ISO_VIEWS:
         raise BudgetExceeded(f"{level}: {len(images)} images exceeds "
                              f"{MAX_ORTHO_VIEWS + MAX_ISO_VIEWS}")

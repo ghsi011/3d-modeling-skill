@@ -14,8 +14,8 @@ The mouth-cutter bug is the model to preserve: it changed the boolean result and
 left `fw * fd - pi * r**2` untouched, so the two disagreed by 67 mm2 and the
 disagreement is what caught it.
 
-`test_independence.py` asserts the import graph, because a rule this easy to
-break quietly is not a rule unless something checks it.
+`test_pipeline.py`'s `IndependenceTest` asserts the import graph, because a rule
+this easy to break quietly is not a rule unless something checks it.
 """
 from __future__ import annotations
 

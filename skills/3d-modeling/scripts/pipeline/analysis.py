@@ -55,10 +55,6 @@ class MeshAnalysisContext:
             self._components = self.normalized.split(only_watertight=False)
         return self._components
 
-    @property
-    def face_normals(self) -> np.ndarray:
-        return self.normalized.face_normals
-
     def section_area(self, z: float) -> float:
         """Material area on a Z plane, net of every hole, cached per height.
 

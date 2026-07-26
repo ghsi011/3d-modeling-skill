@@ -53,26 +53,20 @@ SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 
 
-def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any] | None,
+def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any],
                     label: str) -> dict[str, Any]:
-    """One axis of profile screening.
+    """One axis of profile screening, against the heights a step is explained at.
 
-    Without a template reference envelope this reports INDETERMINATE rather than
-    CLEAR. Legitimate parts step abruptly all the time -- ribs, pockets,
-    shoulders, mounting bosses -- so a bare delta cannot tell a feature from a
-    defect, and saying CLEAR on that basis would be the screen agreeing with
-    whatever it was given.
+    Legitimate parts step abruptly all the time -- ribs, pockets, shoulders,
+    mounting bosses -- so a bare delta cannot tell a feature from a defect. The
+    envelope is what makes the difference sayable, and `reference_envelope`
+    always produces one: the bed and the top of the part are steps on every
+    shape, so there is no shape for which the list is empty.
     """
     profile = ctx.axis_profile(axis, SAMPLES, jitter=0.13)
     if len(profile) < 3:
         return {"detector": f"profile-{label}", "result": "INDETERMINATE",
                 "reason": "the part is too thin along this axis to profile"}
-    if envelope is None:
-        return {"detector": f"profile-{label}", "result": "INDETERMINATE",
-                "reason": "no template reference envelope, so a step cannot be told "
-                          "from a declared feature",
-                "profile": profile}
-
     steps = []
     for a, b in zip(profile, profile[1:]):
         local = max(a["area_mm2"], b["area_mm2"], 1e-6)
@@ -128,7 +122,7 @@ def _bed_screen(ctx: MeshAnalysisContext) -> dict[str, Any]:
     return {"detector": "bed-plane", "result": "CLEAR", "reason": f"lowest point {lowest:.3f} mm"}
 
 
-def reference_envelope(contract: Contract) -> dict[str, Any] | None:
+def reference_envelope(contract: Contract) -> dict[str, Any]:
     """Heights along Z where a step is explained, from the contract and template.
 
     Derived from declarations, never from the mesh. A step at a declared feature

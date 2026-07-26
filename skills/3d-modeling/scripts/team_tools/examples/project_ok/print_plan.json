@@ -99,7 +99,7 @@
   "transform": {
     "bed_contact_landmark": "P_BED",
     "bed_normal": "+Y",
-    "coordinate_convention": "CadQuery model coordinates are the installed frame in mm.",
+    "coordinate_convention": "Model coordinates are the installed frame in mm.",
     "forbidden_downward_faces": [
       "F01"
     ],

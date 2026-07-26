@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import dataclasses
 import platform
-import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -326,6 +325,3 @@ def _contract_from(template: T.CertifiedTemplate, request: JobRequest) -> C.Cont
         step_required=bool(request.step), consequence=request.consequence,
         updated_utc=request.updated_utc)
 
-
-def _unused() -> None:  # pragma: no cover
-    _ = sys

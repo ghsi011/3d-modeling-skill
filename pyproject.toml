@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "3d-modeling-skill"
 version = "0.1.0"
-description = "A five-role, file-contract 3D-modeling pipeline with deterministic Python tooling (preflight gate, contract automation, mesh I/O, CAD runner) for verification-driven modeling workflows."
+description = "A contract-first 3D-modelling pipeline: an immutable model contract, deterministic commissioning of the exported mesh, broad anomaly screening, and bounded review only where judgment is genuinely required."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

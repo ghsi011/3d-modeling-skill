@@ -64,7 +64,6 @@ class CertifiedTemplate:
     # toothless or a nuisance.
     profile_marks: Callable[[dict[str, Any]], dict[str, list[float]]] = lambda p: {"z": []}
     bodies: int = 1
-    step_capable: bool = False
 
     def rejects(self, params: dict[str, Any]) -> list[str]:
         """Why these parameters are outside the certified domain, if they are.
@@ -189,7 +188,7 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        "the skirt would close the hole it lines"),
         ),
         build=_ring_build, expectations=X.trim_ring_expectations, bbox=X.trim_ring_bbox,
-        profile_marks=X.trim_ring_profile_marks, step_capable=True,
+        profile_marks=X.trim_ring_profile_marks,
     )
     box_shell = CertifiedTemplate(
         name="box_shell", version="1.0.0", domain_id="box_shell@1.0.0/d1",

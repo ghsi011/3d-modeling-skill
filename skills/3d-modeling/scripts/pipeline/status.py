@@ -89,6 +89,8 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
            verification: dict[str, Any] | None, updated_utc: str) -> dict[str, Any]:
     reasons: list[str] = []
     verdict = commission_report["verdict"]
+    witness = commission_report.get("witness") or {}
+    rendered = bool(witness.get("rendered"))
 
     if verdict == "FAIL":
         final, claim = "FAILED", "the geometry does not match its contract"
@@ -127,6 +129,13 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             reasons.append("manufacturing blocked")
 
     if contract.consequence == "CONSEQUENTIAL":
+        # A safety review of a part nobody could see is a review of numbers. The
+        # renderer is not on the core path, so this is the ordinary case rather
+        # than an exotic one, and it used to pass in silence: witness.renderer
+        # recorded "unavailable" and no consumer read it.
+        if not rendered:
+            reasons.append("no renders were produced, so the safety reviewer saw "
+                           "numbers and no images")
         if safety is None:
             final = "NEEDS_MORE_EVIDENCE"
             claim = "consequential, and no final safety verification was performed"
@@ -139,6 +148,11 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             final = "NEEDS_MORE_EVIDENCE"
             claim = "the safety reviewer needs evidence this run did not produce"
             reasons.append("safety review needs more evidence")
+        elif not rendered and final in ("COMMISSIONED", "VERIFIED"):
+            final = "NEEDS_MORE_EVIDENCE"
+            claim = ("consequential, and the safety review saw no images -- install the "
+                     "render extra and re-run, or say plainly that nobody has looked "
+                     "at this part")
         elif final == "COMMISSIONED" and verification is None:
             # A passing safety review is not independent verification of the
             # geometry -- it reviewed hazards, not whether the part matches the
@@ -185,6 +199,7 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         "commission_verdict": verdict,
         "screening": screening["overall"],
         "screening_calibrated": screening.get("calibrated", False),
+        "witnesses_rendered": rendered,
         "manufacturing": manufacturing["overall"] if manufacturing else None,
         "verification": verification["decision"] if verification else None,
         "safety_verification": safety["decision"] if safety else None,

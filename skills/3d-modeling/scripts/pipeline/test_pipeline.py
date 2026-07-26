@@ -505,18 +505,47 @@ class IndependenceTest(unittest.TestCase):
 
 
 class StatusTest(unittest.TestCase):
-    def test_a_passing_safety_review_is_not_independent_verification(self) -> None:
-        """It reviewed hazards, not whether the part matches the brief."""
+    def _decide(self, **kw):
         with tempfile.TemporaryDirectory() as raw:
-            out = Path(raw)
-            result = runner.run(_request(
-                out, consequence="CONSEQUENTIAL",
-                reviewer=SafetyTest.REVIEWER,
-                safety_call=lambda p: {"decision": "PASS", "failure_modes": [],
-                                       "safety_concerns": [], "missing_evidence": [],
-                                       "required_actions": [], "summary": "ok"}))
-            self.assertEqual("COMMISSIONED", result.final_status["final_status"])
-            self.assertNotEqual("VERIFIED", result.final_status["final_status"])
+            contract = _contract(Path(raw))
+        base = {"contract": contract,
+                "commission_report": {"verdict": "PASS",
+                                      "witness": {"rendered": True}},
+                "screening": {"overall": "CLEAR", "calibrated": True},
+                "manufacturing": None, "safety": None, "verification": None,
+                "artifact": {"contract_sha256": "a", "stl_sha256": "b",
+                             "source_sha256": "c"},
+                "updated_utc": "t"}
+        return status.decide(**{**base, **kw})
+
+    def test_a_passing_safety_review_is_not_independent_verification(self) -> None:
+        """It reviewed hazards, not whether the part matches the brief.
+
+        Decided at the status layer with a rendered witness, so the assertion is
+        about safety-versus-verification rather than about whether a renderer
+        happened to be installed."""
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+        consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
+        final = self._decide(contract=consequential,
+                             safety={"decision": "PASS", "summary": "ok"})
+        self.assertEqual("COMMISSIONED", final["final_status"])
+        self.assertNotEqual("VERIFIED", final["final_status"])
+
+    def test_a_consequential_job_nobody_could_see_does_not_complete(self) -> None:
+        """The renderer is not on the core path, so this is the ordinary case.
+        It used to pass in silence: the witness recorded 'unavailable' and no
+        consumer read it."""
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+        consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
+        final = self._decide(contract=consequential,
+                             commission_report={"verdict": "PASS",
+                                                "witness": {"rendered": False}},
+                             safety={"decision": "PASS", "summary": "ok"})
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+        self.assertIn("saw no images", final["allowed_claim"])
+        self.assertFalse(final["witnesses_rendered"])
 
     def test_screening_anomaly_stops_short_of_commissioned(self) -> None:
         clean = {"overall": "CLEAR"}
