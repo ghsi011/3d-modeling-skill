@@ -119,45 +119,42 @@ A phase whose input does not exist cannot check anything, and every dispatch cos
 So the profile is decided by one question — **what has to be recovered from evidence?** —
 and it decides which phases run, not how verbose the record is.
 
-- **`DIRECT`** — every design-driving dimension is stated by the user or a cited spec, and no
-  real-world object is being recreated. Single part, `R0`/`R1`.
-  `INTAKE -> PRINT_PLAN -> CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION -> DELIVERY`,
-  and `PRINT_PLAN` is you instantiating the shipped template, not a dispatch. Two dispatches.
-  `REFERENCE_BUILD` reconstructs the mating object from `dimensions.md`; with no mating
-  object it has nothing to build, and `REFERENCE_ACCEPTANCE` has nothing to overlay.
-  `METROLOGY`'s own load-bearing check is reconciling disagreeing sources, and a stated
-  dimension has one source. Write the sheet yourself from the user's numbers, and ask the
-  disambiguating question (units, ID vs OD, radius vs diameter) at `INTAKE` where it is cheap.
+- **`DIRECT`** — every design-driving dimension is stated by the user or a cited spec, no
+  real-world object is being recreated, a template covers the shape, and the job is `R0`/`R1`.
+  **You do the whole thing yourself. No dispatches.**
 
-  **The express variant, only if the user asks for it by name.** Both dispatches together are
-  about fifteen minutes, and roughly four of those are the build. A user who wants the part
-  faster can have `DIRECT_EXPRESS`: you run the verification steps yourself instead of
-  dispatching a fresh verifier —
+  A dispatch costs four to six minutes whatever it contains — measured: an agent asked to run
+  four commands totalling 4.4 seconds took 6.41. A `DIRECT` job's actual work is a six-line
+  model, one gate call and a look, so two dispatches spend eleven minutes of overhead on about
+  a second of computation. That is the whole reason this route exists.
 
   ```bash
-  V=<your-own-dir>
-  python <skill>/scripts/dt.py integrity <candidate>.stl --out $V/integrity.json
-  python <skill>/scripts/dt.py commission --stl <candidate>.stl         --plan print_plan_checks.json --out $V --job-id <job>         --updated-utc <iso8601> --no-receipts
-  python -m team_tools.contracts validate <project-dir> --require all
-  python -m team_tools.contracts status <project-dir>
+  DT=<skill>/scripts/dt.py
+  python $DT templates                                   # which starting point fits
+  python $DT plan template --bbox X Y Z --job-id <job>         --updated-utc <iso> --out <project>/print_plan_checks.json
+  python $DT plan check <project>/print_plan_checks.json
+  # write model.py: import the template, call it, expose PARAMS and part
+  python $DT commission --model model.py --plan print_plan_checks.json         --out . --job-id <job> --updated-utc <iso>
+  python -m team_tools.contracts validate <project> --require all
   ```
 
-  — then look at `$V/renders/`, zooming with `dt.py crop` where a view is too small to settle
-  a question. That chain measures 4.4 seconds of computation, so what it costs is your own
-  turns, not the tooling. You did not author the
-  geometry, so this is not the designer marking its own work; but you *have* read the brief
-  and the dispatch, so it is not fresh eyes either.
+  Then look at `renders/multi.png` and `renders/section_x.png`, zooming with `dt.py crop`
+  where a view is too small, and fill the two judgment fields the receipt leaves blank.
 
-  What that costs is specific, not hypothetical. Fresh-context verification has caught two
-  candidates that passed every deterministic check and were still wrong: one missing the
-  countersink its own sheet required, one whose mounting flange had a slot cut clean through
-  it. Both were found by a reader with no stake in the geometry looking at a render. Neither
-  was a number, so running the same commands yourself would not have caught them.
+  Calling a template with numbers off the sheet is not authoring geometry, so the charter's
+  rule still holds: you are choosing parameters, and the template owns the shape. The moment
+  that stops being true — no template fits, a backend kernel is needed, anything mates, or the
+  class is above `R1` — it is not a `DIRECT` job. Re-route to `FITTED` and dispatch properly.
 
-  So never choose this silently. `job_state.md`'s `## Route` records `DIRECT_EXPRESS` and the
-  sentence "no independent fresh-context verification was performed", and the delivered summary
-  repeats it. An `R2`/`R3` job may never take it, and neither may a job whose part carries load,
-  mates to anything, or would be expensive to reprint.
+  **What this route does not have, said plainly.** No fresh context ever looks at the part.
+  That has caught two candidates which passed every deterministic check and were still wrong:
+  one missing the countersink its own sheet required, one whose mounting flange had a slot cut
+  clean through it. You are the author here, and authors are blind to their own errors — so
+  measure rather than admire: section the part where a feature should be and check the number,
+  rather than glancing at a render you already expect to look right. `job_state.md`'s `## Route`
+  records "built and checked by the orchestrator; no independent fresh-context verification",
+  and the delivery repeats it.
+
 - **`FITTED`** — one real object is measured or photographed and the part must fit it.
   Single candidate.
   `INTAKE -> METROLOGY -> PRINT_PLAN -> CANDIDATE_BUILD -> INDEPENDENT_VERIFICATION ->
@@ -193,30 +190,26 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    optional host print queue note when the host provides one.
 3. Advance only through the phase sequence that profile names. A phase the profile omits is
    not skipped work you owe later — its input does not exist for this job.
-4. `DIRECT` only: write `dimensions.md` yourself from the stated numbers, and generate the
-   bound plan from the stated overall size (run from `skills/3d-modeling/scripts/`):
+4. `DIRECT` only: do the job. The Route profiles section above has the command sequence; the
+   parts that need judgment rather than typing are these.
 
-   ```bash
-   python <skill>/scripts/dt.py plan template --bbox 40 22 14 --out <project-dir>/print_plan_checks.json
-   ```
+   Write `dimensions.md` yourself from the stated numbers, and ask every disambiguating
+   question at `INTAKE` — a unit, or radius-versus-diameter, resolved there costs one
+   question and resolved after the build costs a rebuild.
 
-   It emits `threshold_source: builtin-default`, requires self-support, declares an identity
-   model-to-printer transform, and invents no interface or edge band. Tell the designer the
-   part must therefore be modelled **seated on the bed**, minimum Z at zero — a model centred
-   on the origin has half of itself under the bed and reads as unsupported across its whole
-   underside. A part that cannot clear a zero support ceiling by reorienting or
-   chamfering is not a `DIRECT` part: re-route it to `FITTED`/`FULL` and dispatch a print
-   engineer rather than relaxing the number. Ask every disambiguating question at `INTAKE`; a
-   unit or radius-vs-diameter ambiguity resolved here costs one question, and resolved after
-   the build costs a rebuild.
+   The generated plan requires self-support and declares an identity model-to-printer
+   transform, so the part must be modelled **seated on the bed**, minimum Z at zero: a model
+   centred on the origin has half of itself under the bed and reads as unsupported across its
+   whole underside. A part that cannot clear a zero support ceiling by reorienting or
+   chamfering is not a `DIRECT` part — re-route to `FITTED` and dispatch a print engineer
+   rather than relaxing the number.
 
-   Then run `dt.py templates` yourself and, if one covers the shape you are commissioning,
-   name it in the dispatch. This is routing, not an answer: you are saying which starting
-   point exists, never what the designer should conclude. It is also the single largest
-   measured difference in cost — dispatches told which template fit finished a fitted phone
-   case in 11.9 minutes and five beehive parts in 15.3, while one left to discover the
-   catalogue on its own hand-wrote a part `c_clip` already covered and took twice as long for
-   the same result.
+   Then look, and look sceptically. You wrote this part, so you already believe it is right,
+   which is exactly the state in which two archived candidates shipped with a missing
+   countersink and a slot cut through a mounting flange. Both passed every deterministic
+   check. Section the part where each stated feature should be and check the number; do not
+   settle for a render matching your expectation.
+
 5. `FITTED`/`FULL` only: dispatch the metrologist to create `dimensions.md`; gate on complete
    datum/provenance, confidence grades, resolved blockers, and one blind-build-completeness row
    for every visible feature. That table is what stops a sealed brick: a sheet declaring "all
@@ -229,11 +222,12 @@ checks as "n/a for this interface type", and only a fresh context catches that.
 7. `FITTED`/`FULL`: dispatch the print engineer for the pre-design `print_plan.md`; gate on
    orientation, material, nozzle-linked limits, support budget, chamfers, colour constraints, a
    complete per-interface fit-strategy declaration, and a frozen `required_now` /
-   `deferred_owner` / `final_gate` scope for every geometry rule. Under `DIRECT` the shipped
-   template stands in, and it is a real plan for the same reason: written before any
-   measurement existed. Never let the designer supply its own.
+   `deferred_owner` / `final_gate` scope for every geometry rule. Never let the designer supply
+   its own — a threshold authored by the party being measured, after measuring, is a receipt.
+   (`DIRECT` uses the shipped template instead, which is a real plan for the same reason:
+   written before any measurement existed.)
 
-   Whatever wrote it, gate the plan before dispatching anyone against it:
+   Gate the plan before anyone builds against it, whichever wrote it:
 
    ```bash
    python <skill>/scripts/dt.py plan check <project-dir>/print_plan_checks.json
