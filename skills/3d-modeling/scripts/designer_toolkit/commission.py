@@ -157,6 +157,11 @@ def _check_step(commission: Commission, report, verifying: bool) -> None:
 def _check_receipt_location(commission: Commission, out_dir: Path, plan_path: Path | None) -> None:
     """The receipts are contracts, and contracts are found by exact path.
 
+    Only when receipts are actually being written. A verifier passes
+    `--no-receipts` and writes none, and forcing its `--out` to the project
+    directory made it overwrite the designer's `commission.json` -- destroying
+    the very file its own recomputation exists to be compared against.
+
     `team_tools/project.py` resolves each contract as `project_dir / name` with
     no recursive search, so receipts written to a subdirectory are invisible to
     `contracts validate` however correct their content. A run used `--out out`,
@@ -394,6 +399,7 @@ def run(
     render: bool = True,
     candidate_id: str = "candidate_01",
     plan_path: Path | None = None,
+    writes_receipts: bool = True,
 ) -> Commission:
     """Build (if given a model), verify everything deterministic, write evidence."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -442,7 +448,8 @@ def run(
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
 
-    _check_receipt_location(commission, out_dir, plan_path)
+    if writes_receipts:
+        _check_receipt_location(commission, out_dir, plan_path)
     _check_step(commission, report, stl is not None)
     _check_solid(commission, report)
     _check_envelope(commission, report, plan)
@@ -618,7 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
                          reference=args.reference, render=not args.no_render,
-                         candidate_id=args.candidate_id, plan_path=args.plan)
+                         candidate_id=args.candidate_id, plan_path=args.plan,
+                         writes_receipts=not args.no_receipts)
     except (FileNotFoundError, ValueError) as exc:
         sys.stderr.write("commission: " + str(exc) + "\n")
         return 2

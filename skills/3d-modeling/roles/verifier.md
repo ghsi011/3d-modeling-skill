@@ -110,9 +110,14 @@ gate. `R3` never receives a `PASS` under any profile.
    python <skill>/scripts/dt.py commission --stl <canonical.stl>      --plan print_plan_checks.json --out <verifier-dir> --job-id <job>      --updated-utc <iso8601> --no-receipts [--reference mating.stl]
    ```
 
-   Require exit zero. This is an independent recomputation, not a borrowed verdict: it reads
-   the delivered bytes and never reads the designer's `commission.json` — the one input this
-   step exists to distrust. Do not open that file until you have your own; comparing
+   Require exit zero. `--out` is **your own directory**, never the project root: your
+   recomputation exists to be compared against the designer's `commission.json`, and writing
+   over it destroys the comparison. `--no-receipts` is not optional either — the receipts are
+   the designer's contracts and are not yours to reissue.
+
+   This is an independent recomputation, not a borrowed verdict: it reads the delivered bytes
+   and never reads the designer's `commission.json` — the one input this step exists to
+   distrust. Do not open that file until you have your own; comparing
    afterwards is free. Point at the canonical STL in place and never copy it.
 
    **Do not hand-write a replacement.** Independence is a property of which inputs you

@@ -307,6 +307,23 @@ class ReceiptLocationTest(unittest.TestCase):
             self.assertEqual("FAIL", check.result)
             self.assertIn("does not search subdirectories", check.action)
 
+    def test_a_verifier_writing_no_receipts_is_not_constrained(self) -> None:
+        """It passes --no-receipts and writes none. Forcing its --out to the
+        project directory made one overwrite the designer's commission.json --
+        the very file its own recomputation exists to be compared against."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10})),
+                                 encoding="utf-8")
+
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work / "verify", render=False,
+                plan=_plan(expected_bbox_mm={"x": 30, "y": 20, "z": 10}),
+                plan_path=plan_path, writes_receipts=False)
+
+            self.assertEqual([], [c for c in result.checks if c.id == "receipt-location"])
+
     def test_receipts_beside_the_plan_are_fine(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
