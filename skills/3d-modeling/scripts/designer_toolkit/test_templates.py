@@ -275,6 +275,30 @@ class CClipTest(unittest.TestCase):
             self.assertAlmostEqual(0.0, metrics.overhang_area(built.part, threshold=-0.73),
                                    places=6, msg="a repositioned hole must stay self-supporting")
 
+    def test_a_countersink_is_cut_and_stays_self_supporting(self) -> None:
+        """A verification rejected a candidate for a countersink the sheet asked
+        for and the template could not make. It opens upward, so its own wall
+        faces up."""
+        from designer_toolkit import metrics
+
+        plain = self._clip(countersink_d=0.0)
+        sunk = self._clip(countersink_d=9.0)
+
+        self.assertLess(sunk.part.volume, plain.part.volume, "nothing was cut")
+        for threshold in (-0.73, templates.deg_to_normal_z(45)):
+            with self.subTest(threshold=threshold):
+                self.assertAlmostEqual(
+                    0.0, metrics.overhang_area(sunk.part, threshold=threshold), places=6)
+
+    def test_overlapping_cuts_are_unioned_before_subtraction(self) -> None:
+        """`concatenate` glues meshes into a non-manifold soup the boolean
+        mishandles when they overlap: the countersink cone crossing its own
+        shaft removed nothing, and read as 18 mm2 of phantom downward area."""
+        sunk = self._clip(countersink_d=9.0)
+
+        self.assertTrue(sunk.part.is_watertight)
+        self.assertEqual(1, mesh_io.connected_component_count(sunk.part))
+
     def test_it_works_without_a_flange(self) -> None:
         built = self._clip(flange=None, screw_d=0.0)
 

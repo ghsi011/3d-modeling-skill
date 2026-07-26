@@ -28,6 +28,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import trimesh
 
 
@@ -58,6 +59,45 @@ def _cylinder(radius: float, height: float, centre) -> trimesh.Trimesh:
     mesh = trimesh.creation.cylinder(radius=radius, height=height, sections=48)
     mesh.apply_translation(centre)
     return mesh
+
+
+def _frustum(r_bottom: float, r_top: float, height: float, centre, sections: int = 64):
+    """A truncated cone, built from two rings rather than a tapered cylinder.
+
+    A full cone's apex tessellates into slivers that survive in memory and then
+    fail the watertight check on re-import. A countersink meets its own shaft at
+    a finite radius, so the apex was never part of the shape anyway.
+    """
+    angles = np.linspace(0.0, 2.0 * np.pi, sections, endpoint=False)
+    cx, cy, cz = centre
+    lower = np.column_stack([cx + r_bottom * np.cos(angles), cy + r_bottom * np.sin(angles),
+                             np.full(sections, cz)])
+    upper = np.column_stack([cx + r_top * np.cos(angles), cy + r_top * np.sin(angles),
+                             np.full(sections, cz + height)])
+    vertices = np.vstack([lower, upper, [[cx, cy, cz], [cx, cy, cz + height]]])
+    low_c, high_c = 2 * sections, 2 * sections + 1
+    faces = []
+    for i in range(sections):
+        j = (i + 1) % sections
+        faces.append([i, j, sections + j])
+        faces.append([i, sections + j, sections + i])
+        faces.append([low_c, j, i])                      # bottom cap, facing down
+        faces.append([high_c, sections + i, sections + j])  # top cap, facing up
+    return trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=True)
+
+
+def _cut_with(part: trimesh.Trimesh, cuts: list[trimesh.Trimesh]) -> trimesh.Trimesh:
+    """Subtract several solids, unioning them first.
+
+    `concatenate` glues meshes into one non-manifold soup, which the boolean
+    silently mishandles when the pieces overlap -- a countersink cone crossing
+    its own shaft removed nothing at all, and read as 18 mm2 of phantom
+    downward-facing area. Union them and both problems go away.
+    """
+    if not cuts:
+        return part
+    solid = cuts[0] if len(cuts) == 1 else trimesh.boolean.union(cuts)
+    return trimesh.boolean.difference([part, solid])
 
 
 def _box(extents, centre) -> trimesh.Trimesh:
@@ -178,7 +218,7 @@ def panel(*, width: float, depth: float, thickness: float,
         cuts = [_opening_solid(o, thickness) for o in openings]
         for cut in cuts:
             cut.apply_translation((0.0, 0.0, thickness / 2))
-        plate = trimesh.boolean.difference([plate, trimesh.util.concatenate(cuts)])
+        plate = _cut_with(plate, cuts)
     part = _seated(plate)
 
     ligament = _min_ligament(openings, width, depth)
@@ -255,12 +295,9 @@ def device_case(*, device: tuple[float, float, float], wall: float, clearance: f
     part = trimesh.boolean.difference([outer, cavity])
 
     if openings:
-        cuts = []
-        for opening in openings:
-            cut = _box((float(opening["w"]), float(opening["h"]), outer_t * 3),
-                       (float(opening["x"]), float(opening["y"]), 0.0))
-            cuts.append(cut)
-        part = trimesh.boolean.difference([part, trimesh.util.concatenate(cuts)])
+        part = _cut_with(part, [
+            _box((float(o["w"]), float(o["h"]), outer_t * 3),
+                 (float(o["x"]), float(o["y"]), 0.0)) for o in openings])
     part = _seated(part)
 
     # `clearance` is per-side and that includes underneath. A device resting
@@ -322,13 +359,13 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
 
 def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
            flange: tuple[float, float, float] | None = None,
-           screw_d: float = 0.0, screw_at: tuple[float, float] | None = None) -> Built:
+           screw_d: float = 0.0, screw_at: tuple[float, float] | None = None,
+           countersink_d: float = 0.0) -> Built:
     """A C-shaped channel that snaps over a round thing, on an optional flange.
 
-    Cable clip, hose clamp, rail retainer, pen holder. A plain through-hole is
-    all this cuts: a countersink is the caller's to add, and it must open
-    *upward*, away from the bed, or it becomes a ceiling the zero-overhang
-    guarantee below cannot survive.
+    Cable clip, hose clamp, rail retainer, pen holder. `countersink_d` sinks the
+    screw head from the flange's top face; the cone opens upward, away from the
+    bed, so its own wall faces up and the zero-overhang guarantee survives it.
 
     The channel axis stands along Z on purpose, which is the whole reason this template is worth having:
     a horizontal round bore carries an unsupported crown that no surrounding
@@ -374,8 +411,17 @@ def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
         # place, and hand-built its own -- paying for the template and the
         # authoring both.
         sx, sy = screw_at if screw_at is not None else (outer_d / 2, flange[1] / 2)
-        part = trimesh.boolean.difference(
-            [part, _cylinder(screw_d / 2, base_h * 3, (sx, sy, base_h / 2))])
+        cuts = [_cylinder(screw_d / 2, base_h * 3, (sx, sy, base_h / 2))]
+        if countersink_d > screw_d:
+            # Overshoot above the face: a cone whose wide end lands exactly on
+            # the top plane leaves coplanar boolean artifacts that read as
+            # downward-facing area.
+            over = 1.0
+            depth = (countersink_d - screw_d) / 2.0
+            widest = countersink_d / 2 + over
+            cuts.append(_frustum(screw_d / 2, widest, depth + over,
+                                 (sx, sy, base_h - depth)))
+        part = _cut_with(part, cuts)
 
     extents = part.bounds[1] - part.bounds[0]
     return Built(
@@ -442,7 +488,7 @@ CATALOGUE: dict[str, tuple[str, str]] = {
         "a C-channel that snaps over a round thing, on an optional flange: cable "
         "clip, hose clamp, rail retainer -- axis along Z, so self-supporting",
         "c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0, "
-        "flange=(40, 22, 5), screw_d=4.5, screw_at=(8, 11))",
+        "flange=(40, 22, 5), screw_d=4.5, screw_at=(8, 11), countersink_d=9.0)",
     ),
     "bolt_boss": (
         "a screw boss or standoff, reporting its annulus wall and aspect ratio",
