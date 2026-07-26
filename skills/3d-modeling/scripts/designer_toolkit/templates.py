@@ -685,14 +685,14 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
     Returns the segments in their assembled positions, so the exported solid is
     the box itself and its bounding box is the standard that was asked for.
 
-    It declares no area expectation, deliberately. Every other template here
-    derives one in closed form, but the section area of a jointed plate depends
-    on how many seams cross how many walls and in which direction, and a formula
-    that is *nearly* right is worse than none: it would pass a defect while
-    reading like a check. What guards this shape instead is that a segment
-    reaching past the bed raises rather than returns, every segment is gated for
-    watertightness on its own, and `evidence.slice_profile` shows the whole plate
-    to whoever is looking.
+    It declares the wall ring, and the first draft did not. The argument for
+    silence was that a jointed section has no exact closed form and a nearly-right
+    formula would pass a defect while reading like a check. That was wrong in the
+    way that matters: the assembled section is the plain ring to within the joint
+    clearance, and while nothing measured it a tongue slab spanning each cell left
+    a solid rib straight across the brood cavity -- 6,575 mm2 of excess, no frame
+    able to go in, and every other check green. The band below covers the
+    clearance and nothing structural.
     """
     # A scalar wall cannot describe a real Langstroth box: the standard fixes
     # both the inside (frames must drop in) and the outside (boxes must stack on
@@ -742,12 +742,40 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
     cavity = _box((iw, id_, ih + lid), (outer_x / 2, outer_y / 2, floor + (ih + lid) / 2))
     ring = trimesh.boolean.difference([shell, cavity])
 
+    # The core band: the wall with a third of its thickness taken off each face,
+    # so anything living in it has material on both sides of it.
+    band = min(wall_x, wall_y) / 3.0
+    core = trimesh.boolean.difference([
+        _box((outer_x - 2 * band, outer_y - 2 * band, height * 3),
+             (outer_x / 2, outer_y / 2, height / 2)),
+        _box((iw + 2 * band, id_ + 2 * band, height * 3),
+             (outer_x / 2, outer_y / 2, height / 2))])
+    core_grown = trimesh.boolean.difference([
+        _box((outer_x - 2 * band + 2 * clearance, outer_y - 2 * band + 2 * clearance,
+              height * 3), (outer_x / 2, outer_y / 2, height / 2)),
+        _box((iw + 2 * band - 2 * clearance, id_ + 2 * band - 2 * clearance, height * 3),
+             (outer_x / 2, outer_y / 2, height / 2))])
+
     segments: list[Built] = []
     for j in range(ny):
         for i in range(nx):
             x0, y0 = i * cell_x, j * cell_y
-            cell = _box((cell_x, cell_y, height * 3),
-                        (x0 + cell_x / 2, y0 + cell_y / 2, height / 2))
+            # Inset by half the clearance at every internal seam, so neighbours
+            # stand a bond line apart instead of touching exactly. Physically
+            # that gap is the glue; topologically it is what stops the export
+            # welding six solids into one non-manifold body -- in memory each
+            # piece was watertight and the STL round trip was not, because
+            # coincident faces merge on reimport. Outer faces are untouched, so
+            # the assembled box is still the size the standard asks for.
+            inset_x0 = clearance / 2.0 if i > 0 else 0.0
+            inset_x1 = clearance / 2.0 if i < nx - 1 else 0.0
+            inset_y0 = clearance / 2.0 if j > 0 else 0.0
+            inset_y1 = clearance / 2.0 if j < ny - 1 else 0.0
+            cell = _box((cell_x - inset_x0 - inset_x1, cell_y - inset_y0 - inset_y1,
+                         height * 3),
+                        (x0 + inset_x0 + (cell_x - inset_x0 - inset_x1) / 2,
+                         y0 + inset_y0 + (cell_y - inset_y0 - inset_y1) / 2,
+                         height / 2))
             piece = trimesh.boolean.intersection([ring, cell])
             if piece.is_empty:
                 continue
@@ -767,9 +795,21 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
                               else (outer_x / 2, at, height / 2))
                     (adds if sign > 0 else cuts).append(
                         (_box(size, centre), _box(grown, centre)))
-            piece = _cut_with(piece, [g for _, g in cuts])
+            # Both clipped to the core band, and that is the whole joint.
+            # Unclipped, a tongue is a slab spanning the cell, so every internal
+            # seam left a solid rib straight across the brood cavity: 6,575 mm2
+            # of excess at mid-height, the middle of the cavity reporting as
+            # solid, and no frame able to go in. Clipped only to the wall it
+            # would span the full thickness, which is a butt joint offset by half
+            # a tongue and registers nothing. In the core band it is a tongue in
+            # a groove, with material either side of it.
+            piece = _cut_with(piece, [trimesh.boolean.intersection([g, core_grown])
+                                      for _, g in cuts])
             if adds:
-                piece = trimesh.boolean.union([piece] + [s for s, _ in adds])
+                tongues = [trimesh.boolean.intersection([s, core]) for s, _ in adds]
+                tongues = [s for s in tongues if s is not None and not s.is_empty]
+                if tongues:
+                    piece = trimesh.boolean.union([piece] + tongues)
             # Clamped twice, and the second clamp is the one that matters. A
             # tongue may cross the seam into its neighbour's cell -- that is what
             # registers the joint -- but it may not push past the outside of the
@@ -800,6 +840,14 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
     # objects and arranges them; that is its job, not this one's.
     assembly = trimesh.util.concatenate(segments)
     extents = assembly.bounds[1] - assembly.bounds[0]
+
+    # The assembled section is the plain wall ring, less the clearance in each
+    # joint. Seams are (nx-1)*ny + nx*(ny-1), each crossing two walls, each
+    # crossing losing about 2*clearance across the core band -- so the band is
+    # four times that budget, which is generous for a gap and nowhere near a rib.
+    seams = (nx - 1) * ny + nx * (ny - 1)
+    ring_area = outer_x * outer_y - iw * id_
+    joint_budget = max(1.0, 4.0 * max(seams, 1) * 2.0 * 2.0 * clearance * band)
     return Built(
         part=assembly,
         params={
@@ -809,6 +857,11 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
             "segment_count": len(segments),
             "assembled_mm": {"x": outer_x, "y": outer_y, "z": height},
         },
+        expected=(
+            {"kind": "solid_region", "id": "wall-ring",
+             "z": float(floor) + float(ih) / 2.0,
+             "area_mm2": ring_area, "tol_mm2": joint_budget},
+        ),
         notes=(
             f"{outer_x:.1f} x {outer_y:.1f} mm box on a {bed:.0f} mm bed, so {nx} x {ny} "
             f"corner segments of {cell_x:.1f} x {cell_y:.1f}",

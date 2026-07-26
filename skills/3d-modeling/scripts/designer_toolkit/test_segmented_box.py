@@ -11,6 +11,7 @@ could not reproduce a standard whose two axes imply 15.85 and 19.05 mm.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 try:
     import trimesh
@@ -55,10 +56,59 @@ class TestSegmentedBox(unittest.TestCase):
                 self.assertLessEqual(float(reach[0]), BED)
                 self.assertLessEqual(float(reach[1]), BED)
 
+    def test_the_cavity_is_actually_hollow(self) -> None:
+        """The defect that made this template useless for its own documented
+        example. Each seam tongue was a slab spanning the cell, so every internal
+        seam left a solid rib straight across the brood cavity -- 6,575 mm2 of
+        excess at mid-height, the middle of the cavity reporting as solid, and no
+        frame able to go in. Every other check was green."""
+        built = self._hive()
+
+        inside = built.part.contains([[203.2, 250.0, 122.0], [100.0, 400.0, 60.0]])
+
+        self.assertFalse(any(inside),
+                         "a point inside the brood cavity must not be solid")
+
+    def test_the_wall_ring_is_declared_and_catches_a_rib(self) -> None:
+        """The first draft declared no area expectation, on the argument that a
+        jointed section has no exact closed form. It has one to within the joint
+        clearance, and while nothing measured it the rib above went unnoticed."""
+        built = self._hive()
+        ring = next(r for r in built.expected if r["id"] == "wall-ring")
+        self.assertAlmostEqual(406.4 * 504.8 - 374.7 * 466.7, ring["area_mm2"], places=3)
+
+        from . import features as F
+
+        clean = F.check_features(built.part, built.expected)
+        self.assertEqual(["PASS"], [c.result for c in clean])
+
+        ribbed = trimesh.boolean.union([
+            built.part,
+            trimesh.creation.box(extents=(5.3, 466.7, 244.5)).apply_translation(
+                [203.2, 252.4, 122.25])])
+        self.assertEqual(["FAIL"], [c.result for c in F.check_features(ribbed, built.expected)])
+
     def test_every_segment_is_a_watertight_solid(self) -> None:
         for index, piece in enumerate(self._hive().part.split(only_watertight=False)):
             with self.subTest(segment=index):
                 self.assertTrue(piece.is_watertight)
+
+    def test_it_survives_the_stl_round_trip_as_separate_solids(self) -> None:
+        """In-memory watertightness is not the test. Neighbours that touch
+        exactly weld on reimport -- coincident faces merge -- and six watertight
+        pieces came back as one non-manifold body, which the gate rejected and
+        no in-memory assertion saw. They stand a bond line apart now, which is
+        also what a glued joint physically needs."""
+        import tempfile
+
+        built = self._hive()
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "hive.stl"
+            built.part.export(path)
+            reloaded = trimesh.load(path, process=True)
+
+        self.assertTrue(reloaded.is_watertight)
+        self.assertEqual(built.params["segment_count"], reloaded.body_count)
 
     def test_it_refuses_rather_than_returning_an_unprintable_piece(self) -> None:
         """A tongue wide enough to swallow the bed has no valid decomposition,
