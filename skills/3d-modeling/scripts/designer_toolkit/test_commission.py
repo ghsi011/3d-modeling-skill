@@ -864,6 +864,31 @@ class LoadPartTest(unittest.TestCase):
 
             self.assertIn("build()", str(caught.exception))
 
+    def test_the_build123d_skeleton_is_not_a_model_the_gate_can_import(self) -> None:
+        """The backend docs and `--model` are one contract, and it was broken.
+
+        `build123d-patterns.md` printed a `commission --model model.py` command
+        above a skeleton whose solid is named `body`, so following the file
+        exactly produced a script the gate refuses -- two paragraphs under its
+        own prose saying the exported STL is the handoff. Nothing had ever run
+        that path: it is the one backend with no runner and no test.
+
+        This pins both halves. The loader's contract is `part`/`build()` and a
+        build123d `Part` is not a trimesh either way, so the doc must send a
+        reader to `--stl`.
+        """
+        references = Path(__file__).resolve().parents[2] / "references"
+        doc = (references / "build123d-patterns.md").read_text(encoding="utf-8")
+        self.assertIn("commission --stl body.stl", doc)
+        self.assertNotIn("commission --model", doc)
+
+        with tempfile.TemporaryDirectory() as raw:
+            module = Path(raw) / "model.py"
+            module.write_text("body = object()\nref_part = object()\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                commission.load_model(module)
+
 
 if __name__ == "__main__":
     unittest.main()

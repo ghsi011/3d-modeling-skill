@@ -14,11 +14,26 @@ documented once in [`cadquery-patterns.md`](cadquery-patterns.md) and
 [`designer-toolkit.md`](designer-toolkit.md). Use those as written; only the
 modelling below is build123d-specific.
 
+Run your script, then gate the STL it wrote:
+
 ```bash
-python3 <skill>/scripts/dt.py commission --model model.py \
+python3 model.py                                   # writes body.stl
+python3 <skill>/scripts/dt.py commission --stl body.stl \
   --plan print_plan_checks.json --out . --job-id <job> \
   --updated-utc <iso8601>          # the deterministic gate, from any directory
 ```
+
+**`--stl`, not `--model`.** `--model` imports the file and expects a module-level
+`part` that is a trimesh, alongside `PARAMS` and `EXPECTED` — the contract in
+[`trimesh-patterns.md`](trimesh-patterns.md). A build123d `Part` is neither, and the
+skeleton below names it `body`, so `--model` fails here with ``model.py must define
+`part` or `build()` ``. The exported STL is the handoff, which is what "backend-neutral"
+above means.
+
+`--stl` carries no `EXPECTED`, so **the plan has to declare the features** — `features`
+rows in `print_plan_checks.json`, in the kinds listed under
+[what to declare](trimesh-patterns.md#what-to-declare-in-expected). Skip that and the gate
+checks the envelope and the printability and nothing at all about the shape.
 
 Failure → read the tool output, fix the script, re-export, and always LOOK at
 the preview.

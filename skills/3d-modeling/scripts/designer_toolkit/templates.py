@@ -870,6 +870,18 @@ def segmented_box(*, inner: tuple[float, float, float], wall: Any, bed: float,
                            "z": float(extents[2])},
             "segment_count": len(segments),
             "assembled_mm": {"x": outer_x, "y": outer_y, "z": height},
+            # Where the joints are, in assembled coordinates. The notes already
+            # said the seams are a light and weather path the plan owes a sealing
+            # method; they did not say where to put it, so a print engineer had
+            # to recover the planes from the mesh to specify a bead, and a
+            # verifier had to do it again to check one. It is closed form -- the
+            # same division that decided the cells -- and free to publish.
+            "seams": {
+                "x_mm": [round(cell_x * k, 4) for k in range(1, nx)],
+                "y_mm": [round(cell_y * k, 4) for k in range(1, ny)],
+                "z_from_mm": 0.0,
+                "z_to_mm": float(height),
+            },
         },
         expected=(
             {"kind": "solid_region", "id": "wall-ring",

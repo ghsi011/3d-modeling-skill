@@ -98,6 +98,39 @@ class TestSegmentedBox(unittest.TestCase):
         self.assertEqual({"feature-wall-ring": "FAIL", "feature-cavity": "FAIL"},
                          results(ribbed))
 
+    def test_it_publishes_where_the_seams_are(self) -> None:
+        """The notes said the seams are a light and weather path the plan owes a
+        sealing method. They did not say where they are, so a print engineer had
+        to recover the planes from the mesh to specify a bead and a verifier had
+        to do it again to check one -- for a number that is closed form.
+
+        The grid has to agree with the pieces: a seam list implying a different
+        segment count than the part actually has is worse than none, because it
+        reads as a map.
+        """
+        built = self._hive()
+        seams = built.params["seams"]
+
+        self.assertEqual([203.2], seams["x_mm"])
+        self.assertEqual((len(seams["x_mm"]) + 1) * (len(seams["y_mm"]) + 1),
+                         built.params["segment_count"])
+        self.assertEqual(0.0, seams["z_from_mm"])
+        self.assertEqual(244.5, seams["z_to_mm"])
+
+        # every declared plane must fall strictly inside the assembled box, or it
+        # is naming a joint that is not there
+        for axis, key in (("x", "x_mm"), ("y", "y_mm")):
+            for value in seams[key]:
+                with self.subTest(axis=axis, at=value):
+                    self.assertGreater(value, 0.0)
+                    self.assertLess(value, built.params["assembled_mm"][axis])
+
+    def test_a_box_that_needs_no_splitting_on_one_axis_declares_no_seam_there(self) -> None:
+        built = T.segmented_box(inner=(400.0, 100.0, 100.0), wall=5.0, bed=256.0)
+        self.assertEqual([], built.params["seams"]["y_mm"],
+                         "a single row has no internal seam to seal")
+        self.assertTrue(built.params["seams"]["x_mm"])
+
     def test_every_segment_is_a_watertight_solid(self) -> None:
         for index, piece in enumerate(self._hive().part.split(only_watertight=False)):
             with self.subTest(segment=index):

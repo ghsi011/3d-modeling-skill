@@ -107,5 +107,11 @@ anywhere the point of the feature is that something else has to fit in it. It re
 than passes when the window is not inside the material's own footprint at that height, because
 an empty window off the side of the part is not evidence of anything.
 
+**A split part publishes its joints.** `segmented_box` puts the seam planes in `PARAMS`
+under `seams` — `x_mm` and `y_mm` in assembled coordinates, spanning `z_from_mm` to
+`z_to_mm`. Nothing measures whether a seam was sealed, so carry those numbers into
+`print_notes.md` where the print engineer will act on them; without that they have to be
+recovered from the mesh twice, once to specify a bead and once to check it.
+
 One thing nothing here covers, so say it in `print_notes.md` rather than leaving it silent: a
 feature you added after the fact may have changed a number some other row asserts.
