@@ -149,6 +149,19 @@ gate. `R3` never receives a `PASS` under any profile.
    as a hard `UNIT_SCALE` reject, never a warning to note and pass. A
    `POSSIBLE_UNIT_SCALE_MISMATCH` warning still needs an explicit agent judgment call before
    `PASS`.
+8b. Draft the report from your own recomputation rather than retyping it:
+
+   ```bash
+   python <skill>/scripts/dt.py report --commission <verifier-dir>/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
+   ```
+
+   It transcribes the numeric columns from the file you just produced and leaves every
+   judgment blank — the verdict, the status, every visual observation, the whole upstream
+   audit, and the three checks no tool computes. Answer each one; the report is not finished
+   while a `<!-- REQUIRED -->` remains. Retyping a measurement is how the designer's receipts
+   once came to describe a mesh nobody was shipping, and a report that arrived pre-concluded
+   would be worse than that.
+
 9. A `PASS` requires every applicable check to pass with evidence and no open critical
    upstream question.
 10. A `REJECT` must identify defect, evidence path, expected versus observed value/appearance,

@@ -57,6 +57,9 @@ def main(argv=None):
         for line in catalogue_lines():
             print(line)
         raise SystemExit(0)
+    if argv and argv[0] == "report":
+        from .report import main as report_main
+        raise SystemExit(report_main(argv[1:]))
     if argv and argv[0] == "plan":
         from .plan import main as plan_main
         raise SystemExit(plan_main(argv[1:]))
@@ -73,6 +76,9 @@ def main(argv=None):
     sub.add_parser("doctor", add_help=False,
                    help="what this interpreter can do: backends, extras, and what "
                         "each missing one costs")
+    sub.add_parser("report", add_help=False,
+                   help="draft verification_report.md from the verifier's own "
+                        "recomputation, leaving every judgment blank")
     sub.add_parser("templates", add_help=False,
                    help="the parametric starting points and the shapes they cover")
     sub.add_parser("plan", add_help=False,
