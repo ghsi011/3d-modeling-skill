@@ -99,6 +99,52 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("<!-- REQUIRED -->", audit)
 
 
+class DefectScaffoldTest(unittest.TestCase):
+    """The rejection half of the report, which had none.
+
+    The charter requires a REJECT to identify defect, evidence, expected versus
+    observed, severity and owning loop. The table carried no severity column, so
+    the requirement was unsatisfiable in the document the tool produces, and it
+    arrived empty besides -- meaning the verifier retyped numbers already sitting
+    in `commission.json` two sections above.
+    """
+
+    def _defects(self, checks) -> str:
+        drafted = report.build({"checks": checks, "evidence": {"export": {}}},
+                               job_id="j", candidate_id="candidate-01",
+                               revision=1, updated_utc="t")
+        return drafted.split("## Defects")[1].split("## Verdict")[0]
+
+    def test_the_column_the_charter_requires_exists(self) -> None:
+        self.assertIn("| Severity |", self._defects([]))
+
+    def test_a_failing_check_arrives_as_a_row_with_its_numbers_transcribed(self) -> None:
+        table = self._defects([
+            {"id": "envelope", "result": "FAIL", "detail": "z is +4.20 mm from the plan"},
+            {"id": "watertight", "result": "PASS", "detail": "closed"}])
+
+        self.assertIn("| envelope |", table)
+        self.assertIn("z is +4.20 mm from the plan", table)
+        self.assertNotIn("watertight", table, "a passing check is not a defect")
+
+    def test_the_judgments_are_demanded_not_guessed(self) -> None:
+        """Which loop owns a defect, how severe it is, and what would make it
+        acceptable are not derivable from a failing check: a 0.3 mm envelope
+        miss can be a rounding artefact or a wrong datum."""
+        row = [line for line in self._defects(
+            [{"id": "envelope", "result": "FAIL", "detail": "off by 0.3"}]).splitlines()
+            if line.startswith("| D-01")][0]
+
+        self.assertEqual(3, row.count("<!-- REQUIRED -->"))
+
+    def test_a_passing_run_gets_no_rows(self) -> None:
+        """A table of "none" entries reads as a filled-in form, and a reader who
+        skims it once will skim the one that matters."""
+        table = self._defects([{"id": "watertight", "result": "PASS", "detail": "closed"}])
+
+        self.assertEqual([], [ln for ln in table.splitlines() if ln.startswith("| D-")])
+
+
 class CliTest(unittest.TestCase):
     def test_it_writes_a_draft_from_a_commission_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

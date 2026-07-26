@@ -51,6 +51,31 @@ def _cell(text: str) -> str:
     return text.replace("|", "/").replace("\n", " ")
 
 
+def _defect_rows(checks: list[dict[str, Any]]) -> str:
+    """One row per failing check, mechanical columns filled, judgments blank.
+
+    The charter requires a REJECT to identify defect, evidence, expected versus
+    observed, the named datum or plan rule, severity and owning loop. The table
+    had no severity column at all, so that requirement could not be met in the
+    document this tool produces -- and the table arrived empty, which meant
+    retyping numbers that are already in `commission.json` two sections above.
+    Retyping is what made the designer's receipts drift from their own mesh.
+
+    So the same trade as everything else here: the measurement is transcribed,
+    the judgment is demanded. Which loop owns a defect and how bad it is are not
+    derivable from a failing check -- a 0.3 mm envelope miss can be a rounding
+    artefact or a wrong datum, and only a reader can tell which.
+
+    A passing run gets no rows. A table of "none" entries reads as a filled-in
+    form, and a reader who skims it once will skim the one that matters.
+    """
+    failed = [c for c in checks if c.get("result") == "FAIL"]
+    return "\n".join(
+        f"| D-{index:02d} | {_UNSET} | {_UNSET} | {_cell(str(check.get('id', '?')))} | "
+        f"{_cell(str(check.get('detail', '')))} | verify/commission.json | {_UNSET} |"
+        for index, check in enumerate(failed, start=1))
+
+
 def build(commission: dict[str, Any], *, job_id: str, candidate_id: str,
           revision: int, updated_utc: str, fresh_context: str | None = None) -> str:
     """`fresh_context` is answered, never asserted.
@@ -109,8 +134,9 @@ report is not complete while any remain.
 {chr(10).join(rows)}
 
 ## Defects
-| ID | Owning loop | Feature/check IDs | Expected vs observed | Evidence | Required acceptance condition |
-|---|---|---|---|---|---|
+| ID | Owning loop | Severity | Feature/check IDs | Expected vs observed | Evidence | Required acceptance condition |
+|---|---|---|---|---|---|---|
+{_defect_rows(checks)}
 
 ## Verdict
 {_UNSET} — PASS, or REJECT to METROLOGY / PRINT_PLAN / CANDIDATE_BUILD.

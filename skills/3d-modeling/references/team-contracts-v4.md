@@ -516,8 +516,8 @@ updated_utc: <iso-8601>
 | 7 planned-orientation printability/faces | | | | | |
 
 ## Defects
-| ID | Owning loop | Feature/check IDs | Expected vs observed | Evidence | Required acceptance condition |
-|---|---|---|---|---|---|
+| ID | Owning loop | Severity | Feature/check IDs | Expected vs observed | Evidence | Required acceptance condition |
+|---|---|---|---|---|---|---|
 
 ## Verdict
 <PASS, or REJECT to METROLOGY / PRINT_PLAN / CANDIDATE_BUILD>
