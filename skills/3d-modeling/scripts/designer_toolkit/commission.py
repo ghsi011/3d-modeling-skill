@@ -460,53 +460,89 @@ def seated_clearance_mm(candidate, reference) -> float:
 
 
 def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], reference) -> None:
+    """Each declared interface against its own mating part and its own band.
+
+    One reference yields one number -- the tightest point of the whole assembly --
+    and it cannot say which interface owns it. The gate used to intersect every
+    declared band into `[max(mins), min(maxes)]` and compare that single number
+    to the window. For one interface that is exactly right. For six it is
+    unsatisfiable by construction: a hive body's interfaces gave `[0.30, 0.25]`,
+    an empty window no geometry can enter, and both runs that met it responded
+    the only way left -- by deleting interfaces from the plan until one remained.
+    That silently guts the contract the plan is supposed to be.
+
+    So an interface may name its own `reference`, and is measured against that.
+    The command-line `--reference` covers one unnamed interface, because one
+    measurement can attribute to one interface. More than one unnamed interface
+    is refused with the reason, rather than folded into a window that cannot be
+    met: verifying a fit needs the part it fits.
+    """
     interfaces = plan.get("interfaces") or []
     if not interfaces:
         commission.add(Check("fit", "Declared interface fit", _SKIP,
                              "the plan declares no mating interfaces, so there is no "
                              "fit to measure"))
         return
-    if reference is None:
+
+    unnamed = [i for i in interfaces if not i.get("reference")]
+    if len(unnamed) > 1:
+        ids = ", ".join(str(i.get("id", "?")) for i in unnamed)
         commission.add(Check(
             "fit", "Declared interface fit", _FAIL,
-            f"{len(interfaces)} interface(s) declared but no mating reference was supplied",
-            "Pass --reference <mating.stl>. Forgetting it used to read as a skip, so a "
-            "part with declared fit bands could pass without any of them being measured.",
+            f"{len(unnamed)} interfaces name no reference of their own ({ids})",
+            "One reference measures one clearance -- the tightest point of the assembly -- "
+            "and cannot say which interface owns it. Give each interface a `reference` "
+            "path in the plan, or declare the ones you can actually measure. Do not delete "
+            "interfaces to fit the tool: an undeclared fit is an unverified fit either way, "
+            "and at least a declared one is visible.",
+        ))
+        return
+    if unnamed and reference is None:
+        commission.add(Check(
+            "fit", "Declared interface fit", _FAIL,
+            f"interface {unnamed[0].get('id', 'I-01')} declares a band but no mating "
+            "reference was supplied",
+            "Pass --reference <mating.stl>, or give the interface its own `reference`. "
+            "Forgetting it used to read as a skip, so a part with declared fit bands "
+            "could pass without any of them being measured.",
         ))
         return
 
-    reference_mesh = as_mesh(reference) if isinstance(reference, str) else reference
-    clearance = seated_clearance_mm(mesh, reference_mesh)
-    bands = [(float(i.get("min_mm", 0.0)), float(i.get("max_mm", 0.0))) for i in interfaces]
-    # Intersection, not union. One reference yields one measurement -- the
-    # tightest point of the assembly -- and it has to satisfy every declared
-    # band, so the admissible window is [max(mins), min(maxes)]. Taking the
-    # union instead admitted 0.30 mm against an interface capped at 0.10.
-    low, high = max(b[0] for b in bands), min(b[1] for b in bands)
-    ok = low - 1e-6 <= clearance <= high + 1e-6
+    measured: dict[str, float] = {}
+    for interface in interfaces:
+        ident = str(interface.get("id", "I-01"))
+        source = interface.get("reference") or reference
+        try:
+            partner = as_mesh(source) if isinstance(source, str) else source
+            clearance = seated_clearance_mm(mesh, partner)
+        except (OSError, ValueError) as exc:
+            commission.add(Check(
+                f"fit-{ident}", f"Interface {ident} fit", _FAIL,
+                f"cannot read the mating reference {source!r}: {exc}",
+                "A band whose partner cannot be loaded is a band nothing measured."))
+            continue
+        low, high = float(interface.get("min_mm", 0.0)), float(interface.get("max_mm", 0.0))
+        ok = low - 1e-6 <= clearance <= high + 1e-6
+        measured[ident] = clearance
+        commission.add(Check(
+            f"fit-{ident}", f"Interface {ident} fit", _PASS if ok else _FAIL,
+            f"seated clearance {clearance:.4f} mm against a declared band [{low}, {high}] mm",
+            "" if ok else (
+                "Too tight: the seated pair overlaps or clears by less than the declared "
+                "minimum. Open the mating geometry -- never widen the band."
+                if clearance < low else
+                "Too loose: over-clearance fails the fit exactly as interference does, and "
+                "is what makes a part rattle. Close the mating geometry."),
+        ))
 
-    # One reference carries no per-interface regions, so the measurement is the
-    # tightest point of the whole assembly and cannot say which interface owns
-    # it. Say so rather than implying a per-ID verdict the geometry cannot give.
-    scope = (f"tightest of {len(interfaces)} declared interfaces"
-             if len(interfaces) > 1 else interfaces[0].get("id", "I-01"))
-    if clearance < low:
-        action = ("Too tight: the seated pair overlaps or clears by less than the declared "
-                  "minimum. Open the mating geometry -- never widen the band.")
-    else:
-        action = ("Too loose: over-clearance fails the fit exactly as interference does, and "
-                  "is what makes a part rattle. Close the mating geometry.")
-    commission.add(Check(
-        "fit", "Declared interface fit",
-        _PASS if ok else _FAIL,
-        f"seated clearance {clearance:.4f} mm ({scope}) against a declared band "
-        f"[{low}, {high}] mm",
-        "" if ok else action,
-    ))
     commission.evidence["reference_path"] = str(reference) if isinstance(reference, str) else None
-    commission.evidence["seated_clearance_mm"] = clearance
-    commission.evidence["seated_interference_mm3"] = fit.interference(mesh, reference_mesh)
-
+    commission.evidence["seated_clearance_mm"] = measured
+    if len(interfaces) == 1 and measured:
+        only = next(iter(measured.values()))
+        partner = interfaces[0].get("reference") or reference
+        commission.evidence["seated_interference_mm3"] = fit.interference(
+            mesh, as_mesh(partner) if isinstance(partner, str) else partner)
+        commission.evidence["seated_clearance_mm"] = only
 
 def run(
     *,

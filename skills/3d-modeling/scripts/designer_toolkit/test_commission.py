@@ -225,7 +225,7 @@ class InterfaceCheckTest(unittest.TestCase):
                                     plan=self._plan_with_band(0.15, 0.30),
                                     reference=core, render=False)
 
-            fit_check = next(c for c in result.checks if c.id == "fit")
+            fit_check = next(c for c in result.checks if c.id.startswith("fit"))
             self.assertEqual("PASS", fit_check.result, fit_check.detail)
             self.assertAlmostEqual(0.2, result.evidence["seated_clearance_mm"], delta=0.02)
 
@@ -240,7 +240,7 @@ class InterfaceCheckTest(unittest.TestCase):
                                     plan=self._plan_with_band(0.15, 0.30),
                                     reference=core, render=False)
 
-            fit_check = next(c for c in result.checks if c.id == "fit")
+            fit_check = next(c for c in result.checks if c.id.startswith("fit"))
             self.assertEqual("FAIL", fit_check.result)
             self.assertIn("Too loose", fit_check.action)
 
@@ -253,7 +253,7 @@ class InterfaceCheckTest(unittest.TestCase):
                                     plan=self._plan_with_band(0.15, 0.30),
                                     reference=core, render=False)
 
-            fit_check = next(c for c in result.checks if c.id == "fit")
+            fit_check = next(c for c in result.checks if c.id.startswith("fit"))
             self.assertEqual("FAIL", fit_check.result)
             self.assertIn("Too tight", fit_check.action)
 
@@ -268,7 +268,7 @@ class InterfaceCheckTest(unittest.TestCase):
                                     plan=self._plan_with_band(-0.30, -0.10),
                                     reference=core, render=False)
 
-            self.assertEqual("PASS", next(c for c in result.checks if c.id == "fit").result)
+            self.assertEqual("PASS", next(c for c in result.checks if c.id.startswith("fit")).result)
 
 
 class EdgeCheckTest(unittest.TestCase):
@@ -418,6 +418,68 @@ class SolidCheckTest(unittest.TestCase):
                                     plan=_plan(), render=False)
 
             self.assertEqual(next(c for c in result.checks if c.id == "solid").result, "FAIL")
+
+
+class MultipleInterfaceTest(unittest.TestCase):
+    """Both benchmark runs hit this and both responded the same way.
+
+    One reference yields one number -- the tightest point of the assembly -- and
+    the gate used to intersect every declared band into `[max(mins), min(maxes)]`
+    and compare that. For one interface that is right. For six it gave `[0.30,
+    0.25]`, an empty window no geometry can enter, so each run deleted
+    interfaces from its plan until one remained. That silently guts the contract
+    the plan is supposed to be.
+    """
+
+    def _pair(self, work: Path, clearance: float):
+        inner = trimesh.creation.box(extents=(20.0, 20.0, 10.0))
+        inner.apply_translation([0, 0, 5.0])
+        outer = trimesh.creation.box(extents=(20.0 + 2 * clearance, 20.0 + 2 * clearance, 10.0))
+        outer.apply_translation([0, 0, 5.0])
+        shell = trimesh.boolean.difference([
+            trimesh.creation.box(extents=(40.0, 40.0, 12.0)).apply_translation([0, 0, 6.0]),
+            outer])
+        path = work / "ref.stl"
+        inner.export(path)
+        stl = work / "part.stl"
+        shell.export(stl)
+        return stl, path
+
+    def test_several_unreferenced_interfaces_are_refused_not_intersected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, ref = self._pair(work, 0.25)
+            plan = _plan(interfaces=[
+                {"id": "I-01", "min_mm": 0.15, "max_mm": 0.30},
+                {"id": "I-02", "min_mm": 0.30, "max_mm": 0.60},
+            ], expected_bbox_mm={"x": 40.0, "y": 40.0, "z": 12.0})
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out", plan=plan,
+                                    reference=str(ref), render=False)
+
+            fit = next(c for c in result.checks if c.id.startswith("fit"))
+            self.assertEqual("FAIL", fit.result)
+            self.assertIn("name no reference of their own", fit.detail)
+            self.assertIn("Do not delete interfaces to fit the tool", fit.action)
+
+    def test_each_interface_with_its_own_reference_is_measured_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            stl, ref = self._pair(work, 0.25)
+            plan = _plan(interfaces=[
+                # The pair seats flush -- per-side clearance includes underneath --
+                # so one band admits that and one does not. The point is that each
+                # is judged on its own, not folded into a shared window.
+                {"id": "I-01", "min_mm": -0.05, "max_mm": 0.05, "reference": str(ref)},
+                {"id": "I-02", "min_mm": 0.90, "max_mm": 1.20, "reference": str(ref)},
+            ], expected_bbox_mm={"x": 40.0, "y": 40.0, "z": 12.0})
+
+            result = commission.run(model=None, stl=stl, out_dir=work / "out", plan=plan,
+                                    render=False)
+
+            results = {c.id: c.result for c in result.checks if c.id.startswith("fit-")}
+            self.assertEqual({"fit-I-01": "PASS", "fit-I-02": "FAIL"}, results,
+                             "each band is judged against its own measurement")
 
 
 class SharpEdgeTest(unittest.TestCase):
