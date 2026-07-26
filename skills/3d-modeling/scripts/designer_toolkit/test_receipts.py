@@ -62,6 +62,23 @@ class InPlaceTest(unittest.TestCase):
             self.assertTrue((out / "commission.json").is_file())
 
 
+class MultiPartTest(unittest.TestCase):
+    def test_two_parts_in_one_directory_do_not_overwrite_each_other(self) -> None:
+        """A multi-plate job commissions several parts. The export stem was a
+        fixed `candidate_01`, so the fifth part was the only one left."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            out = work / "out"
+            for name, extents in (("body", (30.0, 20.0, 10.0)), ("lid", (30.0, 20.0, 4.0))):
+                stl = _seated_box(work / f"{name}_src.stl", extents)
+                commission.run(model=None, stl=stl, out_dir=out, candidate_id=name,
+                               plan=plan.direct_template(extents), render=False)
+
+            self.assertTrue((work / "body_src.stl").is_file())
+            self.assertTrue((work / "lid_src.stl").is_file())
+            self.assertTrue((out / "commission.json").is_file())
+
+
 class MatingReferenceTest(unittest.TestCase):
     def test_the_reference_the_fit_was_measured_against_is_hashed(self) -> None:
         """A FITTED run hand-added this row. The gate was handed the file and

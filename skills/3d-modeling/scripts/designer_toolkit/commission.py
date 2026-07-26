@@ -343,6 +343,7 @@ def run(
     plan: dict[str, Any],
     reference: str | None = None,
     render: bool = True,
+    candidate_id: str = "candidate_01",
 ) -> Commission:
     """Build (if given a model), verify everything deterministic, write evidence."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -384,7 +385,9 @@ def run(
     # is a rule violation it then has to clean up -- the charter says never copy
     # a canonical STL into a verifier folder, and this was the thing copying it.
     from .exporter import export_and_hash
-    stem = Path(stl).with_suffix("") if stl is not None else out_dir / "candidate_01"
+    # Named for the candidate, not a fixed `candidate_01`. A multi-part job
+    # commissioning five parts into one directory had them overwrite each other.
+    stem = Path(stl).with_suffix("") if stl is not None else out_dir / candidate_id
     report = export_and_hash(source, str(stem), also_step=stl is None)
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
@@ -562,7 +565,8 @@ def main(argv: list[str] | None = None) -> int:
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
-                         reference=args.reference, render=not args.no_render)
+                         reference=args.reference, render=not args.no_render,
+                         candidate_id=args.candidate_id)
     except (FileNotFoundError, ValueError) as exc:
         sys.stderr.write("commission: " + str(exc) + "\n")
         return 2
