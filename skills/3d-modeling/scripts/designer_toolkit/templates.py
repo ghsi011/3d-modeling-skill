@@ -314,6 +314,71 @@ def bolt_boss(*, outer_d: float, bore_d: float, height: float,
     )
 
 
+def c_clip(*, bore_d: float, wall: float, height: float, mouth_gap: float,
+           flange: tuple[float, float, float] | None = None,
+           screw_d: float = 0.0) -> Built:
+    """A C-shaped channel that snaps over a round thing, on an optional flange.
+
+    Cable clip, hose clamp, rail retainer, pen holder. The channel axis stands
+    along Z on purpose, which is the whole reason this template is worth having:
+    a horizontal round bore carries an unsupported crown that no surrounding
+    geometry can remove, and four archived runs each rediscovered that. Standing
+    it up makes every wall a vertical extrusion, so the part is self-supporting
+    by construction rather than by a designer getting the orientation right.
+    """
+    if bore_d <= 0 or wall <= 0 or height <= 0:
+        raise ValueError(f"bore, wall and height must be positive, got "
+                         f"{bore_d}, {wall}, {height}")
+    if not 0 < mouth_gap < bore_d + 2 * wall:
+        raise ValueError(f"mouth_gap must open the channel without severing it, got {mouth_gap}")
+
+    outer_d = bore_d + 2 * wall
+    base_h = 0.0
+    pieces = []
+    if flange is not None:
+        fw, fd, fh = (float(v) for v in flange)
+        if min(fw, fd, fh) <= 0:
+            raise ValueError(f"flange extents must be positive, got {flange}")
+        base_h = fh
+        pieces.append(_box((fw, fd, fh), (fw / 2, fd / 2, fh / 2)))
+        centre = (fw - outer_d / 2 - wall, fd / 2)
+    else:
+        centre = (outer_d / 2, outer_d / 2)
+
+    ring = trimesh.creation.annulus(r_min=bore_d / 2, r_max=outer_d / 2, height=height,
+                                    sections=96)
+    ring.apply_translation((centre[0], centre[1], base_h + height / 2))
+    pieces.append(ring)
+    part = trimesh.boolean.union(pieces) if len(pieces) > 1 else pieces[0]
+
+    # The mouth is a straight-walled slot, not a radial wedge: a pie-slice cut
+    # leaves cheek faces a few degrees past the overhang screen, which one run
+    # measured at 293 mm2 and spent a build cycle removing.
+    mouth = _box((outer_d, mouth_gap, height * 3),
+                 (centre[0] + outer_d / 2, centre[1], base_h + height / 2))
+    part = _seated(trimesh.boolean.difference([part, mouth]))
+
+    if screw_d > 0 and flange is not None:
+        hole = trimesh.creation.cylinder(radius=screw_d / 2, height=base_h * 3, sections=48)
+        hole.apply_translation((outer_d / 2, flange[1] / 2, base_h / 2))
+        part = trimesh.boolean.difference([part, hole])
+
+    extents = part.bounds[1] - part.bounds[0]
+    return Built(
+        part=part,
+        params={
+            "wall_mm": float(wall),
+            "overall_mm": {"x": float(extents[0]), "y": float(extents[1]),
+                           "z": float(extents[2])},
+            # Declared so the pre-build stage can see it is already resolved:
+            # the channel stands along the print axis, so there is no crown.
+            "horizontal_bores": [],
+        },
+        notes=(f"channel bore {bore_d} mm, {wall} mm wall, {mouth_gap} mm mouth, axis along "
+               "Z so every wall is a vertical extrusion",),
+    )
+
+
 def stack(*builts: Built, gap: float = 0.0) -> Built:
     """Lay several parts out side by side along X, all seated on the bed.
 
@@ -358,6 +423,12 @@ CATALOGUE: dict[str, tuple[str, str]] = {
         "a shelled wrap around a slab device: phone case, remote sleeve, "
         "instrument boot -- and it returns the mating reference with it",
         "device_case(device=(73.6, 155.6, 8.5), wall=1.5, clearance=0.25, corner_radius=9.0)",
+    ),
+    "c_clip": (
+        "a C-channel that snaps over a round thing, on an optional flange: cable "
+        "clip, hose clamp, rail retainer -- axis along Z, so self-supporting",
+        "c_clip(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0, "
+        "flange=(40, 22, 5), screw_d=4.5)",
     ),
     "bolt_boss": (
         "a screw boss or standoff, reporting its annulus wall and aspect ratio",

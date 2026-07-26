@@ -214,6 +214,60 @@ class BoltBossTest(unittest.TestCase):
             templates.bolt_boss(outer_d=4.0, bore_d=4.0, height=10.0)
 
 
+class CClipTest(unittest.TestCase):
+    """The part four runs each spent 18-29 minutes on, and one spent 47."""
+
+    def _clip(self, **kw):
+        args = dict(bore_d=12.0, wall=3.0, height=9.0, mouth_gap=9.0,
+                    flange=(40.0, 22.0, 5.0), screw_d=4.5)
+        args.update(kw)
+        return templates.c_clip(**args)
+
+    def test_it_is_self_supporting_by_construction(self) -> None:
+        """The whole reason the template exists. A horizontal round bore carries
+        a crown no surrounding geometry removes; standing the channel along the
+        print axis makes every wall a vertical extrusion."""
+        from designer_toolkit import metrics
+
+        built = self._clip()
+
+        self.assertAlmostEqual(0.0, metrics.overhang_area(built.part, threshold=-0.73),
+                               places=6)
+        self.assertAlmostEqual(0.0, metrics.overhang_area(built.part,
+                                                          threshold=templates.deg_to_normal_z(45)),
+                               places=6)
+
+    def test_the_reported_size_is_the_size_it_built(self) -> None:
+        built = self._clip()
+
+        measured = built.part.bounds[1] - built.part.bounds[0]
+        for axis, index in (("x", 0), ("y", 1), ("z", 2)):
+            self.assertAlmostEqual(built.params["overall_mm"][axis], measured[index], places=4)
+
+    def test_it_is_a_single_watertight_solid_on_the_bed(self) -> None:
+        built = self._clip()
+
+        self.assertTrue(built.part.is_watertight)
+        self.assertEqual(1, mesh_io.connected_component_count(built.part))
+        self.assertAlmostEqual(0.0, float(built.part.bounds[0][2]), places=9)
+
+    def test_the_mouth_actually_opens_the_channel(self) -> None:
+        closed = self._clip(mouth_gap=0.5)
+        open_wide = self._clip(mouth_gap=9.0)
+
+        self.assertLess(open_wide.part.volume, closed.part.volume)
+
+    def test_a_mouth_that_would_sever_the_part_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._clip(mouth_gap=30.0)
+
+    def test_it_works_without_a_flange(self) -> None:
+        built = self._clip(flange=None, screw_d=0.0)
+
+        self.assertTrue(built.part.is_watertight)
+        self.assertAlmostEqual(9.0, built.params["overall_mm"]["z"], places=4)
+
+
 class StackTest(unittest.TestCase):
     def test_parts_are_laid_out_without_overlapping(self) -> None:
         a = templates.panel(width=40.0, depth=30.0, thickness=3.0)

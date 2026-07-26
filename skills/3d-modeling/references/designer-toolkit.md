@@ -94,7 +94,7 @@ part, PARAMS = built.part, built.params
 That model is four lines, and the whole deterministic path from it — build, export,
 re-import, every check, both receipts — measures about one second.
 
-`box_shell`, `panel` (a plate with rectangular or round openings), `device_case`,
+`box_shell`, `panel` (a plate with rectangular or round openings), `device_case`, `c_clip`,
 `bolt_boss`, and `stack` (several parts laid out for one plate). Each returns geometry *and*
 the `PARAMS` describing it,
 computed from the same arithmetic that built the solid — so `wall_mm` is the wall that exists
@@ -108,6 +108,12 @@ false interference caused by forgetting to round its corners, and another added 
 by hand because a device resting flush on the cavity floor reads zero clearance however
 correct its walls are. A reference derived from the cavity's own arithmetic cannot describe a
 different device from the cavity.
+
+`c_clip` encodes an orientation decision rather than a shape. A horizontal round bore carries
+an unsupported crown that no surrounding geometry removes — four runs each rediscovered that,
+one of them across three build cycles — so the channel axis stands along Z and every wall
+becomes a vertical extrusion. The part is self-supporting by construction instead of by a
+designer choosing the right orientation.
 
 The point is not saved typing, it is that a hand-written model cannot be *asked* anything.
 `panel` reports the narrowest material left between its openings and the panel edge, so a plate
