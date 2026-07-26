@@ -130,6 +130,24 @@ def run(*, job_id: str, template: str, raw_params: list[str], bbox: tuple[float,
     return code, log
 
 
+def _write(message: str) -> None:
+    """Write to stderr without a code page being able to fail the run.
+
+    The closing summary used to be ASCII by construction, for a stated reason: a
+    Windows console on a legacy code page raises UnicodeEncodeError on an
+    em-dash, which turns a finished, passing job into a traceback at its final
+    line. That guarantee ended the moment this began quoting contract lines back
+    verbatim -- `job_state.md` has an em-dash in it, put there by this package.
+
+    So the constraint moves from the message to the write. A console that can
+    show the character gets it exactly, which is what makes the quoted line
+    usable as an edit target; one that cannot degrades a character instead of
+    losing the whole report.
+    """
+    encoding = getattr(sys.stderr, "encoding", None) or "utf-8"
+    sys.stderr.write(message.encode(encoding, "backslashreplace").decode(encoding, "replace"))
+
+
 def _outstanding(out: Path) -> list[str]:
     """Where every unanswered field is, as `file:line` plus what it is asking.
 
@@ -151,14 +169,12 @@ def _outstanding(out: Path) -> list[str]:
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if intake_module.REQUIRED not in line and "<!-- REQUIRED" not in line:
                 continue
-            # The row's own first cell for a table, otherwise the line's opening
-            # words: enough for the reader to know which judgment is being asked
-            # for without opening the file to find out.
-            label = line.strip()
-            if label.startswith("|"):
-                label = label.strip("|").split("|")[0].strip()
-            label = " ".join(label.split())[:64]
-            found.append(f"{path.name}:{number}  {label}")
+            # The whole line, untruncated. The first version cut it at 64
+            # characters, which located the field and then stopped short of
+            # letting anyone edit it: a run reported the text arriving broken
+            # mid-word, so an exact-string replacement was impossible without
+            # opening the file anyway -- which is the read this exists to save.
+            found.append(f"{path.name}:{number}\n    {line.rstrip()}")
     return found
 
 
@@ -223,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else {}
     coverage = payload.get("coverage") or {}
     outstanding = _outstanding(args.out)
-    sys.stderr.write(
+    _write(
         f"\n{coverage.get('ran', '?')} of {coverage.get('declared', '?')} checks ran"
         + (f"; {', '.join(coverage['skipped'])} did not" if coverage.get("skipped") else "")
         # ASCII only. This is the last thing a successful run prints, and a

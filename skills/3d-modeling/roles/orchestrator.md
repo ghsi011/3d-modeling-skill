@@ -179,6 +179,10 @@ and it decides which phases run, not how verbose the record is.
   editing a file that was written a second ago. Do not let a scaffold's confidence stand in
   for a judgment you have not actually made.
 
+  `--require` names contracts, not filenames: `print_plan` resolves to whichever of
+  `print_plan.md` / `print_plan.json` / `print_plan_checks.json` is on disk, and a `DIRECT`
+  job has the last. Do not spend a turn checking.
+
   Name the contracts rather than passing `--require all`: this route dispatches nobody, so no
   `verification_report.md` is ever written, and `all` demands one. Those four are what a
   `DIRECT` job produces, and naming them keeps an absent contract loud — without `--require`

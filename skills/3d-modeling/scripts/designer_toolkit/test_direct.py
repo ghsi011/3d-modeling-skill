@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from . import direct
@@ -178,13 +179,36 @@ class TestDirect(unittest.TestCase):
             rows = direct._outstanding(out)
             self.assertTrue(rows, "a fresh project has judgments left to answer")
             for row in rows:
-                name, _, rest = row.partition(":")
-                number, _, label = rest.partition("  ")
+                where, _, quoted = row.partition("\n")
+                name, _, number = where.partition(":")
                 self.assertTrue((out / name).is_file(), f"{name} must exist")
                 line = (out / name).read_text(encoding="utf-8").splitlines()[int(number) - 1]
                 self.assertIn("<!-- REQUIRED", line,
                               "the line named must be the one carrying the marker")
-                self.assertTrue(label.strip(), "each row must say what is being asked")
+                self.assertEqual(line.rstrip(), quoted.strip(),
+                                 "the line must arrive whole: a truncated one locates the "
+                                 "field and then cannot be used to edit it")
+
+    def test_a_legacy_code_page_cannot_fail_a_finished_job(self) -> None:
+        """The closing summary was ASCII by construction until it began quoting
+        contract lines back, and `job_state.md` carries an em-dash this package
+        put there. On a console that cannot encode it, the old write would raise
+        UnicodeEncodeError and turn a passing job into a traceback at its final
+        line -- after every check had already passed."""
+        import io
+
+        class LegacyConsole(io.StringIO):
+            encoding = "cp437"
+
+            def write(self, text: str) -> int:
+                text.encode(self.encoding)      # raises exactly as the console would
+                return super().write(text)
+
+        console = LegacyConsole()
+        with unittest.mock.patch.object(direct.sys, "stderr", console):
+            direct._write("an em-dash — and a job that must still finish\n")
+
+        self.assertIn("job that must still finish", console.getvalue())
 
     def test_a_field_that_cannot_be_answered_is_not_listed_as_one_that_can(self) -> None:
         """With no renderer `visual_accept` carries a different marker saying so.
