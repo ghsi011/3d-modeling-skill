@@ -2,7 +2,7 @@
 """Visual + layout verification of a candidate model against a reference model.
 
 Usage:
-  python3 verify_visual.py <ref-stl-or-dir> <cand-stl-or-dir> <out-prefix> [--test T4] [--json]
+  uv run --project <skill> --frozen python <skill>/scripts/verify_visual.py <ref-stl-or-dir> <cand-stl-or-dir> <out-prefix> [--test T4] [--json]
 
 Produces:
   <out-prefix>_compare.png   side-by-side composite: ref row / cand row (identical
@@ -97,7 +97,7 @@ def _require_section_stack():
     if missing:
         raise ImportError(
             f"slice_union() needs {', '.join(missing)} "
-            f"(mesh cross-section + ring extraction): pip install -e \".[visual]\""
+            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev --extra visual"
         )
     _section_stack_ok = True
 

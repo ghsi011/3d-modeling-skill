@@ -4,10 +4,10 @@ per part. Bambu Studio / OrcaSlicer import the result as a single object with
 individually selectable parts (assign a filament per part for multi-color).
 
 Usage:
-    python3 make_3mf.py out.3mf "KnobBody (black)=body.stl" "Pattern (white)=pattern.stl"
+    uv run --project <skill> --frozen python <skill>/scripts/make_3mf.py out.3mf "KnobBody (black)=body.stl" "Pattern (white)=pattern.stl"
 
 Parts must already share one coordinate system (exported from the same CAD doc).
-Requires: pip install trimesh numpy
+Requires: trimesh, numpy (bundled; see uv sync --frozen --no-dev)
 """
 import sys
 import io

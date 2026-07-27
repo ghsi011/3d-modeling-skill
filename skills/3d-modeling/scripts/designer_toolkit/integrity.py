@@ -14,7 +14,7 @@ triangle soup: a raw parse of a perfectly good part reports many components and
 format, not a defect. `degenerate_faces` is the number that would catch a real
 one.
 
-    python <skill>/scripts/dt.py integrity out/candidate-01.stl
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py integrity out/candidate-01.stl
 """
 from __future__ import annotations
 

@@ -3,13 +3,13 @@
 Render preview images of an exported mesh for visual inspection.
 
 Usage:
-    python3 preview.py model.stl [output.png]
-    python3 preview.py model.stl --views multi       # 6-view technical sheet
-    python3 preview.py model.stl --views iso          # single isometric
-    python3 preview.py model.stl --resolution 800     # higher-res per view
+    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl [output.png]
+    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --views multi       # 6-view technical sheet
+    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --views iso          # single isometric
+    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --resolution 800     # higher-res per view
 
 Dependencies:
-    pip install trimesh pyrender Pillow
+    uv sync --frozen --no-dev --extra visual  (trimesh, pyrender, Pillow)
 """
 import sys
 import os
@@ -273,7 +273,7 @@ def _render_frame(scene, radius, center, elev, azim, renderer):
         scene.remove_node(cam_node)
         raise RuntimeError(
             f"Rendering failed: {e}\n"
-            "On Linux without GPU, try: PYOPENGL_PLATFORM=osmesa python3 preview.py ..."
+            "On Linux without GPU, try: PYOPENGL_PLATFORM=osmesa uv run --project <skill> --frozen python <skill>/scripts/preview.py ..."
         ) from e
     scene.remove_node(cam_node)
 

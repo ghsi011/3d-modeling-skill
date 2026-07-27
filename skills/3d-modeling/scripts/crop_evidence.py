@@ -14,9 +14,9 @@ cost as much as the entire runtime contract. Two habits made that worse:
 So: `crop` caps the long edge and writes JPEG, and `contact-sheet` puts many
 images on one page so triage costs one read instead of seventeen.
 
-    python crop_evidence.py contact-sheet evidence/*.jpg --out sheet.jpg
-    python crop_evidence.py crop photo.jpg --box 0.30 0.40 0.62 0.58 --out c.jpg
-    python crop_evidence.py rotations photo.jpg --out r.jpg
+    uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py contact-sheet evidence/*.jpg --out sheet.jpg
+    uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py crop photo.jpg --box 0.30 0.40 0.62 0.58 --out c.jpg
+    uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py rotations photo.jpg --out r.jpg
 """
 from __future__ import annotations
 

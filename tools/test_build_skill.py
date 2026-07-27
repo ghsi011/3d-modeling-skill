@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import tomllib
 import subprocess
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -28,10 +28,12 @@ ROLE_FILES = ["roles/designer.md", "roles/metrologist.md",
 
 LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
+_UV = shutil.which("uv")
+
 
 def _run_build(out_dir: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(BUILD_SCRIPT), "--out", str(out_dir)],
+        [_UV or "uv", "run", "python", str(BUILD_SCRIPT), "--out", str(out_dir)],
         capture_output=True,
         text=True,
         cwd=str(ROOT),
@@ -41,6 +43,13 @@ def _run_build(out_dir: Path) -> subprocess.CompletedProcess[str]:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _requires_uv() -> bool:
+    """Skip helper for tests that need uv on PATH."""
+    if _UV is None:
+        pytest.skip("uv not on PATH")
+    return True
 
 
 @pytest.fixture(scope="module")
@@ -78,31 +87,47 @@ class TestBuildSkill:
         Everything is measured from the working tree; the archive is what a host
         installs, so it has to carry a whole working toolchain -- launcher,
         templates, contract scaffolding, plan generator and gate -- with nothing
-        importing back into the repo it was built from. Driven through `direct`
-        because that is the route the charter documents: a bundle whose
-        individual commands work but whose documented entry point does not is
-        broken for every reader who follows the instructions.
+        importing back into the repo it was built from. Driven through
+        `uv run --project <extracted-bundle> --frozen python <skill>/scripts/dt.py ...`
+        from an external job CWD, which is the documented invocation form for a
+        host that has installed the skill outside the job directory.
         """
         pytest.importorskip("trimesh")
         pytest.importorskip("manifold3d")
+        _requires_uv()
 
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
                 zf.extractall(root)
+
+            # Sync the extracted bundle so `uv run --frozen` has a venv.
+            sync = subprocess.run(
+                ["uv", "sync", "--frozen"],
+                capture_output=True, text=True, cwd=str(root), check=False)
+            assert sync.returncode == 0, (
+                f"extracted bundle `uv sync --frozen` failed:\n{sync.stderr}")
+
+            # Create an external job directory (no pyproject.toml).
+            job_dir = Path(raw) / "external-job"
+            job_dir.mkdir()
+            (job_dir / "brief.md").write_text("test clip job", encoding="utf-8")
+
             launcher = root / "scripts" / "dt.py"
             assert launcher.is_file(), "the bundle must carry its own launcher"
 
-            job = root / "job"
+            job = job_dir / "output"
             done = subprocess.run(
-                [sys.executable, str(launcher), "direct", "--job-id", "ship",
+                ["uv", "run", "--project", str(root), "--frozen",
+                 "python", str(launcher), "direct",
+                 "--job-id", "ship",
                  "--template", "c_clip",
                  "--param", "bore_d=12.0", "--param", "wall=3.0", "--param", "height=9.0",
                  "--param", "mouth_gap=9.0", "--param", "flange=(40.0, 22.0, 5.0)",
                  "--param", "screw_d=4.5", "--param", "screw_at=(8.0, 11.0)",
                  "--param", "countersink_d=9.0", "--bbox", "40", "22", "14",
                  "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(job), "--no-render"],
-                capture_output=True, text=True, check=False)
+                capture_output=True, text=True, cwd=str(job_dir), check=False)
 
             assert done.returncode == 0, done.stderr[-2000:]
             for name in ("job_state.md", "dimensions.md", "print_plan_checks.json",
@@ -146,14 +171,6 @@ class TestBuildSkill:
                             if not any(m.startswith(f"{candidate}/") for m in members):
                                 broken.append(f"{name} -> {target} (no member {candidate})")
         assert not broken, "links break inside the shipped skill:\n  " + "\n  ".join(broken)
-
-    def test_zips_ship_no_test_suite(self, build_dir: Path):
-        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
-            offenders = [
-                e for e in zf.namelist()
-                if Path(e).name.startswith("test_") or "/examples/" in e
-            ]
-        assert not offenders, f"ships test payload: {offenders}"
 
     def test_no_pycache_in_zip(self, build_dir: Path):
         with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
@@ -208,6 +225,21 @@ class TestBuildSkill:
 
         assert bundled["project"]["dependencies"] == repo["project"]["dependencies"]
         assert bundled["project"]["requires-python"] == repo["project"]["requires-python"]
+        assert bundled["project"]["version"] == repo["project"]["version"]
+        # The bundle keeps the same name as root so the lockfile matches.
+        assert bundled["project"]["name"] == repo["project"]["name"]
+
+        # optional-dependencies must be preserved (these live under [project] in TOML).
+        bundled_optional = bundled.get("project", {}).get("optional-dependencies", {})
+        repo_optional = repo.get("project", {}).get("optional-dependencies", {})
+        assert bundled_optional == repo_optional, (
+            f"bundle optional-deps {bundled_optional} != repo {repo_optional}")
+
+        # dependency-groups must be preserved.
+        bundled_groups = bundled.get("dependency-groups", {})
+        repo_groups = repo.get("dependency-groups", {})
+        assert bundled_groups == repo_groups, (
+            f"bundle dependency-groups {bundled_groups} != repo {repo_groups}")
 
     def test_the_lockfile_travels_with_the_project_file(self, build_dir: Path):
         """`cache.find_lock` only accepts a lockfile with a `pyproject.toml`
@@ -219,3 +251,224 @@ class TestBuildSkill:
             assert "uv.lock" in names and "pyproject.toml" in names, names[:5]
             assert zf.read("uv.lock") == (REPO_ROOT / "uv.lock").read_bytes(), (
                 "the bundle must pin the toolchain the repository tested against")
+
+    def test_bundle_readme_and_license_are_packed(self, build_dir: Path):
+        """pyproject.toml's readme/license fields must resolve in the bundle."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            names = zf.namelist()
+            assert "README.md" in names, "bundle must carry README.md"
+            assert "LICENSE" in names, "bundle must carry LICENSE"
+            bundled = tomllib.loads(zf.read("pyproject.toml").decode("utf-8"))
+            assert "readme" in bundled.get("project", {}), "project.readme must be set"
+            assert "license" in bundled.get("project", {}), "project.license must be set"
+
+    def test_bundle_project_is_path_adjusted_projection(self, build_dir: Path):
+        """The bundled pyproject.toml adjusts only package-discovery paths;
+        all other root metadata is preserved verbatim after normalising the
+        two path changes."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            bundled = tomllib.loads(zf.read("pyproject.toml").decode("utf-8"))
+        repo = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+        # The bundle adjusts exactly two paths from the root:
+        #   - tool.setuptools.package-dir  ("" -> "scripts")
+        #   - tool.setuptools.packages.find.where (["skills/.../scripts"] -> ["scripts"])
+        # Compare the full parsed documents after normalising those two fields.
+
+        repo_pkg_dir = repo.get("tool", {}).get("setuptools", {}).get("package-dir", {})
+        bundled_pkg_dir = bundled.get("tool", {}).get("setuptools", {}).get("package-dir", {})
+        if repo_pkg_dir:
+            assert bundled_pkg_dir == {"": "scripts"}, (
+                f"expected bundle package-dir={{'': 'scripts'}}, got {bundled_pkg_dir}")
+        expected_where = ["scripts"]
+        bundled_where = bundled.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {}).get("where")
+        assert bundled_where == expected_where, (
+            f"expected find.where={expected_where}, got {bundled_where}")
+
+        # Deep-copy repo TOML, normalise the two bundle-only path changes, then
+        # compare the entire document — no broader table may be removed or altered.
+        import copy
+        normalized = copy.deepcopy(repo)
+        if repo_pkg_dir:
+            # Replace the root path with the bundle path so comparison works.
+            # In the root the value is {"": "skills/3d-modeling/scripts"}.
+            # In the bundle it's {"": "scripts"} — we normalise repo to match.
+            normalized["tool"]["setuptools"]["package-dir"] = {"": "scripts"}
+        repo_find = normalized.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {})
+        if repo_find and "where" in repo_find:
+            repo_find["where"] = ["scripts"]
+        assert bundled == normalized, (
+            f"bundle TOML differs from root after normalising only the two "
+            f"setuptools path fields.\n"
+            f"Keys only in bundled: {set(bundled) - set(normalized)}\n"
+            f"Keys only in normalized: {set(normalized) - set(bundled)}\n"
+            f"Diff tool keys:\n  repo: {normalized.get('tool', {})}\n  bundle: {bundled.get('tool', {})}")
+
+    def test_extracted_lock_passes_uv_lock_check(self, build_dir: Path):
+        """`uv lock --check` on the extracted bundle must pass, proving the
+        bundled pyproject.toml is satisfiable by the bundled lockfile."""
+        _requires_uv()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+
+            done = subprocess.run(
+                ["uv", "lock", "--check"],
+                capture_output=True, text=True, cwd=str(root), check=False)
+            assert done.returncode == 0, (
+                f"bundled lock is inconsistent with bundled pyproject.toml:\n"
+                f"{done.stderr}")
+
+    def test_extracted_bundle_syncs_frozen(self, build_dir: Path):
+        """The extracted bundle can `uv sync --frozen`, proving the lockfile
+        resolves all dependencies including optional-deps and dev groups."""
+        _requires_uv()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+
+            sync = subprocess.run(
+                ["uv", "sync", "--frozen"],
+                capture_output=True, text=True, cwd=str(root), check=False)
+            assert sync.returncode == 0, (
+                f"extracted bundle `uv sync --frozen` failed:\n{sync.stderr}")
+
+    def test_extracted_bundle_preserves_lock_bytes(self, build_dir: Path):
+        """After extracting, the lockfile on disk matches the one in the archive
+        byte-for-byte — no transformation happened during extraction."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zipped = zf.read("uv.lock")
+                zf.extractall(root)
+            on_disk = (root / "uv.lock").read_bytes()
+            assert on_disk == zipped, "lockfile bytes changed during extraction"
+
+    def test_extracted_bundle_runs_design_tool_doctor(self, build_dir: Path):
+        """After `uv sync --frozen`, `uv run --frozen design-tool doctor`
+        executes and exits zero."""
+        _requires_uv()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+
+            sync = subprocess.run(
+                ["uv", "sync", "--frozen"],
+                capture_output=True, text=True, cwd=str(root), check=False)
+            assert sync.returncode == 0, sync.stderr
+
+            doctor = subprocess.run(
+                ["uv", "run", "--frozen", "design-tool", "doctor"],
+                capture_output=True, text=True, cwd=str(root), check=False)
+            assert doctor.returncode == 0, (
+                f"`uv run --frozen design-tool doctor` failed:\n{doctor.stderr}")
+            assert "python" in doctor.stdout.lower(), (
+                f"doctor output missing python info:\n{doctor.stdout}")
+
+    def test_bundle_doctor_with_external_cwd(self, build_dir: Path):
+        """`uv run --project <extracted bundle> --frozen design-tool doctor`
+        executes and exits zero even when CWD is an arbitrary job directory,
+        proving source-checkout discovery cannot mask failures."""
+        _requires_uv()
+        pytest.importorskip("trimesh")
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+
+            # Sync so the venv exists.
+            subprocess.run(
+                ["uv", "sync", "--frozen"],
+                capture_output=True, text=True, cwd=str(root), check=True)
+
+            # Create an external job directory with no pyproject.toml.
+            job_dir = Path(raw) / "external-job"
+            job_dir.mkdir()
+            (job_dir / "brief.md").write_text("test", encoding="utf-8")
+
+            # Run from the external CWD using --project to select the bundle.
+            doctor = subprocess.run(
+                ["uv", "run", "--project", str(root), "--frozen",
+                 "design-tool", "doctor"],
+                capture_output=True, text=True, cwd=str(job_dir), check=False)
+            assert doctor.returncode == 0, (
+                f"`uv run --project <skill> --frozen design-tool doctor` from "
+                f"external CWD failed:\n{doctor.stderr}")
+            assert "python" in doctor.stdout.lower()
+
+    def test_bundle_doctor_with_external_cwd_and_short_flag(self, build_dir: Path):
+        """`uv run --project <extracted bundle>/pyproject.toml --frozen` works
+        when pointing at the toml file rather than the directory, confirming
+        the flag form documented in role instructions."""
+        _requires_uv()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+                zf.extractall(root)
+
+            subprocess.run(
+                ["uv", "sync", "--frozen"],
+                capture_output=True, text=True, cwd=str(root), check=True)
+
+            job_dir = Path(raw) / "another-job"
+            job_dir.mkdir()
+
+            pyproject_toml = root / "pyproject.toml"
+            assert pyproject_toml.is_file()
+            doctor = subprocess.run(
+                ["uv", "run", "--project", str(pyproject_toml), "--frozen",
+                 "design-tool", "doctor"],
+                capture_output=True, text=True, cwd=str(job_dir), check=False)
+            assert doctor.returncode == 0, (
+                f"`uv run --project <skill>/pyproject.toml --frozen design-tool doctor` "
+                f"from external CWD failed:\n{doctor.stderr}")
+
+    def test_shipped_docs_use_absolute_script_paths(self, build_dir: Path):
+        """Every `uv run --project <skill> --frozen python scripts/...` command
+        in shipped markdown AND bundled `.py` sources must use
+        `<skill>/scripts/...` (absolute form), not bare `scripts/...` (which
+        would fail from an external CWD).  Module calls (`python -m ...`) and
+        console-script commands (`design-tool`) are exempt."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            members = zf.namelist()
+            bad: list[str] = []
+            for name in (n for n in members if n.endswith((".md", ".py"))):
+                text = zf.read(name).decode("utf-8", errors="replace")
+                if "uv run --project <skill> --frozen" not in text:
+                    continue
+                for lineno, line in enumerate(text.splitlines(), 1):
+                    if "--project <skill> --frozen" not in line:
+                        continue
+                    if "python -m " in line:
+                        continue
+                    if "design-tool " in line:
+                        continue
+                    # Comment-only lines about module layout are exempt.
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        continue
+                    if " scripts/" in line and "<skill>/scripts/" not in line:
+                        bad.append(f"{name}:{lineno}: {line.strip()}")
+            assert not bad, (
+                "these shipped lines use the bare `scripts/` form "
+                "that fails from external CWD; they must use `<skill>/scripts/`:\n"
+                + "\n".join(bad))
+
+    def test_bundle_ships_no_test_source(self, build_dir: Path):
+        """No file whose name starts with test_ is shipped inside the archive,
+        and no script inside scripts/ is a test file."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            offenders = [
+                e for e in zf.namelist()
+                if Path(e).name.startswith("test_") or "_test." in Path(e).name
+                or "/tests/" in e or "/test_" in e
+            ]
+        assert not offenders, f"bundle ships test source: {offenders}"

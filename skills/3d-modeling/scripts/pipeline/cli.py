@@ -149,7 +149,7 @@ def doctor(argv: list[str]) -> int:
     parser.parse_args(argv)
     import importlib.metadata as md
 
-    print(f"python {sys.version.split()[0]}")
+    print(f"uv run --project <skill> --frozen python {sys.version.split()[0]}")
     for name in ("trimesh", "manifold3d", "build123d", "numpy", "pillow"):
         try:
             print(f"  [yes] {name:12s} {md.version(name)}")

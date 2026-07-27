@@ -20,7 +20,7 @@ costs a second, it is the only thing that would notice a receipt describing a
 different mesh, and the binding proof is reported beside it so a reader can see
 which of the two actually settled the question.
 
-    python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir> \
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir> \
         --job-id <job> --updated-utc <iso8601>
 """
 from __future__ import annotations

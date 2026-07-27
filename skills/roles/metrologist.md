@@ -64,9 +64,9 @@ render-over-photo overlays.
    dimension, and open only those:
 
    ```bash
-   python ../3d-modeling/scripts/crop_evidence.py contact-sheet evidence/*.jpg --out sheet.jpg
-   python ../3d-modeling/scripts/crop_evidence.py crop evidence/x.jpg --box 0.3 0.4 0.62 0.58 --out read1.jpg
-   python ../3d-modeling/scripts/crop_evidence.py rotations evidence/x.jpg --out turns.jpg   # when a display is ambiguous
+   uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py contact-sheet evidence/*.jpg --out sheet.jpg
+   uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py crop evidence/x.jpg --box 0.3 0.4 0.62 0.58 --out read1.jpg
+   uv run --project <skill> --frozen python <skill>/scripts/crop_evidence.py rotations evidence/x.jpg --out turns.jpg   # when a display is ambiguous
    ```
 
    Crops are capped and saved as JPEG deliberately: images are downsampled before you see

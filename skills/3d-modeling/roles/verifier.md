@@ -81,10 +81,10 @@ to compare against.
 
   ```bash
   V=<your-own-dir>                       # never the project root
-  python <skill>/scripts/dt.py audit <project-dir> --out $V --job-id <job>         --updated-utc <iso8601>
-  python <skill>/scripts/dt.py screen <project-dir> --out $V     # what nobody declared
-  python <skill>/scripts/dt.py crop crop <project-dir>/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
-  python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
+  uv run --project <skill> --frozen python <skill>/scripts/dt.py audit <project-dir> --out $V --job-id <job>         --updated-utc <iso8601>
+  uv run --project <skill> --frozen python <skill>/scripts/dt.py screen <project-dir> --out $V     # what nobody declared
+  uv run --project <skill> --frozen python <skill>/scripts/dt.py crop crop <project-dir>/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
+  uv run --project <skill> --frozen python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
   ```
 
   `audit` settles the binding, the recomputation and both contract checks in one call, because
@@ -122,7 +122,7 @@ has to.
    output directory:
 
    ```bash
-   python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir>       --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py audit <project-dir> --out <verifier-dir>       --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
    ```
 
    It reports the hash binding, an independent recomputation compared check-by-check against
@@ -151,8 +151,8 @@ has to.
 5. Where the sheet declares a number, ask the solid for it rather than writing a sampler:
 
    ```bash
-   python <skill>/scripts/dt.py probe <canonical.stl> --section 12.5
-   python <skill>/scripts/dt.py probe <canonical.stl> --hole=-8,13 --z 1.2 --nominal 6.5
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py probe <canonical.stl> --section 12.5
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py probe <canonical.stl> --hole=-8,13 --z 1.2 --nominal 6.5
    ```
 
    Ask at the position the *sheet* gives, not the one the model used — that is the whole
@@ -229,7 +229,7 @@ has to.
 8b. Draft the report from your own recomputation rather than retyping it:
 
    ```bash
-   python <skill>/scripts/dt.py report --commission <verifier-dir>/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py report --commission <verifier-dir>/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
    ```
 
    It transcribes the numeric columns from the file you just produced and leaves every

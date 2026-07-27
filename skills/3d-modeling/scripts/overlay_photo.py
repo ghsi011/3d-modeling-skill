@@ -2,7 +2,7 @@
 """Render-over-photo overlay: draw a candidate model's slice boundaries on top of the
 user's (near-orthographic) top photo, plus a residual metric.
 
-Usage: python3 overlay_photo.py <cand.stl> <photo.png> <out.png> [z_mm ...]
+Usage: uv run --project <skill> --frozen python <skill>/scripts/overlay_photo.py <cand.stl> <photo.png> <out.png> [z_mm ...]
 
 Mapping: candidate slice bbox is fit to the photo's segmented body bbox (scale+translate,
 y flipped: model +Y = photo up). Residual = mean/p90 distance (mm) from candidate

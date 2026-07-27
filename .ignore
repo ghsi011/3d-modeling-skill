@@ -1,0 +1,3 @@
+#! Keep local deep-work state readable to repository tooling.
+!.slim/deepwork/
+!.slim/deepwork/**

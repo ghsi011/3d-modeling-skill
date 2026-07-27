@@ -34,7 +34,7 @@ STEP_FRACTION = 0.08
 # Measured, and the measurement is the point -- an earlier version of this flag
 # said True on a number that turned out to be measuring something else.
 #
-# `python -m pipeline.corpus` measures it, over every certified template and
+# `uv run --project <skill> --frozen python -m pipeline.corpus` measures it, over every certified template and
 # every defect class. **It currently fails**: screening's own false-negative rate
 # on defects fused to the part is 0.30. Fifteen mutants pass every check here and
 # every contract check -- among them a Ø4 x 8 mm post standing on the floor of a
@@ -63,7 +63,7 @@ STEP_FRACTION = 0.08
 # cannot prove a feature is *absent*, and only the Z axis is profiled.
 CALIBRATED = False
 CALIBRATION_NOTE = (
-    "NOT CALIBRATED. `python -m pipeline.corpus` measures a 0.30 false-negative "
+    "NOT CALIBRATED. `uv run --project <skill> --frozen python -m pipeline.corpus` measures a 0.30 false-negative "
     "rate on defects fused to the part -- a small boss standing on the floor "
     "passes every check here. Screening is evidence, not a substitute for a "
     "look, and this job needs one. It also cannot prove a feature is absent -- a "

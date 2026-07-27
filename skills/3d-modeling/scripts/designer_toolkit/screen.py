@@ -19,7 +19,7 @@ declared". Hand the bundle to whoever, or whatever, is doing the looking.
 
 It renders nothing and decides nothing. The answer is a judgment and stays one.
 
-    python <skill>/scripts/dt.py screen <project-dir> --out <dir>
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py screen <project-dir> --out <dir>
 """
 from __future__ import annotations
 

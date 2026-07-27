@@ -1,6 +1,6 @@
 """Side-effect import: put the ``scripts/`` dir (this package's parent) on
 ``sys.path`` so ``designer_toolkit`` modules can ``import mesh_io`` /
-``from preview import ...`` whether they are run as ``python -m
+``from preview import ...`` whether they are run as ``uv run --project <skill> --frozen python -m
 designer_toolkit.x``, imported by the test bootstrap, or vendored into the
 standalone skill repo. Import this first, before any sibling-script import.
 """

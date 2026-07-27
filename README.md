@@ -164,7 +164,7 @@ Broad screening looks for material the contract never declared — the failure m
 where every declared check passes and the part is still wrong.
 
 **It is not currently calibrated, and the receipt says so.** Run
-`python -m pipeline.corpus` for the live numbers; at the last measurement its
+`uv run python -m pipeline.corpus` for the live numbers; at the last measurement its
 false-negative rate on defects *fused to the part* was **0.30**. A small boss
 standing on a floor passes every check in the pipeline. So a job needs an
 independent look before it can finish, and `final_status.json` states that in
@@ -181,19 +181,18 @@ Two things no calibration could license, and the receipt says these too:
 
 ### Dependencies
 
-Core runtime — every contract and mesh tool, and all but the optional-backend
-tests (see [Running the tests](#running-the-tests) for the two extra test-only
-packages):
+Runtime-only install (no test tooling — use `--group dev` when you need the test
+runner):
 
 ```bash
-uv sync --frozen
+uv sync --frozen --no-dev
 ```
 
 That resolves the lockfile, which is what the cache key hashes — two machines on
 the same lock get the same geometry, and a machine whose lock moved misses rather
-than serving bytes built against different versions. `pip install build123d
-trimesh numpy pillow manifold3d` installs the same four packages if you are not
-using uv, but nothing then pins what you got.
+than serving bytes built against different versions. `pip install` is never used;
+everything goes through uv so the lockfile is the authoritative toolchain
+identity.
 
 Optional extras, declared in `pyproject.toml` and installed only for the
 backends you actually use:
@@ -206,9 +205,12 @@ backends you actually use:
 | `bambu`         | lxml                                              | `make_bambu_3mf.py` (3MF authoring / verify)            |
 
 ```bash
-uv sync --frozen              # the core: uv, build123d, trimesh, manifold3d
-uv sync --frozen --group dev  # plus the test runner
-# optional extras: .[render], .[section], .[visual], .[bambu], .[all]  ...
+uv sync --frozen --no-dev                    # the core: uv, build123d, trimesh, manifold3d
+uv sync --frozen --no-dev --extra render     # core + render
+uv sync --frozen --no-dev --extra section    # core + section
+uv sync --frozen --no-dev --extra all        # core + everything
+uv sync --frozen --group dev                 # core + dev (test runner), no optional extras
+uv sync --frozen --all-extras                # everything including dev
 ```
 
 
@@ -224,7 +226,7 @@ ln -s "$PWD/skills/3d-modeling" ~/.claude/skills/3d-modeling
 
 All five roles are files in the skill's `roles/` directory, the orchestrator
 included; `SKILL.md` is the router that names them. Everything resolves inside
-that one folder, so it installs and moves as a unit — `python tools/build_skill.py`
+that one folder, so it installs and moves as a unit — `uv run python tools/build_skill.py`
 packs exactly this tree into `3d-modeling.skill`.
 
 ## Repository layout
@@ -250,7 +252,7 @@ tools/                    # gen_harness · build_skill · check_internal_links �
 ```
 
 `skills/roles/*.md` are the source of truth. Edit a role there and run
-`python tools/gen_harness.py`; CI fails on drift.
+`uv run python tools/gen_harness.py`; CI fails on drift.
 
 ## Running the tests
 
@@ -278,9 +280,10 @@ It exits non-zero while the gate fails, which it currently does. `gate`,
 `survivors_of_everything` are the fields worth reading.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
-3.11 and 3.12, then `gen_harness.py --check`, `check_internal_links.py` and
-`build_skill.py`. A second job installs `.[section]` and runs the cross-section
-tests, which skip on the core stack.
+3.11 and 3.12 via `uv sync --frozen --all-extras`, then `uv run ruff check`,
+`uv run python tools/gen_harness.py --check`, `uv run python tools/check_internal_links.py`,
+`uv run python tools/build_skill.py` and `uv run pytest` — one job with all
+optional dependencies so the cross-section tests run rather than skip.
 
 ## For agents
 
@@ -292,7 +295,7 @@ Set up the 3d-modeling skill (https://github.com/ghsi011/3d-modeling-skill) for 
 1. Clone it outside this project, e.g. `git clone https://github.com/ghsi011/3d-modeling-skill.git ~/src/3d-modeling-skill`. If the clone already exists, `git pull` instead.
 2. Install the tooling dependencies as the clone's README "Dependencies" section specifies: the core install first, extras only for what this job actually needs.
 3. Install the skill as the clone's README "Installing the skill" section specifies. There is nothing to register per harness: `SKILL.md` is a router and the five roles are files beside it, so any runtime that can read a file and spawn a subagent can run it.
-4. Verify: `pip install pytest` and run `pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
+4. Verify: `uv sync --frozen --group dev` and run `uv run pytest -q` inside the clone, report the pass/skip counts, then confirm `3d-orchestrator` is listed as an available agent here. Do not report success on an unverified step.
 
 Then tell me: what you installed, what you skipped and why, and anything that failed. Do not guess versions or invent commands that are not in the repo's README or docs/tooling.md.
 ```

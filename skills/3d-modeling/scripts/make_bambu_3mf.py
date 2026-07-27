@@ -4,7 +4,7 @@ Weld STL parts into ONE **Bambu Studio project 3MF** with print settings and
 per-part filament assignment already baked in, so opening it in Bambu Studio is
 "import -> eyeball -> slice" with nothing to configure by hand.
 
-    python make_bambu_3mf.py out.3mf "Base (translucent)=base.stl" "Text (CF)=text.stl"
+    uv run --project <skill> --frozen python <skill>/scripts/make_bambu_3mf.py out.3mf "Base (translucent)=base.stl" "Text (CF)=text.stl"
 
 Part-name -> filament rule (the whole point of this script; see PART_RULES):
     name contains "Base"  ->  filament 1, Bambu PETG Translucent, MAIN nozzle

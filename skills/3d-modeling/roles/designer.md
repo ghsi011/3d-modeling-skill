@@ -60,7 +60,7 @@ one, so reading its patterns is a page bought and unused:
 ## Checklist
 
 1. Confirm commission, backend, output folder, units, named datums, tolerances, and contract
-   versions before modeling. Run `python <skill>/scripts/dt.py doctor` first: it names the
+    versions before modeling. Run `uv run --project <skill> --frozen python <skill>/scripts/dt.py doctor` first: it names the
    interpreter, the CAD backends it has, and what each missing extra costs. One archived run
    spent turns discovering by trial which of several interpreters had a kernel, and another
    dropped a datum check on learning mid-build that its environment could not section.
@@ -98,7 +98,7 @@ one, so reading its patterns is a page bought and unused:
    the template rejects before any of them reach the gate:
 
    ```bash
-   python <skill>/scripts/dt.py build --template c_clip \
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py build --template c_clip \
        --param bore_d=12.0 --param wall=3.0 --param height=9.0 --param mouth_gap=9.0 \
        --param 'flange=(40.0, 22.0, 5.0)' --param screw_d=4.5 \
        --param 'screw_at=(8.0, 11.0)' --param countersink_d=9.0 --out model.py
@@ -132,7 +132,7 @@ one, so reading its patterns is a page bought and unused:
 8. Verify with one call and iterate until it exits zero:
 
    ```bash
-   python <skill>/scripts/dt.py commission --model model.py        --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>        [--reference mating.stl]
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py commission --model model.py        --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>        [--reference mating.stl]
    ```
 
    Run it from your own project directory and give it relative paths; `dt.py` is

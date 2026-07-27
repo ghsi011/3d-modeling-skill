@@ -54,3 +54,7 @@ desktop.ini
 .claude/settings.local.json
 
 temp/*
+repomix-output*.xml
+
+# Local deep-work progress state.
+.slim/deepwork/

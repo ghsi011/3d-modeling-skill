@@ -33,8 +33,8 @@ dependencies = [
 # What each extra is FOR is tabled in README.md#dependencies; the comments here
 # only carry what the table cannot -- why a set is shaped the way it is.
 [dependency-groups]
-# Dev-only, kept out of the core install: `uv sync --frozen` gives a working
-# toolchain, `uv sync --frozen --group dev` adds the test runner.
+# Dev-only, kept out of the core install: `uv sync --frozen --no-dev` gives a
+# runtime-only toolchain; `uv sync --frozen --group dev` adds the test runner.
 # scipy/networkx/shapely/rtree are here and NOT on the core path: the legacy
 # toolkit's section tests need them, and the core must stay installable
 # without them.

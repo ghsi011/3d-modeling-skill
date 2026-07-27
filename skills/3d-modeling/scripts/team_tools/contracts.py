@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""CLI entry point: python -m team_tools.contracts <validate|hash|status> <path>
+"""CLI entry point: uv run --project <skill> --frozen python -m team_tools.contracts <validate|hash|status> <path>
 
-Run from skills/3d-modeling/scripts/ (so `team_tools` is an importable package
-on sys.path), or directly as `python team_tools/contracts.py ...` from inside
-team_tools/ itself.
+Resolves when the skill project is selected via --project.  The shorthand
+`uv run --project <skill> --frozen python <skill>/scripts/dt.py validate|status <path>`
+also works from any directory.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Every module in this package is imported bare (``import common``, not
 # ``import team_tools.common``) so the same source works both as
-# `python -m team_tools.contracts` (scripts/ on sys.path, team_tools is a
+# `uv run --project <skill> --frozen python -m team_tools.contracts` (selects the skill project, team_tools resolves as a package)
 # package) and as a direct script invocation (team_tools/ itself on
 # sys.path). This line makes that true in the `-m` case too, since only cwd
 # (scripts/) is added to sys.path there, not scripts/team_tools/.
@@ -86,7 +86,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m team_tools.contracts",
+        prog="uv run --project <skill> --frozen python -m team_tools.contracts",
         description=(
             "Deterministic contract-automation CLI for the 3D team pipeline: validate/hash/"
             "status over the structured-JSON contracts. Passing these "

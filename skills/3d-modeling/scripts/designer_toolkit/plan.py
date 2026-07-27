@@ -15,7 +15,7 @@ of any part. That is also the whole constraint on what may live in this file --
 a default may depend on the printer and the stated envelope, never on the
 geometry being judged.
 
-    python <skill>/scripts/dt.py plan template --bbox 40 22 14 --out print_plan_checks.json
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py plan template --bbox 40 22 14 --out print_plan_checks.json
 """
 from __future__ import annotations
 

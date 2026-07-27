@@ -18,7 +18,7 @@ was never built. `plan check` is deliberately absent: `commission` validates the
 plan it is handed and refuses an ungateable one, so running it separately buys a
 failure one second earlier at the cost of a whole turn.
 
-    python <skill>/scripts/dt.py direct --job-id clip --template c_clip \
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py direct --job-id clip --template c_clip \
         --param bore_d=12.0 ... --bbox 40 22 14 \
         --risk R1_LOW_CONSEQUENCE --updated-utc <iso8601> --out <project>
 """

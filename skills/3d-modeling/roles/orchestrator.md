@@ -201,7 +201,7 @@ and it decides which phases run, not how verbose the record is.
   matching bed-contact area.
 
   Broad screening now covers part of that gap and says exactly how much. Run
-  `python -m pipeline.corpus` for the current numbers; at the last measurement it
+  `uv run --project <skill> --frozen python -m pipeline.corpus` for the current numbers; at the last measurement it
   missed nothing. Two different claims sit behind that one number: material *fused
   to the part* is what the profile and volume detectors have to earn, and it is
   their false-negative rate the calibration gate scores. Disconnected debris is
@@ -330,7 +330,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
    Gate the plan before anyone builds against it, whichever wrote it:
 
    ```bash
-   python <skill>/scripts/dt.py plan check <project-dir>/print_plan_checks.json
+   uv run --project <skill> --frozen python <skill>/scripts/dt.py plan check <project-dir>/print_plan_checks.json
    ```
 
    Require exit zero. None of these conditions depend on geometry, so there is no reason to
@@ -362,7 +362,7 @@ checks as "n/a for this interface type", and only a fresh context catches that.
     write `final_prep_review.md` before delivery. Then gate both:
 
     ```bash
-    python $DT validate <project> --require final_print_prep,final_prep_review
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py validate <project> --require final_print_prep,final_prep_review
     ```
 
     Require exit zero. This is the last gate before a part is handed over, and until these

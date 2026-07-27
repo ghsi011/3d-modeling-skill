@@ -20,7 +20,7 @@ precisely when there is one source and nothing to reconcile. The moment a
 photograph or a caliper reading enters the job, a metrologist writes this file
 and this command has no business producing it.
 
-    python <skill>/scripts/dt.py intake --job-id clip --template c_clip \
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py intake --job-id clip --template c_clip \
         --param bore_d=12.0 --param wall=3.0 ... \
         --profile DIRECT --risk R1_LOW_CONSEQUENCE \
         --updated-utc <iso8601> --out <project>

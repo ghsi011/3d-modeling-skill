@@ -122,7 +122,7 @@ def _require_section_stack() -> None:
     if missing:
         raise ImportError(
             f"datum_features() needs {', '.join(missing)} "
-            f"(mesh cross-section + ring extraction): pip install -e \".[section]\""
+            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev --extra section"
         )
 
 

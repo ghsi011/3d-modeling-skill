@@ -10,7 +10,7 @@ Runs from `skills/3d-modeling/scripts/`.
 ## Before anything
 
 ```bash
-python <skill>/scripts/dt.py doctor
+uv run --project <skill> --frozen python <skill>/scripts/dt.py doctor
 ```
 
 Names the interpreter, which CAD backends it has, what each absent extra costs, and the
@@ -28,7 +28,7 @@ another.
 ## The one call
 
 ```bash
-python <skill>/scripts/dt.py commission --model model.py   --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>   [--reference mating.stl] [--no-render]
+uv run --project <skill> --frozen python <skill>/scripts/dt.py commission --model model.py   --plan print_plan_checks.json --out . --job-id <job> --updated-utc <iso8601>   [--reference mating.stl] [--no-render]
 ```
 
 First it checks what needs no geometry. If `model.py` exposes a module-level `PARAMS` dict,
@@ -85,7 +85,7 @@ performs is the mistake this file exists to prevent.
 ## Starting points that know their own topology
 
 ```bash
-python <skill>/scripts/dt.py templates      # what they cover, and the call for each
+uv run --project <skill> --frozen python <skill>/scripts/dt.py templates      # what they cover, and the call for each
 ```
 
 ```python
@@ -132,7 +132,7 @@ yours to declare.
 ## The fit coupon
 
 ```bash
-python <skill>/scripts/dt.py coupon --plan print_plan_checks.json --out coupon.stl
+uv run --project <skill> --frozen python <skill>/scripts/dt.py coupon --plan print_plan_checks.json --out coupon.stl
 ```
 
 A multi-lane coupon from the plan's declared interfaces. Genuinely separate work: a
@@ -147,7 +147,7 @@ solid into phantom shells.
 
 ## Verifying: `dt.py audit`
 
-    python <skill>/scripts/dt.py audit <project-dir> --out <your-own-dir>         --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py audit <project-dir> --out <your-own-dir>         --job-id <job> --updated-utc <iso8601> [--reference mating.stl]
 
 One call for the whole mechanical half: the hash binding between the delivered
 STL and the receipt that claims to describe it, the raw un-repaired parse, an

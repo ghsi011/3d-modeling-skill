@@ -10,7 +10,7 @@ representation of the team contracts (added in Sprint 1A; see CHANGELOG.md).
 Deliberately empty of re-exports: the canonical values live in ``common.py`` and
 are imported bare (without a ``team_tools.`` prefix) everywhere inside the
 package, so the CLI and tests work whether invoked as
-``python -m team_tools.contracts ...`` or ``python team_tools/...py`` directly --
+``uv run --project <skill> --frozen python -m team_tools.contracts ...`` or the shorthand ``uv run --project <skill> --frozen python <skill>/scripts/dt.py validate|status <path>`` --
 see the sys.path bootstrap at the top of contracts.py / test_contracts.py for
 why. External callers import the submodule they need
 (``from team_tools.status import compute_status``); an ``__init__`` re-export

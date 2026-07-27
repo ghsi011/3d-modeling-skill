@@ -11,7 +11,7 @@ The output is still a real `model.py` -- generated, not hidden. Editable source
 is a requirement of the role, and a part that later needs a feature no template
 offers should start from the file rather than from nothing.
 
-    python <skill>/scripts/dt.py build --template c_clip \
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py build --template c_clip \
         --param bore_d=12.0 --param wall=3.0 --param height=9.0 \
         --param mouth_gap=9.0 --param 'flange=(40.0, 22.0, 5.0)' \
         --param screw_d=4.5 --param 'screw_at=(8.0, 11.0)' \

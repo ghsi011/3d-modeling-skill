@@ -15,11 +15,11 @@ its directory. Snapshot it there, and a later run can be handed that state and
 asked for only the next phase. Changing the verifier's charter no longer costs a
 build; changing a template no longer costs a routing decision.
 
-    python tools/bench.py save     --project <dir> --as routed
-    python tools/bench.py restore   --snapshot routed --to <fresh-dir>
-    python tools/bench.py list
-    python tools/bench.py diff     --snapshot routed --project <dir>
-    python tools/bench.py preamble               # paste into every benchmark prompt
+    uv run python tools/bench.py save     --project <dir> --as routed
+    uv run python tools/bench.py restore   --snapshot routed --to <fresh-dir>
+    uv run python tools/bench.py list
+    uv run python tools/bench.py diff     --snapshot routed --project <dir>
+    uv run python tools/bench.py preamble               # paste into every benchmark prompt
 
 A snapshot is a plain directory copy under the snapshot root, so it can be read,
 diffed and edited by hand. Nothing here is clever, and that is the point: the

@@ -1,9 +1,9 @@
 """CLI for designer_toolkit.
 
-    python <skill>/scripts/dt.py doctor        # works from any directory
-    python <skill>/scripts/dt.py commission --model model.py --plan plan.json \
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py doctor        # works from any directory
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py commission --model model.py --plan plan.json \
       --out . --job-id <job> --updated-utc <iso8601>
-    python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
 
 No verb here is a measurement you assemble yourself. `commission` is the gate:
 it takes a model and a plan and returns every deterministic verdict at once.
@@ -61,7 +61,7 @@ def main(argv=None):
         from .probe import main as probe_main
         raise SystemExit(probe_main(argv[1:]))
     if argv and argv[0] == "validate":
-        # `python -m team_tools.contracts` only resolves with the scripts
+        # `uv run --project <skill> --frozen python -m team_tools.contracts` resolves with the skill project selected
         # directory on sys.path. From the repo you are already there; from an
         # installed bundle you are not, and the charter's command failed until a
         # reader worked out it needed PYTHONPATH. `dt.py` puts its own directory

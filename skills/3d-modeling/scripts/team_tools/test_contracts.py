@@ -1,8 +1,8 @@
 """Tests for team_tools.contracts.
 
 Runnable as:
-    python -m team_tools.test_contracts     (from skills/3d-modeling/scripts/)
-    python team_tools/test_contracts.py      (from skills/3d-modeling/scripts/)
+    uv run --project <skill> --frozen python -m team_tools.test_contracts     (from the repo root or skill directory)
+    uv run --project <skill> --frozen python <skill>/scripts/team_tools/test_contracts.py      (from any directory)
 
 For every validator: a normal-pass fixture, a malformed-input fixture, an
 adversarial numeric (NaN/Inf) fixture, a stale-dependency fixture where
@@ -1183,7 +1183,7 @@ class ProjectValidateReceiptTest(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 # CLI subprocess tests (matches the invocation style in the implementation
-# plan: `python -m team_tools.contracts <cmd> <path>` run from scripts/).
+# plan: `uv run --project <skill> --frozen python -m team_tools.contracts <cmd> <path>`).
 # ---------------------------------------------------------------------------
 
 

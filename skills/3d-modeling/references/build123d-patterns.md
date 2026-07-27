@@ -22,8 +22,7 @@ modelling below is build123d-specific.
 Run your script, then gate the STL it wrote:
 
 ```bash
-python3 model.py                                   # writes body.stl
-python3 <skill>/scripts/dt.py commission --stl body.stl \
+uv run --project <skill> --frozen python <skill>/scripts/dt.py commission --stl body.stl \
   --plan print_plan_checks.json --out . --job-id <job> \
   --updated-utc <iso8601>          # the deterministic gate, from any directory
 ```

@@ -15,7 +15,7 @@ screens and the contract each catch. Two rates come out:
 * **false positive** -- a correct part something flagged. This is the rate that
   decides whether anybody will still be reading the output in a month.
 
-Run it: `python -m pipeline.corpus`
+Run it: `uv run --project <skill> --frozen python -m pipeline.corpus` (from the skill directory) or `uv run --project <extracted-bundle> --frozen python -m pipeline.corpus` (from any directory)
 """
 from __future__ import annotations
 

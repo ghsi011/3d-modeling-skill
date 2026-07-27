@@ -10,7 +10,7 @@ a round trip every time.
 Reports rather than raises: a missing optional extra is a fact about the
 environment, and the caller decides whether it matters for this commission.
 
-    python <skill>/scripts/dt.py doctor
+    uv run --project <skill> --frozen python <skill>/scripts/dt.py doctor
 """
 from __future__ import annotations
 
@@ -80,7 +80,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(data, indent=2) + "\n")
     else:
         sys.stdout.write(f"python {data['python']}\n{data['executable']}\n")
-        sys.stdout.write(f"run the toolkit as: python {data['launcher']} <command>\n\n")
+        sys.stdout.write(
+            "run the toolkit as: uv run --project <skill> --frozen "
+            "python <skill>/scripts/dt.py <command>\n\n")
         for name, entry in data["capabilities"].items():
             mark = "yes" if entry["present"] else "NO "
             sys.stdout.write(f"  [{mark}] {name:<12} {entry['enables']}\n")

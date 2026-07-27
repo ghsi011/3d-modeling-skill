@@ -439,7 +439,8 @@ paired with its STEP twin, for the bbox cross-check below).
 
 Validation is already implemented in
 [`../scripts/team_tools/`](../scripts/team_tools/) — run
-`python -m team_tools.contracts validate <project-dir>` from `skills/3d-modeling/scripts/`.
+`uv run python -m team_tools.contracts validate <project-dir>` from the repo root, or use
+`dt.py validate` from any directory the launcher resolves.
 It checks: artifact file exists; declared hash matches the recomputed one; bbox is finite with
 positive extent on every axis; declared `expected_components` matches the re-imported STL's
 observed connected-component count; a `mating_reference` artifact can never be marked
@@ -453,7 +454,7 @@ STL to a STEP artifact and both load, their bounding-box extents are cross-check
 opportunistic and skipped, never failed, when no OCC/cascadio backend is installed — there is no
 deep STEP topology compare. STL bbox plus declared units is the load-bearing check.
 
-The verifier treats a failed `python -m team_tools.contracts validate` (non-zero exit) as a hard
+The verifier treats a failed `uv run python -m team_tools.contracts validate` (non-zero exit) as a hard
 reject of the candidate's exported artifacts, distinct from the seven geometric checks. In
 particular, any `UNIT_SCALE_MISMATCH` is a hard `UNIT_SCALE` reject — never downgrade it to a
 note-and-pass — recorded as a defect owned by `CANDIDATE_BUILD`. A zero exit is **not** the
@@ -462,7 +463,7 @@ with exit `0` and an empty `validated_paths`. The verifier must therefore name w
 requires:
 
 ```bash
-python -m team_tools.contracts validate <project-dir> --require all
+uv run python -m team_tools.contracts validate <project-dir> --require all
 ```
 
 `--require` promotes each named contract's absence to a `REQUIRED_CONTRACT_MISSING` error, so
