@@ -72,9 +72,17 @@ SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 
 # How far the solid's own volume may sit from the closed form before it is worth
-# a look. Tessellation error is 0.01% or better on every certified template,
-# measured, so 0.25% sits 25x above the noise floor and still catches a 1.1 mm
-# post that moves the total 0.38%. Set at 1% it missed exactly that post.
+# a look. Measured tessellation error at the nominal points, worst first:
+# trim_ring -0.0414%, c_clip -0.0144%, vented_enclosure -0.0066%, l_bracket
+# +0.0008%, box_shell 0.0000%. So the band sits **6x** above the noise floor,
+# and it catches a 1.1 mm post that moves the total 0.38%. Set at 1% it missed
+# exactly that post.
+#
+# This comment claimed 0.01% and 25x, which was true of the three templates it
+# was written against and false as soon as trim_ring's thin annulus arrived --
+# `(R^2+r^2)/(R^2-r^2)` reaches 10.5x there, so faceting error is amplified by
+# an order of magnitude. 6x is thinner headroom than 25x and the honest number
+# to design the next change against.
 VOLUME_FRACTION = 0.0025
 
 

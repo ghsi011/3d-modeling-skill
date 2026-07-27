@@ -577,8 +577,11 @@ class StatusTest(unittest.TestCase):
         self.assertFalse(final["witnesses_rendered"])
 
     def test_screening_anomaly_stops_short_of_commissioned(self) -> None:
-        clean = {"overall": "CLEAR"}
-        anomaly = {"overall": "ANOMALY"}
+        # Both carry `calibrated`, which production always sets. Without it the
+        # uncalibrated branch answered first and this test passed with the
+        # ANOMALY branch deleted -- it was asserting the wrong reason.
+        clean = {"overall": "CLEAR", "calibrated": True}
+        anomaly = {"overall": "ANOMALY", "calibrated": True}
         with tempfile.TemporaryDirectory() as raw:
             contract = _contract(Path(raw))
         report = {"verdict": "PASS"}
@@ -1094,10 +1097,32 @@ class IndependentVerificationTest(unittest.TestCase):
         question asked again by someone with less context."""
         with tempfile.TemporaryDirectory() as raw:
             _, seen = self._verify(Path(raw), self._reply("PASS"))
-            payload = json.dumps(seen[0].payload)
-            self.assertNotIn("model.py", payload)
-            self.assertIn("brief", seen[0].payload)
-            self.assertIn("commission_report", seen[0].payload)
+            payload = seen[0].payload
+
+            # An allow-list, not a search for a filename. This asserted
+            # `"model.py" not in json.dumps(payload)`, which a mutation defeats
+            # by putting the source under the key `model_py` -- the substring
+            # disappears and the designer's reasoning is still in the packet.
+            allowed = {"brief", "task", "intent_manifest", "model_contract",
+                       "artifact_manifest", "commission_report",
+                       "manufacturing_report", "witness", "specification",
+                       "questions", "response_schema"}
+            self.assertEqual(set(), set(payload) - allowed,
+                             "the verifier's packet grew a key nobody vetted; if it "
+                             "belongs there, add it to `allowed` deliberately")
+            self.assertIn("brief", payload)
+            self.assertIn("commission_report", payload)
+
+            # And nothing anywhere in it may carry Python source. The verifier
+            # exists to disagree with the designer, and it cannot do that having
+            # read how the designer got there.
+            # Markers of Python source, not library names: `trimesh` is in there
+            # legitimately as the backend identifier, and asserting on it would
+            # be asserting the packet does not say which engine built the part.
+            blob = json.dumps(payload)
+            for tell in ("import ", "def ", "model.py", "lambda ", "return "):
+                with self.subTest(tell=tell):
+                    self.assertNotIn(tell, blob)
 
     def test_a_rejection_with_no_defects_is_refused(self) -> None:
         with self.assertRaises(Exception) as caught:
