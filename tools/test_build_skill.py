@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import tomllib
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = ROOT / "tools" / "build_skill.py"
 
 ARTIFACT = "3d-modeling.skill"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 ROLE_FILES = ["roles/designer.md", "roles/metrologist.md",
               "roles/print-engineer.md", "roles/verifier.md"]
 
@@ -167,3 +169,42 @@ class TestBuildSkill:
         with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
             names = zf.namelist()
         assert names == sorted(names)
+
+    def test_the_bundle_can_run_the_command_skill_md_opens_with(self, build_dir: Path):
+        """SKILL.md's first line is `uv run design-tool run-job`. `design-tool` is
+        a console script, so without a project file beside it the installed
+        bundle answers that command with `program not found` -- the shipped
+        artifact could not run the one command it leads with.
+        """
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            names = zf.namelist()
+            assert "pyproject.toml" in names, (
+                "the bundle ships no project file, so its own headline command "
+                "does not resolve once installed")
+            bundled = tomllib.loads(zf.read("pyproject.toml").decode("utf-8"))
+            skill_md = zf.read("SKILL.md").decode("utf-8")
+
+        entry = bundled["project"]["scripts"]
+        assert entry.get("design-tool") == "pipeline.cli:main", entry
+        assert "scripts/pipeline/cli.py" in names, "the entry point must be packed too"
+
+        # Anywhere in the file, fenced or inline. The first version of this
+        # required backticks and SKILL.md puts the command in a code block, so it
+        # iterated an empty list and could not fail -- which is the same shape of
+        # defect as the packaging bug it was written to catch.
+        commands = set(re.findall(r"uv run ([a-z][a-z0-9-]*)", skill_md))
+        assert commands, "SKILL.md names no `uv run` command; this test would prove nothing"
+        for command in sorted(commands - {"python"}):
+            assert command in entry, (
+                f"SKILL.md tells the reader to run `{command}`, which the bundle "
+                f"does not define. It defines {sorted(entry)}.")
+
+    def test_the_bundle_pins_the_same_toolchain_the_tests_ran_against(self, build_dir: Path):
+        """A second copy of a version floor drifts from the first, and the bundle
+        would then resolve a different toolchain than anything was tested on."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            bundled = tomllib.loads(zf.read("pyproject.toml").decode("utf-8"))
+        repo = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+        assert bundled["project"]["dependencies"] == repo["project"]["dependencies"]
+        assert bundled["project"]["requires-python"] == repo["project"]["requires-python"]
