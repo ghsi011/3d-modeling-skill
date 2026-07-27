@@ -114,11 +114,21 @@ def run(request: JobRequest) -> JobResult:
                          written, timings, llm_calls, None)
 
     if decision.route in ("FITTED", "FULL"):
-        if request.spec_call is None and decision.route == "FITTED":
+        # Both routes recover geometry the job does not own, so both need the
+        # spec call. Guarding only FITTED meant a FULL job with a verifier but no
+        # spec reviewer called `None` and raised out of `run` -- no receipt, no
+        # final status, a half-written directory, and a traceback out of the CLI.
+        # That is the one thing this function is not allowed to do.
+        if request.spec_call is None:
             return JobResult(False, "routing",
-                             f"route is FITTED: {decision.condition}. This job needs one "
-                             "bounded call to recover geometry it does not own, and no "
-                             "spec reviewer was supplied.",
+                             f"route is {decision.route}: {decision.condition}. This job "
+                             "needs one bounded call to recover geometry it does not own, "
+                             "and no spec reviewer was supplied.",
+                             written, timings, llm_calls, None)
+        if decision.route == "FULL" and (decision.template or request.template) is None:
+            return JobResult(False, "routing",
+                             f"route is FULL: {decision.condition}. No certified template "
+                             "was named, so there is nothing to recover parameters into.",
                              written, timings, llm_calls, None)
         mark = time.perf_counter()
         template = T.get(decision.template or request.template)
