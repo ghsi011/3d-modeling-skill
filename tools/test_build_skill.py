@@ -208,3 +208,14 @@ class TestBuildSkill:
 
         assert bundled["project"]["dependencies"] == repo["project"]["dependencies"]
         assert bundled["project"]["requires-python"] == repo["project"]["requires-python"]
+
+    def test_the_lockfile_travels_with_the_project_file(self, build_dir: Path):
+        """`cache.find_lock` only accepts a lockfile with a `pyproject.toml`
+        beside it, so shipping one without the other identifies nothing. Without
+        both, an installed bundle falls back to installed versions -- correct,
+        but weaker than the lock it was tested against."""
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            names = zf.namelist()
+            assert "uv.lock" in names and "pyproject.toml" in names, names[:5]
+            assert zf.read("uv.lock") == (REPO_ROOT / "uv.lock").read_bytes(), (
+                "the bundle must pin the toolchain the repository tested against")

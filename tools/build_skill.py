@@ -70,6 +70,11 @@ def _build_skill(out_dir: Path) -> Path:
         for f in _collect_files(SKILL_DIR)
     ]
     entries.append(("pyproject.toml", _bundle_pyproject().encode("utf-8")))
+    # The lockfile travels with the project file that needs it. Without it an
+    # installed bundle has no lockfile to identify its toolchain by, and the
+    # cache key falls back to installed versions -- correct, but weaker than the
+    # lock this was actually tested against.
+    entries.append(("uv.lock", (ROOT / "uv.lock").read_bytes()))
     _write_zip(zip_path, entries)
     return zip_path
 

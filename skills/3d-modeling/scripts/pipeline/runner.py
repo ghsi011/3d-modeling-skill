@@ -71,8 +71,14 @@ class JobResult:
 
 
 def _repo_root() -> Path:
-    """Where `uv.lock` lives, for the toolchain half of the cache key."""
-    return Path(__file__).resolve().parents[4]
+    """Where to start looking for the toolchain's lockfile.
+
+    A starting point, not an answer: `cache.find_lock` walks up from here for a
+    `uv.lock` with a `pyproject.toml` beside it. This used to return
+    `parents[4]`, which is this repository's layout and no one else's -- from an
+    installed skill it landed two directories above the skill root.
+    """
+    return Path(__file__).resolve().parent
 
 
 def _write(path: Path, payload: dict[str, Any]) -> Path:

@@ -60,15 +60,63 @@ class Key:
         return {**dataclasses.asdict(self), "digest": self.digest()}
 
 
-def lock_hash(root: Path) -> str:
-    """The toolchain, by its lockfile.
+# Packages whose version can change the geometry or the measurement. Used to
+# identify the toolchain when no lockfile is available.
+TOOLCHAIN_PACKAGES = ("trimesh", "manifold3d", "build123d", "numpy")
 
-    Not the installed versions: two machines resolving the same lock get the same
-    geometry, and a machine whose lock moved should miss even if the version
-    numbers happen to line up.
+
+def find_lock(start: Path) -> Path | None:
+    """The nearest lockfile that belongs to a project, searching upward.
+
+    Paired with `pyproject.toml` deliberately. Locating it by a fixed depth --
+    `parents[4]`, which was correct for this repository and nothing else -- read
+    two directories *above* an installed skill and would have hashed whatever
+    unrelated `uv.lock` happened to be sitting there. A lockfile with no project
+    beside it is somebody else's.
     """
-    lock = root / "uv.lock"
-    return S.sha256_file(lock) if lock.is_file() else "no-lockfile"
+    for directory in (start, *start.parents):
+        if (directory / "uv.lock").is_file() and (directory / "pyproject.toml").is_file():
+            return directory / "uv.lock"
+    return None
+
+
+def lock_hash(root: Path) -> str:
+    """The toolchain, by its lockfile where there is one.
+
+    Preferred over installed versions: two machines resolving the same lock get
+    the same geometry, and a machine whose lock moved should miss even if the
+    version numbers happen to line up.
+
+    **Never a constant.** This returned the literal `"no-lockfile"` whenever it
+    could not find one, so every machine without a lockfile shared a cache key no
+    matter what was actually installed -- which is precisely the "serving a stale
+    answer with a fresh-looking receipt" this module opens by warning about, and
+    it fired on exactly the configuration that cannot check: an installed bundle.
+    Falling back to the installed versions of the packages that decide geometry
+    is weaker than a lock and enormously stronger than a constant.
+    """
+    lock = find_lock(root.resolve()) or find_lock(Path(__file__).resolve().parent)
+    if lock is not None:
+        return "lock:" + S.sha256_file(lock)
+    return "versions:" + S.payload_hash(installed_versions())
+
+
+def installed_versions() -> dict[str, str]:
+    """What is actually importable, for when no lockfile identifies it.
+
+    A package that cannot be found is recorded as absent rather than skipped: an
+    absent build123d and an installed one are different toolchains, and a key
+    blind to the difference would serve one's geometry to the other.
+    """
+    from importlib import metadata
+
+    found: dict[str, str] = {}
+    for name in TOOLCHAIN_PACKAGES:
+        try:
+            found[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            found[name] = "absent"
+    return found
 
 
 def key_for(contract, *, backend_version: str, tessellation: dict[str, Any],

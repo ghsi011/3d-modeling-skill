@@ -1343,3 +1343,62 @@ class NumericOnlyVerificationTest(unittest.TestCase):
             if final["final_status"] == "VERIFIED":
                 self.assertIn("no images were rendered", final["allowed_claim"])
                 self.assertTrue(any("saw no images" in r for r in final["reasons"]))
+
+
+class ToolchainIdentityTest(unittest.TestCase):
+    """The cache key's toolchain half. It was the literal string "no-lockfile"
+    whenever a lockfile could not be found, so every machine without one shared
+    a key no matter what was installed -- and the configuration that could not
+    find one was the installed bundle."""
+
+    def test_no_lockfile_is_never_a_constant(self) -> None:
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            empty = Path(raw)
+            self.assertIsNone(K.find_lock(empty), "nothing should be found here")
+            digest = K.lock_hash(empty)
+
+        self.assertNotIn("no-lockfile", digest)
+        self.assertTrue(digest.startswith(("lock:", "versions:")), digest)
+
+    def test_a_lockfile_needs_a_project_beside_it(self) -> None:
+        """A lockfile with no project beside it belongs to somebody else. The
+        old code took one by fixed depth and, from an installed skill, read two
+        directories above the skill root."""
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            stray = Path(raw) / "someone-elses"
+            stray.mkdir()
+            (stray / "uv.lock").write_text("not ours", encoding="utf-8")
+            self.assertIsNone(K.find_lock(stray))
+
+            (stray / "pyproject.toml").write_text("[project]", encoding="utf-8")
+            self.assertEqual(stray / "uv.lock", K.find_lock(stray))
+
+    def test_the_versions_fallback_distinguishes_toolchains(self) -> None:
+        from . import cache as K
+
+        versions = K.installed_versions()
+        self.assertEqual(sorted(K.TOOLCHAIN_PACKAGES), sorted(versions))
+        for name, value in versions.items():
+            with self.subTest(package=name):
+                self.assertTrue(value, name)
+
+        # An absent package and an installed one are different toolchains.
+        base = dict(versions)
+        from . import schemas as SC
+        self.assertNotEqual(SC.payload_hash(base),
+                            SC.payload_hash({**base, "build123d": "absent"}))
+
+    def test_the_key_moves_when_the_toolchain_does(self) -> None:
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+            key = K.key_for(contract, backend_version="v", tessellation={},
+                            root=Path(raw))
+            self.assertNotEqual("no-lockfile", key.lock_sha256)
+            moved = dataclasses.replace(key, lock_sha256="versions:something-else")
+            self.assertNotEqual(key.digest(), moved.digest())
