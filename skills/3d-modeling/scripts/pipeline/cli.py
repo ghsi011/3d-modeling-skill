@@ -6,6 +6,19 @@
 Lower-level verbs exist for debugging and are not the production path. A job is
 one invocation because every extra one pays interpreter startup to do work
 measured in milliseconds.
+
+**Reviews are answered by re-running, not by this program.** A `CONSEQUENTIAL`
+job needs a bounded safety call, a `FITTED` job needs a spec call, and `VERIFIED`
+needs independent verification. Those are model calls, and this is a
+deterministic program: it cannot make them and must not pretend to. So when the
+runner needs one, the CLI writes the evidence packet to `reviews/<kind>_packet.json`
+and exits 3 naming the file to answer. Write the response next to it as
+`reviews/<kind>_response.json` and run the same command again; the response is
+validated against the same schema an in-process caller would be held to.
+
+Until this existed the CLI wired none of the hooks, so `run-job` could complete
+exactly one kind of job -- INCONSEQUENTIAL, DIRECT, unverified -- while the
+front page advertised the pipeline.
 """
 from __future__ import annotations
 
@@ -18,6 +31,47 @@ from typing import Any
 from . import runner, schemas as S
 
 JOB_FILE = "job.json"
+
+
+REVIEW_DIR = "reviews"
+NEEDS_REVIEW = 3
+
+
+class _ReviewNeeded(Exception):
+    """A review has no answer on disk yet. Carries what to write and where."""
+
+    def __init__(self, kind: str, packet: Any, path: Path) -> None:
+        super().__init__(kind)
+        self.kind, self.packet, self.path = kind, packet, path
+
+
+def _payload_of(packet: Any) -> Any:
+    """Packets are dataclasses; a spec call is handed a plain dict."""
+    return getattr(packet, "payload", packet)
+
+
+def _reviewer_of(spec: dict[str, Any]) -> dict[str, Any]:
+    """Who answered, by their own account.
+
+    Not defaulted to something flattering: `fresh_context` is a claim only the
+    caller can make, and this program has no way to check it. Absent means
+    absent, and the receipt records that rather than `true`.
+    """
+    return dict(spec.get("reviewer") or {})
+
+
+def _answer(job_dir: Path, kind: str):
+    """A call that reads its answer from disk, or asks for one and stops."""
+    def call(packet: Any) -> dict[str, Any]:
+        room = job_dir / REVIEW_DIR
+        response = room / f"{kind}_response.json"
+        if response.is_file():
+            return json.loads(response.read_text(encoding="utf-8"))
+        room.mkdir(parents=True, exist_ok=True)
+        request = room / f"{kind}_packet.json"
+        request.write_text(S.canonical_json(_payload_of(packet)), encoding="utf-8")
+        raise _ReviewNeeded(kind, packet, response)
+    return call
 
 
 def _load_job(job_dir: Path) -> dict[str, Any]:
@@ -44,6 +98,13 @@ def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.Job
         ambiguities=tuple(spec.get("ambiguities", ())),
         step=bool(spec.get("step", False)),
         render=render,
+        safety_call=_answer(job_dir, "safety"),
+        spec_call=_answer(job_dir, "spec"),
+        verify_call=_answer(job_dir, "verification"),
+        reviewer=_reviewer_of(spec),
+        evidence=tuple(spec.get("evidence", ())),
+        interface_map=dict(spec.get("interface_map") or {}),
+        cache_dir=(job_dir / spec["cache_dir"]) if spec.get("cache_dir") else None,
     )
 
 
@@ -57,7 +118,19 @@ def run_job(argv: list[str]) -> int:
 
     job_dir = args.job_dir.resolve()
     spec = _load_job(job_dir)
-    result = runner.run(_request(job_dir, spec, render=not args.no_render))
+    try:
+        result = runner.run(_request(job_dir, spec, render=not args.no_render))
+    except _ReviewNeeded as need:
+        rel = need.path.relative_to(job_dir)
+        packet = rel.with_name(need.kind + "_packet.json")
+        sys.stderr.write(
+            f"\ndesign-tool: this job needs a {need.kind} review before it can finish.\n"
+            f"  the evidence is written to  {packet}\n"
+            f"  write the answer to         {rel}\n"
+            "  then run the same command again.\n\n"
+            "  This program cannot answer it. A review is a judgement about a part,\n"
+            "  and a deterministic tool that returned one would be inventing it.\n")
+        return NEEDS_REVIEW
 
     for name, path in sorted(result.artifacts.items()):
         sys.stderr.write(f"  {name:28s} {path.name}\n")

@@ -169,6 +169,20 @@ def _registry() -> dict[str, CertifiedTemplate]:
             Constraint("screw_d < flange_w / 3",
                        lambda p: float(p["screw_d"]) < float(p["flange_w"]) / 3.0,
                        "the screw would break out of the flange"),
+            # The bbox expectation takes the flange as the bounding box. A ring
+            # wider than its own flange makes that false, and the envelope check
+            # then fails a correct part: bore_d 40 + 2x8 wall is a 56 mm ring on
+            # a 20 mm flange, extents [56.0, 55.9, 15.0] against a declared
+            # [40, 20, 15]. That was inside the certified domain, so a clean job
+            # was flagged for being outside a box the contract derived wrong.
+            Constraint("bore_d + 2 * wall <= min(flange_w, flange_d)",
+                       lambda p: float(p["bore_d"]) + 2.0 * float(p["wall"])
+                       <= min(float(p["flange_w"]), float(p["flange_d"])),
+                       "the ring would stand proud of the flange, and the flange "
+                       "is what the bounding box is derived from"),
+            Constraint("screw_d < flange_d / 3",
+                       lambda p: float(p["screw_d"]) < float(p["flange_d"]) / 3.0,
+                       "the screw would break out across the flange's short side"),
         ),
         build=_clip_build, expectations=X.c_clip_expectations, bbox=X.c_clip_bbox,
         profile_marks=X.c_clip_profile_marks, volume=X.c_clip_volume,
@@ -188,6 +202,15 @@ def _registry() -> dict[str, CertifiedTemplate]:
                                             "a spacer, not a trim ring"),
         },
         constraints=(
+            # A chamfer larger than the material it is cut into makes the kernel
+            # raise `Failed creating a chamfer`, which reached the caller as a
+            # build crash on parameters the domain said were fine.
+            Constraint("chamfer < lip_t",
+                       lambda p: float(p["chamfer"]) < float(p["lip_t"]),
+                       "the chamfer would consume the whole lip"),
+            Constraint("chamfer < wall",
+                       lambda p: float(p["chamfer"]) < float(p["wall"]),
+                       "the chamfer would cut through the wall it sits on"),
             Constraint("chamfer < lip_w / 2",
                        lambda p: float(p["chamfer"]) < float(p["lip_w"]) / 2.0,
                        "the chamfer would consume the whole lip"),
@@ -245,10 +268,15 @@ def _registry() -> dict[str, CertifiedTemplate]:
             Constraint("hole_inset > hole_d",
                        lambda p: float(p["hole_inset"]) > float(p["hole_d"]),
                        "less than one diameter of edge distance tears out"),
-            Constraint("hole_inset < min(leg_a, leg_b) - thickness",
-                       lambda p: float(p["hole_inset"]) < min(float(p["leg_a"]),
-                                                              float(p["leg_b"])) - float(p["thickness"]),
-                       "the hole would fall outside the plate or into the corner"),
+            # Clears the hole's *edge* from the corner, not its centre. Clearing
+            # only the centre let a hole overlap the upright (leaving 1.07 mm of
+            # material against a 2.90 mm wall) and let another reach below the
+            # bed -- both inside the certified domain, both flagged on a part
+            # built exactly as asked.
+            Constraint("hole_inset + hole_d / 2 < min(leg_a, leg_b) - thickness",
+                       lambda p: float(p["hole_inset"]) + float(p["hole_d"]) / 2.0
+                       < min(float(p["leg_a"]), float(p["leg_b"])) - float(p["thickness"]),
+                       "the hole would run into the corner or off the plate"),
             Constraint("thickness < min(leg_a, leg_b) / 3",
                        lambda p: float(p["thickness"]) < min(float(p["leg_a"]),
                                                              float(p["leg_b"])) / 3.0,
@@ -287,13 +315,19 @@ def _registry() -> dict[str, CertifiedTemplate]:
                        lambda p: 4.0 * float(p["boss_d"]) < min(float(p["inner_w"]),
                                                                 float(p["inner_d"])),
                        "the bosses would meet in the middle and there would be no cavity"),
-            Constraint("vent_cols * (vent_w + 2) < inner_w + 2*wall",
-                       lambda p: int(p["vent_cols"]) * (float(p["vent_w"]) + 2.0)
-                       < float(p["inner_w"]) + 2.0 * float(p["wall"]),
+            # Written against the builder's own pitch, `inner_w / (cols + 1)`.
+            # These divided by `cols` and added `2 * wall`, which admitted a grid
+            # whose vents overlapped: five 33.2 mm vents on a 28.6 mm pitch. The
+            # closed form counts N separate cuts and overlapping cuts remove less
+            # material than N of them, so the volume screen called a part built
+            # exactly as asked an ANOMALY.
+            Constraint("vent_w + 2 < inner_w / (vent_cols + 1)",
+                       lambda p: float(p["vent_w"]) + 2.0
+                       < float(p["inner_w"]) / (int(p["vent_cols"]) + 1),
                        "the vents would run into each other with no web between"),
-            Constraint("vent_rows * (vent_h + 2) < inner_h",
-                       lambda p: int(p["vent_rows"]) * (float(p["vent_h"]) + 2.0)
-                       < float(p["inner_h"]),
+            Constraint("vent_h + 2 < inner_h / (vent_rows + 1)",
+                       lambda p: float(p["vent_h"]) + 2.0
+                       < float(p["inner_h"]) / (int(p["vent_rows"]) + 1),
                        "the vent rows would merge into one opening"),
             Constraint("wall < min(inner_w, inner_d) / 4",
                        lambda p: float(p["wall"]) < min(float(p["inner_w"]),

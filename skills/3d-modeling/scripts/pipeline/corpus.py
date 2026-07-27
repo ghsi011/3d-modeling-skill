@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import random
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -335,6 +336,48 @@ def _evaluate(mesh: trimesh.Trimesh, contract: Contract,
             len(ctx.components))
 
 
+def _contract_at(name: str, params: dict[str, Any]) -> Contract:
+    """A contract for arbitrary in-domain parameters, not just the nominal point."""
+    from . import runner as R
+    from . import templates as T
+
+    request = R.JobRequest(job_id="corpus", brief_path=Path("none"), template=name,
+                           parameters=params, stated=frozenset(),
+                           consequence="INCONSEQUENTIAL", out_dir=Path("."),
+                           updated_utc="1970-01-01T00:00:00Z", render=False)
+    return R._contract_from(T.get(name), request)
+
+
+# How many in-domain parameter sets each template is checked at for false
+# positives, beyond its nominal point.
+#
+# One point per template is not a rate. Measured on five nominal points the false
+# positive rate read 0.0 while `c_clip` flagged 36% of its own certified domain:
+# nothing constrained the ring to fit inside the flange the bounding box is
+# derived from, so a correct part failed the envelope check for being outside a
+# box the contract had computed wrong. A threshold of 2% against a denominator of
+# five cannot express 2%.
+DOMAIN_SAMPLES = 12
+DOMAIN_SEED = 20260727
+
+
+def _domain_points(tpl, count: int, seed: int) -> list[dict[str, Any]]:
+    """Deterministic parameter sets drawn from inside a template's own domain.
+
+    Seeded, because a corpus that samples differently each run reports a rate
+    that moves on its own and cannot be regressed against.
+    """
+    rng = random.Random(f"{seed}:{tpl.name}")
+    points: list[dict[str, Any]] = []
+    for _ in range(count * 400):
+        if len(points) >= count:
+            break
+        candidate = {k: rng.uniform(b.low, b.high) for k, b in tpl.bounds.items()}
+        if not tpl.rejects(candidate):
+            points.append(candidate)
+    return points
+
+
 def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> dict[str, Any]:
     """Measure every template against its mutants, plus the clean part."""
     rows: list[Outcome] = []
@@ -354,6 +397,25 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
             if verdict != "PASS" or screen != "CLEAR":
                 false_positives.append(f"{name}: clean part flagged "
                                        f"(commission {verdict}, screening {screen})")
+
+            # And across the domain, not only at the nominal point. A template
+            # certified for a range is a claim about the whole range.
+            from . import templates as T
+            tpl = T.get(name)
+            for point in _domain_points(tpl, DOMAIN_SAMPLES, DOMAIN_SEED):
+                clean_parts += 1
+                try:
+                    sampled = _as_mesh(tpl.build(point)[0], tmp)
+                    v, s, _ = _evaluate(sampled, _contract_at(name, point), tmp)
+                except Exception as exc:                        # noqa: BLE001
+                    # A build that raises on parameters the domain accepts is a
+                    # false positive of the worst kind: no receipt at all.
+                    false_positives.append(f"{name}: in-domain build raised "
+                                           f"{type(exc).__name__}: {exc} at {point}")
+                    continue
+                if v != "PASS" or s != "CLEAR":
+                    false_positives.append(f"{name}: in-domain part flagged "
+                                           f"(commission {v}, screening {s}) at {point}")
 
             mutants = generic_mutants(clean)
             if name == "c_clip":
@@ -408,6 +470,9 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
         "per_class": per_class,
         "screening_false_negative_rate": worst_screening_fn,
         "false_positive_rate": round(fp_rate, 4),
+        # The denominator, because the rate is meaningless without it: this read
+        # 0.0 over five clean parts while one template flagged 36% of its domain.
+        "clean_parts_checked": clean_parts,
         "false_positives": false_positives,
         "thresholds": {"max_false_negative": MAX_FALSE_NEGATIVE,
                        "max_false_positive": MAX_FALSE_POSITIVE},

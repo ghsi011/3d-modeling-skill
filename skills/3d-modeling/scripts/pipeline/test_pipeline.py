@@ -1253,3 +1253,93 @@ class CacheTest(unittest.TestCase):
                     f"a reviewer differing only in {field} is a different reviewer")
         self.assertNotEqual(first, SF.cache_identity(
             SF.Packet(stage=1, payload={"a": 2}), reviewer=base))
+
+
+class CliReviewTest(unittest.TestCase):
+    """`design-tool run-job` has to be able to finish the jobs the pipeline
+    supports. It wired none of the review hooks, so a CONSEQUENTIAL job could
+    not complete through the documented production path at all."""
+
+    CLIP_JOB = {
+        "job_id": "cli", "template": "c_clip", "consequence": "CONSEQUENTIAL",
+        "updated_utc": "1970-01-01T00:00:00Z", "stated": [],
+        "reviewer": {"model_snapshot": "test"},
+        "parameters": CLIP,
+    }
+
+    def _job_dir(self, root: Path, **over) -> Path:
+        job = root / "job"
+        job.mkdir(parents=True, exist_ok=True)
+        (job / "brief.md").write_text("a clip", encoding="utf-8")
+        (job / "job.json").write_text(json.dumps({**self.CLIP_JOB, **over}), encoding="utf-8")
+        return job
+
+    def _run(self, job: Path) -> int:
+        from . import cli
+        return cli.run_job([str(job), "--no-render"])
+
+    def test_a_consequential_job_asks_for_the_review_it_needs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            code = self._run(job)
+
+            self.assertEqual(cli_module().NEEDS_REVIEW, code,
+                             "a job needing a review is neither a pass nor a crash")
+            packet = job / "reviews" / "safety_packet.json"
+            self.assertTrue(packet.is_file(), "the evidence has to be written down")
+            payload = json.loads(packet.read_text(encoding="utf-8"))
+            self.assertEqual("CONSEQUENTIAL", payload["consequence"])
+            self.assertNotIn("verification", payload,
+                             "stage 1 must not see the verifier's conclusion")
+
+    def test_answering_the_packet_completes_the_job(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            self._run(job)
+            room = job / "reviews"
+            (room / "safety_response.json").write_text(json.dumps({
+                "decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                "missing_evidence": [], "required_actions": [],
+                "summary": "a cable clip"}), encoding="utf-8")
+            self._run(job)
+            (room / "verification_response.json").write_text(json.dumps({
+                "decision": "PASS", "defects": [], "unmet_requirements": [],
+                "missing_evidence": [], "summary": "matches the contract"}),
+                encoding="utf-8")
+            self._run(job)
+
+            final = json.loads((job / "final_status.json").read_text(encoding="utf-8"))
+            self.assertEqual("CONSEQUENTIAL", final["consequence"])
+            self.assertIn(final["final_status"], ("VERIFIED", "NEEDS_MORE_EVIDENCE"))
+            self.assertNotEqual("FAILED", final["final_status"])
+
+    def test_the_cli_never_answers_a_review_itself(self) -> None:
+        """The one thing this program must not do. A deterministic tool that
+        returned a safety verdict would be inventing it."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            self._run(job)
+            self.assertFalse((job / "reviews" / "safety_response.json").exists())
+            self.assertFalse((job / "final_status.json").exists(),
+                             "no receipt may exist for a job that never got its review")
+
+
+def cli_module():
+    from . import cli
+    return cli
+
+
+class NumericOnlyVerificationTest(unittest.TestCase):
+    def test_verified_without_images_says_so(self) -> None:
+        """The verifier is asked what is *visible* in the witnesses. With no
+        images it answers from numbers, and undeclared geometry is exactly what
+        numbers do not cover -- so the claim has to name which one it was."""
+        with tempfile.TemporaryDirectory() as raw:
+            result = _run(Path(raw), verify_call=_looked_at,
+                          reviewer={"model_snapshot": "test"})
+            final = result.final_status
+
+            self.assertFalse(final["witnesses_rendered"])
+            if final["final_status"] == "VERIFIED":
+                self.assertIn("no images were rendered", final["allowed_claim"])
+                self.assertTrue(any("saw no images" in r for r in final["reasons"]))

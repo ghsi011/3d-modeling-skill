@@ -114,7 +114,9 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             # The plan's hard gate, and it has to move the status or it is a
             # string. An uncalibrated screen plus nobody looking means the one
             # question no declared check can ask went unasked -- and the measured
-            # miss rate on fused undeclared material is 87.5%.
+            # miss rate on fused undeclared material is 30% -- measured on a
+            # corpus whose mutants are actually fused to the part, which the
+            # first one was not.
             final = "NEEDS_MORE_EVIDENCE"
             claim = ("the geometry matches its contract, but the broad screen is "
                      "uncalibrated and nobody independent looked, so undeclared "
@@ -122,8 +124,11 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
                      "that nothing has looked at this part.")
             reasons.append("screening is uncalibrated and no independent look ran")
         elif not screening.get("calibrated", False):
-            reasons.append("screening is uncalibrated; the independent look is what "
-                           "covers undeclared geometry here")
+            # Only claim the look covered it if there was something to look at.
+            reasons.append(
+                "screening is uncalibrated; the independent review is what covers "
+                "undeclared geometry here"
+                + ("" if rendered else " -- and it saw no images, only numbers"))
 
     if final in ("COMMISSIONED", "VERIFIED"):
         if manufacturing and manufacturing["overall"] == "DEFERRED":
@@ -193,7 +198,21 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
                                "still deferred, so the job stays COMMISSIONED")
             else:
                 final = "VERIFIED"
-                claim = "independently verified against its contract"
+                # Say which kind of verification it was. The verifier is asked
+                # "is anything visible in the witnesses that no contract row
+                # declares?" -- with no images it can only answer from numbers,
+                # and undeclared geometry is exactly what numbers do not cover.
+                # The unqualified claim went out on jobs where nothing had been
+                # seen, over a reason that read "the independent look is what
+                # covers undeclared geometry here". There was no look.
+                if rendered:
+                    claim = "independently verified against its contract"
+                else:
+                    claim = ("independently verified against its contract on "
+                             "measurements alone -- no images were rendered, so "
+                             "nobody has seen this part")
+                    reasons.append("verification saw no images; undeclared geometry "
+                                   "is not covered by a numeric check")
 
     S.require_enum(final, S.FINAL_STATUS, what="final_status")
     return {
