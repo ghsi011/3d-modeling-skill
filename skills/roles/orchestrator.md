@@ -89,34 +89,46 @@ disk, not on how the context was named.
 
 ## Consequence and escalation gate
 
-Before any pipeline profile decision, classify every job into exactly one consequence class and
-record the class, rationale, reviewer requirement, and prohibited claims in
-`job_state.md`'s `## Route` section (an optional `risk_class` field on the JSON mirror carries
-the same enum value when present, for `team_tools` to check mechanically; its absence is valid).
-Classification is a judgment call informed by the actual request, not a keyword match — when
-genuinely uncertain between two classes, classify toward the higher-consequence one. Re-classify
-immediately if new information raises the class (e.g. "for my desk" becomes "goes on my bike's
-brake lever").
+Two levels, and they are the enum the pipeline actually carries. Classify every job before any
+profile decision and write the class into `job.json`'s `consequence` field, with the rationale
+in `job_state.md`'s `## Route` section. Classification is a judgment call informed by the real
+request, not a keyword match; when genuinely uncertain between the two, classify up. Re-classify
+immediately if new information raises it — "for my desk" becoming "goes on my bike's brake
+lever" is a different job.
 
-- **`R0_DECORATIVE`** — cosmetic/display only; no functional load; failure only disappoints.
-- **`R1_LOW_CONSEQUENCE`** — light functional use; failure causes inconvenience or wasted
-  material, never injury.
-- **`R2_ENGINEERING_REVIEW`** — sustained load, repeated/cyclic motion, elevated temperature,
-  vehicle-mounted, magnets near children, electrical enclosure, food contact, fluid
-  containment, or any other injury-capable failure mode. Requires a **named human reviewer**, a
-  documented test plan, a conservative (fail-safe, not fail-dangerous) failure mode, and
-  physical proof (a printed and tested part, not a render) before the pipeline may make any
-  "ready for use" claim. The pipeline may design and gather evidence but does not itself
-  certify the part safe — that is the named reviewer's call.
-- **`R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`** — life-safety, medical, pressure vessel,
-  load-bearing for a person, braking/steering, a mains-electrical barrier, fire containment, a
-  weapon, or regulated structural application. The pipeline may give conceptual/non-operational
-  help only (discussion, non-functional mockups, pointers to the relevant professional or
-  regulatory process) and must **never** mark such a job accepted, verified, safe, or
-  ready-to-use — regardless of what any gate, checklist, or verification report reports. No
-  dispatch in this pipeline may output an acceptance verdict for an `R3` job; treat any contract
-  that tries to (e.g. a `verification_report.md` with `status: PASS`) as invalid for that reason
-  alone.
+- **`INCONSEQUENTIAL`** — cosmetic, display, or light functional use. Failure disappoints or
+  wastes material. Nobody gets hurt and nothing else breaks.
+- **`CONSEQUENTIAL`** — everything else: sustained load, repeated or cyclic motion, elevated
+  temperature, vehicle-mounted, magnets near children, an electrical enclosure, food contact,
+  fluid containment, or any other failure mode capable of injuring somebody or damaging
+  something that matters. A `CONSEQUENTIAL` job **must** make the bounded safety call in
+  `pipeline/safety.py`. It is not skippable because the route is `DIRECT`, the template is
+  certified, the part looks simple, the deterministic checks passed, the artifact came from
+  cache, or somebody wants it faster.
+
+**Why two and not four.** An earlier version of this charter ran `R0`–`R3` while the pipeline
+carried two, and nothing mapped one onto the other: an `R3` job was written into `job.json` as
+`CONSEQUENTIAL` and every `R3` guarantee evaporated at the file boundary. Four names that decay
+to two on write are worse than two names, because they read like protection that is not there.
+
+**Where the prohibited applications went.** They did not become a third level. `safety.py`'s
+`MANDATORY_CONCERNS` names them — life-safety, load-bearing for a person, braking or steering,
+pressure vessel, mains-electrical barrier, fire containment, regulated structural or medical
+use — and the safety reviewer must address any that apply *explicitly*, saying what physical
+evidence would be needed. The reviewer can answer `BLOCK` or `NEEDS_MORE_EVIDENCE`, and
+`status.decide` will not reach `VERIFIED` without independent verification on top. So the
+protection is a review that must engage with the hazard, not a keyword list that refuses.
+
+That is a deliberate trade and you should know which way it cuts: an automatic refusal cannot
+be argued out of, and a review can. What an automatic list cannot do is notice a hazard nobody
+wrote down, which is the failure mode this pipeline sees more often. If you are looking at a
+job where the list would have refused, say so in your handoff and let the human decide — you
+have the safety report, and it is more informative than a rejection.
+
+**What you may never claim.** No dispatch may output an acceptance verdict that outruns
+`final_status.json`. Read the `allowed_claim` field and do not exceed it. `COMMISSIONED` is not
+`VERIFIED`, and neither is "safe" or "ready to use" — a printed and tested part is what makes a
+part ready to use, and this pipeline does not print.
 
 ## Route profiles
 
@@ -211,9 +223,14 @@ and it decides which phases run, not how verbose the record is.
   twenty-seven green checks, an exact bounding box, a watertight verdict and a
   matching bed-contact area.
 
-  Broad screening now covers part of that gap and says exactly how much: measured
-  against a 38-mutant corpus across three templates, it catches added material and
-  boolean debris at a 0.0 false-negative rate. What it cannot do is prove a feature is
+  Broad screening now covers part of that gap and says exactly how much. Run
+  `python -m pipeline.corpus` for the current numbers; at the last measurement it
+  missed nothing. Two different claims sit behind that one number: material *fused
+  to the part* is what the profile and volume detectors have to earn, and it is
+  their false-negative rate the calibration gate scores. Disconnected debris is
+  caught free by the component detector and carries no fused rate at all — do not
+  read its absence from the gate as an unmeasured class. What screening cannot do
+  is prove a feature is
   *absent* — a deleted countersink leaves a plain bore, smooth and plausible, anomalous
   only against the curve the part should have had. Absence is the contract's job.
 

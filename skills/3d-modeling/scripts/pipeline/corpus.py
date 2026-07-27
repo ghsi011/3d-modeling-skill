@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 import trimesh
 
 from . import analysis, commission, screening
@@ -177,6 +178,41 @@ def c_clip_mutants(params: dict[str, Any], clean: trimesh.Trimesh) -> list[Mutan
     return out
 
 
+def _bed_point(clean: trimesh.Trimesh) -> tuple[float, float]:
+    """A point in XY that is guaranteed to have material under it.
+
+    The centre of the bounding box is not: it is the mouth of a C-channel, the
+    empty quadrant of an L, and the cavity of every shell. The largest face lying
+    on the bed plane is real material by construction, so its centroid is
+    somewhere a mutant can stand.
+    """
+    z0 = float(clean.bounds[0][2])
+    centers = clean.triangles_center
+    on_bed = np.abs(centers[:, 2] - z0) < 1e-6
+    if not on_bed.any():                       # not seated: fall back to the centre
+        lo, hi = clean.bounds
+        return float((lo[0] + hi[0]) / 2.0), float((lo[1] + hi[1]) / 2.0)
+    areas = clean.area_faces[on_bed]
+    biggest = centers[on_bed][int(np.argmax(areas))]
+    return float(biggest[0]), float(biggest[1])
+
+
+def _require_fused(mesh: trimesh.Trimesh, name: str) -> trimesh.Trimesh:
+    """A mutant that did not fuse is a corpus bug, not a caught defect.
+
+    Silently counting it flatters the screen twice over: the component detector
+    catches it for free, and it is excluded from the fused rate the gate reads --
+    so the corpus shrinks toward whichever template happens to place material
+    where there is material, and reports a rate measured on that one.
+    """
+    if mesh.body_count != 1:
+        raise AssertionError(
+            f"corpus: added-material mutant {name!r} left {mesh.body_count} bodies. "
+            "It floats -- place it on the part, or the component detector catches "
+            "it for free and it never scores against screening.")
+    return mesh
+
+
 def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
     """Defects any part can have, built to be hard rather than convenient.
 
@@ -186,8 +222,16 @@ def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
 
     * **Fused, not floating.** Bosses were placed at `hi[0] - r*0.5`, which on
       two of three templates landed in empty space -- so they were separate
-      solids and the component detector caught them for free. Every added-material
-      mutant here is unioned into the part and asserted to leave one body.
+      solids and the component detector caught them for free.
+
+      This paragraph used to end "and asserted to leave one body". There was no
+      assertion, and the property was false on four of five templates: added
+      material was placed at mid-height in the middle of the part, which inside a
+      shell is air. 19 of 30 added-material mutants were separate solids and the
+      fused rate the calibration gate reads came from `c_clip` alone. Both are
+      fixed here -- material is seated on the part rather than floated in its
+      bounding box, and `_require_fused` raises if a mutant does not fuse, so the
+      corpus fails loudly instead of quietly measuring the wrong thing.
     * **Inside the envelope.** They protruded past the bounding box and tripped
       the envelope check, which is a contract check, not a screen. These stay
       within it.
@@ -202,26 +246,49 @@ def generic_mutants(clean: trimesh.Trimesh) -> list[Mutant]:
     span = hi - lo
     cx, cy = (lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0
     scale = float(min(span[0], span[1]))
+    bx, by = _bed_point(clean)
     out: list[Mutant] = []
 
     # Added material: a ledge grown inward from a wall, and a post standing in
     # the middle. Both inside the bbox, both spanning a band between marks.
     for frac in (0.03, 0.06, 0.12):
         thickness = max(float(span[2]) * frac, 0.8)
-        z0 = float(lo[2]) + float(span[2]) * 0.35
-        ledge = _box((float(span[0]) * 0.5, float(span[1]) * 0.5, thickness),
-                     (cx, cy, z0 + thickness / 2.0))
+        # Seated on the bed and against a wall. Centred in the bounding box at
+        # mid-height -- where this used to sit -- is air on every shell, and on
+        # an L it is the empty quadrant. The bed plane is the one height at which
+        # a seated part is guaranteed to have material under the mutant.
+        depth = float(span[0]) * 0.25
+        ledge = _box((depth, float(span[1]) * 0.5, thickness),
+                     (float(lo[0]) + depth / 2.0, cy, float(lo[2]) + thickness / 2.0))
         out.append(Mutant("ledge-%.0f%%-mid-height" % (frac * 100), ADDED,
-                          _union(clean, ledge),
+                          _require_fused(_union(clean, ledge),
+                                         "ledge-%.0f%%" % (frac * 100)),
                           "a ledge between declared heights, wholly inside the envelope"))
 
+    # Seated on the part, not floated at mid-height. A post centred in a shell's
+    # bounding box stands in the cavity touching nothing; seating its base on the
+    # bed plane guarantees it meets material, because every part here is seated.
     for frac in (0.05, 0.10, 0.20):
         r = max(scale * frac, 0.6)
-        post = _cyl(r, float(span[2]) * 0.5,
-                    (cx, cy, float(lo[2]) + float(span[2]) * 0.5))
-        out.append(Mutant("post-%.0f%%-through-the-middle" % (frac * 100), ADDED,
-                          _union(clean, post),
-                          "a post standing through the part, inside the envelope"))
+        h = float(span[2]) * 0.5
+        post = _cyl(r, h, (bx, by, float(lo[2]) + h / 2.0))
+        out.append(Mutant("post-%.0f%%-standing-on-the-part" % (frac * 100), ADDED,
+                          _require_fused(_union(clean, post),
+                                         "post-%.0f%%" % (frac * 100)),
+                          "a post rising from the part, inside the envelope"))
+
+    # The one the review broke this corpus with: small, seated on the interior
+    # floor, between declared marks. 0.234% of the volume of a box_shell.
+    for frac in (0.02, 0.04, 0.08):
+        r = max(scale * frac, 0.6)
+        h = float(span[2]) * 0.25
+        # Base on the bed plane: every part here is seated, so that is the one
+        # height at which material is guaranteed to be present.
+        boss = _cyl(r, h, (bx, by, float(lo[2]) + h / 2.0))
+        out.append(Mutant("floor-boss-%.0f%%" % (frac * 100), ADDED,
+                          _require_fused(_union(clean, boss),
+                                         "floor-boss-%.0f%%" % (frac * 100)),
+                          "a small boss low on the part, off every declared mark"))
 
     # Debris stays disconnected -- that is what makes it debris.
     for frac in (0.01, 0.03, 0.08):
@@ -314,6 +381,12 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
                 len([r for r in subset if not r.caught]) / len(subset), 4),
             "screening_false_negative_rate": (
                 round(len(screening_missed) / len(fused), 4) if fused else None),
+            # Read this next to `screening_false_negative_rate`, which is None for
+            # any class with no fused mutants. Debris is disconnected by
+            # construction -- that is what makes it debris -- so it has no fused
+            # rate and the gate below cannot score it. It is still caught, every
+            # one, for free by the component detector; without this count the
+            # class reads as unmeasured rather than trivial.
             "caught_by_screening": len([r for r in subset if r.caught_by_screening]),
             "caught_by_contract_only": len([r for r in subset
                                             if r.caught_by_contract and not r.caught_by_screening]),
@@ -339,9 +412,9 @@ def run(templates: list[tuple[str, dict[str, Any], Callable[[], Contract]]]) -> 
         "thresholds": {"max_false_negative": MAX_FALSE_NEGATIVE,
                        "max_false_positive": MAX_FALSE_POSITIVE},
         "templates_measured": len(templates),
-        # The plan requires at least three. Two templates that both happen to be
-        # boxes would agree with each other and prove nothing about the third
-        # shape somebody actually asks for.
+        # Every certified template, not a sample: see MIN_TEMPLATES. Two
+        # templates that both happen to be boxes would agree with each other and
+        # prove nothing about the third shape somebody actually asks for.
         "gate": ("PASS" if worst_screening_fn <= MAX_FALSE_NEGATIVE
                  and fp_rate <= MAX_FALSE_POSITIVE
                  and len(templates) >= MIN_TEMPLATES else "FAIL"),

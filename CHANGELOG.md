@@ -6,6 +6,59 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — a deterministic pipeline that runs a certified job with no dispatches
+
+Six iterations of the approved redesign. The entry below describing `DIRECT` as
+"two dispatches" is what this replaced: on a certified template inside its
+domain, `DIRECT` now costs **zero**, and the whole job — contract, build,
+commission, screening, witness, status — completes in well under a second.
+
+The shape of it:
+
+* **The contract is written before the geometry** and frozen at build start.
+  `model_contract.json` names every mandatory feature with five properties:
+  where its number came from, what it should measure, the tolerance, which check
+  proves it, and what to do when that check cannot run. `preflight` refuses a
+  contract missing any of them.
+* **Expectations share no code path with the backends.** `expectations.py`
+  imports `math` and nothing else, so geometry and expectation cannot fail
+  together. Asserted by an import-graph test, not by a naming convention.
+* **Fail-closed.** A check that cannot run escalates or fails per the contract.
+  There is no `SKIP`, deliberately.
+* **Broad screening**, calibrated against a mutation corpus over every certified
+  template and scored on defects fused to the part — the ones the component
+  detector does not catch for free. `python -m pipeline.corpus` is the gate, and
+  it moves the final status rather than editing a claim string.
+* **Routes**: `DIRECT` (0 dispatches), `FITTED` (1 bounded spec call), `FULL`
+  (requires independent verification). `VERIFIED` is reachable only through
+  verification that never saw the designer's reasoning.
+* **Five certified templates**, `c_clip`, `box_shell`, `l_bracket`, `trim_ring`
+  and `vented_enclosure`, each with parameter bounds that route an
+  out-of-domain job away from `DIRECT` rather than building it anyway.
+* **Content-addressed caching**, keyed on the contract hash, template,
+  `domain_id`, backend version, lockfile, schema version and tessellation
+  settings. Off unless asked for.
+
+Measured, zero dispatches, cold: a 12-vent enclosure in 0.42 s, 72 vents in
+0.53 s, 300 vents in 0.78 s.
+
+### Changed — consequence is two levels, everywhere
+
+The charters classified `R0`–`R3` and then wrote a two-value enum into
+`job.json`, with nothing mapping between them: an `R3` job became
+`CONSEQUENTIAL` and every `R3` guarantee evaporated at the file boundary. Four
+names that decay to two on write are worse than two names, because they read
+like protection that is not there.
+
+`INCONSEQUENTIAL` and `CONSEQUENTIAL` are now the only levels in the charters as
+well as the code. The prohibited applications did not become a third level —
+they are `safety.MANDATORY_CONCERNS`, which the mandatory safety review must
+address explicitly. The team route's `risk_class` frontmatter survives because
+`validate` enforces one thing mechanically that no review can, and
+`team-contracts-v4.md` now states the mapping instead of leaving it to be
+guessed.
+
+
 ### Changed — the pipeline runs the phases a job actually has
 
 `profile: COMPACT | FULL` decided how verbose the record was and nothing else —

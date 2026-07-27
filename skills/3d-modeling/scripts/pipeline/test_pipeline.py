@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -442,7 +441,6 @@ class SafetyTest(unittest.TestCase):
                 "decision": "PASS", "failure_modes": [], "safety_concerns": [],
                 "missing_evidence": [], "required_actions": [], "summary": "ok"})
             self.assertNotIn("verification_report", seen[0].payload)
-            self.assertEqual(1, seen[0].payload["stage"])
 
     def test_an_inconsequential_job_never_calls_the_reviewer(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -533,7 +531,6 @@ class IndependenceTest(unittest.TestCase):
                     measured = ctx.section_area(float(row["at"]["z"]))
                     self.assertAlmostEqual(float(row["value_mm2"]), measured,
                                            delta=max(1.0, 0.005 * row["value_mm2"]))
-            _ = math
 
 
 class StatusTest(unittest.TestCase):
@@ -1238,22 +1235,21 @@ class CacheTest(unittest.TestCase):
             _run(out)
             self.assertEqual("disabled", self._status(out))
 
-    def test_a_geometry_hit_is_not_a_safety_hit(self) -> None:
-        """Reusing a safety review because the mesh matched answers 'is this part
-        safe' with 'this is the same part'."""
-        from . import cache as K
+    def test_a_safety_review_is_not_reused_because_the_geometry_matched(self) -> None:
+        """The identity has to move when the reviewer does, not only when the
+        part does. Comparing it against the geometry key proves nothing -- two
+        digests over two unrelated payloads differ by construction."""
         from . import safety as SF
 
-        with tempfile.TemporaryDirectory() as raw:
-            contract = _contract(Path(raw))
-            key = K.key_for(contract, backend_version="v", tessellation={}, root=Path(raw))
-            packet = SF.Packet(stage=1, payload={"a": 1})
-            reviewer = {"model_snapshot": "m", "prompt_hash": "p", "policy_version": "1",
-                        "reasoning_settings": "none", "inference_config": "{}",
-                        "image_preprocessing": "none"}
-            self.assertNotEqual(key.digest(),
-                                SF.cache_identity(packet, reviewer=reviewer))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        packet = SF.Packet(stage=1, payload={"a": 1})
+        base = {"model_snapshot": "m", "prompt_hash": "p", "policy_version": "1",
+                "reasoning_settings": "none", "inference_config": "{}",
+                "image_preprocessing": "none"}
+        first = SF.cache_identity(packet, reviewer=base)
+        for field in base:
+            with self.subTest(reviewer_differs=field):
+                self.assertNotEqual(
+                    first, SF.cache_identity(packet, reviewer={**base, field: "moved"}),
+                    f"a reviewer differing only in {field} is a different reviewer")
+        self.assertNotEqual(first, SF.cache_identity(
+            SF.Packet(stage=1, payload={"a": 2}), reviewer=base))

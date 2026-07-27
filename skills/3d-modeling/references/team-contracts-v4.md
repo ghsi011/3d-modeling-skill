@@ -89,17 +89,28 @@ seven copies of the same job id and revision will drift, and `contracts status` 
 drift only after it has happened. The parent directory holds the brief and the table; it is
 not itself a project and `validate` should not be pointed at it.
 
-`job_state.md`'s `## Route` section also records the job's consequence/risk class from the
-orchestrator's Consequence and escalation gate (`R0_DECORATIVE` / `R1_LOW_CONSEQUENCE` /
-`R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`; see
-[`../SKILL.md`](../SKILL.md)), its rationale, any named
-human reviewer requirement, and the claims the pipeline is prohibited from making for that
-class. Record the same enum as a `risk_class` field in `job_state.md`'s frontmatter: that is
-what makes the R3 prohibition machine-enforceable. `validate` rejects an unknown value, and
-rejects any project whose `job_state` declares `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` while its
-`verification_report` claims `PASS`, with `R3_ACCEPTANCE_PROHIBITED` — the prohibition is not
-advisory. Absence of the field remains valid for backward compatibility, but a job with no
-`risk_class` cannot be checked for it, so omit it only for work that is plainly `R0`.
+`job_state.md`'s `## Route` section also records the job's consequence class from the
+orchestrator's [Consequence and escalation gate](../roles/orchestrator.md), its rationale, and
+the claims the pipeline is prohibited from making. That gate carries **two** values,
+`INCONSEQUENTIAL` and `CONSEQUENTIAL`, and they are what `job.json` carries.
+
+The `risk_class` frontmatter field is older and finer-grained: `R0_DECORATIVE` /
+`R1_LOW_CONSEQUENCE` / `R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`. It is
+not a second consequence model — it exists because `validate` enforces one thing mechanically
+that no review can: it rejects any project whose `job_state` declares
+`R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` while its `verification_report` claims `PASS`, with
+`R3_ACCEPTANCE_PROHIBITED`. That check is live and is worth keeping, so the field stays and the
+mapping is written down here rather than left to be guessed:
+
+| gate value | applications | `risk_class` |
+| --- | --- | --- |
+| `INCONSEQUENTIAL` | cosmetic, display, light functional | `R0_DECORATIVE` or `R1_LOW_CONSEQUENCE` |
+| `CONSEQUENTIAL` | injury-capable failure modes | `R2_ENGINEERING_REVIEW` |
+| `CONSEQUENTIAL` | any of `safety.MANDATORY_CONCERNS` | `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` |
+
+`validate` rejects an unknown value. Absence of the field remains valid for backward
+compatibility, but a job with no `risk_class` cannot be checked for the R3 prohibition, so omit
+it only for work that is plainly decorative.
 
 Both backends are headless and file-based, so candidates isolate by directory rather than by lock. There is no mutation lease and no single-session backend.
 

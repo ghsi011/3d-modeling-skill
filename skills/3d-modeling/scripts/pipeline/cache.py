@@ -12,11 +12,14 @@ and tessellation settings. Tessellation is in there because a section area
 measured off a coarser mesh is a different number, and two runs that disagree
 about it are not the same run.
 
-**A geometry hit is not a safety hit.** They are separate namespaces on purpose.
-Reusing a safety review because the mesh matched would be answering "is this part
-safe" with "this is the same part", which is a different question and a worse
-one -- the reviewer, its prompt, its reasoning settings and what it was shown all
-have to match too, and those live in `safety.cache_identity`.
+**A geometry hit is not a safety hit.** Reusing a safety review because the mesh
+matched would be answering "is this part safe" with "this is the same part",
+which is a different question and a worse one -- the reviewer, its prompt, its
+reasoning settings and what it was shown all have to match too. `safety` computes
+its own identity from those, and nothing here consults it.
+
+There is one cached layer, the build. Commission and witness are fast enough that
+caching them would buy less than the risk of serving one stale.
 """
 from __future__ import annotations
 
@@ -33,9 +36,6 @@ from . import schemas as S
 # generation before it is dead, which is the intended blunt instrument: the
 # alternative is reasoning about which stale entries are still fine.
 GENERATION = 1
-
-LAYERS = ("build", "commission", "witness")
-
 
 @dataclasses.dataclass(frozen=True)
 class Key:
@@ -141,15 +141,3 @@ class Cache:
         }
         (slot / "cache_receipt.json").write_text(S.canonical_json(receipt), encoding="utf-8")
         return receipt
-
-    def restore(self, key: Key, into: Path) -> list[str]:
-        payload = self.lookup(key)
-        if payload is None:
-            return []
-        slot = self._slot(key)
-        into.mkdir(parents=True, exist_ok=True)
-        restored = []
-        for name in payload["files"]:
-            shutil.copy2(slot / name, into / name)
-            restored.append(name)
-        return restored

@@ -45,7 +45,7 @@ commands pay 5.9 s of interpreter startup to do 3.5 s of work.
   plumbing, not new capability.
 - **No caching of any kind.** Every run rebuilds and re-measures.
 - **No console entry points**; `dt.py` is invoked by absolute path.
-- **`uv.lock` is gitignored** (`.gitignore:60`) and therefore not committed.
+- **`uv.lock` is committed** and hashed into the cache key, so a machine whose lock moved misses rather than serving geometry built against different resolved versions.
   `uv sync --frozen` resolves today, but nothing pins what CI installs.
 
 ## Contract inventory, and where it maps
@@ -130,8 +130,9 @@ worth anything:
 
 ## Still not met
 
-* The `< 2 s` cached-validation target has no cache to measure — content-addressed
-  caching is unbuilt.
+* The `< 2 s` cached-validation target is met, and not only when cached: the
+  300-vent enclosure commissions cold in 0.78 s. Content-addressed caching landed
+  in `pipeline/cache.py` and is off unless a `cache_dir` is passed.
 * Wall clock on a real agent-driven job is still unmeasured against the new
   pipeline. The deterministic compute is 0.17 s; the previous end-to-end
   measurement of 3.1 minutes was against the retired route.

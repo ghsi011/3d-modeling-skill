@@ -91,7 +91,7 @@ tests (see [Running the tests](#running-the-tests) for the two extra test-only
 packages):
 
 ```bash
-pip install trimesh numpy pillow manifold3d
+pip install build123d trimesh numpy pillow manifold3d
 ```
 
 Optional extras, declared in `pyproject.toml` and installed only for the

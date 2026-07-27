@@ -162,19 +162,3 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
     S.require_enum(contract.backend, S.BACKEND, what="contract.backend")
     return problems
 
-
-def load(payload: dict[str, Any]) -> Contract:
-    S.require_version(payload, S.CONTRACT_SCHEMA, what="model_contract.json")
-    features = tuple(Feature(**row) for row in payload.get("features", ()))
-    return Contract(
-        job_id=payload["job_id"], template=payload["template"],
-        template_version=payload["template_version"], domain_id=payload.get("domain_id"),
-        backend=payload["backend"], parameters=payload["parameters"], features=features,
-        expected_bbox_mm=payload["expected_bbox_mm"],
-        bbox_tolerance_mm=payload["bbox_tolerance_mm"],
-        expected_bodies=payload["expected_bodies"], orientation=payload["orientation"],
-        material=payload["material"], modifiers=tuple(payload.get("modifiers", ())),
-        minimum_coverage=payload["minimum_coverage"],
-        step_required=payload["step_required"], consequence=payload["consequence"],
-        updated_utc=payload["updated_utc"],
-    )

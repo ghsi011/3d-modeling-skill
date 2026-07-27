@@ -86,7 +86,8 @@ def manufacturing(contract: Contract, commission_report: dict[str, Any]) -> dict
 def decide(*, contract: Contract, commission_report: dict[str, Any],
            screening: dict[str, Any], manufacturing: dict[str, Any] | None,
            safety: dict[str, Any] | None, artifact: dict[str, Any],
-           verification: dict[str, Any] | None, updated_utc: str) -> dict[str, Any]:
+           verification: dict[str, Any] | None, updated_utc: str,
+           route: str = "DIRECT") -> dict[str, Any]:
     reasons: list[str] = []
     verdict = commission_report["verdict"]
     witness = commission_report.get("witness") or {}
@@ -199,7 +200,11 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         "schema_version": S.STATUS_SCHEMA,
         "job_id": contract.job_id,
         "consequence": contract.consequence,
-        "route": "DIRECT",
+        # Threaded, not assumed. It was the literal "DIRECT" from the days when
+        # DIRECT was the only route, so every FITTED job's authoritative receipt
+        # said it had cost no dispatches. Nothing read the field, which is how it
+        # survived -- a receipt nobody reads is still a receipt somebody may.
+        "route": route,
         "backend": contract.backend,
         "template": f"{contract.template}@{contract.template_version}",
         "domain_id": contract.domain_id,

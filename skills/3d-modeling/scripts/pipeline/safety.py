@@ -9,10 +9,11 @@ Bounded on purpose. This is one call with a compact packet and a strict output
 schema -- not an autonomous agent with a shell. A full autonomous reviewer runs
 only after this one names a specific unresolved issue.
 
-**Two stages, because anchoring is real.** Stage 1 decides from the evidence
-alone. Only then is the normal verifier's conclusion shown, and only so
-disagreement can be reported. A second opinion that read the first one is not a
-second opinion.
+**Stage 1 only, and it says so.** The plan's second stage -- show the normal
+verifier's conclusion, purely so disagreement can be reported -- is not built.
+What is built is the part that matters most: this call never sees
+`verification_report.json`, so it cannot anchor on it. A second opinion that read
+the first one is not a second opinion.
 
 This module builds the packet and validates the response. It does not call a
 model: the runner hands the packet to whatever the host provides, so the pipeline
@@ -51,7 +52,6 @@ MANDATORY_CONCERNS = (
 )
 
 
-
 @dataclasses.dataclass(frozen=True)
 class Packet:
     stage: int
@@ -63,11 +63,11 @@ class Packet:
 
 def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any],
                  artifact: dict[str, Any], commission: dict[str, Any],
-                 manufacturing: dict[str, Any] | None, witness: dict[str, Any],
-                 stage: int = 1) -> Packet:
-    """Stage 1 deliberately omits `verification_report.json`."""
-    return Packet(stage=stage, payload={
-        "stage": stage,
+                 manufacturing: dict[str, Any] | None,
+                 witness: dict[str, Any]) -> Packet:
+    """Deliberately omits `verification_report.json` -- see the module docstring."""
+    return Packet(stage=1, payload={
+        "stage": 1,
         "brief": brief,
         "consequence": intent["consequence"],
         "intent_manifest": intent,
@@ -131,7 +131,8 @@ def run(packet: Packet, reviewer: dict[str, Any],
         "evidence_packet_sha256": packet.packet_hash(),
         "cache_identity": cache_identity(packet, reviewer=reviewer),
         "reviewer": reviewer,
-        "fresh_context": True,
+        # See verification.py: answered, not asserted.
+        "fresh_context": reviewer.get("fresh_context"),
         "stage": packet.stage,
         "reviewed_questions": list(QUESTIONS),
         **response,

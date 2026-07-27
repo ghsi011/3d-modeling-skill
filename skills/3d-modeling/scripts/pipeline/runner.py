@@ -325,7 +325,8 @@ def run(request: JobRequest) -> JobResult:
                           screening=screen, manufacturing=manufacturing,
                           safety=safety_report, artifact=artifact,
                           verification=verification_report,
-                          updated_utc=request.updated_utc)
+                          updated_utc=request.updated_utc,
+                          route=manifest["route_decision"]["route"])
     written["final_status"] = _write(out / "final_status.json", final)
 
     timings["build"] = round(built.build_seconds, 4)

@@ -34,36 +34,45 @@ STEP_FRACTION = 0.08
 # Measured, and the measurement is the point -- an earlier version of this flag
 # said True on a number that turned out to be measuring something else.
 #
-# `python -m pipeline.corpus`: 58 mutants across all four certified templates,
-# five defect classes. Screening's own false-negative rate on defects **fused to
-# the part** is 0.0, false positives on the clean parts 0.0.
+# `python -m pipeline.corpus` measures it, over every certified template and
+# every defect class. **It currently fails**: screening's own false-negative rate
+# on defects fused to the part is 0.30. Fifteen mutants pass every check here and
+# every contract check -- among them a Ø4 x 8 mm post standing on the floor of a
+# box_shell, one body, watertight, inside the envelope, +0.234% of the volume.
+# That is verbatim the defect the first paragraph of this file exists to prevent.
 #
-# Three things had to be fixed before that number meant anything:
+# It read 0.0 until the corpus was fixed. Three construction errors, each of
+# which flattered the screen:
 #
 #   * The rate was computed from `caught_by_contract or caught_by_screening`, so
-#     it reported the pipeline's 0.0 while the screen itself missed 46.7%.
-#     Contract checks are conditioned on declared features, which is exactly why
-#     they are not the broad evidence this gate is about.
-#   * Half the added-material mutants were disconnected solids, caught free by
-#     the component detector. Scored on fused defects only the rate was 87.5%.
+#     it reported the pipeline's number while the screen itself missed 46.7%.
+#   * Added material was placed at the centre of the bounding box at mid-height,
+#     which inside a shell is air. Those mutants were separate solids, caught
+#     free by the component detector, and excluded from the fused rate -- so the
+#     0.0 was measured on `c_clip` alone, 11 mutants out of 30. `_require_fused`
+#     now raises rather than letting one through, and there are 50.
 #   * The profile compares neighbouring samples, so material that lifts the level
-#     across a whole region shows no step -- a ledge adding 24.9% and a rib adding
-#     45.8% both screened CLEAR. The volume detector closes that: one scalar for
-#     the whole part, the only screen here that does not need to know where.
+#     across a whole region shows no step. The volume detector closes part of
+#     that, but its 0.25% band is above a real defect: the post costs 0.234%.
 #
-# Still true and not licensed by this flag: screening cannot prove a feature is
-# *absent*, and only the Z axis is profiled.
-CALIBRATED = True
+# The corpus size is deliberately not written down here. It was, twice, and both
+# times a template was added and the number in this file became a false
+# provenance claim stamped into every receipt.
+#
+# Also true and not something this flag could license even at 0.0: screening
+# cannot prove a feature is *absent*, and only the Z axis is profiled.
+CALIBRATED = False
 CALIBRATION_NOTE = (
-    "measured on a 58-mutant corpus across all four certified templates: 0.0 "
-    "false-negative rate on defects fused to the part, 0.0 false positives. Not "
-    "licensed by that: screening cannot prove a feature is absent -- a deleted "
-    "countersink leaves a plain bore -- and only the Z axis is profiled.")
+    "NOT CALIBRATED. `python -m pipeline.corpus` measures a 0.30 false-negative "
+    "rate on defects fused to the part -- a small boss standing on the floor "
+    "passes every check here. Screening is evidence, not a substitute for a "
+    "look, and this job needs one. It also cannot prove a feature is absent -- a "
+    "deleted countersink leaves a plain bore -- and only the Z axis is profiled.")
 SAMPLES = 24
 FRAGMENT_FRACTION = 0.02
 
 # How far the solid's own volume may sit from the closed form before it is worth
-# a look. Tessellation error is 0.01% or better on all four certified templates,
+# a look. Tessellation error is 0.01% or better on every certified template,
 # measured, so 0.25% sits 25x above the noise floor and still catches a 1.1 mm
 # post that moves the total 0.38%. Set at 1% it missed exactly that post.
 VOLUME_FRACTION = 0.0025
@@ -180,8 +189,8 @@ def reference_envelope(contract: Contract) -> dict[str, Any]:
 
     Derived from declarations, never from the mesh. A step at a declared feature
     is the feature; a step anywhere else is worth a look. Without this the
-    detector cannot tell a rib from a defect, which is why an absent envelope
-    reports INDETERMINATE rather than CLEAR.
+    detector cannot tell a rib from a defect, which is why it is derived from the
+    contract rather than passed in and allowed to be missing.
     """
     from . import templates as T
 

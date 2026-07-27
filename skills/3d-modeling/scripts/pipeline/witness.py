@@ -17,8 +17,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-MAX_ORTHO_VIEWS = 8
-MAX_ISO_VIEWS = 2
 MAX_RESOLUTION_PX = 512
 MAX_SECTIONS = 12
 MAX_SECONDS = 2.0
@@ -40,9 +38,8 @@ class Witness:
         return {"level": self.level, "images": list(self.images),
                 "sections": list(self.sections), "renderer": self.renderer,
                 "rendered": bool(self.images),
-                "budgets": {"ortho_views": MAX_ORTHO_VIEWS, "iso_views": MAX_ISO_VIEWS,
-                            "resolution_px": MAX_RESOLUTION_PX, "sections": MAX_SECTIONS,
-                            "seconds": MAX_SECONDS}}
+                "budgets": {"resolution_px": MAX_RESOLUTION_PX,
+                            "sections": MAX_SECTIONS, "seconds": MAX_SECONDS}}
 
 
 def _sections(ctx, contract, limit: int) -> tuple[dict[str, Any], ...]:
@@ -111,9 +108,6 @@ def generate(ctx, contract, out_dir: Path, *, level: str = "W1",
     witness = Witness(level=level, images=tuple(images), sections=sections,
                       seconds=seconds, renderer=renderer)
 
-    if len(images) > MAX_ORTHO_VIEWS + MAX_ISO_VIEWS:
-        raise BudgetExceeded(f"{level}: {len(images)} images exceeds "
-                             f"{MAX_ORTHO_VIEWS + MAX_ISO_VIEWS}")
     if seconds > MAX_SECONDS:
         raise BudgetExceeded(
             f"{level}: generation took {seconds:.2f}s against a {MAX_SECONDS}s budget. "

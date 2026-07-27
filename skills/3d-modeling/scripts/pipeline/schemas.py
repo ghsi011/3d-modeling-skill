@@ -5,9 +5,11 @@ JSON is canonical here. Markdown, where it appears at all, is a generated view
 -- which inverts the direction this repo used to run, where four contracts were
 Markdown-authoritative and the JSON mirrored them.
 
-Every artifact carries `schema_version`. A reader that finds a version it does
-not know refuses rather than guessing: a schema change that silently reinterprets
-an old field is indistinguishable, from the outside, from a correct read.
+Every artifact carries `schema_version` so that a reader can refuse a version it
+does not know rather than guess -- a schema change that silently reinterprets an
+old field is indistinguishable, from the outside, from a correct read. Nothing
+reads an artifact back yet: one run writes them and the next writes them again.
+The field is the provision for when something does, not a check running today.
 """
 from __future__ import annotations
 
@@ -67,14 +69,6 @@ def payload_hash(payload: Any) -> str:
     """Hash a structure by its canonical text, so key order cannot change it."""
     return sha256_text(canonical_json(payload))
 
-
-def require_version(payload: dict[str, Any], expected: int, *, what: str) -> None:
-    found = payload.get("schema_version")
-    if found != expected:
-        raise SchemaError(
-            f"{what}: schema_version {found!r}, this build reads {expected}. "
-            "Migrate the artifact or use the build that wrote it -- reading it "
-            "anyway would be a guess about what its fields meant.")
 
 
 def require_enum(value: Any, allowed: tuple[str, ...], *, what: str) -> str:

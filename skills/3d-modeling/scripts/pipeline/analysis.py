@@ -36,6 +36,11 @@ class MeshAnalysisContext:
     normalized: trimesh.Trimesh
     load_count: int
     repair_actions: tuple[str, ...]
+    # What the parse and the normalization actually saw. Reported, never a
+    # verdict: every escalation here is `repair_actions`, which is derived from
+    # comparing the two meshes rather than from either tool's own log.
+    integrity: dict[str, Any] = dataclasses.field(default_factory=dict)
+    mutations: dict[str, Any] = dataclasses.field(default_factory=dict)
     # Recorded, never escalated: see `load` for why the ratio is meaningless.
     vertex_merge: tuple[int, int] = (0, 0)
     _sections: dict[tuple, float] = dataclasses.field(default_factory=dict)
@@ -197,8 +202,9 @@ def load(path: Path) -> MeshAnalysisContext:
     volume_delta = abs(float(raw.volume) - float(normalized.volume))
     if volume_delta > max(1e-6, 1e-9 * abs(float(raw.volume))):
         actions.append(f"volume moved by {volume_delta:.6g} mm3 during normalization")
-    _ = integrity, mutations
     return MeshAnalysisContext(
         path=path, raw=raw, normalized=normalized, load_count=parses,
         repair_actions=tuple(actions),
+        integrity=dataclasses.asdict(integrity),
+        mutations=dataclasses.asdict(mutations),
         vertex_merge=(len(raw.vertices), len(normalized.vertices)))

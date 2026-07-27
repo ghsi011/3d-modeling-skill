@@ -235,6 +235,8 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
                      "minimum": contract.minimum_coverage},
         "mesh_loads": ctx.load_count,
         "repair_actions": list(ctx.repair_actions),
+        "raw_parse_integrity": ctx.integrity,
+        "normalization_log": ctx.mutations,
         "checks": [c.as_dict() for c in checks],
     }
 

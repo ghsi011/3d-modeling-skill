@@ -17,35 +17,42 @@ the individual check functions as a menu is what made three measured runs
 hand-write 130-to-280-line verification scripts instead of running the gate, and
 one of them widened its own acceptance bands until its wrong numbers passed.
 
-## Phase-4 verification patterns
+The gate already handles the traps below — the `plane_transform` datum frame, the
+-0.73 overhang screen, watertight-on-the-normalized-mesh — and exits non-zero if
+any declared measurement fails.
 
-**Run `dt.py commission`, not this code.** One call measures everything the plan
-declares and exits non-zero if any of it fails; see
-[`designer-toolkit.md`](designer-toolkit.md). It already handles the traps below
-— the `plane_transform` datum frame, the -0.73 overhang screen,
-watertight-on-the-normalized-mesh.
-
-The patterns below explain what the gate does under the hood, for when you need
-to understand a result. They are not a kit to assemble. Offering the individual
-check functions as a menu is what made three measured runs hand-write
-130-to-280-line verification scripts instead of running the gate, and one of them
-widened its own acceptance bands until its wrong numbers passed.
+## Verification patterns
 
 ```python
+# Name the engine at every boolean. Letting trimesh choose is how a run silently
+# gets a different engine's answer, or none.
+import numpy as np, trimesh
+from trimesh.boolean import intersection, difference
+ENGINE = "manifold"
+
+body = trimesh.load("body.stl", force="mesh")
+ref_part = trimesh.load("ref.stl", force="mesh")
+
 # 1. seated interference (must be ~0)
-inter = body.intersect(ref_part)
-print("interference", inter.val().Volume() if inter.val().Solids() else 0.0)
+inter = intersection([body, ref_part], engine=ENGINE)
+print("interference", float(inter.volume) if len(inter.faces) else 0.0)
 
 # 2. insertion sweep — ref less deep by t, still no interference
 for t in (5, 15, 25, 35, 45, 55, 65):
-    r = ref_part.translate((0, 0, -t))
-    s = body.intersect(r)
-    v = s.val().Volume() if s.val().Solids() else 0.0
+    r = ref_part.copy()
+    r.apply_translation((0, 0, -t))
+    s = intersection([body, r], engine=ENGINE)
+    v = float(s.volume) if len(s.faces) else 0.0
     assert v < 1e-6, f"insertion blocked at travel {t}: {v}"
 
 # 3. section render: cut half, export, preview
-half = body.cut(cq.Workplane("XY").box(500, 500, 500, centered=(False, True, True)))
-cq.exporters.export(half, "section.stl", tolerance=0.01, angularTolerance=0.1)
+# Place the cutter from the part's own bounds, not from the origin. A fixed
+# x >= 0 half-space removes a seated part entirely, and an empty section.stl
+# looks like a rendering problem rather than a cut in the wrong place.
+mid = float(body.bounds[:, 0].mean())
+cutter = trimesh.creation.box((500, 500, 500))
+cutter.apply_translation((mid + 250, 0, 0))    # keep the x < mid half
+difference([body, cutter], engine=ENGINE).export("section.stl")
 
 # 4. visual side-by-side vs reference model / photos — SAME cameras, one image
 import sys; sys.path.insert(0, '<skill>/scripts'); from preview import render_view
@@ -63,9 +70,7 @@ canvas.save('side_by_side.png')                      # then LOOK at it and compa
 # feature-by-feature: silhouette, shapes, counts, positions — before any export
 
 # 5. feature positions from named datums — on the EXPORTED STL
-import trimesh, numpy as np
-m = trimesh.load('body.stl')
-sec = m.section(plane_origin=[0, 0, 1.0], plane_normal=[0, 0, 1])
+sec = body.section(plane_origin=[0, 0, 1.0], plane_normal=[0, 0, 1])
 # ALWAYS pass plane_transform: bare to_2D() re-origins on a path-dependent frame,
 # so hole centers silently stop matching model-coordinate datums
 p, _ = sec.to_2D(trimesh.geometry.plane_transform([0, 0, 1.0], [0, 0, 1]))
@@ -78,13 +83,24 @@ for poly in p.polygons_full:
 # centerline, 36.7 from top edge). Size alone never passes a placement check.
 # Handedness: also compare with x negated — mirrored layouts fit the numbers too.
 
-# 7. face audit half of check 7 — cylindrical radii present in the part
+# 7. face audit half of check 7 — bore diameters present in the part
 #    (check 6, measurement audit, is a manual diff of prompt numbers vs geometry;
 #     printability half of check 7: next section)
-import re
-radii = sorted({round(f.radius(), 2) for f in body.val().Faces()
-                if f.geomType() == "CYLINDER"})
-print("cyl radii", radii, "bbox", body.val().BoundingBox())
+# An STL has no analytic faces: a cylinder is facets, and there is no radius to
+# ask for. That is the honest cost of verifying the exported mesh instead of the
+# kernel's own model of it -- and it is the right trade, because the exported
+# mesh is what gets printed. Measure the hole in a section instead.
+sec = body.section(plane_origin=[0, 0, 1.0], plane_normal=[0, 0, 1])
+flat, _ = sec.to_2D(trimesh.geometry.plane_transform([0, 0, 1.0], [0, 0, 1]))
+for poly in flat.polygons_full:
+    for hole in poly.interiors:
+        c = np.array(hole.coords)
+        size = c.max(0) - c.min(0)
+        # Round only for display. A bore tessellated at 64 segments measures
+        # slightly under nominal across the flats; compare against the tolerance
+        # the contract declares, never against the nominal number.
+        print("bore", np.round(size, 2))
+print("bbox", np.round(body.bounds, 2))
 ```
 
 ## Render-over-photo overlay loop (recreating a part from photos)

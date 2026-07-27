@@ -6,8 +6,9 @@ Two things live here that used to live nowhere.
 **Stated versus inferred, per value.** Defaulting an unmarked number to "the user
 said this" fabricates authority. A brief asking for a clip over a 12 mm bundle
 states three numbers and the template takes eight; the other five were chosen by
-whoever ran the job. The default is `inferred`, which understates and invites
-scrutiny -- the failure direction that is safe.
+whoever ran the job, and those are marked "chosen by design" with the designer
+named as their source. Nothing is defaulted to the user, which is the failure
+direction that is safe.
 
 **Why this route, and why not the others.** Routing was the one decision in the
 pipeline that left no trace, so it could be neither audited nor regression-tested.

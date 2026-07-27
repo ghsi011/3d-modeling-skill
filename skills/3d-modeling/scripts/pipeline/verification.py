@@ -129,8 +129,15 @@ def run(packet: Packet, reviewer: dict[str, Any],
         "schema_version": S.VERIFICATION_SCHEMA,
         "evidence_packet_sha256": packet.packet_hash(),
         "reviewer": reviewer,
-        "fresh_context": True,
-        "saw_designer_reasoning": False,
+        # Answered by whoever knows, never asserted here. These were the literals
+        # `True` and `False`, written by this function on every report and
+        # established by nothing -- on a single-context run that is a plain
+        # falsehood in a contract, produced by the pipeline itself. No code can
+        # know whether the context that invoked it has read the designer's
+        # reasoning, and the whole charter rests on a fresh context being able to
+        # disagree with the designer.
+        "fresh_context": reviewer.get("fresh_context"),
+        "saw_designer_reasoning": reviewer.get("saw_designer_reasoning"),
         "reviewed_questions": list(QUESTIONS),
         **result,
     }

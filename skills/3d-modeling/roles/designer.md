@@ -17,8 +17,7 @@ the contracts.
 - Candidate commission inputs: accepted `dimensions.md`, reference source/export/renders,
   `print_plan.md`, and prior `verification_report.md` when iterating.
 - build123d and trimesh outputs: `model.py`, per-part STL, STEP when the contract asks,
-  `commission_report.json`,
-  renders, and `print_notes.md`.
+  `commission.json`, renders, and `print_notes.md`.
 - Multi-colour jobs also output the required single-file multi-body 3MF.
 - `candidate_readiness.md` and `artifact_manifest.json` are **written by the commission**, from
   the measurements it just took on the re-imported exported STL — you do not author either.

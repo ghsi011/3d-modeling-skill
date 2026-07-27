@@ -129,7 +129,9 @@ to compare against.
 - **`FULL`** — every step, and the conditional final-prep review.
 
 The consequence class scales the depth of steps 6 and 7 on top of this, never the deterministic
-gate. `R3` never receives a `PASS` under any profile.
+gate. A job whose `risk_class` is `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` never receives a `PASS`
+under any profile — `validate` enforces that mechanically, and you should not be the reason it
+has to.
 
 ## Checklist
 
@@ -227,10 +229,10 @@ gate. `R3` never receives a `PASS` under any profile.
    engineer owns fit strategy; you check the designer's implementation of it and never
    redeclare it.
 
-   Scale this judgment by consequence class, never the deterministic gate above. `R0` needs
-   the visual call and little fit reasoning; `R1` adds the fit-band judgment; `R2` needs the
-   whole of this step with every occluded view resolved and the `SUPPORT_ALLOWED` contact
-   inspection written out. What never scales down is that this step happens at all: a purely
+   Scale this judgment by consequence class, never the deterministic gate above. An
+   `INCONSEQUENTIAL` job needs the visual call and the fit-band judgment. A `CONSEQUENTIAL` one
+   needs the whole of this step, with every occluded view resolved and the `SUPPORT_ALLOWED`
+   contact inspection written out. What never scales down is that this step happens at all: a purely
    numeric `PASS` reintroduces the exact failure this role exists to catch, a part that
    satisfies every scalar and is the wrong object. Compare the sheet's feature inventory
    against what you can see, item by item — that comparison is the one this role owns
