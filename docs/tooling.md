@@ -18,6 +18,83 @@ Exit code convention across these tools:
 
 Individual tools narrow or extend this table below.
 
+## `design-tool run-job` — the deterministic route
+
+The production entry point for a job the pipeline can build itself. One
+invocation runs contract, build, commission, screening, witness and status;
+every extra invocation would pay interpreter startup to do work measured in
+milliseconds.
+
+```bash
+uv run design-tool run-job job_dir/ [--no-render]
+```
+
+`job_dir/job.json` describes the job:
+
+| field | meaning |
+| --- | --- |
+| `job_id` | names the job in every artifact it writes |
+| `template` | a certified template name; omit to let routing decide |
+| `parameters` | the template's parameters, in mm |
+| `consequence` | `INCONSEQUENTIAL` or `CONSEQUENTIAL` — there is no third level |
+| `stated` | which parameters the user actually gave, as opposed to chosen for them |
+| `updated_utc` | timestamp carried into the contract |
+| `reviewer` | who answers the reviews, by their own account — including `fresh_context`, which nothing here can verify and so is never assumed |
+| `modifiers`, `step`, `evidence`, `interface_map`, `cache_dir` | optional; see `runner.JobRequest` |
+
+Exit codes, which extend the table above:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The job finished and `final_status.json` records a status the run earned. |
+| 1 | The job stopped at a named stage, or finished at a status short of passing. The receipt says which and why. |
+| 3 | The job needs a review before it can finish. See below. |
+
+### Answering a review
+
+A `CONSEQUENTIAL` job must make a bounded safety call, a `FITTED` job needs one
+spec call, and `VERIFIED` requires independent verification. Those are judgements
+about a part; a deterministic program that returned one would be inventing it. So
+the CLI writes the evidence and stops:
+
+```
+design-tool: this job needs a safety review before it can finish.
+  the evidence is written to  reviews/safety_packet.json
+  write the answer to         reviews/safety_response.json
+  then run the same command again.
+```
+
+Write the response file and re-run the same command. Responses are validated
+against the same schema an in-process caller is held to — a malformed one is a
+`SchemaError`, not a shrug. The safety packet deliberately omits
+`verification_report.json`: a second opinion that read the first one is not a
+second opinion.
+
+### What it writes
+
+`model_contract.json`, `intent_manifest.json`, `candidate.stl` (and
+`candidate.step` when the contract asks), `commission_report.json`,
+`manufacturing_report.json`, `witness/`, `artifact_manifest.json`,
+`timings.json`, and `final_status.json`.
+
+**Read `final_status.json`, and read `allowed_claim` before repeating anything
+about the part.** `COMMISSIONED` is not `VERIFIED`, and neither one is "safe".
+
+## `python -m pipeline.corpus` — the calibration measurement
+
+Builds every certified template, mutates each one, and reports what broad
+screening caught. Exits non-zero while the gate fails, which it currently does.
+
+```bash
+uv run python -m pipeline.corpus
+```
+
+The fields worth reading: `gate`, `screening_false_negative_rate` (scored on
+defects *fused* to the part, since a disconnected one is caught free by the
+component detector), `false_positive_rate` with its `clean_parts_checked`
+denominator, and `survivors_of_everything`.
+
+
 ## `team_preflight.py`
 
 Script: [`skills/3d-modeling/scripts/team_preflight.py`](../skills/3d-modeling/scripts/team_preflight.py)
@@ -31,7 +108,7 @@ schema errors raised before a gate result can be written.
 ### support, actual command `support-audit`
 
 ```bash
-python skills/3d-modeling/scripts/team_preflight.py support-audit \
+uv run python skills/3d-modeling/scripts/team_preflight.py support-audit \
   --stl candidate.stl \
   --plan print_plan_checks.json \
   --rule-id support-rule-id \
@@ -61,7 +138,7 @@ Exit codes:
 ### interfaces, actual command `validate-interfaces`
 
 ```bash
-python skills/3d-modeling/scripts/team_preflight.py validate-interfaces \
+uv run python skills/3d-modeling/scripts/team_preflight.py validate-interfaces \
   --plan print_plan_checks.json \
   [--output interface_validation.json]
 ```
@@ -96,7 +173,7 @@ bindings only. It doesn't prove geometric or manufacturing correctness.
 
 ```bash
 cd skills/3d-modeling/scripts
-python -m team_tools.contracts validate path/to/project [--require CONTRACT] [--output receipt.json] [--timestamp ISO-8601]
+uv run python -m team_tools.contracts validate path/to/project [--require CONTRACT] [--output receipt.json] [--timestamp ISO-8601]
 ```
 
 Inputs:
@@ -150,8 +227,8 @@ validate from one that gated on nothing.
 
 ```bash
 cd skills/3d-modeling/scripts
-python -m team_tools.contracts hash path/to/project
-python -m team_tools.contracts status path/to/project
+uv run python -m team_tools.contracts hash path/to/project
+uv run python -m team_tools.contracts status path/to/project
 ```
 
 Both take a project directory and print to stdout by default. `hash` takes
@@ -179,7 +256,7 @@ normally return `1` with a Python traceback.
 ### `commission`
 
 ```bash
-python <skill>/scripts/dt.py commission (--model model.py | --stl body.stl) --plan plan.json   --out DIR --job-id JOB --updated-utc ISO8601 [--reference ref.stl] [--no-render] [--no-receipts]
+uv run python <skill>/scripts/dt.py commission (--model model.py | --stl body.stl) --plan plan.json   --out DIR --job-id JOB --updated-utc ISO8601 [--reference ref.stl] [--no-render] [--no-receipts]
 ```
 
 Inputs: a model module defining `part`/`build()` or an already-exported STL; the
@@ -200,10 +277,10 @@ of running the gate. The library functions remain importable for the rare direct
 ### `coupon`
 
 ```bash
-python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
-python <skill>/scripts/dt.py doctor
-python <skill>/scripts/dt.py plan template --bbox X Y Z --out print_plan_checks.json
-python <skill>/scripts/dt.py plan check print_plan_checks.json
+uv run python <skill>/scripts/dt.py coupon --plan plan.json --out coupon.stl
+uv run python <skill>/scripts/dt.py doctor
+uv run python <skill>/scripts/dt.py plan template --bbox X Y Z --out print_plan_checks.json
+uv run python <skill>/scripts/dt.py plan check print_plan_checks.json
 ```
 
 Inputs to `coupon`: plan JSON, either a JSON object with `interfaces` or a raw
@@ -217,7 +294,7 @@ writes the coupon STL.
 Script: [`skills/3d-modeling/scripts/preview.py`](../skills/3d-modeling/scripts/preview.py)
 
 ```bash
-python skills/3d-modeling/scripts/preview.py model.stl [output.png] \
+uv run python skills/3d-modeling/scripts/preview.py model.stl [output.png] \
   [--views iso|multi] [--title "Title"] [--subtitle "Text"] \
   [--resolution 600] [--strict]
 ```
@@ -273,7 +350,7 @@ Failure behavior:
 Script: [`skills/3d-modeling/scripts/make_3mf.py`](../skills/3d-modeling/scripts/make_3mf.py)
 
 ```bash
-python skills/3d-modeling/scripts/make_3mf.py out.3mf \
+uv run python skills/3d-modeling/scripts/make_3mf.py out.3mf \
   "KnobBody (black)=body.stl" "Pattern (white)=pattern.stl"
 ```
 
@@ -303,7 +380,7 @@ Exit codes:
 Script: [`skills/3d-modeling/scripts/make_bambu_3mf.py`](../skills/3d-modeling/scripts/make_bambu_3mf.py)
 
 ```bash
-python skills/3d-modeling/scripts/make_bambu_3mf.py out.3mf \
+uv run python skills/3d-modeling/scripts/make_bambu_3mf.py out.3mf \
   "Base (translucent)=base.stl" "Text (CF)=text.stl"
 ```
 
@@ -334,7 +411,7 @@ Exit codes:
 Script: [`skills/3d-modeling/scripts/overlay_photo.py`](../skills/3d-modeling/scripts/overlay_photo.py)
 
 ```bash
-python skills/3d-modeling/scripts/overlay_photo.py cand.stl photo.png out.png [z_mm ...]
+uv run python skills/3d-modeling/scripts/overlay_photo.py cand.stl photo.png out.png [z_mm ...]
 ```
 
 Inputs:
@@ -361,7 +438,7 @@ Exit codes:
 Script: [`skills/3d-modeling/scripts/verify_visual.py`](../skills/3d-modeling/scripts/verify_visual.py)
 
 ```bash
-python skills/3d-modeling/scripts/verify_visual.py ref-stl-or-dir cand-stl-or-dir out-prefix \
+uv run python skills/3d-modeling/scripts/verify_visual.py ref-stl-or-dir cand-stl-or-dir out-prefix \
   [--test T4] [--json]
 ```
 
@@ -394,7 +471,7 @@ Exit codes:
 Script: [`tools/gen_harness.py`](../tools/gen_harness.py)
 
 ```bash
-python tools/gen_harness.py [--check]
+uv run python tools/gen_harness.py [--check]
 ```
 
 Inputs:
@@ -416,7 +493,7 @@ Exit codes: the convention above, with a `--check` mismatch reported as a `1`.
 Script: [`tools/build_skill.py`](../tools/build_skill.py)
 
 ```bash
-python tools/build_skill.py [--out dist/skills]
+uv run python tools/build_skill.py [--out dist/skills]
 ```
 
 Inputs:
