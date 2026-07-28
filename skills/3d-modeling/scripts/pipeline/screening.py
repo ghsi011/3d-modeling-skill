@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .analysis import MeshAnalysisContext
+from .analysis import MeasurementFailed, MeshAnalysisContext
 from .contract import Contract
 
 # Fraction of the local section area. Scale-normalized on purpose: a 12 mm2 post
@@ -96,7 +96,11 @@ def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any
     always produces one: the bed and the top of the part are steps on every
     shape, so there is no shape for which the list is empty.
     """
-    profile = ctx.axis_profile(axis, SAMPLES, jitter=0.13)
+    try:
+        profile = ctx.axis_profile(axis, SAMPLES, jitter=0.13)
+    except MeasurementFailed as exc:
+        return {"detector": f"profile-{label}", "result": "INDETERMINATE",
+                "reason": f"the boolean engine could not profile this axis: {exc}"}
     if len(profile) < 3:
         return {"detector": f"profile-{label}", "result": "INDETERMINATE",
                 "reason": "the part is too thin along this axis to profile"}

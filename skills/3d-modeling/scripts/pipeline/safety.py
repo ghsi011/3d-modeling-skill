@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Callable
 
+from . import review as R
 from . import schemas as S
 
 QUESTIONS = (
@@ -58,7 +59,15 @@ class Packet:
     payload: dict[str, Any]
 
     def packet_hash(self) -> str:
-        return S.payload_hash(self.payload)
+        # The envelope is meta-data handed to the reviewer and echoed back.
+        # Including it in the packet hash would create a circular dependency,
+        # because the envelope binds the packet hash.
+        payload = {k: v for k, v in self.payload.items() if k != "review_envelope"}
+        return S.payload_hash(payload)
+
+    def with_envelope(self, envelope: R.ReviewEnvelope) -> "Packet":
+        return Packet(stage=self.stage,
+                      payload={**self.payload, "review_envelope": envelope.as_dict()})
 
 
 def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any],
@@ -83,24 +92,39 @@ def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any]
             "failure_modes": "list[str]", "safety_concerns": "list[str]",
             "missing_evidence": "list[str]", "required_actions": "list[str]",
             "summary": "str",
+            "review_envelope": "dict -- exact envelope digest required when review is bound",
         },
     })
 
 
-def validate(response: dict[str, Any]) -> dict[str, Any]:
-    decision = S.require_enum(response.get("decision"), S.SAFETY_DECISION,
+def validate(response: dict[str, Any], *,
+             envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise S.SchemaError("safety response must be a dict")
+    required = {"decision", "failure_modes", "safety_concerns", "missing_evidence",
+                "required_actions", "summary"}
+    missing = required - set(response.keys())
+    if missing:
+        raise S.SchemaError(f"safety response missing required fields: {sorted(missing)}")
+    if envelope is not None and "review_envelope" not in response:
+        raise S.SchemaError("safety response: review_envelope is required when bound")
+
+    decision = S.require_enum(response["decision"], S.SAFETY_DECISION,
                               what="safety response decision")
     for key in ("failure_modes", "safety_concerns", "missing_evidence", "required_actions"):
-        if not isinstance(response.get(key, []), list):
+        value = response[key]
+        if not isinstance(value, list):
             raise S.SchemaError(f"safety response: {key} must be a list")
-    if not isinstance(response.get("summary", ""), str):
+        if not all(isinstance(item, str) for item in value):
+            raise S.SchemaError(f"safety response: {key} must be a list of strings")
+    if not isinstance(response["summary"], str):
         raise S.SchemaError("safety response: summary must be a string")
     return {"decision": decision,
-            "failure_modes": list(response.get("failure_modes", [])),
-            "safety_concerns": list(response.get("safety_concerns", [])),
-            "missing_evidence": list(response.get("missing_evidence", [])),
-            "required_actions": list(response.get("required_actions", [])),
-            "summary": str(response.get("summary", ""))}
+            "failure_modes": list(response["failure_modes"]),
+            "safety_concerns": list(response["safety_concerns"]),
+            "missing_evidence": list(response["missing_evidence"]),
+            "required_actions": list(response["required_actions"]),
+            "summary": response["summary"]}
 
 
 def cache_identity(packet: Packet, *, reviewer: dict[str, Any]) -> str:
@@ -123,14 +147,22 @@ def cache_identity(packet: Packet, *, reviewer: dict[str, Any]) -> str:
 
 
 def run(packet: Packet, reviewer: dict[str, Any],
-        call: Callable[[Packet], dict[str, Any]]) -> dict[str, Any]:
-    """One bounded call, validated, with its cache identity recorded."""
-    response = validate(call(packet))
+        call: Callable[[Packet], dict[str, Any]], *,
+        envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
+    """One bounded call, validated, with its cache identity and review envelope recorded."""
+    if envelope is not None:
+        packet = packet.with_envelope(envelope)
+    response = call(packet)
+    if envelope is not None:
+        R.validate_response_envelope(response, envelope)
+        R.require_safety_pass_closed(response)
+    response = validate(response, envelope=envelope)
     return {
         "schema_version": S.SAFETY_SCHEMA,
         "evidence_packet_sha256": packet.packet_hash(),
         "cache_identity": cache_identity(packet, reviewer=reviewer),
         "reviewer": reviewer,
+        "review_envelope": envelope.as_dict() if envelope is not None else None,
         # See verification.py: answered, not asserted.
         "fresh_context": reviewer.get("fresh_context"),
         "stage": packet.stage,

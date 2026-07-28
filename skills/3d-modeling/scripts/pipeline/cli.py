@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import review as R
 from . import runner, schemas as S
 
 JOB_FILE = "job.json"
@@ -37,12 +38,7 @@ REVIEW_DIR = "reviews"
 NEEDS_REVIEW = 3
 
 
-class _ReviewNeeded(Exception):
-    """A review has no answer on disk yet. Carries what to write and where."""
-
-    def __init__(self, kind: str, packet: Any, path: Path) -> None:
-        super().__init__(kind)
-        self.kind, self.packet, self.path = kind, packet, path
+ReviewNeeded = runner.ReviewNeeded
 
 
 def _payload_of(packet: Any) -> Any:
@@ -64,13 +60,22 @@ def _answer(job_dir: Path, kind: str):
     """A call that reads its answer from disk, or asks for one and stops."""
     def call(packet: Any) -> dict[str, Any]:
         room = job_dir / REVIEW_DIR
-        response = room / f"{kind}_response.json"
-        if response.is_file():
-            return json.loads(response.read_text(encoding="utf-8"))
         room.mkdir(parents=True, exist_ok=True)
+        # Always write the current request packet first. If a stale response from
+        # a previous run is already on disk, the runner will reject it, but the
+        # user must be able to answer the current envelope.
         request = room / f"{kind}_packet.json"
         request.write_text(S.canonical_json(_payload_of(packet)), encoding="utf-8")
-        raise _ReviewNeeded(kind, packet, response)
+        response = room / f"{kind}_response.json"
+        if response.is_file():
+            try:
+                return json.loads(response.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                # An unreadable answer is a malformed review, not a crash: the
+                # runner boundary turns this into a blocked job with a receipt.
+                raise R.ReviewError(
+                    f"{response.name} is not valid JSON: {exc}") from exc
+        raise ReviewNeeded(kind, packet, response)
     return call
 
 
@@ -120,7 +125,7 @@ def run_job(argv: list[str]) -> int:
     spec = _load_job(job_dir)
     try:
         result = runner.run(_request(job_dir, spec, render=not args.no_render))
-    except _ReviewNeeded as need:
+    except ReviewNeeded as need:
         rel = need.path.relative_to(job_dir)
         packet = rel.with_name(need.kind + "_packet.json")
         sys.stderr.write(

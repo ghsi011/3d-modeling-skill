@@ -40,6 +40,14 @@ class Check:
     measured: Any
     tolerance: Any
     result: str
+    status: str = "MEASURED"
+    error_code: str | None = None
+    error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.ran and self.measured is None and self.status == "MEASURED":
+            self.status = "UNAVAILABLE"
+        S.require_enum(self.status, S.MEASUREMENT_STATUS, what="check.status")
 
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -62,6 +70,15 @@ def _verdict(feature: Feature, ok: bool, ran: bool) -> str:
     return "PASS" if ok else "FAIL"
 
 
+def _unavailable_check(feature: Feature, title: str, reason: str, code: str,
+                       expected: Any, tolerance: Any) -> Check:
+    return Check(
+        check_id=f"feature-{feature.feature_id}", feature_id=feature.feature_id,
+        title=title, ran=False, reason=reason, expected=expected, measured=None,
+        tolerance=tolerance, result=_verdict(feature, False, False),
+        status="UNAVAILABLE", error_code=code, error_message=reason)
+
+
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                    bed_contact_mm2: float | None) -> Check:
     exp = feature.expectation
@@ -70,8 +87,12 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
     if kind == "section_area":
         z = float(exp["at"]["z"])
         want = float(exp["value_mm2"])
-        got = ctx.section_area(z)
         tol = _tol(feature.tolerance, want)
+        try:
+            got = ctx.section_area(z)
+        except MeasurementFailed as exc:
+            return _unavailable_check(
+                feature, f"Section area at z={z:.2f}", str(exc), exc.code, want, tol)
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
                      f"Section area at z={z:.2f}", True, "measured", want, round(got, 3), tol,
                      _verdict(feature, abs(got - want) <= tol, True))
@@ -80,10 +101,10 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         want = float(exp["value_mm2"])
         tol = _tol(feature.tolerance, want)
         if bed_contact_mm2 is None:
-            return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                         "Bed contact area", False,
-                         "no placement was computed, so there is no contact area",
-                         want, None, tol, _verdict(feature, False, False))
+            return _unavailable_check(
+                feature, "Bed contact area",
+                "no placement was computed, so there is no contact area",
+                "NO_PLACEMENT", want, tol)
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
                      "Bed contact area", True, "measured", want, round(bed_contact_mm2, 3), tol,
                      _verdict(feature, abs(bed_contact_mm2 - want) <= tol, True))
@@ -100,9 +121,20 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
             try:
                 got = F.bore_diameter_mm(ctx.normalized, float(at["x"]), float(at["y"]), z, radius)
             except F.Indeterminate as exc:
-                return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                             f"Bore {want:.2f} mm", False, str(exc), want, None, tol,
-                             _verdict(feature, False, False))
+                return _unavailable_check(
+                    feature, f"Bore {want:.2f} mm", str(exc),
+                    "BORE_INDETERMINATE", want, tol)
+            except Exception as exc:
+                # This instrument is the one feature check that does not go
+                # through `analysis._intersect`, so an engine refusal here used
+                # to escape commission.run entirely -- no report, no verdict.
+                # An absent engine answer is not a measured zero: it is an
+                # UNAVAILABLE observation, exactly like every other check's.
+                return _unavailable_check(
+                    feature, f"Bore {want:.2f} mm",
+                    f"the boolean engine could not measure the bore at z={z:.2f}: "
+                    f"{exc}. An absent engine answer is not an empty bore.",
+                    "BOOLEAN_ENGINE_REFUSED", want, tol)
             detail.append(round(got, 3))
             worst = max(worst, abs(got - want))
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
@@ -120,14 +152,18 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         outer_d, z = float(exp["enclosing_d_mm"]), float(exp["z"])
         tol = _tol(feature.tolerance, want)
         outer_area = math.pi / 4.0 * outer_d * outer_d
-        material = ctx.disc_area(z=z, at=(float(at["x"]), float(at["y"])), diameter=outer_d)
+        try:
+            material = ctx.disc_area(z=z, at=(float(at["x"]), float(at["y"])), diameter=outer_d)
+        except MeasurementFailed as exc:
+            return _unavailable_check(
+                feature, f"Bore {want:.2f} mm", str(exc), exc.code, want, tol)
         void = outer_area - material
         if void <= 0.0:
-            return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                         f"Bore {want:.2f} mm", False,
-                         "the enclosing disc is entirely solid, so no bore is present to "
-                         "measure at this height",
-                         want, None, tol, _verdict(feature, False, False))
+            return _unavailable_check(
+                feature, f"Bore {want:.2f} mm",
+                "the enclosing disc is entirely solid, so no bore is present to "
+                "measure at this height",
+                "BORE_NOT_PRESENT", want, tol)
         got = 2.0 * math.sqrt(void / math.pi)
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
                      f"Bore {want:.2f} mm", True,
@@ -143,26 +179,25 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         cx, cy = float(at["x"]), float(at["y"])
         if (cx - half_x < lo[0] - 0.02 or cx + half_x > hi[0] + 0.02
                 or cy - half_y < lo[1] - 0.02 or cy + half_y > hi[1] + 0.02):
-            return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                         "Void region", False,
-                         "the window reaches outside the part's own footprint, so an "
-                         "empty reading would be fresh air rather than a clear cavity",
-                         allowed, None, tol, _verdict(feature, False, False))
+            return _unavailable_check(
+                feature, "Void region",
+                "the window reaches outside the part's own footprint, so an "
+                "empty reading would be fresh air rather than a clear cavity",
+                "WINDOW_OUTSIDE_FOOTPRINT", allowed, tol)
         try:
             got = ctx.window_area(z=z, at=(cx, cy), size=(float(size[0]), float(size[1])))
         except MeasurementFailed as exc:
-            return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                         "Void region", False, str(exc), allowed, None, tol,
-                         _verdict(feature, False, False))
+            return _unavailable_check(
+                feature, "Void region", str(exc), exc.code, allowed, tol)
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
                      "Void region", True, "material inside a declared-empty window",
                      allowed, round(got, 3), tol,
                      _verdict(feature, got - allowed <= tol, True))
 
-    return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                 f"Feature kind {kind!r}", False,
-                 f"no check implements kind {kind!r}", None, None, None,
-                 _verdict(feature, False, False))
+    return _unavailable_check(
+        feature, f"Feature kind {kind!r}",
+        f"no check implements kind {kind!r}",
+        "UNKNOWN_CHECK_KIND", None, None)
 
 
 def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:

@@ -23,6 +23,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Callable
 
+from . import review as R
 from . import schemas as S
 
 DECISION = ("PASS", "REJECT", "NEEDS_MORE_EVIDENCE")
@@ -46,7 +47,12 @@ class Packet:
     payload: dict[str, Any]
 
     def packet_hash(self) -> str:
-        return S.payload_hash(self.payload)
+        # The envelope is meta-data handed to the reviewer and echoed back.
+        payload = {k: v for k, v in self.payload.items() if k != "review_envelope"}
+        return S.payload_hash(payload)
+
+    def with_envelope(self, envelope: R.ReviewEnvelope) -> "Packet":
+        return Packet(payload={**self.payload, "review_envelope": envelope.as_dict()})
 
 
 def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any],
@@ -80,23 +86,48 @@ def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any]
             "unmet_requirements": ["str -- in the brief, absent from the contract"],
             "missing_evidence": ["str"],
             "summary": "str",
+            "review_envelope": "dict -- exact envelope digest required when review is bound",
         },
     })
 
 
-def validate(response: dict[str, Any]) -> dict[str, Any]:
-    decision = S.require_enum(response.get("decision"), DECISION,
+def validate(response: dict[str, Any], *,
+             envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise S.SchemaError("verification response must be a dict")
+    required = {"decision", "defects", "unmet_requirements", "missing_evidence", "summary"}
+    missing = required - set(response.keys())
+    if missing:
+        raise S.SchemaError(f"verification response missing required fields: {sorted(missing)}")
+    if envelope is not None and "review_envelope" not in response:
+        raise S.SchemaError("verification response: review_envelope is required when bound")
+
+    decision = S.require_enum(response["decision"], DECISION,
                               what="verification decision")
+    if not isinstance(response["defects"], list):
+        raise S.SchemaError("verification response: defects must be a list")
+    if not isinstance(response["unmet_requirements"], list):
+        raise S.SchemaError("verification response: unmet_requirements must be a list")
+    if not isinstance(response["missing_evidence"], list):
+        raise S.SchemaError("verification response: missing_evidence must be a list")
+    if not isinstance(response["summary"], str):
+        raise S.SchemaError("verification response: summary must be a string")
+
     defects = []
-    for row in response.get("defects", []):
-        loop = S.require_enum(row.get("owning_loop"), OWNING_LOOP,
-                              what=f"defect {row.get('summary')!r} owning_loop")
-        for field in ("summary", "expected_vs_observed", "evidence", "severity"):
-            if not str(row.get(field, "")).strip():
+    for row in response["defects"]:
+        if not isinstance(row, dict):
+            raise S.SchemaError("verification response: each defect must be a dict")
+        for field in ("summary", "owning_loop", "expected_vs_observed", "evidence", "severity"):
+            if field not in row or not str(row[field]).strip():
                 raise S.SchemaError(
-                    f"defect {row.get('summary')!r}: {field} is empty. A rejection "
+                    f"defect {row.get('summary')!r}: {field} is empty or missing. A rejection "
                     "that does not say what was expected, what was observed, and "
                     "where to look sends the next context back to rediscover it.")
+        for field in ("summary", "expected_vs_observed", "evidence", "severity"):
+            if not isinstance(row[field], str):
+                raise S.SchemaError(f"defect {row['summary']!r}: {field} must be a string")
+        loop = S.require_enum(row["owning_loop"], OWNING_LOOP,
+                              what=f"defect {row['summary']!r} owning_loop")
         defects.append({**row, "owning_loop": loop})
 
     if decision == "REJECT" and not defects:
@@ -108,15 +139,27 @@ def validate(response: dict[str, Any]) -> dict[str, Any]:
             "PASS with defects listed: decide. A pass carrying known defects is "
             "how a defect ships with a paper trail saying somebody saw it.")
 
+    if not all(isinstance(r, str) for r in response["unmet_requirements"]):
+        raise S.SchemaError("verification response: unmet_requirements must be a list of strings")
+    if not all(isinstance(e, str) for e in response["missing_evidence"]):
+        raise S.SchemaError("verification response: missing_evidence must be a list of strings")
+
     return {"decision": decision, "defects": defects,
-            "unmet_requirements": [str(r) for r in response.get("unmet_requirements", [])],
-            "missing_evidence": [str(e) for e in response.get("missing_evidence", [])],
-            "summary": str(response.get("summary", ""))}
+            "unmet_requirements": list(response["unmet_requirements"]),
+            "missing_evidence": list(response["missing_evidence"]),
+            "summary": response["summary"]}
 
 
 def run(packet: Packet, reviewer: dict[str, Any],
-        call: Callable[[Packet], dict[str, Any]]) -> dict[str, Any]:
-    result = validate(call(packet))
+        call: Callable[[Packet], dict[str, Any]], *,
+        envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
+    if envelope is not None:
+        packet = packet.with_envelope(envelope)
+    response = call(packet)
+    if envelope is not None:
+        R.validate_response_envelope(response, envelope)
+        R.require_verification_pass_closed(response)
+    result = validate(response, envelope=envelope)
     if result["decision"] == "PASS" and result["unmet_requirements"]:
         # Not a schema error -- a coherent answer to a question nobody asked
         # clearly enough. Downgraded rather than rejected, because "the brief
@@ -129,6 +172,7 @@ def run(packet: Packet, reviewer: dict[str, Any],
         "schema_version": S.VERIFICATION_SCHEMA,
         "evidence_packet_sha256": packet.packet_hash(),
         "reviewer": reviewer,
+        "review_envelope": envelope.as_dict() if envelope is not None else None,
         # Answered by whoever knows, never asserted here. These were the literals
         # `True` and `False`, written by this function on every report and
         # established by nothing -- on a single-context run that is a plain

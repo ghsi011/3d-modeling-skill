@@ -112,6 +112,120 @@ class TestHoleProfile(unittest.TestCase):
 
 
 @_needs_trimesh
+class BooleanRefusalTest(unittest.TestCase):
+    """An engine that returns nothing has not measured zero.
+
+    `None` from the boolean kernel used to be read as an empty slab: a bore
+    then measured from fresh air, and its centre landed exactly where it was
+    declared -- a fabricated (0, 0) offset that passed the position check.
+    """
+
+    @staticmethod
+    def _no_answer():
+        return lambda *a, **k: None
+
+    def test_bore_diameter_refuses_when_the_engine_returns_nothing(self) -> None:
+        part = _clip().part
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            with self.assertRaises(F.Indeterminate):
+                F.bore_diameter_mm(part, 8, 11, 2.5, 6.0)
+        finally:
+            trimesh.boolean.intersection = original
+
+    def test_bore_offset_refuses_when_the_engine_returns_nothing(self) -> None:
+        """The measured-zero PASS: an absent answer put the hole's centre
+        exactly on its declaration."""
+        part = _clip().part
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            with self.assertRaises(F.Indeterminate):
+                F.bore_offset_mm(part, 8, 11, 2.5, 6.0)
+        finally:
+            trimesh.boolean.intersection = original
+
+    def test_a_through_hole_row_fails_when_the_engine_returns_nothing(self) -> None:
+        """Never a measured-zero PASS: the row fails, it does not confirm."""
+        plate = trimesh.creation.box(extents=(60.0, 60.0, 4.0))
+        plate.apply_translation([0, 0, 2])
+        bore = trimesh.creation.cylinder(radius=3.25, height=20.0, sections=128)
+        bore.apply_translation([0, 0, 2])
+        part = trimesh.boolean.difference([plate, bore])
+        row = {"kind": "through_hole", "id": "H", "at": (0.0, 0.0), "d_mm": 6.5,
+               "z_from": 0.0, "z_to": 4.0}
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            check = F.check_features(part, [row])[0]
+        finally:
+            trimesh.boolean.intersection = original
+        self.assertEqual("FAIL", check.result)
+
+    def test_solid_area_raises_when_the_engine_returns_nothing(self) -> None:
+        """The section path the Oracle flagged: engine `None` used to come back
+        as a measured 0.0 mm2 -- indistinguishable from a genuinely empty plane."""
+        part = _clip().part
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            with self.assertRaises(F.Indeterminate):
+                F.solid_area_mm2(part, 2.5)
+        finally:
+            trimesh.boolean.intersection = original
+
+    def test_a_solid_region_row_fails_without_serializing_a_measured_zero(self) -> None:
+        """The check must name the engine's silence, not report `0.00 mm2` as
+        if it had been measured."""
+        part = _clip().part
+        row = {"kind": "solid_region", "id": "flange-mid", "z": 2.5, "area_mm2": _PLATE}
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            check = F.check_features(part, [row])[0]
+        finally:
+            trimesh.boolean.intersection = original
+        self.assertEqual("FAIL", check.result)
+        self.assertIn("returned nothing", check.detail)
+        self.assertNotIn("0.00 mm2", check.detail)
+
+    def test_a_void_row_names_the_engines_silence_not_an_empty_plane(self) -> None:
+        """`None` is not 'no material anywhere': the void check's plane guard
+        must say the engine refused, or the reason on the receipt is a lie."""
+        part = _clip().part
+        row = {"kind": "void_region", "id": "v", "z": 2.5,
+               "at": (20.0, 11.0), "size_mm": (5.0, 5.0)}
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            check = F.check_features(part, [row])[0]
+        finally:
+            trimesh.boolean.intersection = original
+        self.assertEqual("FAIL", check.result)
+        self.assertIn("returned nothing", check.detail)
+        self.assertNotIn("no material anywhere", check.detail)
+
+    def test_slice_profile_propagates_engine_silence(self) -> None:
+        """Its production callers degrade to `[]` -- absent evidence -- which is
+        exactly what an engine refusal should serialize as, never 28 zeros."""
+        part = _clip().part
+        original = trimesh.boolean.intersection
+        try:
+            trimesh.boolean.intersection = self._no_answer()
+            with self.assertRaises(F.Indeterminate):
+                F.slice_profile(part)
+        finally:
+            trimesh.boolean.intersection = original
+
+    def test_a_legitimately_empty_plane_is_still_a_measured_zero(self) -> None:
+        """Preserved: a plane above the part genuinely intersects nothing, and
+        that is a measured 0.0 -- loud against any area expectation."""
+        part = _clip().part
+        self.assertEqual(0.0, F.solid_area_mm2(part, 500.0))
+
+
+@_needs_trimesh
 class TestSliceProfile(unittest.TestCase):
     """The one measurement here that nobody has to anticipate."""
 

@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, cache as K, commission, contract as C, fitted, intent, safety
+from . import analysis, cache as K, commission, contract as C, fitted, intent, review as R
+from . import safety
 from . import schemas as S
 from . import screening, status, templates as T, verification, witness as W
 from .backends import get as get_backend
@@ -59,6 +60,18 @@ class JobRequest:
     cache_dir: Path | None = None
 
 
+class ReviewNeeded(Exception):
+    """A review has no answer on disk yet.
+
+    Raised by the CLI's on-disk review adapter so the runner can stop cleanly
+    without its broad safety/spec/verification try/except swallowing the signal.
+    """
+
+    def __init__(self, kind: str, packet: Any, path: Path) -> None:
+        super().__init__(kind)
+        self.kind, self.packet, self.path = kind, packet, path
+
+
 @dataclasses.dataclass
 class JobResult:
     ok: bool
@@ -94,6 +107,8 @@ def run(request: JobRequest) -> JobResult:
     written: dict[str, Path] = {}
     llm_calls = 0
     specification: dict[str, Any] | None = None
+    safety_envelope: R.ReviewEnvelope | None = None
+    verification_envelope: R.ReviewEnvelope | None = None
 
     brief_text = request.brief_path.read_text(encoding="utf-8") if request.brief_path.is_file() else ""
     brief_hash = S.sha256_text(brief_text)
@@ -138,10 +153,31 @@ def run(request: JobRequest) -> JobResult:
                              written, timings, llm_calls, None)
         mark = time.perf_counter()
         template = T.get(decision.template or request.template)
-        spec = fitted.recover(
-            brief=brief_text, evidence=list(request.evidence), template=template.name,
-            template_covers=template.covers, bounds=template.bounds,
-            call=request.spec_call, reviewer=request.reviewer or {})
+        # The contract that would be built from the current parameters, before the
+        # spec reviewer recovers anything. The spec envelope binds this hash so a
+        # response cannot be replayed against a different starting contract.
+        pre_contract = _contract_from(template, request)
+        try:
+            spec = fitted.recover(
+                brief=brief_text, evidence=list(request.evidence), template=template.name,
+                template_covers=template.covers, bounds=template.bounds,
+                call=request.spec_call, reviewer=request.reviewer or {},
+                job_id=request.job_id, revision=request.updated_utc,
+                contract_hash=pre_contract.contract_hash(), evidence_dir=out,
+                artifact_hashes=None)
+        except ReviewNeeded:
+            raise
+        except (S.SchemaError, R.ReviewError, ValueError) as exc:
+            written["specification"] = _write(out / "specification.json", {
+                "schema_version": S.SPECIFICATION_SCHEMA,
+                "route": "FITTED",
+                "error": f"{type(exc).__name__}: {exc}",
+                "measurements": [], "interfaces": [],
+                "unresolved": [str(exc)],
+            })
+            return JobResult(False, "specification",
+                             f"{type(exc).__name__}: {exc}",
+                             written, timings, llm_calls, None)
         llm_calls += 1
         timings["specification"] = time.perf_counter() - mark
         specification = spec
@@ -317,7 +353,38 @@ def run(request: JobRequest) -> JobResult:
             witness=witness.as_dict())
         # Stage 1 only: `verification_report` is deliberately not in the packet.
         # Showing a second opinion the first one is anchoring by construction.
-        safety_report = safety.run(packet, request.reviewer or {}, request.safety_call)
+        # The envelope hashes the evidence and witness files, so it is built
+        # inside the boundary: a missing file is a controlled failure with a
+        # receipt, not an exception out of the runner.
+        try:
+            safety_envelope = R.build_envelope(
+                kind="safety", job_id=request.job_id, revision=request.updated_utc,
+                packet_hash=packet.packet_hash(), reviewer=request.reviewer or {},
+                contract_hash=model_contract.contract_hash(),
+                artifact_hashes={
+                    "contract": artifact["contract_sha256"],
+                    "stl": artifact["stl_sha256"],
+                    "source": artifact["source_sha256"],
+                    "step": artifact.get("step_sha256"),
+                },
+                witness=witness.as_dict(), witness_dir=out / "witness",
+                evidence=request.evidence, evidence_dir=out)
+            safety_report = safety.run(packet, request.reviewer or {}, request.safety_call,
+                                       envelope=safety_envelope)
+        except ReviewNeeded:
+            raise
+        except (S.SchemaError, R.ReviewError, ValueError) as exc:
+            # ValueError too, as at the specification boundary: review adapters
+            # parse JSON, and a parse failure is a malformed review -- a receipt,
+            # not a traceback.
+            written["safety_verification_report"] = _write(
+                out / "safety_verification_report.json", {
+                    "schema_version": S.SAFETY_SCHEMA,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+            return JobResult(False, "safety",
+                             f"{type(exc).__name__}: {exc}",
+                             written, timings, llm_calls, None)
         llm_calls += 1
         timings["safety"] = time.perf_counter() - mark
         written["safety_verification_report"] = _write(
@@ -330,8 +397,38 @@ def run(request: JobRequest) -> JobResult:
             brief=brief_text, intent=manifest, contract=model_contract.as_payload(),
             artifact=artifact, commission=report, witness=witness.as_dict(),
             specification=specification)
-        verification_report = verification.run(packet, request.reviewer or {},
-                                               request.verify_call)
+        try:
+            # Built inside the boundary for the same reason as the safety
+            # envelope above: hashing the evidence can fail, and that failure
+            # is a receipt, not a traceback.
+            verification_envelope = R.build_envelope(
+                kind="verification", job_id=request.job_id, revision=request.updated_utc,
+                packet_hash=packet.packet_hash(), reviewer=request.reviewer or {},
+                contract_hash=model_contract.contract_hash(),
+                artifact_hashes={
+                    "contract": artifact["contract_sha256"],
+                    "stl": artifact["stl_sha256"],
+                    "source": artifact["source_sha256"],
+                    "step": artifact.get("step_sha256"),
+                },
+                witness=witness.as_dict(), witness_dir=out / "witness",
+                evidence=request.evidence, evidence_dir=out)
+            verification_report = verification.run(packet, request.reviewer or {},
+                                                   request.verify_call,
+                                                   envelope=verification_envelope)
+        except ReviewNeeded:
+            raise
+        except (S.SchemaError, R.ReviewError, ValueError) as exc:
+            # See the safety boundary above: a JSON parse failure from the
+            # adapter is a malformed review, written down rather than raised.
+            written["verification_report"] = _write(
+                out / "verification_report.json", {
+                    "schema_version": S.VERIFICATION_SCHEMA,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+            return JobResult(False, "verification",
+                             f"{type(exc).__name__}: {exc}",
+                             written, timings, llm_calls, None)
         llm_calls += 1
         timings["verification"] = time.perf_counter() - mark
         written["verification_report"] = _write(
@@ -342,7 +439,9 @@ def run(request: JobRequest) -> JobResult:
                           safety=safety_report, artifact=artifact,
                           verification=verification_report,
                           updated_utc=request.updated_utc,
-                          route=manifest["route_decision"]["route"])
+                          route=manifest["route_decision"]["route"],
+                          safety_envelope=safety_envelope if model_contract.consequence == "CONSEQUENTIAL" else None,
+                          verification_envelope=verification_envelope if request.verify_call is not None else None)
     written["final_status"] = _write(out / "final_status.json", final)
 
     timings["build"] = round(built.build_seconds, 4)

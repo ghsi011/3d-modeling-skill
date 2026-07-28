@@ -16,7 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import review as R
+from . import safety as _safety_review
 from . import schemas as S
+from . import verification as _verification_review
 from .contract import Contract
 
 # Predicates no mesh can answer. Without a named, versioned slicer adapter these
@@ -41,6 +44,34 @@ NOT_YET_MEASURED = {
 }
 
 KNOWN_MODIFIERS = frozenset(SLICER_DEPENDENT) | frozenset(NOT_YET_MEASURED)
+
+
+def _promotable(report: dict[str, Any] | None, kind: str,
+                envelope: R.ReviewEnvelope | None) -> bool:
+    """Bound to the current request, and itself a complete, closed answer.
+
+    Envelope equality says the report answers this request. It says nothing
+    about what the answer is: a partial report, or a PASS that carries its own
+    contradictions -- defects, failure modes, missing evidence, an empty
+    summary -- was refused when it was first validated, and it is refused
+    again here. The status layer is the last place a malformed pass can be
+    caught, so it re-runs the checks rather than trusting that somebody else
+    did.
+    """
+    if envelope is None or not isinstance(report, dict):
+        return False
+    if not R.is_bound(report, kind, envelope.digest()):
+        return False
+    try:
+        if kind == "safety":
+            _safety_review.validate(report)
+            R.require_safety_pass_closed(report)
+        else:
+            _verification_review.validate(report)
+            R.require_verification_pass_closed(report)
+    except (S.SchemaError, R.ReviewError):
+        return False
+    return True
 
 
 def manufacturing(contract: Contract, commission_report: dict[str, Any]) -> dict[str, Any] | None:
@@ -87,7 +118,9 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
            screening: dict[str, Any], manufacturing: dict[str, Any] | None,
            safety: dict[str, Any] | None, artifact: dict[str, Any],
            verification: dict[str, Any] | None, updated_utc: str,
-           route: str = "DIRECT") -> dict[str, Any]:
+           route: str = "DIRECT",
+           safety_envelope: R.ReviewEnvelope | None = None,
+           verification_envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
     reasons: list[str] = []
     verdict = commission_report["verdict"]
     witness = commission_report.get("witness") or {}
@@ -131,7 +164,16 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
                 + ("" if rendered else " -- and it saw no images, only numbers"))
 
     if final in ("COMMISSIONED", "VERIFIED"):
-        if manufacturing and manufacturing["overall"] == "DEFERRED":
+        unavailable_sections = [s for s in witness.get("sections", [])
+                                if s.get("status") == "UNAVAILABLE"]
+        if unavailable_sections:
+            final = "NEEDS_MORE_EVIDENCE"
+            claim = ("witness section(s) could not be measured; the part was not "
+                     "fully verified")
+            reasons.append(
+                f"witness sections unavailable: {len(unavailable_sections)} section(s) "
+                f"at z={[s.get('z') for s in unavailable_sections]}")
+        elif manufacturing and manufacturing["overall"] == "DEFERRED":
             unproven = ", ".join(p["predicate"] for p in manufacturing["predicates"]
                                  if p["result"] == "DEFERRED")
             final = "COMMISSIONED"
@@ -149,10 +191,11 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         if not rendered:
             reasons.append("no renders were produced, so the safety reviewer saw "
                            "numbers and no images")
-        if safety is None:
+        if safety is None or not _promotable(safety, "safety", safety_envelope):
             final = "NEEDS_MORE_EVIDENCE"
             claim = "consequential, and no final safety verification was performed"
-            reasons.append("safety verification is mandatory and absent")
+            reasons.append("safety verification is mandatory and absent, unbound "
+                           "or invalid")
         elif safety["decision"] == "BLOCK":
             final = "FAILED"
             claim = f"blocked on safety review: {safety['summary'][:160]}"
@@ -173,46 +216,51 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             reasons.append("safety review passed; no independent geometric verification ran")
 
     if verification is not None:
-        decision = verification.get("decision")
-        if decision == "REJECT":
-            # A rejection must move the status. Leaving it at COMMISSIONED read
-            # as "geometrically commissioned against its contract" while an
-            # independent reader had just said the part is wrong -- the claim was
-            # true about the geometry and silent about the finding, which is the
-            # worst combination a receipt can have.
-            defects = verification.get("defects") or []
-            loops = sorted({d.get("owning_loop", "?") for d in defects})
-            final = "FAILED"
-            claim = (f"rejected by independent verification ({len(defects)} defect(s), "
-                     f"owned by {', '.join(loops) or 'an unnamed loop'}): "
-                     f"{verification.get('summary', '')[:120]}")
-            reasons.append("independent verification returned REJECT")
-        elif decision == "NEEDS_MORE_EVIDENCE" and final in ("COMMISSIONED", "VERIFIED"):
+        if not _promotable(verification, "verification", verification_envelope):
             final = "NEEDS_MORE_EVIDENCE"
-            claim = ("independent verification could not decide on the evidence this "
-                     "run produced")
-            reasons.append("independent verification needs more evidence")
-        elif decision == "PASS" and final == "COMMISSIONED":
-            if manufacturing and manufacturing["overall"] == "DEFERRED":
-                reasons.append("verified geometrically; a manufacturing predicate is "
-                               "still deferred, so the job stays COMMISSIONED")
-            else:
-                final = "VERIFIED"
-                # Say which kind of verification it was. The verifier is asked
-                # "is anything visible in the witnesses that no contract row
-                # declares?" -- with no images it can only answer from numbers,
-                # and undeclared geometry is exactly what numbers do not cover.
-                # The unqualified claim went out on jobs where nothing had been
-                # seen, over a reason that read "the independent look is what
-                # covers undeclared geometry here". There was no look.
-                if rendered:
-                    claim = "independently verified against its contract"
+            claim = "independent verification is unbound or invalid and cannot be trusted"
+            reasons.append("verification report is unbound or invalid")
+        else:
+            decision = verification.get("decision")
+            if decision == "REJECT":
+                # A rejection must move the status. Leaving it at COMMISSIONED read
+                # as "geometrically commissioned against its contract" while an
+                # independent reader had just said the part is wrong -- the claim was
+                # true about the geometry and silent about the finding, which is the
+                # worst combination a receipt can have.
+                defects = verification.get("defects") or []
+                loops = sorted({d.get("owning_loop", "?") for d in defects})
+                final = "FAILED"
+                claim = (f"rejected by independent verification ({len(defects)} defect(s), "
+                         f"owned by {', '.join(loops) or 'an unnamed loop'}): "
+                         f"{verification.get('summary', '')[:120]}")
+                reasons.append("independent verification returned REJECT")
+            elif decision == "NEEDS_MORE_EVIDENCE" and final in ("COMMISSIONED", "VERIFIED"):
+                final = "NEEDS_MORE_EVIDENCE"
+                claim = ("independent verification could not decide on the evidence this "
+                         "run produced")
+                reasons.append("independent verification needs more evidence")
+            elif decision == "PASS" and final == "COMMISSIONED":
+                if manufacturing and manufacturing["overall"] == "DEFERRED":
+                    reasons.append("verified geometrically; a manufacturing predicate is "
+                                   "still deferred, so the job stays COMMISSIONED")
                 else:
-                    claim = ("independently verified against its contract on "
-                             "measurements alone -- no images were rendered, so "
-                             "nobody has seen this part")
-                    reasons.append("verification saw no images; undeclared geometry "
-                                   "is not covered by a numeric check")
+                    final = "VERIFIED"
+                    # Say which kind of verification it was. The verifier is asked
+                    # "is anything visible in the witnesses that no contract row
+                    # declares?" -- with no images it can only answer from numbers,
+                    # and undeclared geometry is exactly what numbers do not cover.
+                    # The unqualified claim went out on jobs where nothing had been
+                    # seen, over a reason that read "the independent look is what
+                    # covers undeclared geometry here". There was no look.
+                    if rendered:
+                        claim = "independently verified against its contract"
+                    else:
+                        claim = ("independently verified against its contract on "
+                                 "measurements alone -- no images were rendered, so "
+                                 "nobody has seen this part")
+                        reasons.append("verification saw no images; undeclared geometry "
+                                       "is not covered by a numeric check")
 
     S.require_enum(final, S.FINAL_STATUS, what="final_status")
     return {
@@ -232,8 +280,11 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         "screening_calibrated": screening.get("calibrated", False),
         "witnesses_rendered": rendered,
         "manufacturing": manufacturing["overall"] if manufacturing else None,
-        "verification": verification["decision"] if verification else None,
-        "safety_verification": safety["decision"] if safety else None,
+        # `.get`, not subscript: a report that reached this layer without a
+        # decision was refused above, and the receipt's own serialization must
+        # not KeyError on the way out.
+        "verification": verification.get("decision") if verification else None,
+        "safety_verification": safety.get("decision") if safety else None,
         "final_status": final,
         "allowed_claim": claim,
         "reasons": reasons,

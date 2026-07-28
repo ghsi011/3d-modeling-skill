@@ -28,6 +28,10 @@ SLAB_MM = 0.02
 class MeasurementFailed(RuntimeError):
     """The instrument did not answer. Distinct from answering zero."""
 
+    def __init__(self, message: str, *, code: str = "BOOLEAN_ENGINE_REFUSED") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 @dataclasses.dataclass
 class MeshAnalysisContext:
@@ -80,7 +84,7 @@ class MeshAnalysisContext:
         centre = self.normalized.centroid
         window.apply_translation([float(centre[0]), float(centre[1]), float(z)])
         solid = self._intersect(window, where=f"the plane z={z:.3f}")
-        return 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+        return 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
 
     def _intersect(self, window, *, where: str):
         """Intersect, turning an engine refusal into a measurement failure.
@@ -92,13 +96,22 @@ class MeshAnalysisContext:
         down.
         """
         try:
-            return trimesh.boolean.intersection([self.normalized, window],
-                                                engine="manifold")
-        except ValueError as exc:
+            solid = trimesh.boolean.intersection([self.normalized, window],
+                                                 engine="manifold")
+        except Exception as exc:
+            if isinstance(exc, MeasurementFailed):
+                raise
             raise MeasurementFailed(
                 f"the boolean engine could not measure {where}: {exc}. The mesh is "
                 "not a closed solid, so nothing sectioned from it means anything."
             ) from exc
+        if solid is None:
+            raise MeasurementFailed(
+                f"the boolean engine returned nothing for {where}, so this is an "
+                "absent measurement rather than an empty one.",
+                code="BOOLEAN_ENGINE_RETURNED_NONE",
+            )
+        return solid
 
     def window_area(self, *, z: float, at: tuple[float, float],
                     size: tuple[float, float]) -> float:
@@ -108,15 +121,9 @@ class MeshAnalysisContext:
             window = trimesh.creation.box(extents=(float(size[0]), float(size[1]), SLAB_MM))
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
             solid = self._intersect(window, where=f"the window at z={z:.3f}")
-            if solid is None:
-                # Not "no material" -- "no answer". For a void check the two have
-                # the same numeric signature and opposite meanings, so returning
-                # 0.0 here reports the cleanest possible cavity for a measurement
-                # that did not happen.
-                raise MeasurementFailed(
-                    f"the boolean engine returned nothing for the window at "
-                    f"z={z:.3f}, so this is an absent measurement rather than an "
-                    "empty one")
+            # `_intersect` raises for an absent engine answer; a non-empty answer
+            # is the measured material, and an empty one is a genuinely measured
+            # zero.
             self._windows[key] = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
         return self._windows[key]
 
@@ -128,8 +135,7 @@ class MeshAnalysisContext:
                                                height=SLAB_MM, sections=192)
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
             solid = self._intersect(window, where=f"the disc at z={z:.3f}")
-            self._windows[key] = (0.0 if solid is None or solid.is_empty
-                                  else float(solid.volume) / SLAB_MM)
+            self._windows[key] = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
         return self._windows[key]
 
     def axis_profile(self, axis: int, samples: int, *, jitter: float = 0.0) -> list[dict[str, Any]]:
@@ -162,7 +168,7 @@ class MeshAnalysisContext:
         centre[axis] = at
         window.apply_translation([float(v) for v in centre])
         solid = self._intersect(window, where=f"axis {axis} at {at:.3f}")
-        return 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+        return 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
 
 
 def load(path: Path) -> MeshAnalysisContext:

@@ -85,19 +85,35 @@ class Indeterminate(Exception):
 def _slab_volume(mesh: Any, window: Any) -> float:
     import trimesh
     solid = trimesh.boolean.intersection([mesh, window])
-    if solid is None or solid.is_empty:
+    if solid is None:
+        # An absent engine answer is not an empty slab. Reading it as one
+        # measures fresh air and calls it a bore -- or a clear cavity.
+        raise Indeterminate(
+            "the boolean engine returned nothing for this window; an absent "
+            "answer is not a measured zero")
+    if solid.is_empty:
         return 0.0
     return float(solid.volume)
 
 
 def _plane_solid(mesh: Any, z: float, *, thickness: float = SLAB_MM) -> Any:
-    """The part's material on a Z plane, as a solid. `None` when the plane is empty."""
+    """The part's material on a Z plane, as a solid. `None` when the plane is empty.
+
+    Genuinely empty -- an intersection that computed and came back with no
+    volume -- is a measured zero. The engine returning `None` is not: it is a
+    measurement that did not happen, and it raises rather than serialize as
+    0.0 mm2 next to a real one.
+    """
     import trimesh
     span = float(max(mesh.extents)) * 4.0 + 10.0
     window = trimesh.creation.box(extents=(span, span, thickness))
     window.apply_translation([float(mesh.centroid[0]), float(mesh.centroid[1]), z])
     solid = trimesh.boolean.intersection([mesh, window])
-    return None if solid is None or solid.is_empty else solid
+    if solid is None:
+        raise Indeterminate(
+            f"the boolean engine returned nothing for the plane z={z:.2f}; an "
+            "absent answer is not an empty section")
+    return None if solid.is_empty else solid
 
 
 def solid_area_mm2(mesh: Any, z: float, *, thickness: float = SLAB_MM) -> float:
@@ -176,7 +192,14 @@ def bore_offset_mm(mesh: Any, x: float, y: float, z: float, radius: float) -> tu
                                        sections=WINDOW_SECTIONS)
     window.apply_translation([x, y, z])
     solid = trimesh.boolean.intersection([mesh, window])
-    material = 0.0 if solid is None or solid.is_empty else float(solid.volume) / SLAB_MM
+    if solid is None:
+        # The exact measured-zero PASS this check exists to prevent: an absent
+        # answer made material 0, the void the whole window, and the centroid
+        # fallback below landed the hole exactly on its declaration.
+        raise Indeterminate(
+            f"the boolean engine returned nothing at ({x:.2f}, {y:.2f}, {z:.2f}); "
+            "an absent answer is not a centred bore")
+    material = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
     window_area = math.pi * radius * radius
     void = window_area - material
     if void <= 1e-6:
@@ -212,7 +235,14 @@ def _check_solid_region(mesh: Any, row: dict) -> Check:
     expected = float(row["area_mm2"])
     tolerance = float(row.get("tol_mm2") or area_tolerance(expected))
     z = float(row["z"])
-    measured = solid_area_mm2(mesh, z)
+    try:
+        measured = solid_area_mm2(mesh, z)
+    except Indeterminate as exc:
+        return Check(
+            f"feature-{ident}", "Section area", _FAIL, str(exc),
+            "The engine's silence is not an empty plane. An absent boolean "
+            "answer is a measurement that did not happen; re-run, and if it "
+            "persists the mesh is not a solid the kernel can measure.")
     delta = measured - expected
     detail = f"{measured:.2f} mm2 at z={z:.2f}, expected {expected:.2f} +/- {tolerance:.2f}"
     if abs(delta) <= tolerance:
@@ -254,7 +284,13 @@ def _check_void_region(mesh: Any, row: dict) -> Check:
     dx, dy = float(row["size_mm"][0]), float(row["size_mm"][1])
     label = f"Void {dx:.1f} x {dy:.1f} mm at z={z:.2f}"
 
-    plane = _plane_solid(mesh, z)
+    try:
+        plane = _plane_solid(mesh, z)
+    except Indeterminate as exc:
+        return Check(
+            f"feature-{ident}", label, _FAIL, str(exc),
+            "The engine's silence is not an empty plane, and a plane nobody "
+            "measured cannot vouch for a window inside it.")
     if plane is None:
         return Check(
             f"feature-{ident}", label, _FAIL,
@@ -278,7 +314,14 @@ def _check_void_region(mesh: Any, row: dict) -> Check:
 
     allowed = float(row.get("max_area_mm2", 0.0))
     tolerance = float(row.get("tol_mm2") or AREA_TOL_MM2)
-    measured = material_in_window_mm2(mesh, z=z, at=(cx, cy), size=(dx, dy))
+    try:
+        measured = material_in_window_mm2(mesh, z=z, at=(cx, cy), size=(dx, dy))
+    except Indeterminate as exc:
+        return Check(
+            f"feature-{ident}", label, _FAIL, str(exc),
+            "The engine's silence is not a clear cavity. An absent boolean "
+            "answer is a measurement that did not happen, and a window nobody "
+            "measured cannot be declared empty.")
     detail = (f"{measured:.2f} mm2 of material inside a {dx * dy:.2f} mm2 window, "
               f"allowed {allowed:.2f} +/- {tolerance:.2f}")
     if measured - allowed <= tolerance:

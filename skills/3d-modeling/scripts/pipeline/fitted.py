@@ -22,8 +22,10 @@ reading from becoming a confident wrong part.
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any, Callable
 
+from . import review as R
 from . import schemas as S
 
 # Per-side clearance by fit class, in millimetres, for FDM at a 0.4 mm nozzle.
@@ -90,6 +92,7 @@ SPEC_SCHEMA = {
         "fit_class": " | ".join(sorted(FIT_CLEARANCE)),
     }],
     "unresolved": ["str -- what could not be recovered, and why"],
+    "review_envelope": "dict -- exact envelope digest required when review is bound",
 }
 
 
@@ -126,38 +129,99 @@ def build_request(*, brief: str, evidence: list[str], template: str,
     }
 
 
-def validate(response: dict[str, Any]) -> tuple[list[Measurement], list[Interface], list[str]]:
+def validate(response: dict[str, Any], *,
+             envelope: "R.ReviewEnvelope | None" = None) -> tuple[list[Measurement], list[Interface], list[str]]:
     """Turn the response into data, refusing anything that is not measurable."""
+    if not isinstance(response, dict):
+        raise S.SchemaError("specification response must be a dict")
+    required = {"measurements", "interfaces", "unresolved"}
+    missing = required - set(response.keys())
+    if missing:
+        raise S.SchemaError(f"specification response missing required fields: {sorted(missing)}")
+    if envelope is not None and "review_envelope" not in response:
+        raise S.SchemaError("specification response: review_envelope is required when bound")
+
+    if not isinstance(response["measurements"], list):
+        raise S.SchemaError("specification response: measurements must be a list")
+    if not isinstance(response["interfaces"], list):
+        raise S.SchemaError("specification response: interfaces must be a list")
+    if not isinstance(response["unresolved"], list):
+        raise S.SchemaError("specification response: unresolved must be a list")
+
     measurements: list[Measurement] = []
-    for row in response.get("measurements", []):
-        confidence = S.require_enum(row.get("confidence"), ("A", "B", "C", "D"),
-                                    what=f"measurement {row.get('feature')!r} confidence")
-        nominal = float(row["nominal_mm"])
-        uncertainty = float(row.get("uncertainty_mm", 0.0))
+    seen_features: set[str] = set()
+    for row in response["measurements"]:
+        if not isinstance(row, dict):
+            raise S.SchemaError("specification response: each measurement must be a dict")
+        for field in ("feature", "nominal_mm", "uncertainty_mm", "method", "datum", "confidence"):
+            if field not in row:
+                raise S.SchemaError(f"measurement {row.get('feature')!r}: missing {field}")
+        if not isinstance(row["feature"], str):
+            raise S.SchemaError(f"measurement {row['feature']!r}: feature must be a string")
+        if row["feature"] in seen_features:
+            raise S.SchemaError(f"measurement {row['feature']!r}: duplicate feature")
+        seen_features.add(row["feature"])
+        if not isinstance(row["confidence"], str):
+            raise S.SchemaError(
+                f"measurement {row['feature']!r}: confidence must be a string")
+        confidence = S.require_enum(row["confidence"], ("A", "B", "C", "D"),
+                                    what=f"measurement {row['feature']!r} confidence")
+        try:
+            nominal = float(row["nominal_mm"])
+        except (TypeError, ValueError) as exc:
+            raise S.SchemaError(f"{row['feature']}: nominal_mm must be a number") from exc
+        try:
+            uncertainty = float(row["uncertainty_mm"])
+        except (TypeError, ValueError) as exc:
+            raise S.SchemaError(f"{row['feature']}: uncertainty_mm must be a number") from exc
         if uncertainty < 0:
             raise S.SchemaError(f"{row['feature']}: uncertainty cannot be negative")
         if nominal <= 0:
             raise S.SchemaError(f"{row['feature']}: a dimension must be positive")
+        for field in ("method", "datum"):
+            if not isinstance(row[field], str):
+                raise S.SchemaError(f"{row['feature']}: {field} must be a string")
         measurements.append(Measurement(
             feature=str(row["feature"]), nominal_mm=nominal, uncertainty_mm=uncertainty,
-            method=str(row.get("method", "")), datum=str(row.get("datum", "")),
+            method=str(row["method"]), datum=str(row["datum"]),
             confidence=confidence))
 
     known = {m.feature for m in measurements}
     interfaces: list[Interface] = []
-    for row in response.get("interfaces", []):
-        feature = str(row["measurement"])
+    seen_interfaces: set[str] = set()
+    for row in response["interfaces"]:
+        if not isinstance(row, dict):
+            raise S.SchemaError("specification response: each interface must be a dict")
+        for field in ("interface_id", "measurement", "fit_class"):
+            if field not in row:
+                raise S.SchemaError(f"interface: missing {field}")
+        if not isinstance(row["interface_id"], str):
+            raise S.SchemaError("interface: interface_id must be a string")
+        if not isinstance(row["measurement"], str):
+            raise S.SchemaError(
+                f"interface {row['interface_id']!r}: measurement must be a string")
+        feature = row["measurement"]
         if feature not in known:
             raise S.SchemaError(
-                f"interface {row.get('interface_id')!r} fits {feature!r}, which no "
+                f"interface {row['interface_id']!r} fits {feature!r}, which no "
                 "measurement reports. An interface to a dimension nobody measured is "
                 "a fit nobody can check.")
-        interface = Interface(interface_id=str(row["interface_id"]), measurement=feature,
-                              fit_class=str(row["fit_class"]))
+        if row["interface_id"] in seen_interfaces:
+            raise S.SchemaError(f"interface {row['interface_id']!r}: duplicate interface_id")
+        seen_interfaces.add(row["interface_id"])
+        if not isinstance(row["fit_class"], str):
+            raise S.SchemaError(
+                f"interface {row['interface_id']!r}: fit_class must be a string")
+        interface = Interface(interface_id=row["interface_id"], measurement=feature,
+                              fit_class=row["fit_class"])
         interface.clearance()      # refuse an unknown class now, not at build time
         interfaces.append(interface)
 
-    return measurements, interfaces, [str(u) for u in response.get("unresolved", [])]
+    unresolved = response["unresolved"]
+    if not all(isinstance(u, str) for u in unresolved):
+        raise S.SchemaError("specification response: unresolved must be a list of strings")
+
+    return measurements, interfaces, [str(u) for u in unresolved]
 
 
 def parameters_from(measurements: list[Measurement], interfaces: list[Interface],
@@ -184,7 +248,7 @@ def parameters_from(measurements: list[Measurement], interfaces: list[Interface]
 def report(*, measurements: list[Measurement], interfaces: list[Interface],
            unresolved: list[str], reviewer: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": S.INTENT_SCHEMA,
+        "schema_version": S.SPECIFICATION_SCHEMA,
         "route": "FITTED",
         "reviewer": reviewer,
         "measurements": [
@@ -205,10 +269,28 @@ def report(*, measurements: list[Measurement], interfaces: list[Interface],
 
 def recover(*, brief: str, evidence: list[str], template: str, template_covers: str,
             bounds: dict[str, Any], call: Callable[[dict[str, Any]], dict[str, Any]],
-            reviewer: dict[str, Any]) -> dict[str, Any]:
+            reviewer: dict[str, Any], job_id: str, revision: str,
+            contract_hash: str, evidence_dir: Path | None = None,
+            artifact_hashes: dict[str, str | None] | None = None) -> dict[str, Any]:
     """One call, validated, with every deterministic consequence computed here."""
+    from . import review as R
+
     request = build_request(brief=brief, evidence=evidence, template=template,
                             template_covers=template_covers, bounds=bounds)
-    measurements, interfaces, unresolved = validate(call(request))
-    return report(measurements=measurements, interfaces=interfaces,
-                  unresolved=unresolved, reviewer=reviewer)
+    packet_hash = S.payload_hash(request)
+    envelope = R.build_envelope(
+        kind="specification", job_id=job_id, revision=revision,
+        packet_hash=packet_hash, reviewer=reviewer, contract_hash=contract_hash,
+        artifact_hashes=artifact_hashes, evidence=evidence, evidence_dir=evidence_dir)
+    request["review_envelope"] = envelope.as_dict()
+    response = call(request)
+    # Validate the payload shape and types first. A malformed but correctly bound
+    # response must become a controlled SchemaError, not a TypeError from a set
+    # operation or a hash that runs before the schema check.
+    measurements, interfaces, unresolved = validate(response, envelope=envelope)
+    R.validate_response_envelope(response, envelope)
+    R.require_specification_pass_closed(response)
+    result = report(measurements=measurements, interfaces=interfaces,
+                    unresolved=unresolved, reviewer=reviewer)
+    result["review_envelope"] = envelope.as_dict()
+    return result

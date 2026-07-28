@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .analysis import MeasurementFailed
+
 MAX_RESOLUTION_PX = 512
 MAX_SECTIONS = 12
 MAX_SECONDS = 2.0
@@ -70,7 +72,13 @@ def _sections(ctx, contract, limit: int) -> tuple[dict[str, Any], ...]:
     # is a comment, and this module's docstring sells it as a build failure.
     rows = []
     for z in sorted(set(round(v, 3) for v in marks)):
-        rows.append({"z": z, "area_mm2": round(ctx.section_area(z), 3)})
+        try:
+            area = round(ctx.section_area(z), 3)
+        except MeasurementFailed as exc:
+            rows.append({"z": z, "area_mm2": None, "status": "UNAVAILABLE",
+                         "error_code": exc.code, "error_message": str(exc)})
+        else:
+            rows.append({"z": z, "area_mm2": area, "status": "MEASURED"})
     return tuple(rows)
 
 

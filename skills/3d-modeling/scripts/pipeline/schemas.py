@@ -20,9 +20,10 @@ from typing import Any
 INTENT_SCHEMA = 1
 CONTRACT_SCHEMA = 1
 ARTIFACT_SCHEMA = 1
-COMMISSION_SCHEMA = 1
-VERIFICATION_SCHEMA = 1
-SAFETY_SCHEMA = 1
+COMMISSION_SCHEMA = 2
+SPECIFICATION_SCHEMA = 1
+VERIFICATION_SCHEMA = 2
+SAFETY_SCHEMA = 2
 MANUFACTURING_SCHEMA = 1
 STATUS_SCHEMA = 1
 
@@ -35,6 +36,11 @@ BACKEND = ("trimesh-manifold", "build123d")
 # nothing counted them, and the gate exited zero. A feature that cannot say what
 # its own silence means does not get built.
 ON_UNRUNNABLE = ("ESCALATE", "FAIL")
+
+# Whether a measured value was produced or the instrument could not answer.
+# A measured zero is "MEASURED" with value 0.0; "UNAVAILABLE" means the check
+# did not run and the value is null.
+MEASUREMENT_STATUS = ("MEASURED", "UNAVAILABLE")
 
 SAFETY_DECISION = ("PASS", "BLOCK", "NEEDS_MORE_EVIDENCE")
 FINAL_STATUS = ("FAILED", "NEEDS_MORE_EVIDENCE", "COMMISSIONED", "VERIFIED")

@@ -13,6 +13,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 import trimesh
 
@@ -42,9 +43,12 @@ def _looked_at(packet):
     clean job does not complete without somebody looking. Tests that want a
     finished job supply this; tests about the gate itself do not.
     """
-    _ = packet
-    return {"decision": "PASS", "defects": [], "unmet_requirements": [],
-            "missing_evidence": [], "summary": "nothing undeclared visible"}
+    response = {"decision": "PASS", "defects": [], "unmet_requirements": [],
+                "missing_evidence": [], "summary": "nothing undeclared visible"}
+    payload = getattr(packet, "payload", packet)
+    if isinstance(payload, dict) and "review_envelope" in payload:
+        response["review_envelope"] = payload["review_envelope"]
+    return response
 
 
 def _run(out: Path, **kw):
@@ -399,6 +403,8 @@ class SafetyTest(unittest.TestCase):
 
         def call(packet):
             seen.append(packet)
+            if hasattr(packet, "payload") and "review_envelope" in packet.payload:
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
             return response
         result = runner.run(_request(out, consequence="CONSEQUENTIAL",
                                      safety_call=call, reviewer=self.REVIEWER))
@@ -547,6 +553,13 @@ class StatusTest(unittest.TestCase):
                 "updated_utc": "t"}
         return status.decide(**{**base, **kw})
 
+    def _bound_safety(self, contract: C.Contract) -> dict[str, Any]:
+        from . import review as R
+        return {**self._decide(), "safety_envelope": R.build_envelope(
+            kind="safety", job_id=contract.job_id, revision="t",
+            packet_hash="p", reviewer={},
+            contract_hash=contract.contract_hash())}
+
     def test_a_passing_safety_review_is_not_independent_verification(self) -> None:
         """It reviewed hazards, not whether the part matches the brief.
 
@@ -556,8 +569,18 @@ class StatusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             base = _contract(Path(raw))
         consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
-        final = self._decide(contract=consequential,
-                             safety={"decision": "PASS", "summary": "ok"})
+        envelope = self._bound_safety(consequential)["safety_envelope"]
+        final = status.decide(
+            contract=consequential,
+            commission_report={"verdict": "PASS", "witness": {"rendered": True}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": consequential.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety={"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok",
+                    "review_envelope": envelope.as_dict()},
+            verification=None, updated_utc="t",
+            safety_envelope=envelope)
         self.assertEqual("COMMISSIONED", final["final_status"])
         self.assertNotEqual("VERIFIED", final["final_status"])
 
@@ -568,13 +591,176 @@ class StatusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             base = _contract(Path(raw))
         consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
-        final = self._decide(contract=consequential,
-                             commission_report={"verdict": "PASS",
-                                                "witness": {"rendered": False}},
-                             safety={"decision": "PASS", "summary": "ok"})
+        envelope = self._bound_safety(consequential)["safety_envelope"]
+        final = status.decide(
+            contract=consequential,
+            commission_report={"verdict": "PASS", "witness": {"rendered": False}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": consequential.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety={"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok",
+                    "review_envelope": envelope.as_dict()},
+            verification=None, updated_utc="t",
+            safety_envelope=envelope)
         self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
         self.assertIn("saw no images", final["allowed_claim"])
         self.assertFalse(final["witnesses_rendered"])
+
+    def _verification_envelope(self, contract: C.Contract):
+        from . import review as R
+        return R.build_envelope(
+            kind="verification", job_id=contract.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=contract.contract_hash())
+
+    def _status_kwargs(self, contract: C.Contract) -> dict[str, Any]:
+        return {"contract": contract,
+                "commission_report": {"verdict": "PASS",
+                                      "witness": {"rendered": True, "sections": []}},
+                "screening": {"overall": "CLEAR", "calibrated": True},
+                "manufacturing": None, "safety": None, "verification": None,
+                "artifact": {"contract_sha256": contract.contract_hash(),
+                             "stl_sha256": "b", "source_sha256": "c"},
+                "updated_utc": "t"}
+
+    def test_a_bound_safety_pass_with_failure_modes_is_not_promoted(self) -> None:
+        """Envelope equality says who answered; it says nothing about what they
+        answered. A PASS carrying its own failure modes is contradictory, and
+        must fail closed at promotion exactly as it did at first validation."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+        consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
+        envelope = R.build_envelope(
+            kind="safety", job_id=consequential.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=consequential.contract_hash())
+        final = status.decide(
+            **{**self._status_kwargs(consequential),
+               "safety": {"decision": "PASS", "failure_modes": ["fracture"],
+                          "safety_concerns": [], "missing_evidence": [],
+                          "required_actions": [], "summary": "ok",
+                          "review_envelope": envelope.as_dict()}},
+            safety_envelope=envelope)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_a_bound_safety_pass_missing_a_field_is_not_promoted(self) -> None:
+        """A partial report bound to the current envelope is still partial:
+        completeness is re-checked at promotion, not only when first parsed."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+        consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
+        envelope = R.build_envelope(
+            kind="safety", job_id=consequential.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=consequential.contract_hash())
+        partial = {"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                   "missing_evidence": [], "summary": "ok",
+                   "review_envelope": envelope.as_dict()}  # no required_actions
+        final = status.decide(
+            **{**self._status_kwargs(consequential), "safety": partial},
+            safety_envelope=envelope)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_a_bound_verification_pass_with_defects_is_not_promoted(self) -> None:
+        """A PASS carrying known defects is how a defect ships with a paper
+        trail saying somebody saw it -- even when the envelope is current."""
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        envelope = self._verification_envelope(contract)
+        defect = {"summary": "x", "owning_loop": "CONTRACT",
+                  "expected_vs_observed": "x", "evidence": "x", "severity": "x"}
+        final = status.decide(
+            **{**self._status_kwargs(contract),
+               "verification": {"decision": "PASS", "defects": [defect],
+                                "unmet_requirements": [], "missing_evidence": [],
+                                "summary": "ok",
+                                "review_envelope": envelope.as_dict()}},
+            verification_envelope=envelope)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_a_bound_verification_pass_missing_a_field_is_not_promoted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        envelope = self._verification_envelope(contract)
+        partial = {"decision": "PASS", "defects": [], "unmet_requirements": [],
+                   "missing_evidence": [],  # no summary
+                   "review_envelope": envelope.as_dict()}
+        final = status.decide(
+            **{**self._status_kwargs(contract), "verification": partial},
+            verification_envelope=envelope)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_a_bound_reject_without_defects_fails_closed(self) -> None:
+        """A rejection that names nothing is malformed. It cannot be read as a
+        valid finding, and it cannot crash the status layer either."""
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        envelope = self._verification_envelope(contract)
+        final = status.decide(
+            **{**self._status_kwargs(contract),
+               "verification": {"decision": "REJECT", "defects": [],
+                                "unmet_requirements": [], "missing_evidence": [],
+                                "summary": "no",
+                                "review_envelope": envelope.as_dict()}},
+            verification_envelope=envelope)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+
+    def test_a_decisionless_safety_report_fails_closed_not_a_keyerror(self) -> None:
+        """Completeness is re-checked at promotion, and the receipt's own
+        serialization must not KeyError on a report carrying no decision."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+        consequential = C.Contract(**{**base.__dict__, "consequence": "CONSEQUENTIAL"})
+        envelope = R.build_envelope(
+            kind="safety", job_id=consequential.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=consequential.contract_hash())
+        final = status.decide(
+            **{**self._status_kwargs(consequential),
+               "safety": {"failure_modes": [], "safety_concerns": [],
+                          "missing_evidence": [], "required_actions": [],
+                          "summary": "ok",  # no decision at all
+                          "review_envelope": envelope.as_dict()}},
+            safety_envelope=envelope)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+        self.assertIsNone(final["safety_verification"])
+
+    def test_a_decisionless_verification_report_fails_closed_not_a_keyerror(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        envelope = self._verification_envelope(contract)
+        final = status.decide(
+            **{**self._status_kwargs(contract),
+               "verification": {"defects": [], "unmet_requirements": [],
+                                "missing_evidence": [], "summary": "ok",
+                                "review_envelope": envelope.as_dict()}},
+            verification_envelope=envelope)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+        self.assertIsNone(final["verification"])
+
+    def test_an_unavailable_witness_section_blocks_commissioned(self) -> None:
+        """No verifier is needed for the block: a section the instrument could
+        not measure demotes a clean, calibrated job before any promotion is
+        considered. PASS-equivalent requires every section MEASURED."""
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        witness = {"rendered": True,
+                   "sections": [{"z": 2.0, "area_mm2": None, "status": "UNAVAILABLE",
+                                 "error_code": "X", "error_message": "x"}]}
+        final = status.decide(
+            contract=contract,
+            commission_report={"verdict": "PASS", "witness": witness},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": contract.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=None, verification=None, updated_utc="t")
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+        self.assertIn("could not be measured", final["allowed_claim"].lower())
+        self.assertTrue(any("witness sections unavailable" in r
+                            for r in final["reasons"]))
 
     def test_screening_anomaly_stops_short_of_commissioned(self) -> None:
         # Both carry `calibrated`, which production always sets. Without it the
@@ -647,6 +833,63 @@ class FailClosedTest(unittest.TestCase):
             self.assertFalse(check.ran)
             self.assertNotEqual("PASS", check.result)
             self.assertIn("returned nothing", check.reason)
+
+    def test_a_through_hole_with_no_boolean_answer_is_unavailable(self) -> None:
+        """The engine returning nothing is an absent measurement, never a
+        measured zero: the bore check must record UNAVAILABLE and not pass."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            contract = _contract(tmp)
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            path = tmp / "a.stl"
+            part.export(path)
+            ctx = analysis.load(path)
+            hole = next(f for f in contract.features if f.kind == "through_hole")
+
+            original = trimesh.boolean.intersection
+            try:
+                trimesh.boolean.intersection = lambda *a, **k: None
+                check = commission._feature_check(ctx, hole, 100.0)
+            finally:
+                trimesh.boolean.intersection = original
+
+            self.assertFalse(check.ran)
+            self.assertEqual("UNAVAILABLE", check.status)
+            self.assertIsNone(check.measured)
+            self.assertNotEqual("PASS", check.result)
+            self.assertIsNotNone(check.error_code)
+
+    def test_a_through_hole_boolean_failure_is_unavailable_not_a_crash(self) -> None:
+        """An engine refusal must become an UNAVAILABLE observation on the
+        report -- the same treatment every other feature check gets -- not an
+        exception that ends commissioning with no commission report at all."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            contract = _contract(tmp)
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            path = tmp / "a.stl"
+            part.export(path)
+            ctx = analysis.load(path)
+
+            original = trimesh.boolean.intersection
+            try:
+                def refused(*a, **k):
+                    raise RuntimeError("Not all meshes are volumes!")
+                trimesh.boolean.intersection = refused
+                report = commission.run(ctx, contract)
+            finally:
+                trimesh.boolean.intersection = original
+
+            hole = next(c for c in report["checks"]
+                        if c["check_id"].startswith("feature-") and "Bore" in c["title"])
+            self.assertFalse(hole["ran"])
+            self.assertEqual("UNAVAILABLE", hole["status"])
+            self.assertIsNone(hole["measured"])
+            self.assertNotEqual("PASS", hole["result"])
+            self.assertIsNotNone(hole["error_code"])
+            self.assertNotEqual("PASS", report["verdict"])
 
     def test_every_boolean_names_manifold3d(self) -> None:
         """Automatic engine selection lets whichever engine happens to be
@@ -896,14 +1139,18 @@ class FittedRouteTest(unittest.TestCase):
                             "fit_class": "slip"}],
             "unresolved": []}
 
-    BASE = {"wall": 3.0, "height": 9.0, "mouth_gap": 9.0, "flange_w": 40.0,
-            "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+    BASE = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+            "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
 
     def _job(self, out: Path, response, **kw):
         seen = []
+        # Evidence must exist to be hashed into the request identity.
+        (out / "photo1.jpg").write_bytes(b"dummy evidence")
 
         def call(request):
             seen.append(request)
+            if isinstance(request, dict) and "review_envelope" in request:
+                return {**response, "review_envelope": request["review_envelope"]}
             return response
 
         result = runner.run(runner.JobRequest(
@@ -989,7 +1236,8 @@ class FittedRouteTest(unittest.TestCase):
     def test_an_unknown_fit_class_is_refused_before_the_build(self) -> None:
         bad = {"unresolved": [],
                "measurements": [{"feature": "a", "nominal_mm": 10.0,
-                                 "uncertainty_mm": 0.1, "confidence": "A"}],
+                                 "uncertainty_mm": 0.1, "method": "caliper",
+                                 "datum": "x", "confidence": "A"}],
                "interfaces": [{"interface_id": "x", "measurement": "a",
                                "fit_class": "magic"}]}
         with self.assertRaises(ValueError) as caught:
@@ -1007,6 +1255,46 @@ class FittedRouteTest(unittest.TestCase):
                 with self.assertRaises(Exception):
                     fitted.validate({"measurements": [row], "interfaces": [],
                                      "unresolved": []})
+
+    def test_malformed_field_types_raise_schema_error_never_type_error(self) -> None:
+        """Every one of these shapes reaches a set operation, a hash or float()
+        in unchecked code, and each escapes as a TypeError. The schema check
+        has to fire first, so the failure is a controlled SchemaError."""
+        from . import schemas as S
+
+        good = {"feature": "a", "nominal_mm": 10.0, "uncertainty_mm": 0.1,
+                "method": "caliper", "datum": "x", "confidence": "A"}
+        shapes = {
+            "response not a dict": ["not", "a", "dict"],
+            "measurement row not a dict": {"measurements": ["nope"],
+                                           "interfaces": [], "unresolved": []},
+            "feature not a string": {"measurements": [{**good, "feature": ["a"]}],
+                                     "interfaces": [], "unresolved": []},
+            "nominal not a number": {"measurements": [{**good, "nominal_mm": {"x": 1}}],
+                                     "interfaces": [], "unresolved": []},
+            "uncertainty not a number": {"measurements": [{**good, "uncertainty_mm": None}],
+                                         "interfaces": [], "unresolved": []},
+            "confidence not a string": {"measurements": [{**good, "confidence": ["A"]}],
+                                        "interfaces": [], "unresolved": []},
+            "unresolved not strings": {"measurements": [], "interfaces": [],
+                                       "unresolved": [42]},
+            "interface row not a dict": {"measurements": [good], "interfaces": [7],
+                                         "unresolved": []},
+            "interface id not a string": {
+                "measurements": [good],
+                "interfaces": [{"interface_id": 1, "measurement": "a",
+                                "fit_class": "slip"}],
+                "unresolved": []},
+            "interface measurement not a string": {
+                "measurements": [good],
+                "interfaces": [{"interface_id": "i", "measurement": ["a"],
+                                "fit_class": "slip"}],
+                "unresolved": []},
+        }
+        for name, payload in shapes.items():
+            with self.subTest(shape=name):
+                with self.assertRaises(S.SchemaError):
+                    fitted.validate(payload)
 
     def test_the_band_carries_instrument_uncertainty_on_top_of_the_spread(self) -> None:
         """A repeat spread bounds repeatability, not accuracy."""
@@ -1043,6 +1331,8 @@ class IndependentVerificationTest(unittest.TestCase):
 
         def call(packet):
             seen.append(packet)
+            if hasattr(packet, "payload") and "review_envelope" in packet.payload:
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
             return response
 
         result = runner.run(_request(out, verify_call=call,
@@ -1106,7 +1396,7 @@ class IndependentVerificationTest(unittest.TestCase):
             allowed = {"brief", "task", "intent_manifest", "model_contract",
                        "artifact_manifest", "commission_report",
                        "manufacturing_report", "witness", "specification",
-                       "questions", "response_schema"}
+                       "questions", "response_schema", "review_envelope"}
             self.assertEqual(set(), set(payload) - allowed,
                              "the verifier's packet grew a key nobody vetted; if it "
                              "belongs there, add it to `allowed` deliberately")
@@ -1322,15 +1612,19 @@ class CliReviewTest(unittest.TestCase):
             job = self._job_dir(Path(raw))
             self._run(job)
             room = job / "reviews"
+            safety_envelope = json.loads(
+                (room / "safety_packet.json").read_text(encoding="utf-8")).get("review_envelope")
             (room / "safety_response.json").write_text(json.dumps({
                 "decision": "PASS", "failure_modes": [], "safety_concerns": [],
                 "missing_evidence": [], "required_actions": [],
-                "summary": "a cable clip"}), encoding="utf-8")
+                "summary": "a cable clip", "review_envelope": safety_envelope}), encoding="utf-8")
             self._run(job)
+            verification_envelope = json.loads(
+                (room / "verification_packet.json").read_text(encoding="utf-8")).get("review_envelope")
             (room / "verification_response.json").write_text(json.dumps({
                 "decision": "PASS", "defects": [], "unmet_requirements": [],
-                "missing_evidence": [], "summary": "matches the contract"}),
-                encoding="utf-8")
+                "missing_evidence": [], "summary": "matches the contract",
+                "review_envelope": verification_envelope}), encoding="utf-8")
             self._run(job)
 
             final = json.loads((job / "final_status.json").read_text(encoding="utf-8"))
@@ -1348,10 +1642,923 @@ class CliReviewTest(unittest.TestCase):
             self.assertFalse((job / "final_status.json").exists(),
                              "no receipt may exist for a job that never got its review")
 
+    def test_stale_response_is_rejected_but_current_packet_is_written(self) -> None:
+        """If an old response is already on disk, the CLI must still write the
+        current request packet so the user can answer the current envelope."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            self._run(job)
+            room = job / "reviews"
+            first_envelope = json.loads(
+                (room / "safety_packet.json").read_text(encoding="utf-8")).get("review_envelope")
+            # Write a stale response for the first envelope.
+            (room / "safety_response.json").write_text(json.dumps({
+                "decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                "missing_evidence": [], "required_actions": [],
+                "summary": "stale", "review_envelope": first_envelope}), encoding="utf-8")
+
+            # Change a parameter so the second run has a different envelope.
+            (job / "job.json").write_text(json.dumps({
+                **self.CLIP_JOB, "parameters": {**CLIP, "wall": 4.0}}), encoding="utf-8")
+            code = self._run(job)
+            self.assertEqual(1, code, "a stale response must not be promoted")
+            self.assertTrue((room / "safety_packet.json").is_file(),
+                            "the current packet must be written before reporting stale")
+            packet = json.loads((room / "safety_packet.json").read_text(encoding="utf-8"))
+            self.assertNotEqual(first_envelope["packet_sha256"],
+                                packet["review_envelope"]["packet_sha256"])
+
+    def test_malformed_safety_response_json_is_a_controlled_failure(self) -> None:
+        """An answer file that is not JSON must come back as a blocked job with
+        an error receipt -- the same as any other malformed review -- never a
+        JSONDecodeError traceback out of the CLI."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            self.assertEqual(cli_module().NEEDS_REVIEW, self._run(job))
+            (job / "reviews" / "safety_response.json").write_text(
+                "this is not json {", encoding="utf-8")
+            code = self._run(job)
+            self.assertEqual(1, code)
+            receipt = json.loads(
+                (job / "safety_verification_report.json").read_text(encoding="utf-8"))
+            self.assertIn("not valid JSON", receipt["error"])
+
+    def test_malformed_verification_response_json_is_a_controlled_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw), consequence="INCONSEQUENTIAL")
+            self.assertEqual(cli_module().NEEDS_REVIEW, self._run(job))
+            (job / "reviews" / "verification_response.json").write_text(
+                "[not, valid", encoding="utf-8")
+            code = self._run(job)
+            self.assertEqual(1, code)
+            receipt = json.loads(
+                (job / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertIn("not valid JSON", receipt["error"])
+
 
 def cli_module():
     from . import cli
     return cli
+
+
+class ReviewEnvelopeTest(unittest.TestCase):
+    """A review response is only as good as the request it answers.
+
+    The envelope binds the response to the exact packet, artifact, witness and
+    evidence it reviewed. A stale or cross-kind answer must not be promoted to a
+    passing status, and a PASS that carries contradictions must fail closed.
+    """
+
+    SAFETY_REVIEWER = {"model_snapshot": "m", "prompt_hash": "p",
+                       "policy_version": "1", "reasoning_settings": "none",
+                       "inference_config": "{}", "image_preprocessing": "none"}
+
+    def _safety_call(self, response):
+        def call(packet):
+            if hasattr(packet, "payload") and "review_envelope" in packet.payload:
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            return response
+        return call
+
+    def _verify_call(self, response):
+        def call(packet):
+            if hasattr(packet, "payload") and "review_envelope" in packet.payload:
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            return response
+        return call
+
+    def _good_safety(self):
+        return {"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                "missing_evidence": [], "required_actions": [], "summary": "ok"}
+
+    def _good_verification(self):
+        return {"decision": "PASS", "defects": [], "unmet_requirements": [],
+                "missing_evidence": [], "summary": "ok"}
+
+    def test_safety_response_is_bound_to_its_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(self._good_safety()),
+                verify_call=_looked_at,
+                reviewer=self.SAFETY_REVIEWER))
+            report = json.loads((Path(raw) / "safety_verification_report.json").read_text(
+                encoding="utf-8"))
+            self.assertEqual("safety", report["review_envelope"]["kind"])
+            self.assertEqual(report["evidence_packet_sha256"],
+                             report["review_envelope"]["packet_sha256"])
+
+    def test_verification_response_is_bound_to_its_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=self._verify_call(self._good_verification()),
+                reviewer={"model_snapshot": "test"}))
+            self.assertEqual("VERIFIED", result.final_status["final_status"])
+            report = json.loads((Path(raw) / "verification_report.json").read_text(
+                encoding="utf-8"))
+            self.assertEqual("verification", report["review_envelope"]["kind"])
+
+    def test_stale_safety_response_after_parameter_change_is_rejected(self) -> None:
+        """Changing a parameter changes the contract and the packet; an old
+        answer must not be stampable onto the new job."""
+        response = self._good_safety()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, consequence="CONSEQUENTIAL",
+                                safety_call=capture, reviewer=self.SAFETY_REVIEWER))
+            stale = seen[0].payload["review_envelope"]
+
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                params={**CLIP, "wall": 4.0},
+                safety_call=lambda p: {**response, "review_envelope": stale},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_stale_safety_response_after_revision_change_is_rejected(self) -> None:
+        response = self._good_safety()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, consequence="CONSEQUENTIAL",
+                                safety_call=capture, reviewer=self.SAFETY_REVIEWER))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(runner.JobRequest(
+                job_id="t", brief_path=out / "brief.md", template="c_clip",
+                parameters=dict(CLIP), stated=frozenset({"bore_d"}),
+                consequence="CONSEQUENTIAL", out_dir=out,
+                updated_utc="2026-01-01T00:00:00Z", render=False,
+                safety_call=lambda p: {**response, "review_envelope": stale},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_safety_response_for_wrong_kind_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**self._good_verification(),
+                        "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, verify_call=capture,
+                                reviewer={"model_snapshot": "test"}))
+            wrong_envelope = seen[0].payload["review_envelope"]
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                safety_call=lambda p: {**self._good_safety(),
+                                       "review_envelope": wrong_envelope},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_safety_pass_with_failure_modes_fails_closed(self) -> None:
+        response = {**self._good_safety(), "failure_modes": ["fracture"]}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(response),
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_safety_pass_with_missing_evidence_fails_closed(self) -> None:
+        response = {**self._good_safety(), "missing_evidence": ["load direction"]}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(response),
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_safety_pass_with_empty_summary_fails_closed(self) -> None:
+        response = {**self._good_safety(), "summary": "   "}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(response),
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_verification_pass_with_defects_fails_closed(self) -> None:
+        response = {**self._good_verification(),
+                    "defects": [{"summary": "x", "owning_loop": "CONTRACT",
+                                 "expected_vs_observed": "x", "evidence": "x",
+                                 "severity": "x"}]}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=self._verify_call(response),
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_verification_pass_with_unmet_requirements_fails_closed(self) -> None:
+        response = {**self._good_verification(),
+                    "unmet_requirements": ["strain relief not modelled"]}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=self._verify_call(response),
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_verification_pass_with_empty_summary_fails_closed(self) -> None:
+        response = {**self._good_verification(), "summary": ""}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=self._verify_call(response),
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_malformed_safety_response_produces_controlled_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=lambda p: {"decision": "BANANA", "summary": "?"},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+            self.assertIn("safety_verification_report.json",
+                          [p.name for p in Path(raw).iterdir()])
+
+    def test_malformed_verification_response_produces_controlled_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=lambda p: {"decision": "PASS", "summary": ""},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_changed_fitted_evidence_byte_rejects_spec_response(self) -> None:
+        """A FITTED response bound to one set of evidence bytes cannot be
+        reused after the evidence file is touched."""
+        spec = {"measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
+                                  "uncertainty_mm": 0.15, "method": "caliper",
+                                  "datum": "widest", "confidence": "A"}],
+                "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
+                                "fit_class": "slip"}],
+                "unresolved": []}
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            (out / "photo1.jpg").write_bytes(b"first")
+            seen = []
+            def capture(request):
+                seen.append(request)
+                return {**spec, "review_envelope": request["review_envelope"]}
+            runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("photo1.jpg",), spec_call=capture,
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            stale = seen[0]["review_envelope"]
+
+            (out / "photo1.jpg").write_bytes(b"second")
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("photo1.jpg",),
+                spec_call=lambda r: {**spec, "review_envelope": stale},
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+
+    def test_malformed_specification_response_produces_controlled_failure(self) -> None:
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            (out / "photo1.jpg").write_bytes(b"evidence")
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("photo1.jpg",),
+                spec_call=lambda r: {"measurements": [], "interfaces": [],
+                                     "unresolved": []},
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+
+    def test_stale_verification_response_after_render_change_is_rejected(self) -> None:
+        """Changing whether images are rendered changes the witness record, so
+        an answer from the other setting must not be accepted."""
+        response = self._good_verification()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, verify_call=capture,
+                                reviewer={"model_snapshot": "test"}))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(runner.JobRequest(
+                job_id="t", brief_path=out / "brief.md", template="c_clip",
+                parameters=dict(CLIP), stated=frozenset({"bore_d"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=True,
+                verify_call=lambda p: {**response, "review_envelope": stale},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_status_does_not_promote_unbound_safety_pass(self) -> None:
+        """Even if a safety report somehow lacks the envelope, status must not
+        treat it as a valid pass."""
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        final = status.decide(
+            contract=C.Contract(**{**contract.__dict__, "consequence": "CONSEQUENTIAL"}),
+            commission_report={"verdict": "PASS", "witness": {"rendered": True}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": "a", "stl_sha256": "b",
+                                          "source_sha256": "c"},
+            safety={"decision": "PASS", "summary": "ok"},
+            verification=None, updated_utc="t")
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_status_does_not_promote_a_stale_safety_envelope(self) -> None:
+        """A safety report bound to a different request must not let the status
+        reach COMMISSIONED or VERIFIED, even if every field looks like a pass."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        consequential = C.Contract(**{**contract.__dict__, "consequence": "CONSEQUENTIAL"})
+        stale_envelope = R.build_envelope(
+            kind="safety", job_id="t", revision="old",
+            packet_hash="stale-packet", reviewer={},
+            contract_hash="stale-contract").as_dict()
+        safety_report = {**self._good_safety(), "review_envelope": stale_envelope}
+        current = R.build_envelope(
+            kind="safety", job_id="t", revision="new",
+            packet_hash="current-packet", reviewer={},
+            contract_hash=consequential.contract_hash())
+        final = status.decide(
+            contract=consequential,
+            commission_report={"verdict": "PASS", "witness": {"rendered": True}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": consequential.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=safety_report, verification=None, updated_utc="t",
+            safety_envelope=current)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_status_does_not_promote_a_stale_verification_envelope(self) -> None:
+        """An independent verification report bound to a different request must
+        not be promoted to VERIFIED."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        stale_envelope = R.build_envelope(
+            kind="verification", job_id="t", revision="old",
+            packet_hash="stale-packet", reviewer={},
+            contract_hash="stale-contract").as_dict()
+        verification_report = {**self._good_verification(),
+                               "review_envelope": stale_envelope}
+        current = R.build_envelope(
+            kind="verification", job_id="t", revision="new",
+            packet_hash="current-packet", reviewer={},
+            contract_hash=contract.contract_hash())
+        final = status.decide(
+            contract=contract,
+            commission_report={"verdict": "PASS", "witness": {"rendered": True}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": contract.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=None, verification=verification_report, updated_utc="t",
+            verification_envelope=current)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_partial_safety_envelope_with_expected_envelope_fails_closed(self) -> None:
+        """A fragment of an envelope is not a binding. Missing digest fields
+        must fail closed even when the expected envelope is supplied -- a
+        partial envelope cannot yield a PASS-equivalent status."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        consequential = C.Contract(**{**contract.__dict__, "consequence": "CONSEQUENTIAL"})
+        expected = R.build_envelope(
+            kind="safety", job_id=consequential.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=consequential.contract_hash())
+        final = status.decide(
+            contract=consequential,
+            commission_report={"verdict": "PASS", "witness": {"rendered": True}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": consequential.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety={"decision": "PASS", "summary": "ok",
+                    "review_envelope": {"kind": "safety", "protocol_version": 1}},
+            verification=None, updated_utc="t",
+            safety_envelope=expected)
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+
+    def test_a_bound_report_still_needs_the_expected_envelope(self) -> None:
+        """The expected envelope is mandatory, not optional. A report carrying
+        the full current envelope must still fail closed when the caller
+        supplies nothing to bind it against."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        envelope = R.build_envelope(
+            kind="verification", job_id=contract.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=contract.contract_hash())
+        final = status.decide(
+            contract=contract,
+            commission_report={"verdict": "PASS",
+                               "witness": {"rendered": True, "sections": []}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": contract.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=None,
+            verification={"decision": "PASS", "summary": "ok",
+                          "review_envelope": envelope.as_dict()},
+            updated_utc="t")
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+        self.assertIn("unbound", final["allowed_claim"])
+
+    def test_a_non_dict_safety_response_is_a_controlled_failure(self) -> None:
+        """The binding check runs before the schema check on this path, so a
+        response that is not a dict at all must still fail closed."""
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=lambda p: ["not", "a", "dict"],
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_a_non_dict_verification_response_is_a_controlled_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=lambda p: 42,
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_a_safety_call_that_raises_valueerror_is_a_controlled_failure(self) -> None:
+        """Adapters parse JSON; a parse failure surfaces as ValueError, and the
+        runner boundary must turn it into a blocked JobResult, not a traceback."""
+        def bad_json(packet):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=bad_json, reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+            self.assertIn("ValueError", result.message)
+
+    def test_a_verification_call_that_raises_valueerror_is_a_controlled_failure(self) -> None:
+        def bad_json(packet):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=bad_json,
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+            self.assertIn("ValueError", result.message)
+
+    def test_malformed_fitted_types_fail_closed_with_valid_envelope(self) -> None:
+        """A correctly bound FITTED response with a malformed measurement type
+        must become a controlled SchemaError/JobResult, never a TypeError."""
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        bad_spec = {"measurements": [{"feature": ["not", "string"], "nominal_mm": 12.4,
+                                      "uncertainty_mm": 0.15, "method": "caliper",
+                                      "datum": "widest", "confidence": "A"}],
+                    "interfaces": [], "unresolved": []}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            (out / "photo1.jpg").write_bytes(b"evidence")
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("photo1.jpg",),
+                spec_call=lambda r: {**bad_spec,
+                                     "review_envelope": r["review_envelope"]},
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+            self.assertIn("specification.json",
+                          [p.name for p in Path(raw).iterdir()])
+
+    def test_malformed_bound_spec_shapes_fail_closed_without_type_errors(self) -> None:
+        """Every malformed but correctly bound specification shape must come
+        back as a controlled JobResult. A TypeError would escape the runner
+        entirely: no receipt, no final status, a traceback out of the CLI."""
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        good = {"feature": "a", "nominal_mm": 10.0, "uncertainty_mm": 0.1,
+                "method": "caliper", "datum": "x", "confidence": "A"}
+        shapes = {
+            "measurement row not a dict": {"measurements": ["nope"],
+                                           "interfaces": [], "unresolved": []},
+            "nominal not a number": {"measurements": [{**good, "nominal_mm": {"x": 1}}],
+                                     "interfaces": [], "unresolved": []},
+            "unresolved not strings": {"measurements": [], "interfaces": [],
+                                       "unresolved": [42]},
+            "interface row not a dict": {"measurements": [good], "interfaces": [7],
+                                         "unresolved": []},
+        }
+        for name, bad_spec in shapes.items():
+            with self.subTest(shape=name), tempfile.TemporaryDirectory() as raw:
+                out = Path(raw)
+                (out / "photo1.jpg").write_bytes(b"evidence")
+                result = runner.run(runner.JobRequest(
+                    job_id="fit", brief_path=out / "b.md", template="c_clip",
+                    parameters=dict(base), stated=frozenset({"flange_w"}),
+                    consequence="INCONSEQUENTIAL", out_dir=out,
+                    updated_utc="1970-01-01T00:00:00Z", render=False,
+                    external_geometry=True, evidence=("photo1.jpg",),
+                    spec_call=lambda r: {**bad_spec,
+                                         "review_envelope": r["review_envelope"]},
+                    interface_map={"channel": "bore_d"},
+                    reviewer={"model_snapshot": "test"}))
+                self.assertFalse(result.ok)
+                self.assertEqual("specification", result.stage)
+                self.assertNotIn("TypeError", result.message)
+
+    def test_an_unhashable_echoed_envelope_is_a_controlled_failure(self) -> None:
+        """The digest hashes the echoed envelope. A reviewer that hand-assembles
+        one can put a value in it that no JSON document can hold; that must be
+        a ReviewError inside the runner, never a TypeError out of it."""
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        spec = {"measurements": [], "interfaces": [], "unresolved": []}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            (out / "photo1.jpg").write_bytes(b"evidence")
+
+            def call(request):
+                corrupt = dict(request["review_envelope"])
+                corrupt["reviewer"] = {"snapshot": object()}
+                return {**spec, "review_envelope": corrupt}
+
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("photo1.jpg",),
+                spec_call=call, interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+            self.assertIn("ReviewError", result.message)
+
+    def test_malformed_envelope_mapping_fields_are_controlled(self) -> None:
+        """Wrong-type nested envelope fields must parse into a controlled
+        ReviewError -- or a plain False at the status surface check -- never a
+        ValueError out of dict() or an AttributeError out of sorted()."""
+        from . import review as R
+
+        good = R.build_envelope(kind="safety", job_id="t", revision="r",
+                                packet_hash="p", reviewer={}, contract_hash="c")
+        env = good.as_dict()
+        broken = {
+            "reviewer a list": {**env, "reviewer": ["not-a-dict"]},
+            "reviewer not a dict": {**env, "reviewer": 5},
+            "artifact_hashes a list": {**env, "artifact_hashes": ["a"]},
+            "witness_hashes a list": {**env, "witness_hashes": ["a"]},
+            "evidence_hashes a list": {**env, "evidence_hashes": ["a"]},
+            "artifact hash not a string": {**env, "artifact_hashes": {"stl": 5}},
+            "witness hash not a string": {**env, "witness_hashes": {"a.png": 5}},
+            "evidence hash is null": {**env, "evidence_hashes": {"p.jpg": None}},
+            "hash-map key not a string": {**env, "witness_hashes": {1: "x"}},
+            "packet_sha256 not a string": {**env, "packet_sha256": 5},
+            "protocol_version not an int": {**env, "protocol_version": "1"},
+        }
+        for name, payload in broken.items():
+            with self.subTest(case=name):
+                with self.assertRaises(R.ReviewError):
+                    R.validate_response_envelope({"review_envelope": payload}, good)
+                self.assertFalse(R.is_bound({"review_envelope": payload}, "safety",
+                                            good.digest()))
+
+    def test_a_non_string_evidence_entry_is_a_controlled_review_error(self) -> None:
+        """Hashing joins each entry onto the evidence dir; a non-string entry
+        must be refused before the join, not detonate as a TypeError there."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            for name, kwargs in (
+                    ("evidence entry", {"evidence": (42,), "evidence_dir": out}),
+                    ("witness image", {"witness": {"images": [3]}, "witness_dir": out})):
+                with self.subTest(case=name):
+                    with self.assertRaises(R.ReviewError):
+                        R.build_envelope(kind="safety", job_id="t", revision="r",
+                                         packet_hash="p", reviewer={},
+                                         contract_hash="c", **kwargs)
+
+    def test_a_non_string_evidence_entry_is_a_controlled_safety_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(self._good_safety()),
+                reviewer=self.SAFETY_REVIEWER, evidence=(42,)))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+            self.assertNotIn("TypeError", result.message)
+
+    def test_a_non_string_evidence_entry_is_a_controlled_verification_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_request(
+                out, verify_call=self._verify_call(self._good_verification()),
+                reviewer={"model_snapshot": "test"}, evidence=(42,)))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+            self.assertNotIn("TypeError", result.message)
+
+    def test_a_non_string_evidence_entry_is_a_controlled_specification_failure(self) -> None:
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        spec = {"measurements": [], "interfaces": [], "unresolved": []}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=(42,),
+                spec_call=lambda r: {**spec, "review_envelope": r["review_envelope"]},
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+            self.assertNotIn("TypeError", result.message)
+
+    def test_missing_evidence_file_is_a_controlled_safety_failure(self) -> None:
+        """Evidence hashing happens inside the review boundary: a file that is
+        not there is a controlled blocked JobResult with a receipt, never an
+        uncaught MissingEvidenceError out of the runner."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(self._good_safety()),
+                reviewer=self.SAFETY_REVIEWER, evidence=("ghost.jpg",)))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+            self.assertIn("MissingEvidenceError", result.message)
+            self.assertIn("safety_verification_report.json",
+                          [p.name for p in out.iterdir()])
+
+    def test_missing_evidence_file_is_a_controlled_verification_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_request(
+                out, verify_call=self._verify_call(self._good_verification()),
+                reviewer={"model_snapshot": "test"}, evidence=("ghost.jpg",)))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+            self.assertIn("MissingEvidenceError", result.message)
+            self.assertIn("verification_report.json",
+                          [p.name for p in out.iterdir()])
+
+    def test_missing_evidence_file_is_a_controlled_specification_failure(self) -> None:
+        base = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
+        spec = {"measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
+                                  "uncertainty_mm": 0.15, "method": "caliper",
+                                  "datum": "widest", "confidence": "A"}],
+                "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
+                                "fit_class": "slip"}],
+                "unresolved": []}
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(runner.JobRequest(
+                job_id="fit", brief_path=out / "b.md", template="c_clip",
+                parameters=dict(base), stated=frozenset({"flange_w"}),
+                consequence="INCONSEQUENTIAL", out_dir=out,
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                external_geometry=True, evidence=("ghost.jpg",),
+                spec_call=lambda r: {**spec, "review_envelope": r["review_envelope"]},
+                interface_map={"channel": "bore_d"},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("specification", result.stage)
+            self.assertIn("MissingEvidenceError", result.message)
+
+    def test_an_unhashable_envelope_fails_closed_at_every_surface(self) -> None:
+        """The same malformed envelope must be a ReviewError at the binding
+        check and a plain False at the status surface check -- is_bound runs
+        inside status.decide, which has no try/except to catch anything."""
+        from . import review as R
+
+        envelope = R.build_envelope(kind="verification", job_id="t", revision="t",
+                                    packet_hash="p", reviewer={}, contract_hash="c")
+        corrupt = envelope.as_dict()
+        corrupt["reviewer"] = {"snapshot": object()}
+        with self.assertRaises(R.ReviewError):
+            R.validate_response_envelope({"review_envelope": corrupt}, envelope)
+        self.assertFalse(R.is_bound({"review_envelope": corrupt}, "verification",
+                                    envelope.digest()))
+        self.assertFalse(R.is_bound(["not", "a", "dict"], "verification",
+                                    envelope.digest()))
+
+    def test_verification_report_without_expected_envelope_is_not_promoted(self) -> None:
+        """Status must require the full current verification envelope; omitting
+        it must fail closed even if the report looks like a pass."""
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        final = status.decide(
+            contract=contract,
+            commission_report={"verdict": "PASS",
+                               "witness": {"rendered": True, "sections": []}},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": contract.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=None,
+            verification={"decision": "PASS", "summary": "ok",
+                          "review_envelope": {"kind": "verification",
+                                              "protocol_version": 1}},
+            updated_utc="t")
+        self.assertNotIn(final["final_status"], ("COMMISSIONED", "VERIFIED"))
+        self.assertIn("unbound", final["allowed_claim"])
+
+    def test_unavailable_witness_section_blocks_verified(self) -> None:
+        """A witness section the pipeline could not measure must block
+        PASS-equivalent status while keeping the unavailable evidence visible."""
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            contract = _contract(Path(raw))
+        witness = {"rendered": True,
+                   "sections": [{"z": 1.0, "area_mm2": None, "status": "UNAVAILABLE",
+                                 "error_code": "X", "error_message": "x"}]}
+        envelope = R.build_envelope(
+            kind="verification", job_id=contract.job_id, revision="t",
+            packet_hash="p", reviewer={}, contract_hash=contract.contract_hash())
+        verification_report = {**self._good_verification(),
+                               "review_envelope": envelope.as_dict()}
+        final = status.decide(
+            contract=contract,
+            commission_report={"verdict": "PASS", "witness": witness},
+            screening={"overall": "CLEAR", "calibrated": True},
+            manufacturing=None, artifact={"contract_sha256": contract.contract_hash(),
+                                          "stl_sha256": "b", "source_sha256": "c"},
+            safety=None, verification=verification_report, updated_utc="t",
+            verification_envelope=envelope)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
+        self.assertIn("could not be measured", final["allowed_claim"].lower())
+        self.assertTrue(any("witness sections unavailable" in r for r in final["reasons"]))
+
+    def test_stale_safety_response_after_reviewer_config_change_is_rejected(self) -> None:
+        """The reviewer configuration is part of the binding; a response from a
+        different reviewer is a different review."""
+        response = self._good_safety()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, consequence="CONSEQUENTIAL",
+                                safety_call=capture, reviewer=self.SAFETY_REVIEWER))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                safety_call=lambda p: {**response, "review_envelope": stale},
+                reviewer={**self.SAFETY_REVIEWER, "model_snapshot": "other"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_stale_safety_response_after_schema_version_change_is_rejected(self) -> None:
+        """A response that advertises an old answer schema version cannot match
+        the current envelope, even if every other field is identical."""
+        from . import schemas as S
+
+        response = self._good_safety()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, consequence="CONSEQUENTIAL",
+                                safety_call=capture, reviewer=self.SAFETY_REVIEWER))
+            stale = seen[0].payload["review_envelope"]
+            stale["answer_schema_version"] = S.SAFETY_SCHEMA - 1
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                safety_call=lambda p: {**response, "review_envelope": stale},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_stale_verification_response_after_artifact_change_is_rejected(self) -> None:
+        """Changing the built artifact changes the artifact hashes in the
+        envelope; an old answer must not be accepted."""
+        response = self._good_verification()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, verify_call=capture,
+                                reviewer={"model_snapshot": "test"}))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(_request(
+                out, verify_call=lambda p: {**response, "review_envelope": stale},
+                params={**CLIP, "wall": 4.0},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_stale_safety_response_after_contract_change_is_rejected(self) -> None:
+        """A response bound to one contract hash must not be promoted after the
+        contract changes."""
+        response = self._good_safety()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_request(out, consequence="CONSEQUENTIAL",
+                                safety_call=capture, reviewer=self.SAFETY_REVIEWER))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(_request(
+                out, consequence="CONSEQUENTIAL",
+                params={**CLIP, "wall": 4.0},
+                safety_call=lambda p: {**response, "review_envelope": stale},
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_safety_response_with_valid_envelope_but_missing_field_fails_closed(self) -> None:
+        """A correctly bound payload with a missing required field must become a
+        SchemaError, not a TypeError or a pass."""
+        response = {"decision": "PASS", "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok"}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(response),
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
+
+    def test_verification_response_with_valid_envelope_but_missing_defect_field_fails_closed(self) -> None:
+        """A bound REJECT carrying a defect that omits a required field must be
+        refused as a schema error."""
+        response = {"decision": "REJECT",
+                    "defects": [{"summary": "x", "owning_loop": "CONTRACT",
+                                 "expected_vs_observed": "x", "severity": "x"}],
+                    "unmet_requirements": [], "missing_evidence": [], "summary": "x"}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), verify_call=self._verify_call(response),
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
+
+    def test_safety_response_with_non_string_list_item_fails_closed(self) -> None:
+        """Exact top-level types: a list containing a non-string is malformed."""
+        response = {**self._good_safety(), "failure_modes": ["fracture", 123]}
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_request(
+                Path(raw), consequence="CONSEQUENTIAL",
+                safety_call=self._safety_call(response),
+                reviewer=self.SAFETY_REVIEWER))
+            self.assertFalse(result.ok)
+            self.assertEqual("safety", result.stage)
 
 
 class NumericOnlyVerificationTest(unittest.TestCase):
@@ -1427,3 +2634,100 @@ class ToolchainIdentityTest(unittest.TestCase):
             self.assertNotEqual("no-lockfile", key.lock_sha256)
             moved = dataclasses.replace(key, lock_sha256="versions:something-else")
             self.assertNotEqual(key.digest(), moved.digest())
+
+
+class UnavailableRunnerTest(unittest.TestCase):
+    """Unavailable measurements on the production path must become explicit
+    non-success evidence rather than aborting before a receipt is written."""
+
+    def test_unavailable_witness_section_is_non_success_evidence(self) -> None:
+        """A witness section the instrument could not measure must be recorded
+        as UNAVAILABLE and the runner must still finish and write receipts."""
+        from . import witness as W
+
+        original_sections = W._sections
+        def sections_with_unavailable(ctx, contract, limit):
+            real = list(original_sections(ctx, contract, limit))
+            return (*real, {"z": 999.0, "area_mm2": None, "status": "UNAVAILABLE",
+                            "error_code": "TEST_INJECTED",
+                            "error_message": "injected unavailable section"})
+        try:
+            W._sections = sections_with_unavailable
+            with tempfile.TemporaryDirectory() as raw:
+                out = Path(raw)
+                result = _run(out)
+                self.assertIn("commission_report", result.artifacts)
+                report = json.loads(
+                    (out / "commission_report.json").read_text(encoding="utf-8"))
+                sections = report["witness"]["sections"]
+                unavailable = [s for s in sections if s.get("status") == "UNAVAILABLE"]
+                self.assertEqual(1, len(unavailable), sections)
+                self.assertIsNone(unavailable[0]["area_mm2"])
+                self.assertEqual("TEST_INJECTED", unavailable[0]["error_code"])
+                # The runner must still produce a final status receipt.
+                self.assertIn("final_status", result.artifacts)
+        finally:
+            W._sections = original_sections
+
+    def test_an_unavailable_section_blocks_verified_with_a_bound_pass(self) -> None:
+        """End to end through the real envelope flow: the verifier echoes the
+        current envelope and returns a bound PASS, and the UNAVAILABLE section
+        still keeps the job off VERIFIED."""
+        from . import witness as W
+
+        original_sections = W._sections
+        def sections_with_unavailable(ctx, contract, limit):
+            real = list(original_sections(ctx, contract, limit))
+            return (*real, {"z": 999.0, "area_mm2": None, "status": "UNAVAILABLE",
+                            "error_code": "TEST_INJECTED",
+                            "error_message": "injected unavailable section"})
+        try:
+            W._sections = sections_with_unavailable
+            with tempfile.TemporaryDirectory() as raw:
+                result = _run_looked(Path(raw))
+                self.assertEqual("NEEDS_MORE_EVIDENCE",
+                                 result.final_status["final_status"])
+                self.assertTrue(any("witness sections unavailable" in r
+                                    for r in result.final_status["reasons"]))
+        finally:
+            W._sections = original_sections
+
+
+class CommissionInvariantTest(unittest.TestCase):
+    """Every ran=False, measured=None observation must be UNAVAILABLE with
+    error metadata. A missing instrument answer is not a measured zero."""
+
+    def test_bore_by_displacement_with_no_bore_is_unavailable(self) -> None:
+        """The enclosing disc is solid, so the instrument could not answer. The
+        check must record UNAVAILABLE, not a fabricated PASS or a traceback."""
+        import math
+
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            base = _contract(tmp)
+            bore = C.Feature(
+                feature_id="liner-bore", kind="bore_by_displacement", provenance="test",
+                expectation={"at": {"x": 20.0, "y": 11.0}, "d_mm": 30.0,
+                             "enclosing_d_mm": 5.0, "z": 2.0},
+                tolerance={"abs": 0.5}, verified_by="bore_by_displacement",
+                on_unrunnable="FAIL", mandatory=True)
+            contract = C.Contract(**{**base.__dict__, "features": (bore,)})
+            from .backends.trimesh_manifold import build_c_clip
+            part, _ = build_c_clip(CLIP)
+            path = tmp / "part.stl"
+            part.export(path)
+            ctx = analysis.load(path)
+            # Force the instrument to see a completely solid disc so the only
+            # honest reading is "no bore is present to measure".
+            def solid_disc(*, z, at, diameter):
+                return math.pi / 4.0 * diameter * diameter
+            ctx.disc_area = solid_disc
+            report = commission.run(ctx, contract)
+            check = next(c for c in report["checks"]
+                         if c["check_id"] == "feature-liner-bore")
+            self.assertFalse(check["ran"])
+            self.assertIsNone(check["measured"])
+            self.assertEqual("UNAVAILABLE", check["status"])
+            self.assertIsNotNone(check["error_code"])
+            self.assertIsNotNone(check["error_message"])
+            self.assertNotEqual("PASS", check["result"])
