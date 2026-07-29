@@ -16,10 +16,10 @@ every station.
 
 Measured by intersecting the solid with a thin slab and dividing the resulting
 volume by the slab thickness. The obvious route is `mesh.section`, but that
-needs scipy, networkx, shapely and rtree, and the gate's core path deliberately
-needs none of them -- a check that only runs on a full install is a check that
-does not run where parts are actually built. The boolean kernel is already a
-core dependency, and both routes agree to 0.04 mm2 on the same part.
+needs scipy, networkx, shapely and rtree. Those packages are part of the
+certified runtime now, so a check that runs from a production wheel is the same
+check that runs in the source checkout. The boolean kernel is already a core
+dependency, and both routes agree to 0.04 mm2 on the same part.
 
 The expectations may come from the template's own arithmetic or from the plan.
 They may never come from a hand-maintained dict beside the model: that is the

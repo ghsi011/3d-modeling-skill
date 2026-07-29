@@ -46,9 +46,9 @@ def _request(out: Path, *, template="c_clip", params=None, consequence="INCONSEQ
 def _looked_at(packet):
     """A stand-in for the bounded visual call.
 
-    Screening is uncalibrated (87.5% miss on fused undeclared material), so a
-    clean job does not complete without somebody looking. Tests that want a
-    finished job supply this; tests about the gate itself do not.
+    The screening corpus gate is not currently earned, so a clean job does not
+    complete without somebody looking. Tests that want a finished job supply
+    this; tests about the gate itself do not.
     """
     response = {"decision": "PASS", "defects": [], "unmet_requirements": [],
                 "missing_evidence": [], "summary": "nothing undeclared visible"}
@@ -2062,6 +2062,82 @@ class CliReviewTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as caught:
                     self._run(job)
                 self.assertIn(field, str(caught.exception))
+
+    def test_malformed_job_json_reports_a_detailed_parse_error(self) -> None:
+        """A broken job.json must name where the JSON is broken, not traceback.
+
+        job.json is the contract's own source. When it does not parse, the CLI
+        has to hand back the decoder's position so the author can fix it, rather
+        than dumping a JSONDecodeError that reads as a crash in the tool."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            (job / "job.json").write_text('{ "job_id": "x", ', encoding="utf-8")
+            with self.assertRaises(SystemExit) as caught:
+                self._run(job)
+            message = str(caught.exception)
+            self.assertIn("job.json", message)
+            self.assertIn("not valid JSON", message)
+            self.assertRegex(message, r"line \d+ column \d+")
+
+    def test_an_invalid_contract_value_reports_the_field_and_value(self) -> None:
+        """A bad consequence class is the contract failing to parse. The CLI must
+        surface the offending field and value, not a bare SchemaError traceback."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw), consequence="MAYBE")
+            with self.assertRaises(SystemExit) as caught:
+                self._run(job)
+            message = str(caught.exception)
+            self.assertIn("MAYBE", message)
+            self.assertIn("consequence", message)
+            self.assertIn("not a valid contract", message)
+
+    def test_non_object_job_json_reports_the_contract_shape(self) -> None:
+        """A valid JSON scalar is still not a job contract."""
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            (job / "job.json").write_text("[]", encoding="utf-8")
+            with self.assertRaises(SystemExit) as caught:
+                self._run(job)
+            message = str(caught.exception)
+            self.assertIn("job.json", message)
+            self.assertIn("JSON object", message)
+            self.assertIn("list", message)
+
+    def test_invalid_nested_job_shapes_are_reported_without_traceback(self) -> None:
+        """Nested manufacturing fields are contract input, not unchecked kwargs."""
+        cases = (
+            ("material", ["FDM", "PLA"], "material must be an object"),
+            ("material", {"process": "FDM", "material": 7}, "material.material must be a string"),
+            ("nozzle", {"diameter_mm": "0.4"}, "nozzle.diameter_mm must be a finite number"),
+            ("orientation", {"model_to_printer_matrix": "identity", "bed_z_mm": "0"},
+             "orientation.bed_z_mm must be a finite number"),
+            ("stated", ["bore_d", 7], "stated must be a list of strings"),
+            ("parameters", [1, 2], "parameters must be an object"),
+            ("parameters", {"bore_d": "12"}, "parameters.bore_d must be a finite number"),
+            ("interface_map", ["channel"], "interface_map must be an object"),
+            ("candidate_strategy", "MANY", "job.candidate_strategy"),
+            ("candidate_strategy", True, "job.candidate_strategy"),
+            ("external_geometry", "false", "external_geometry must be a boolean"),
+        )
+        for field, value, expected in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                job = self._job_dir(Path(raw), **{field: value})
+                with self.assertRaises(SystemExit) as caught:
+                    self._run(job)
+                message = str(caught.exception)
+                self.assertIn(expected, message)
+                self.assertNotIn("Traceback", message)
+
+    def test_invalid_utf8_job_json_reports_a_contract_error(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            job = self._job_dir(Path(raw))
+            (job / "job.json").write_bytes(b'{"job_id": "x", "bad": "\xff"}')
+            with self.assertRaises(SystemExit) as caught:
+                self._run(job)
+            message = str(caught.exception)
+            self.assertIn("job.json", message)
+            self.assertIn("not valid UTF-8", message)
+            self.assertNotIn("Traceback", message)
 
     def test_answering_the_packet_completes_the_job(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

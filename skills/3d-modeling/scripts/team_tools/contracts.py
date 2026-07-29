@@ -12,20 +12,22 @@ import argparse
 import sys
 from pathlib import Path
 
-# Every module in this package is imported bare (``import common``, not
-# ``import team_tools.common``) so the same source works both as
-# `uv run --project <skill> --frozen python -m team_tools.contracts` (selects the skill project, team_tools resolves as a package)
-# package) and as a direct script invocation (team_tools/ itself on
-# sys.path). This line makes that true in the `-m` case too, since only cwd
-# (scripts/) is added to sys.path there, not scripts/team_tools/.
+# Package-relative imports are the production path. The fallback keeps the
+# legacy direct-script invocation working for the source-checkout tests.
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 if _PACKAGE_DIR not in sys.path:
     sys.path.insert(0, _PACKAGE_DIR)
 
-from common import ContractError, canonical_json  # noqa: E402
-from receipts import build_hash_receipt, build_validate_receipt  # noqa: E402
-from status import compute_status, exit_code, format_status_lines  # noqa: E402
-from validators import CANONICAL_FILENAMES  # noqa: E402
+try:  # noqa: E402 - compatibility imports must follow the bootstrap above
+    from .common import ContractError, canonical_json
+    from .receipts import build_hash_receipt, build_validate_receipt
+    from .status import compute_status, exit_code, format_status_lines
+    from .validators import CANONICAL_FILENAMES
+except ImportError:  # pragma: no cover - direct script compatibility
+    from common import ContractError, canonical_json
+    from receipts import build_hash_receipt, build_validate_receipt
+    from status import compute_status, exit_code, format_status_lines
+    from validators import CANONICAL_FILENAMES
 
 
 def _write(payload: str, output: Path | None) -> None:

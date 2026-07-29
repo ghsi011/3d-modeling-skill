@@ -1,8 +1,6 @@
 # 3D Print Engineer
 
 
-# 3D Print Engineer
-
 ## Charter
 
 Own the printer, material, orientation, **fit strategy**, slicing process, coupons, and

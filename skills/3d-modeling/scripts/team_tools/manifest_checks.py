@@ -16,7 +16,10 @@ from typing import Any
 import numpy as np
 import trimesh
 
-from common import INCH_TO_MM, Issue, error, is_hash_format, normalize_project_path, sha256_file, warning
+try:
+    from .common import INCH_TO_MM, Issue, error, is_hash_format, normalize_project_path, sha256_file, warning
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    from common import INCH_TO_MM, Issue, error, is_hash_format, normalize_project_path, sha256_file, warning
 
 # Tolerances for the "obvious 25.4x mismatch" heuristic.
 _SCALE_BLOCK_TOL = 0.005  # within 0.5% of an exact 25.4x ratio -> hard error

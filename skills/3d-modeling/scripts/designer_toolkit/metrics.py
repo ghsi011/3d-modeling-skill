@@ -104,14 +104,14 @@ def _ring_area(coords: np.ndarray) -> float:
 # trimesh soft dependencies the section path reaches in turn: scipy (csgraph,
 # walking the cut edges), networkx (vertex graph -> closed paths), shapely (the
 # rings), rtree (the enclosure tree that decides which ring is a hole). Declared
-# together as the `section` extra in pyproject.toml.
+# together as the core trimesh section stack in pyproject.toml.
 _SECTION_STACK = ("scipy", "networkx", "shapely", "rtree")
 
 
 def _require_section_stack() -> None:
-    """Fail fast, and legibly, when the cross-section extra is not installed.
+    """Fail fast, and legibly, when the cross-section stack is not installed.
 
-    None of these are core dependencies, and trimesh defers each ImportError
+    These are core dependencies, but trimesh can still defer an ImportError
     into an exception wrapper that only fires deep inside its own call stack --
     as a bare ``ModuleNotFoundError: No module named 'scipy'`` several frames
     below this function, with nothing to say which install fixes it. Checking
@@ -122,7 +122,7 @@ def _require_section_stack() -> None:
     if missing:
         raise ImportError(
             f"datum_features() needs {', '.join(missing)} "
-            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev --extra section"
+            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev"
         )
 
 
@@ -133,8 +133,8 @@ def datum_features(mesh_or_path: Any, plane_origin, plane_normal=(0, 0, 1)) -> l
     layouts fit the same magnitudes, so also compare with u negated when
     handedness is in question.
 
-    Needs the ``section`` extra (scipy + shapely); every other helper in this
-    module runs on the core trimesh + numpy stack.
+    Needs the core cross-section stack (scipy + shapely); every other helper in
+    this module runs on the core trimesh + numpy stack.
     """
     _require_section_stack()
     m = as_mesh(mesh_or_path)

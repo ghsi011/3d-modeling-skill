@@ -106,10 +106,10 @@ second opinion.
 **Read `final_status.json`, and read `allowed_claim` before repeating anything
 about the part.** `COMMISSIONED` is not `VERIFIED`, and neither one is "safe".
 
-## `python -m pipeline.corpus` — the calibration measurement
+## `python -m pipeline.corpus` — the screening corpus measurement
 
 Builds every certified template, mutates each one, and reports what broad
-screening caught. Exits non-zero while the gate fails, which it currently does.
+screening caught. Exits non-zero when the measured gate fails.
 
 ```bash
 uv run python -m pipeline.corpus
@@ -331,7 +331,8 @@ Inputs:
 
 * STL path.
 * Optional output PNG path. Default is `<stl_name>_preview.png`.
-* `--views iso` for one isometric image or `--views multi` for a six-view sheet.
+* `--views iso` for one isometric image or `--views multi` for an eight-view sheet
+  (all four sides square-on plus two isometrics, top and bottom).
 * Optional title, subtitle, and per-view resolution.
 * `--strict` to fail before rendering if the normalized mesh is not watertight.
 
@@ -540,3 +541,18 @@ Outputs:
 * All entries use a fixed timestamp (1980-01-01), sorted archive order, and
   `0o644` permissions for deterministic, reproducible builds. `__pycache__/`
   and `.pyc` files are excluded.
+
+## `uv build --wheel` — the Python runtime surface
+
+```bash
+uv build --wheel --out-dir dist/wheels
+```
+
+The wheel contains the `pipeline`, `designer_toolkit`, and `team_tools` runtime
+packages, required sibling modules such as `mesh_io` and `preview`, and the
+`design-tool` entry point. It intentionally excludes test modules and does not
+claim to be the agent bundle: `SKILL.md`, roles, and references belong to the
+`.skill` archive above. Release validation installs the wheel through uv from
+an external working directory and runs both `design-tool doctor` and
+`design-tool run-job`; the archive tests extract the `.skill` bundle and run its
+documented route from the same kind of external directory.

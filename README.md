@@ -8,8 +8,12 @@ There are two ways through, and the job picks one:
 
 - **The deterministic pipeline.** Route selection is independent of consequence.
   For a certified template inside its certified domain, a certified
-  `INCONSEQUENTIAL` `DIRECT` job is one command with **zero model dispatches** and
-  finishes in under a second. A certified `CONSEQUENTIAL` `DIRECT` job instead
+  `INCONSEQUENTIAL` `DIRECT` job is one command with **zero model dispatches**;
+  on the reference workstation the deterministic compute measures under a second
+  for a certified template on the trimesh path. That figure is a measurement of
+  one path, not a promise for every job — a build123d cold import or a job that
+  carries a static interface check can cost several seconds or more. A certified
+  `CONSEQUENTIAL` `DIRECT` job instead
   adds exactly one bounded safety review and no normal geometric verifier. A
   contract is written *before* any geometry, frozen, and hashed; the geometry is
   then measured against it.
@@ -45,10 +49,11 @@ uv run design-tool run-job job_dir/
 ```
 
 That is the whole certified `INCONSEQUENTIAL` `DIRECT` job: contract, build,
-commission, screening, witness, status. Measured cold for certified
-`INCONSEQUENTIAL` `DIRECT`: zero specialist calls — a 300-vent enclosure
-(220 × 180 × 200 mm,
-~4,500 faces) commissions in **0.78 s**.
+commission, screening, witness, status. Measured cold on the reference
+workstation for certified `INCONSEQUENTIAL` `DIRECT`: zero specialist calls — a
+300-vent enclosure (220 × 180 × 200 mm, ~4,500 faces) commissions in **0.78 s**
+on the trimesh path. Times are certified-template measurements on that machine,
+not guarantees; a build123d template or a static interface check can cost more.
 
 The five certified templates and their domains:
 
@@ -173,14 +178,14 @@ Four rules hold this together, and each exists because it failed once without it
 Broad screening looks for material the contract never declared — the failure mode
 where every declared check passes and the part is still wrong.
 
-**It is not currently calibrated, and the receipt says so.** Run
-`uv run python -m pipeline.corpus` for the live numbers; at the last measurement its
-false-negative rate on defects *fused to the part* was **0.30**. A small boss
-standing on a floor passes every check in the pipeline. So a job needs an
-independent look before it can finish, and `final_status.json` states that in
-`allowed_claim` rather than reading as though something had already looked.
+The screening corpus is a release measurement, not a correctness claim. Run
+`uv run python -m pipeline.corpus` for the current rates and read its `gate` result.
+A small boss standing on a floor can pass every declared check in the pipeline.
+Until the screening gate has earned its threshold, a job needs an independent look
+before it can finish; `final_status.json` records that state in `allowed_claim`
+rather than reading as though something had already looked.
 
-Two things no calibration could license, and the receipt says these too:
+Two things no screening measurement could license, and the receipt says these too:
 
 - Screening **cannot prove a feature is absent**. A deleted countersink leaves a
   plain bore — smooth, plausible, and anomalous only against the curve the part
@@ -209,13 +214,13 @@ backends you actually use:
 
 | Extra           | Pulls in                                          | Needed for                                              |
 |-----------------|---------------------------------------------------|---------------------------------------------------------|
-| `section`       | scipy, networkx, shapely, rtree                   | `datum_features` / `finalize` datum blocks              |
+| `section`       | already core: scipy, networkx, shapely, rtree    | `datum_features` / `finalize` compatibility alias       |
 | `render`        | pyrender, PyOpenGL                                | `preview.py` offscreen renders                          |
 | `visual`        | pyrender, PyOpenGL, scipy, networkx, shapely, rtree | `overlay_photo.py`, `verify_visual.py`                |
 | `bambu`         | lxml                                              | `make_bambu_3mf.py` (3MF authoring / verify)            |
 
 ```bash
-uv sync --frozen --no-dev                    # the core: uv, build123d, trimesh, manifold3d
+uv sync --frozen --no-dev                    # core runtime + trimesh section stack
 uv sync --frozen --no-dev --extra render     # core + render
 uv sync --frozen --no-dev --extra section    # core + section
 uv sync --frozen --no-dev --extra all        # core + everything
@@ -251,7 +256,7 @@ skills/
         templates.py      #       the five certified templates and their domains
         expectations.py   #       closed forms; imports math and nothing else
         backends/         #       trimesh+manifold3d and build123d builders
-        corpus.py         #       the mutation corpus the calibration gate reads
+        corpus.py         #       the mutation corpus that measures screening
       team_tools/         #     contract-automation package (validate/hash/status)
       designer_toolkit/   #     export/measure/fit/coupon helpers for the designer role
     SKILL.md              #   the router: names the five roles and the shared assets
@@ -277,7 +282,7 @@ uv run pytest
 The `bambu` extra adds multi-colour 3MF packing, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
 so the suites resolve their bare imports with no install step.
 
-The calibration corpus is a separate measurement, not a test assertion — it
+The screening corpus is a separate release measurement, not a test assertion — it
 builds every certified template, mutates each one, and reports what screening
 caught:
 
@@ -285,15 +290,31 @@ caught:
 uv run python -m pipeline.corpus
 ```
 
-It exits non-zero while the gate fails, which it currently does. `gate`,
+It exits non-zero when the measured gate fails. `gate`,
 `screening_false_negative_rate`, `clean_parts_checked` and
 `survivors_of_everything` are the fields worth reading.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
 3.11 and 3.12 via `uv sync --frozen --all-extras`, then `uv run ruff check`,
-`uv run python tools/gen_harness.py --check`, `uv run python tools/check_internal_links.py`,
-`uv run python tools/build_skill.py` and `uv run pytest` — one job with all
-optional dependencies so the cross-section tests run rather than skip.
+the generated/stale-file scan, internal links, `uv run python tools/build_skill.py`,
+`uv build --wheel`, and `uv run pytest` — one job with all optional dependencies
+so the cross-section tests run rather than skip.
+
+### Release surfaces
+
+The Python wheel and the `.skill` archive are deliberately different products:
+
+* `uv build --wheel` produces the runtime `pipeline`, `designer_toolkit`, and
+  `team_tools` packages plus required sibling modules and the `design-tool`
+  entry point. Test modules are excluded; role files, references, and the
+  standalone skill launcher are not part of the wheel.
+* `uv run python tools/build_skill.py` produces `3d-modeling.skill`, the
+  installable agent bundle containing `SKILL.md`, roles, references, scripts,
+  and its locked runtime project. Tests and local fixtures are excluded.
+
+Release checks cover both surfaces: generated-file drift and links, deterministic
+bundle bytes and SHA-256 equality, an extracted-bundle smoke from an external
+working directory, and a wheel-installed `design-tool doctor` smoke.
 
 ## For agents
 

@@ -11,8 +11,10 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 Six iterations of the approved redesign. The entry below describing `DIRECT` as
 "two dispatches" is what this replaced: on a certified template inside its
 domain, certified `INCONSEQUENTIAL` `DIRECT` now costs **zero specialist calls**, and
-the whole job — contract, build, commission, screening, witness, status — completes
-in well under a second. A certified `CONSEQUENTIAL` `DIRECT` job instead has one
+the whole job — contract, build, commission, screening, witness, status — measures
+well under a second for the certified trimesh path on the reference workstation.
+A build123d cold import or a static interface check can cost more; these are
+environment measurements, not guarantees. A certified `CONSEQUENTIAL` `DIRECT` job instead has one
 bounded safety review and no normal geometric verifier.
 
 The shape of it:
@@ -27,7 +29,7 @@ The shape of it:
   together. Asserted by an import-graph test, not by a naming convention.
 * **Fail-closed.** A check that cannot run escalates or fails per the contract.
   There is no `SKIP`, deliberately.
-* **Broad screening**, calibrated against a mutation corpus over every certified
+* **Broad screening**, measured against a mutation corpus over every certified
   template and scored on defects fused to the part — the ones the component
   detector does not catch for free. `python -m pipeline.corpus` is the gate, and
   it moves the final status rather than editing a claim string.
@@ -44,8 +46,10 @@ The shape of it:
   `domain_id`, backend version, lockfile, schema version and tessellation
   settings. Off unless asked for.
 
-Measured cold on certified `INCONSEQUENTIAL` `DIRECT` jobs: zero specialist calls;
-a 12-vent enclosure in 0.42 s, 72 vents in 0.53 s, 300 vents in 0.78 s.
+Measured cold on the reference workstation for certified `INCONSEQUENTIAL` `DIRECT`
+jobs: zero specialist calls; a 12-vent enclosure in 0.42 s, 72 vents in 0.53 s,
+and 300 vents in 0.78 s on the trimesh path. These measurements do not cover every
+template or environment.
 
 ### Changed — consequence is two levels, everywhere
 
@@ -481,8 +485,10 @@ separate from the editor.
   delivered geometry on the normalized mesh, killing stale-hash and phantom-shell
   bugs), `measure` / `datum_features` / `overhang_area` (bbox/volume/integrity;
   section holes in MODEL coordinates via `plane_transform`; overhang at the SAME
-  −0.73 screen as the gate), `interference` / `insertion_sweep` (boolean fit on
-  the exported mesh), `fit_coupon` (parametric multi-lane coupon from the plan's
+  −0.73 screen as the gate), `interference` (static seated boolean-overlap fit on
+  the exported mesh — a single position at rest; no insertion/travel sweep is
+  computed, and dynamic motion fit is deferred), `fit_coupon` (parametric
+  multi-lane coupon from the plan's
   interfaces), `render` (ref-vs-candidate view grid + section, pyrender-gated),
   and a one-call `finalize` that assembles the whole evidence bundle. Also a CLI
   (`python -m designer_toolkit …`).

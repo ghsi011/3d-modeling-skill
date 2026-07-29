@@ -16,9 +16,14 @@ source = { editable = "." }
 dependencies = [
     { name = "build123d" },
     { name = "manifold3d" },
+    { name = "networkx" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
+    { name = "rtree" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "shapely" },
     { name = "trimesh" },
 ]
 
@@ -59,13 +64,8 @@ visual = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "networkx" },
     { name = "pytest" },
-    { name = "rtree" },
     { name = "ruff" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "shapely" },
 ]
 
 [package.metadata]
@@ -74,6 +74,7 @@ requires-dist = [
     { name = "lxml", marker = "extra == 'all'" },
     { name = "lxml", marker = "extra == 'bambu'" },
     { name = "manifold3d", specifier = ">=2.5" },
+    { name = "networkx" },
     { name = "networkx", marker = "extra == 'all'" },
     { name = "networkx", marker = "extra == 'section'" },
     { name = "networkx", marker = "extra == 'visual'" },
@@ -85,12 +86,15 @@ requires-dist = [
     { name = "pyrender", marker = "extra == 'all'" },
     { name = "pyrender", marker = "extra == 'render'" },
     { name = "pyrender", marker = "extra == 'visual'" },
+    { name = "rtree" },
     { name = "rtree", marker = "extra == 'all'" },
     { name = "rtree", marker = "extra == 'section'" },
     { name = "rtree", marker = "extra == 'visual'" },
+    { name = "scipy" },
     { name = "scipy", marker = "extra == 'all'" },
     { name = "scipy", marker = "extra == 'section'" },
     { name = "scipy", marker = "extra == 'visual'" },
+    { name = "shapely" },
     { name = "shapely", marker = "extra == 'all'" },
     { name = "shapely", marker = "extra == 'section'" },
     { name = "shapely", marker = "extra == 'visual'" },
@@ -100,12 +104,8 @@ provides-extras = ["section", "render", "visual", "bambu", "all"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "networkx" },
     { name = "pytest", specifier = ">=8" },
-    { name = "rtree" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "scipy" },
-    { name = "shapely" },
 ]
 
 [[package]]

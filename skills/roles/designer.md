@@ -111,8 +111,10 @@ one, so reading its patterns is a page bought and unused:
    `designer_toolkit.templates` returns geometry and its `PARAMS` together, computed from the
    same arithmetic, so the two cannot drift. Hand-written models declare `PARAMS` themselves.
 3. **Before authoring any geometry, run `dt.py templates`.** One call, and it decides how the
-   next hour goes. Where a shape fits, the model is four lines and the whole deterministic
-   path takes about a second — measured runs that started here finished a fitted phone case in
+   next hour goes. Where a shape fits, the model is four lines. The deterministic path took
+   about a second on the reference workstation for this measured template path;
+   build123d imports, rendering, or a static interface check can take longer. Historical runs
+   that started here finished a fitted phone case in
    11.9 minutes and five beehive parts in 15.3; a run that skipped it hand-wrote a part
    `c_clip` already covered and took twice as long for the same result. A template also
    carries decisions somebody already paid for: `c_clip` stands its channel along the print
@@ -133,8 +135,9 @@ one, so reading its patterns is a page bought and unused:
    being maintained by hand. What lands is ordinary readable source — read it, and edit it if
    the part needs a feature the template does not carry. Then run the gate once. A certified
    `INCONSEQUENTIAL` `DIRECT` job that fits a template is that one command, one gate call, a look at the two renders, two
-   judgment fields and a short `print_notes.md`; build through gate measures under four seconds
-   end to end. If you find yourself exploring well beyond that, the shape probably does not fit
+   judgment fields and a short `print_notes.md`; one measured trimesh path on the reference
+   workstation took under four seconds end to end. Treat that as an environment/template
+   measurement, not a guarantee. If you find yourself exploring well beyond that, the shape probably does not fit
    after all, and hand-writing it is the faster answer than fighting the parameters.
 
    Where no shape fits, hand-write it — in the commissioned backend if there is one, and in
@@ -154,7 +157,7 @@ one, so reading its patterns is a page bought and unused:
    plan's interface declarations and the metrologist's as-observed geometry in
    `dimensions.md`. The designer implements the declared fit intent; it does not choose it.
 6. Organize boolean operations robustly; preserve editable source; label bodies and exports.
-7. The commission exports, hashes and renders for you — a section and a six-view exterior
+7. The commission exports, hashes and renders for you — a section and an eight-view exterior
    sheet, both listed in the manifest it writes. Produce an extra view only when one of those
    cannot settle a question you actually have, and add its manifest row when you do.
 8. Verify with one call and iterate until it exits zero:

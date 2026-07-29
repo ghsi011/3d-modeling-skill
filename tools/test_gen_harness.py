@@ -94,6 +94,50 @@ def test_generation_is_idempotent_and_matches_committed_bytes() -> None:
     assert first == on_disk
 
 
+def test_check_reports_orphaned_generated_files(capsys) -> None:
+    """The drift gate must fail when a generated output is left behind."""
+    roles = gen_harness.load_roles()
+    files = gen_harness.generate(roles)
+    orphan = gen_harness.SKILL_DIR / "roles" / "orphan.md"
+    orphan.write_text("# stale generated role\n", encoding="utf-8")
+    try:
+        assert gen_harness.check(files) == 1
+        assert "orphan.md" in capsys.readouterr().err
+    finally:
+        orphan.unlink()
+
+
+def test_generated_skill_roles_have_exactly_one_h1() -> None:
+    """The generator owns the title, so a body H1 must not double it.
+
+    `render_skill` prepends `# 3D <name>` from `display_name`; the neutral bodies
+    also open with their own `# 3D <name>`. Before the fix every `roles/*.md`
+    rendered that heading twice at the top of the file -- a duplicated document
+    title, valid Markdown that reads as a mistake.
+    """
+    roles = gen_harness.load_roles()
+    skill_files = [f for f in gen_harness.generate(roles)
+                   if f.path.parent.name == "roles" and f.path.parent.parent.name == "3d-modeling"]
+
+    assert len(skill_files) == 5
+    for file in skill_files:
+        h1_lines = [line for line in file.content.splitlines() if line.startswith("# ")]
+        assert len(h1_lines) == 1, f"{file.path.name} has {len(h1_lines)} H1 headings: {h1_lines}"
+        assert h1_lines[0].startswith("# 3D "), h1_lines[0]
+
+
+def test_generated_router_qualifies_zero_dispatch_claim() -> None:
+    """Only the certified inconsequential DIRECT route is dispatch-free."""
+    router = next(file.content for file in gen_harness.generate(gen_harness.load_roles())
+                  if file.path == gen_harness.SKILL_DIR / "SKILL.md")
+    assert "certified `INCONSEQUENTIAL` `DIRECT`" in router
+    assert "zero model calls" in router
+    assert "`CONSEQUENTIAL` `DIRECT`" in router
+    assert "bounded safety review" in router
+    assert "`FITTED` or `FULL`" in router
+    assert "required reviews" in router
+
+
 def test_check_reports_mismatch_when_generated_file_differs(tmp_path: Path) -> None:
     # Given: a generated file contract whose on-disk bytes differ.
     target = tmp_path / "3d-demo.md"

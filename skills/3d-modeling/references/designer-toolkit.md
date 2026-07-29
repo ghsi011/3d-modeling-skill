@@ -55,7 +55,7 @@ Point `--out` at the project directory itself. The receipts are contracts, and t
 gate resolves them by exact path without searching subdirectories, so receipts written below
 the project are invisible to it however correct their content.
 
-Then it renders a section and a six-view exterior sheet, writes `commission.json`,
+Then it renders a section and an eight-view exterior sheet, writes `commission.json`,
 `artifact_manifest.json` and `candidate_readiness.md` -- the manifest listing the renders it
 produced -- and exits non-zero if any check failed. Each failure names
 the action to take. Iterate until it exits zero.

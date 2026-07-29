@@ -18,9 +18,15 @@ uv run design-tool run-job <project-dir>    # needs a job.json beside the brief
 
 That runs intent, routing, the immutable contract, a completeness preflight, the
 build, one mesh load, commissioning, broad anomaly screening, witnesses and the
-final status -- zero model calls, well under a second. Read `final_status.json`
-when it finishes: `allowed_claim` states exactly what was established, and it is
-the sentence to repeat rather than paraphrase.
+final status. Only a certified `INCONSEQUENTIAL` `DIRECT` job has zero model calls
+and no review callback. A certified `CONSEQUENTIAL` `DIRECT` job stops for
+exactly one bounded safety review; `FITTED` or `FULL` stops for its required
+reviews. On the reference workstation a certified template on the trimesh path
+measures well under a second; a build123d cold import or a job carrying a static
+interface check can cost several seconds or more, so that number is a measurement
+of one path, not a guarantee for every job. Read `final_status.json` when it finishes:
+`allowed_claim` states exactly what was established, and it is the sentence to
+repeat rather than paraphrase.
 
 Read [`roles/orchestrator.md`](roles/orchestrator.md) for the job.json fields, the
 certified templates and what to do when a job does not route `DIRECT`. The other

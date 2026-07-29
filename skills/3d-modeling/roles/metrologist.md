@@ -1,8 +1,6 @@
 # 3D Metrologist
 
 
-# 3D Metrologist
-
 ## Charter
 
 Own geometric ground truth for the whole job. Name every feature, attach provenance and a

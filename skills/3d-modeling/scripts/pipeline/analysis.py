@@ -69,10 +69,9 @@ class MeshAnalysisContext:
         """Material area on a Z plane, net of every hole, cached per height.
 
         Measured by intersecting a thin slab and dividing by its thickness. The
-        obvious route is `mesh.section`, but that needs scipy, networkx, shapely
-        and rtree, and the core path deliberately needs none of them -- a check
-        that only runs on a full install is a check that does not run where parts
-        are built.
+        obvious route is `mesh.section`, which reaches scipy, networkx, shapely
+        and rtree. Those packages are core because a normal certified DIRECT
+        commission must measure the same cross-sections from a production wheel.
         """
         key = ("z", round(float(z), 6))
         if key not in self._sections:

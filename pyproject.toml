@@ -12,8 +12,10 @@ license = { file = "LICENSE" }
 authors = [{ name = "Idan" }]
 keywords = ["3d-modeling", "3d-printing", "cad", "fdm", "agents", "trimesh", "verification", "automation"]
 
-# The core path is exactly four things: uv, build123d, trimesh, manifold3d
-# (plus numpy/pillow, which trimesh and rendering need anyway).
+# The certified DIRECT path includes trimesh's complete cross-section stack:
+# scipy, networkx, shapely and rtree. A wheel must be able to commission a
+# normal certified job without selecting an extra; numpy/pillow are also core
+# because trimesh and the witness path need them.
 #
 # build123d is core rather than an extra because a certified template may choose
 # it and the runner must not have to ask whether it is installed. It is imported
@@ -28,6 +30,10 @@ dependencies = [
     "pillow>=10",
     "manifold3d>=2.5",
     "build123d>=0.9",
+    "scipy",
+    "networkx",
+    "shapely",
+    "rtree",
 ]
 
 # What each extra is FOR is tabled in README.md#dependencies; the comments here
@@ -35,17 +41,12 @@ dependencies = [
 [dependency-groups]
 # Dev-only, kept out of the core install: `uv sync --frozen --no-dev` gives a
 # runtime-only toolchain; `uv sync --frozen --group dev` adds the test runner.
-# scipy/networkx/shapely/rtree are here and NOT on the core path: the legacy
-# toolkit's section tests need them, and the core must stay installable
-# without them.
-dev = ["pytest>=8", "ruff>=0.6", "scipy", "networkx", "shapely", "rtree"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.optional-dependencies]
-# Mesh cross-sectioning. Not a grab bag: these are the trimesh soft
-# dependencies the section path reaches in turn -- scipy (csgraph, walking the
-# cut edges), networkx (vertex graph -> closed paths), shapely (the rings),
-# rtree (the enclosure tree deciding which ring is a hole). Kept out of
-# `visual` so the datum path needs no pyrender/PyOpenGL or GL context.
+# Mesh cross-sectioning. The section extra is retained as a compatibility alias
+# for existing install commands; its dependencies are core because certified DIRECT commissioning
+# reaches this trimesh cross-section stack without selecting an extra.
 section = ["scipy", "networkx", "shapely", "rtree"]
 
 render = ["pyrender", "PyOpenGL"]
@@ -78,10 +79,24 @@ Changelog = "https://github.com/ghsi011/3d-modeling-skill/blob/main/CHANGELOG.md
 # ---------------------------------------------------------------------------
 [tool.setuptools]
 package-dir = { "" = "skills/3d-modeling/scripts" }
+py-modules = [
+    "crop_evidence",
+    "make_3mf",
+    "make_bambu_3mf",
+    "mesh_io",
+    "overlay_photo",
+    "preview",
+    "team_preflight",
+    "verify_visual",
+]
 
 [tool.setuptools.packages.find]
 where = ["skills/3d-modeling/scripts"]
-include = ["pipeline*"]
+include = ["pipeline*", "designer_toolkit*", "team_tools*"]
+# Runtime wheels contain the production Python surface needed by both
+# `design-tool run-job` and the standalone tooling. The source checkout keeps
+# tests beside those modules for convenient collection; setup.py's build_py
+# hook excludes the test modules from the wheel.
 
 [tool.ruff]
 target-version = "py311"

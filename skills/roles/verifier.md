@@ -166,7 +166,10 @@ from your geometric verdict. Your `PASS` remains valid for either consequence cl
    reads `dimensions.md`, so a part that measures self-consistently and disagrees with what
    was asked for passes all of it.
 7. Cover the rest by hand, per plan: check **2**, the full-travel insertion sweep, for any
-   interface declaring a motion path; check **5**, feature positions and handedness from named
+   interface declaring a motion path — no tool computes it, the gate checks only a static
+   seated overlap/clearance, so author the sweep yourself and mark the motion fit
+   DEFERRED/BLOCKED if you cannot run it rather than letting the static check pass for it;
+   check **5**, feature positions and handedness from named
    datums (a mirrored layout fits the same magnitudes — compare with the datum coordinate
    negated); and the sheet half of check **6**, comparing `dimensions.md` values back to the
    built geometry. Then, for a `SUPPORT_ALLOWED` rule, whether the permitted contact class actually

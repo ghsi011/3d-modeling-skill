@@ -69,11 +69,11 @@ def load_main(path):
     return m, kept
 
 
-# trimesh soft dependencies the cross-section path reaches in turn: scipy (csgraph,
+# trimesh dependencies the cross-section path reaches in turn: scipy (csgraph,
 # walking the cut edges), networkx (vertex graph -> closed paths), rtree (the
 # enclosure tree that decides which ring is a hole). shapely is imported at module
-# scope above, so it cannot be silently missing by the time we get here. Shipped
-# with shapely as the `section` extra and folded into `visual`.
+# scope above, so it cannot be silently missing by the time we get here. These are
+# part of the core runtime; render remains the optional visual capability.
 _SECTION_STACK = ("scipy", "networkx", "rtree")
 _section_stack_ok = False
 
@@ -97,7 +97,7 @@ def _require_section_stack():
     if missing:
         raise ImportError(
             f"slice_union() needs {', '.join(missing)} "
-            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev --extra visual"
+            f"(mesh cross-section + ring extraction): uv sync --frozen --no-dev"
         )
     _section_stack_ok = True
 

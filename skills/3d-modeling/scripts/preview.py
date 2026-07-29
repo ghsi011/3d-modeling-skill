@@ -4,7 +4,7 @@ Render preview images of an exported mesh for visual inspection.
 
 Usage:
     uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl [output.png]
-    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --views multi       # 6-view technical sheet
+    uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --views multi       # 8-view technical sheet
     uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --views iso          # single isometric
     uv run --project <skill> --frozen python <skill>/scripts/preview.py model.stl --resolution 800     # higher-res per view
 
@@ -444,7 +444,7 @@ def main():
     parser.add_argument("output", nargs="?", default=None,
                         help="Output PNG path (default: <stl_name>_preview.png)")
     parser.add_argument("--views", choices=["iso", "multi"], default="multi",
-                        help="View mode: iso (single) or multi (6-view)")
+                        help="View mode: iso (single) or multi (8-view)")
     parser.add_argument("--title", default=None, help="Title for the preview")
     parser.add_argument("--resolution", type=int, default=DEFAULT_VIEW_SIZE,
                         help=f"Pixels per view (default: {DEFAULT_VIEW_SIZE})")

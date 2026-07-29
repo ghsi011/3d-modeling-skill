@@ -1,8 +1,6 @@
 # 3D Orchestrator
 
 
-# 3D Orchestrator
-
 ## Charter
 
 Own routing, job state, phase gates, user questions, specialist dispatch, project/queue
@@ -125,10 +123,12 @@ and it decides which phases run, not how verbose the record is.
   no specialist dispatches.** A certified `CONSEQUENTIAL` `DIRECT` job adds exactly
   one bounded safety review and no normal geometric verifier.
 
-  A dispatch costs four to six minutes whatever it contains — measured: an agent asked to run
-  four commands totalling 4.4 seconds took 6.41. A certified `INCONSEQUENTIAL` `DIRECT` job's
-  deterministic work is four commands and a local witness inspection, so adding an unnecessary dispatch would spend minutes of
-  overhead on under four seconds of computation. That is the whole reason this route exists.
+  A dispatch costs minutes on the reference workstation whatever it contains — one measured
+  agent run asked to execute four commands totalling 4.4 seconds and took 6.41 minutes. A
+  certified `INCONSEQUENTIAL` `DIRECT` job's deterministic work is four commands and a local
+  witness inspection, so adding an unnecessary dispatch would spend minutes of overhead on
+  a short certified-template computation. That is the whole reason this route exists; these
+  are environment measurements, not timing guarantees.
 
   The starting points, so that choosing one is not a round trip. Generated from the
   certified registry, and `gen_harness --check` fails when it drifts. Every parameter
@@ -168,16 +168,18 @@ and it decides which phases run, not how verbose the record is.
 
   For this certified `INCONSEQUENTIAL` `DIRECT` route, that is the whole run: intent, routing, the
   completeness preflight, build, export, one mesh load, commissioning, screening,
-  `W1` witnesses and the final status — one invocation, because the compute is
-  well under a second and every extra command pays interpreter start to do it.
+  `W1` witnesses and the final status — one invocation. On the reference workstation a
+  certified template on the trimesh path measures well under a second; a build123d cold
+  import or a job carrying a static interface check can cost several seconds or more.
+  Those are measurements of named paths in one environment, not timing guarantees.
 
   **`stated` names the parameters the brief actually gives you.** Everything else is
   recorded as chosen by the design. Omitting it understates your own numbers, which
   is safe; the reverse claims the user said something they did not.
 
   **Set `consequence` honestly.** `CONSEQUENTIAL` is failure that could injure
-  someone, damage equipment, start a fire, or make a machine misbehave. It does not
-  change the geometry route — it adds one mandatory safety pass at the end, and the
+  someone, damage equipment, start a fire, or make a machine misbehave.
+  **Consequence does not change the geometry route** — it adds one mandatory safety pass at the end, and the
   job cannot reach `VERIFIED` without it.
 
   Read `final_status.json` when it finishes. Four outcomes and they mean different
@@ -188,9 +190,10 @@ and it decides which phases run, not how verbose the record is.
   says in words what was established, and it is the sentence to repeat to the user.
 
   **Budget: three turns.** Not three commands — three round trips, because that is
-  what the clock actually charges for. Measured: the deterministic work is 0.18 s for
-  a trimesh template and 0.25 s for build123d with a STEP export, inside a job whose
-  wall clock is entirely round trips.
+  what the clock actually charges for. Exact wall time depends on the certified
+  template, environment, imports, rendering, and declared interface checks; measure
+  the route on the target workstation rather than treating an old benchmark as a
+  promise.
 
   1. Read the brief.
   2. Write `job.json` and run `design-tool run-job`. One call.
@@ -233,11 +236,10 @@ and it decides which phases run, not how verbose the record is.
   matching bed-contact area.
 
   Broad screening now covers part of that gap and says exactly how much. Run
-  `uv run --project <skill> --frozen python -m pipeline.corpus` for the current numbers; at the last measurement it
-  currently missed 30% of defects fused to the part. Two different claims sit behind
-  that number: material *fused
-  to the part* is what the profile and volume detectors have to earn, and it is
-  their false-negative rate the calibration gate scores. Disconnected debris is
+  `uv run --project <skill> --frozen python -m pipeline.corpus` for the current screening
+  corpus numbers. Material *fused
+  to the part* is what the profile and volume detectors have to earn, and the corpus
+  scores their false-negative rate. Disconnected debris is
   caught free by the component detector and carries no fused rate at all — do not
   read its absence from the gate as an unmeasured class. What screening cannot do
   is prove a feature is

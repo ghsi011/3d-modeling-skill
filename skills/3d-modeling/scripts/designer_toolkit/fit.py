@@ -1,12 +1,13 @@
-"""Interference and insertion-sweep on the exported meshes.
+"""Static seated overlap/clearance on the exported meshes.
 
-The boolean fit check the designer and verifier both run: does the seated
-reference intersect the part (must be ~0 for a clearance interface), and does it
-stay clear all the way in along the insertion axis? Runs on meshes — the
-delivered geometry — not the CAD kernel, so the answer matches what prints.
-Boolean overlap volume is the shared currency; the print engineer owns whether a
-given interface is ALLOWED to interfere (interference/crush-rib/snap fits declare
-a deliberately negative band).
+The primitive the designer and verifier can run at the seated position returns
+boolean overlap volume on the delivered meshes, not the CAD kernel. It does not
+perform an insertion/travel sweep and it does not decide whether overlap is
+acceptable. Use this volume only with an explicit volumetric threshold such as
+`assembly_overlap_budget_mm3`. Per-side clearance/transition/interference,
+crush-rib, snap, or retention bands use `commission.seated_clearance_mm` instead.
+Motion fit remains verifier-owned and is deferred/blocked when no motion check is
+available.
 """
 
 from __future__ import annotations
