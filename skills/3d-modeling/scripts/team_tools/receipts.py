@@ -11,8 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
-from common import TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors, resolve_timestamp, sha256_file, sort_issues
-from project import ProjectValidation, load_project, run_manifest_checks
+try:
+    from .common import TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors, resolve_timestamp, sha256_file, sort_issues
+    from .project import ProjectValidation, load_project, run_manifest_checks
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    from common import TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors, resolve_timestamp, sha256_file, sort_issues
+    from project import ProjectValidation, load_project, run_manifest_checks
 
 DISCLAIMER = (
     "This receipt confirms contract structure, identifiers, cross-references, "

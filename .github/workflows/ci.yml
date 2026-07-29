@@ -33,7 +33,7 @@ jobs:
       # Before Pytest, deliberately. Any test that shells out to the generator
       # writes into the working tree, which would repair the drift this step
       # exists to catch and make it pass unconditionally.
-      - name: Generated harness is current
+      - name: Generated and stale-file scan
         run: uv run python tools/gen_harness.py --check
 
       - name: Pytest
@@ -44,3 +44,6 @@ jobs:
 
       - name: Build skill bundles
         run: uv run python tools/build_skill.py --out dist/skills
+
+      - name: Build production wheel
+        run: uv build --wheel --out-dir dist/wheels

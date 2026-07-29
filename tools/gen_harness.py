@@ -290,6 +290,27 @@ def _rewrite_shared_links(body: str, prefix: str) -> str:
     )
 
 
+def _strip_leading_h1(body: str) -> str:
+    """Drop a body's own opening H1 so the generated title is not doubled.
+
+    `render_skill` prepends the canonical title from `display_name`. A neutral
+    role body that also opens with its own `# 3D ...` heading then rendered two
+    identical H1s at the top of every `roles/*.md` -- valid Markdown, but a
+    duplicated document title. The generator owns the visible title; a body H1 is
+    redundant, so it is removed here at the one place that adds the real one.
+    """
+    lines = body.split("\n")
+    index = 0
+    while index < len(lines) and lines[index].strip() == "":
+        index += 1
+    if index < len(lines) and lines[index].startswith("# "):
+        del lines[index]
+        if index < len(lines) and lines[index].strip() == "":
+            del lines[index]
+        return "\n".join(lines)
+    return body
+
+
 def render_skill(role: Role) -> GeneratedFile:
     """Every role is a file under `roles/`, the orchestrator included.
 
@@ -298,10 +319,10 @@ def render_skill(role: Role) -> GeneratedFile:
     sibling skills that reach each other by relative path break the moment a
     host installs one of them on its own.
     """
+    body = _rewrite_shared_links(_expand(_strip_leading_h1(role.body)), "../")
     return GeneratedFile(
         SKILL_DIR / "roles" / f"{role.role}.md",
-        f"# 3D {role.display_name.removeprefix('3D ')}\n\n"
-        f"{_rewrite_shared_links(_expand(role.body), '../')}",
+        f"# 3D {role.display_name.removeprefix('3D ')}\n\n{body}",
     )
 
 
@@ -336,9 +357,15 @@ def render_router(roles: tuple[Role, ...]) -> GeneratedFile:
         "",
         "That runs intent, routing, the immutable contract, a completeness preflight, the",
         "build, one mesh load, commissioning, broad anomaly screening, witnesses and the",
-        "final status -- zero model calls, well under a second. Read `final_status.json`",
-        "when it finishes: `allowed_claim` states exactly what was established, and it is",
-        "the sentence to repeat rather than paraphrase.",
+        "final status. Only a certified `INCONSEQUENTIAL` `DIRECT` job has zero model calls",
+        "and no review callback. A certified `CONSEQUENTIAL` `DIRECT` job stops for",
+        "exactly one bounded safety review; `FITTED` or `FULL` stops for its required",
+        "reviews. On the reference workstation a certified template on the trimesh path",
+        "measures well under a second; a build123d cold import or a job carrying a static",
+        "interface check can cost several seconds or more, so that number is a measurement",
+        "of one path, not a guarantee for every job. Read `final_status.json` when it finishes:",
+        "`allowed_claim` states exactly what was established, and it is the sentence to",
+        "repeat rather than paraphrase.",
         "",
         "Read [`roles/orchestrator.md`](roles/orchestrator.md) for the job.json fields, the",
         "certified templates and what to do when a job does not route `DIRECT`. The other",
@@ -376,11 +403,27 @@ def generate(roles: tuple[Role, ...]) -> tuple[GeneratedFile, ...]:
 
 
 def check(files: tuple[GeneratedFile, ...]) -> int:
-    mismatches = [file.path for file in files if file.path.read_text(encoding="utf-8") != file.content]
-    if mismatches:
+    mismatches = [
+        file.path
+        for file in files
+        if not file.path.is_file()
+        or file.path.read_text(encoding="utf-8") != file.content
+    ]
+    expected = {file.path for file in files}
+    actual = {
+        *((SKILL_DIR / "roles").glob("*.md") if (SKILL_DIR / "roles").is_dir() else ()),
+        *((ROOT / ".claude" / "agents").glob("3d-*.md")
+          if (ROOT / ".claude" / "agents").is_dir() else ()),
+    }
+    orphans = sorted(actual - expected)
+    if mismatches or orphans:
         print("Generated files differ from disk:", file=sys.stderr)
         for path in mismatches:
             print(f"  {_display_path(path)}", file=sys.stderr)
+        if orphans:
+            print("Orphan generated files:", file=sys.stderr)
+            for path in orphans:
+                print(f"  {_display_path(path)}", file=sys.stderr)
         return 1
     print(f"OK: {len(files)} generated files match disk")
     return 0

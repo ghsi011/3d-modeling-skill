@@ -78,10 +78,24 @@ Changelog = "https://github.com/ghsi011/3d-modeling-skill/blob/main/CHANGELOG.md
 # ---------------------------------------------------------------------------
 [tool.setuptools]
 package-dir = { "" = "skills/3d-modeling/scripts" }
+py-modules = [
+    "crop_evidence",
+    "make_3mf",
+    "make_bambu_3mf",
+    "mesh_io",
+    "overlay_photo",
+    "preview",
+    "team_preflight",
+    "verify_visual",
+]
 
 [tool.setuptools.packages.find]
 where = ["skills/3d-modeling/scripts"]
-include = ["pipeline*"]
+include = ["pipeline*", "designer_toolkit*", "team_tools*"]
+# Runtime wheels contain the production Python surface needed by both
+# `design-tool run-job` and the standalone tooling. The source checkout keeps
+# tests beside those modules for convenient collection; setup.py's build_py
+# hook excludes the test modules from the wheel.
 
 [tool.ruff]
 target-version = "py311"

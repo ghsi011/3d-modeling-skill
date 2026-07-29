@@ -66,17 +66,36 @@ def test_documented_review_routes_match_the_canonical_runner() -> None:
     assert "specification review" in tooling
     assert "independent verification" in tooling
 
-    plan = (ROOT / "docs" / "redesign-plan.md").read_text(encoding="utf-8")
-    assert "Consequence does **not** affect geometry routing." in plan
-    assert "`FULL` retains both route-required reviews" in plan
+    assert "Consequence does not change the geometry route" in role
+    assert "`FULL` retains both route-required reviews" in role
+
+
+def test_obsolete_redesign_documents_are_not_part_of_the_release() -> None:
+    """The live role/tooling docs are authoritative; the old design drafts are not."""
+    assert not (ROOT / "docs" / "redesign-baseline.md").exists()
+    assert not (ROOT / "docs" / "redesign-plan.md").exists()
+
+
+def test_static_fit_guidance_uses_the_declared_plan_band() -> None:
+    patterns = (ROOT / "skills" / "3d-modeling" / "references" / "verification-patterns.md").read_text(
+        encoding="utf-8"
+    )
+    contracts = (ROOT / "skills" / "3d-modeling" / "references" / "team-contracts-v4.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "must be ~0" not in patterns
+    assert "declared interface band" in patterns
+    assert "seated_clearance_mm" in patterns
+    assert "assembly_overlap_budget_mm3" in patterns
+    assert "No universal zero-interference rule" in contracts
+    assert "static seated overlap/clearance" in contracts
 
 
 def test_documentation_rejects_the_old_consequential_direct_policy() -> None:
     paths = (
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
-        ROOT / "docs" / "redesign-baseline.md",
-        ROOT / "docs" / "redesign-plan.md",
         ROOT / "docs" / "tooling.md",
         ROOT / "skills" / "3d-modeling" / "references" / "team-contracts-v4.md",
         ROOT / "skills" / "roles" / "orchestrator.md",
@@ -101,8 +120,6 @@ def test_direct_dispatch_claims_are_qualified_as_inconsequential() -> None:
     paths = (
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
-        ROOT / "docs" / "redesign-baseline.md",
-        ROOT / "docs" / "redesign-plan.md",
         ROOT / "skills" / "roles" / "orchestrator.md",
         ROOT / "skills" / "3d-modeling" / "roles" / "orchestrator.md",
     )

@@ -95,6 +95,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual("print-plan", payload["contract"])
             self.assertEqual(14.0, payload["expected_bbox_mm"]["z"])
 
+    def test_out_dash_prints_the_plan_to_stdout_portably(self) -> None:
+        """`--out -` means stdout on every platform.
+
+        Windows has no `/dev/stdout`, and a bare `Path("-")` would create a file
+        literally named `-` in the working directory instead of printing. The
+        plan must arrive on stdout as parseable JSON, with no stray path line and
+        no `-` file left behind."""
+        with tempfile.TemporaryDirectory() as raw:
+            completed = subprocess.run(
+                [sys.executable, "-m", "designer_toolkit.plan", "template",
+                 "--bbox", "40", "22", "14", "--out", "-"],
+                cwd=raw, capture_output=True, text=True, check=False,
+            )
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertFalse((Path(raw) / "-").exists(),
+                             "`--out -` must not create a file named '-'")
+            payload = json.loads(completed.stdout)
+            self.assertEqual("print-plan", payload["contract"])
+            self.assertEqual(14.0, payload["expected_bbox_mm"]["z"])
+
 
 class AgainstTheRealAuditTest(unittest.TestCase):
     """Checked against the tool itself, not against a list I wrote from memory.

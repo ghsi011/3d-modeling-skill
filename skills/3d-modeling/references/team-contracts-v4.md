@@ -388,8 +388,8 @@ updated_utc: <iso-8601>
 | Pre-dispatch check on re-imported STL | Required | Observed | Result | Evidence |
 |---|---:|---:|---|---|
 | One watertight intended body and bounds | yes | | | |
-| Seated interference | plan threshold | | | |
-| Full insertion/travel sweep | zero forbidden collision | | | |
+| Seated interference (static overlap/clearance at rest) | plan threshold | | | |
+| Full insertion/travel sweep — MANUAL, no tool computes it; DEFERRED if not hand-checked | zero forbidden collision | | | |
 | Installed-coordinate section proves architecture/open face | yes | | | |
 | Named bed face at printer Z=0 after exact transform | yes | | | |
 | Unsupported roof/critical wall floors | plan limits | | | |
@@ -530,8 +530,8 @@ updated_utc: <iso-8601>
 ## Seven checks on re-imported exported STL
 | Check | Method | Numeric result | Visual observation | Result | Evidence |
 |---|---|---:|---|---|---|
-| 1 interference | | | | | |
-| 2 full insertion/travel sweep | | | | | |
+| 1 interference (static seated overlap/clearance) | | | | | |
+| 2 full insertion/travel sweep (VERIFIER-OWNED — manual; no tool computes it; DEFERRED if not hand-checked) | | | | | |
 | 3 section | | | | | |
 | 4 same-view/photo overlay look | | n/a | | | |
 | 5 named-datum feature positions/handedness | | | | | |

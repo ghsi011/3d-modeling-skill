@@ -14,9 +14,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-import manifest_checks as MC
-import validators as V
-from common import ContractError, Issue, check_finite, error, load_json_object, load_markdown_contract
+try:
+    from . import manifest_checks as MC
+    from . import validators as V
+    from .common import ContractError, Issue, check_finite, error, load_json_object, load_markdown_contract
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    import manifest_checks as MC
+    import validators as V
+    from common import ContractError, Issue, check_finite, error, load_json_object, load_markdown_contract
 
 
 @dataclass

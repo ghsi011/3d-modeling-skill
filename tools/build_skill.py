@@ -23,14 +23,16 @@ ARTIFACT_NAME = "3d-modeling.skill"
 # A bundle is a runtime surface, not a dev checkout. The suites and their
 # fixtures are a third of the packed bytes, no shipped skill runs them, and no
 # role or reference tells an agent to. They stay in the repo, where CI runs them.
-EXCLUDE_DIRS = {"__pycache__", ".ruff_cache", ".pytest_cache", "examples"}
+EXCLUDE_DIRS = {"__pycache__", ".ruff_cache", ".pytest_cache", "examples", "tests", "test"}
 EXCLUDE_EXTS = {".pyc"}
 EXCLUDE_PREFIXES = ("test_",)
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def _should_include(path: Path) -> bool:
-    if path.suffix in EXCLUDE_EXTS or path.name.startswith(EXCLUDE_PREFIXES):
+    if (path.suffix in EXCLUDE_EXTS
+            or path.name.startswith(EXCLUDE_PREFIXES)
+            or path.stem.endswith("_test")):
         return False
     for part in path.parts:
         if part in EXCLUDE_DIRS:
@@ -198,12 +200,16 @@ def _bundle_pyproject() -> str:
     # tool.setuptools — full projection with only paths adapted.
     # Root:  package-dir = {"" = "skills/3d-modeling/scripts"}
     #        packages.find.where = ["skills/3d-modeling/scripts"]
-    #        packages.find.include = ["pipeline*"]
+    #        packages.find.include and py-modules describe the runtime surface.
     # Bundle: package-dir = {"" = "scripts"}
     #         packages.find.where = ["scripts"]
-    #         packages.find.include unchanged.
+    #         packages.find.include and py-modules unchanged.
     lines.append("\n[tool.setuptools]")
     lines.append('package-dir = { "" = "scripts" }')
+    py_modules = st.get("py-modules")
+    if py_modules:
+        modules_fmt = ", ".join(f'"{name}"' for name in py_modules)
+        lines.append(f"py-modules = [{modules_fmt}]")
     find = st.get("packages", {}).get("find", {})
     include = find.get("include")
     lines.append("\n[tool.setuptools.packages.find]")

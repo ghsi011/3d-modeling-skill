@@ -33,17 +33,28 @@ ENGINE = "manifold"
 body = trimesh.load("body.stl", force="mesh")
 ref_part = trimesh.load("ref.stl", force="mesh")
 
-# 1. seated interference (must be ~0)
-inter = intersection([body, ref_part], engine=ENGINE)
-print("interference", float(inter.volume) if len(inter.faces) else 0.0)
+# 1. static seated fit — per-side bands use the shipped seated-clearance
+#    measurement, not overlap volume. Compare `seated_clearance_mm` with the
+#    declared interface band from the plan. There is no universal zero-overlap rule:
+#    clearance, transition, interference, crush-rib, snap and retention fits all
+#    have different bounded acceptance ranges owned by the print plan.
+from designer_toolkit.commission import seated_clearance_mm
+seated_clearance = seated_clearance_mm(body, ref_part)
+print("seated_clearance_mm", seated_clearance, "compare with the plan's interface band")
 
-# 2. insertion sweep — ref less deep by t, still no interference
-for t in (5, 15, 25, 35, 45, 55, 65):
-    r = ref_part.copy()
-    r.apply_translation((0, 0, -t))
-    s = intersection([body, r], engine=ENGINE)
-    v = float(s.volume) if len(s.faces) else 0.0
-    assert v < 1e-6, f"insertion blocked at travel {t}: {v}"
+# An overlap volume is a different quantity. Compare it only with an explicit
+# volumetric plan field such as `assembly_overlap_budget_mm3`, never with a
+# linear per-side clearance band.
+inter = intersection([body, ref_part], engine=ENGINE)
+overlap = float(inter.volume) if len(inter.faces) else 0.0
+print("static overlap mm3", overlap, "compare only with assembly_overlap_budget_mm3")
+
+# 2. dynamic insertion/travel — NOT supplied by this skill. The shipped fit
+#    check is check 1 above: a single STATIC seated overlap/clearance at rest.
+#    No tool here sweeps a mating part along a travel axis, and `run-job` does
+#    not treat the static result as motion evidence. A verifier must own any
+#    motion judgement for the interface's declared path; if it cannot run that
+#    check, record the motion fit as DEFERRED/BLOCKED rather than passing it.
 
 # 3. section render: cut half, export, preview
 # Place the cutter from the part's own bounds, not from the origin. A fixed

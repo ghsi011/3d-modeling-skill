@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,25 @@ def _load_job(job_dir: Path) -> dict[str, Any]:
     path = job_dir / JOB_FILE
     if not path.is_file():
         raise SystemExit(f"design-tool: no {JOB_FILE} in {job_dir}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise SystemExit(
+            f"design-tool: {JOB_FILE} in {job_dir} is not valid UTF-8: {exc}") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # A malformed job.json is the contract's own parse failure, not a bug in
+        # the tool. Surface the decoder's line and column instead of letting a
+        # JSONDecodeError traceback out of the CLI -- a traceback reads as a crash
+        # and hides the one thing the author needs: where the JSON is broken.
+        raise SystemExit(
+            f"design-tool: {JOB_FILE} in {job_dir} is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"design-tool: {JOB_FILE} in {job_dir} must contain a JSON object, "
+            f"not {type(payload).__name__}")
+    return payload
 
 
 def _required(spec: dict[str, Any], key: str) -> Any:
@@ -93,17 +112,109 @@ def _required(spec: dict[str, Any], key: str) -> Any:
     return spec[key]
 
 
+def _string(value: Any, path: str, *, non_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise S.SchemaError(f"{path} must be a string")
+    if non_empty and not value.strip():
+        raise S.SchemaError(f"{path} must be a non-empty string")
+    return value
+
+
+def _object(value: Any, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise S.SchemaError(f"{path} must be an object")
+    return value
+
+
+def _number(value: Any, path: str, *, positive: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise S.SchemaError(f"{path} must be a finite number")
+    result = float(value)
+    if not math.isfinite(result) or (positive and result <= 0):
+        suffix = " positive" if positive else " finite"
+        raise S.SchemaError(f"{path} must be a{suffix} number")
+    return result
+
+
+def _strings(value: Any, path: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise S.SchemaError(f"{path} must be a list of strings")
+    return tuple(value)
+
+
+def _validate_orientation(value: Any) -> dict[str, Any]:
+    orientation = _object(value, "orientation")
+    if "model_to_printer_matrix" not in orientation:
+        raise S.SchemaError("orientation.model_to_printer_matrix is required")
+    matrix = orientation["model_to_printer_matrix"]
+    if matrix != "identity":
+        if (not isinstance(matrix, list) or len(matrix) != 4
+                or any(not isinstance(row, list) or len(row) != 4 for row in matrix)):
+            raise S.SchemaError(
+                "orientation.model_to_printer_matrix must be 'identity' or a 4x4 numeric matrix")
+        for row_index, row in enumerate(matrix):
+            for column_index, item in enumerate(row):
+                _number(item, f"orientation.model_to_printer_matrix[{row_index}][{column_index}]")
+    if "bed_z_mm" not in orientation:
+        raise S.SchemaError("orientation.bed_z_mm is required")
+    _number(orientation["bed_z_mm"], "orientation.bed_z_mm")
+    return orientation
+
+
+def _validate_job_contract(spec: dict[str, Any]) -> None:
+    """Validate JSON shapes before any runner code can turn them into a traceback."""
+    _string(_required(spec, "job_id"), "job_id", non_empty=True)
+    parameters = _object(_required(spec, "parameters"), "parameters")
+    for key, value in parameters.items():
+        if not isinstance(key, str):
+            raise S.SchemaError("parameters keys must be strings")
+        _number(value, f"parameters.{key}")
+    _string(_required(spec, "updated_utc"), "updated_utc", non_empty=True)
+    S.require_enum(_required(spec, "consequence"), S.CONSEQUENCE, what="job.consequence")
+    S.require_enum(spec.get("candidate_strategy", "SINGLE"), S.CANDIDATE_STRATEGY,
+                   what="job.candidate_strategy")
+
+    _string(_required(spec, "printer"), "printer", non_empty=True)
+    material = _object(_required(spec, "material"), "material")
+    _string(material.get("process"), "material.process", non_empty=True)
+    _string(material.get("material"), "material.material", non_empty=True)
+    nozzle = _object(_required(spec, "nozzle"), "nozzle")
+    if "diameter_mm" not in nozzle:
+        raise S.SchemaError("nozzle.diameter_mm is required")
+    _number(nozzle["diameter_mm"], "nozzle.diameter_mm", positive=True)
+    _validate_orientation(_required(spec, "orientation"))
+
+    optional_strings = ("brief", "template", "cache_dir")
+    for key in optional_strings:
+        if key in spec and spec[key] is not None:
+            _string(spec[key], key, non_empty=True)
+    for key in ("stated", "modifiers", "ambiguities", "evidence"):
+        if key in spec:
+            _strings(spec[key], key)
+    for key in ("external_geometry", "step"):
+        if key in spec and not isinstance(spec[key], bool):
+            raise S.SchemaError(f"{key} must be a boolean")
+    if "reviewer" in spec and spec["reviewer"] is not None:
+        _object(spec["reviewer"], "reviewer")
+    if "interface_map" in spec and spec["interface_map"] is not None:
+        interface_map = _object(spec["interface_map"], "interface_map")
+        if any(not isinstance(key, str) or not isinstance(value, str)
+               for key, value in interface_map.items()):
+            raise S.SchemaError("interface_map must map strings to strings")
+
+
 def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.JobRequest:
+    _validate_job_contract(spec)
     return runner.JobRequest(
-        job_id=spec["job_id"],
+        job_id=_required(spec, "job_id"),
         brief_path=job_dir / spec.get("brief", "brief.md"),
         template=spec.get("template"),
-        parameters=spec["parameters"],
+        parameters=_required(spec, "parameters"),
         stated=frozenset(spec.get("stated", ())),
         consequence=S.require_enum(_required(spec, "consequence"),
                                    S.CONSEQUENCE, what="job.consequence"),
         out_dir=job_dir,
-        updated_utc=spec["updated_utc"],
+        updated_utc=_required(spec, "updated_utc"),
         modifiers=tuple(spec.get("modifiers", ())),
         candidate_strategy=spec.get("candidate_strategy", "SINGLE"),
         external_geometry=bool(spec.get("external_geometry", False)),
@@ -135,7 +246,16 @@ def run_job(argv: list[str]) -> int:
     job_dir = args.job_dir.resolve()
     spec = _load_job(job_dir)
     try:
-        result = runner.run(_request(job_dir, spec, render=not args.no_render))
+        request = _request(job_dir, spec, render=not args.no_render)
+    except (S.SchemaError, KeyError, TypeError, ValueError) as exc:
+        # Contract-shaped inputs (the consequence class, and anything else parsed
+        # through the schema helpers) are validated as the job is turned into a
+        # request. A bad value is the contract failing to parse: name the field
+        # and the value it rejected rather than tracebacking out of the CLI.
+        raise SystemExit(
+            f"design-tool: {JOB_FILE} in {job_dir} is not a valid contract: {exc}") from exc
+    try:
+        result = runner.run(request)
     except ReviewNeeded as need:
         rel = need.path.relative_to(job_dir)
         packet = rel.with_name(need.kind + "_packet.json")

@@ -10,8 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from common import sha256_file
-from project import load_project
+try:
+    from .common import sha256_file
+    from .project import load_project
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    from common import sha256_file
+    from project import load_project
 
 CONTRACT_ORDER = ("job_state", "dimensions", "print_plan", "verification_report", "artifact_manifest")
 

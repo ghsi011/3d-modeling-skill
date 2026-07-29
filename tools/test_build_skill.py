@@ -8,6 +8,7 @@ green, and an agent following its own charter found nothing.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import tomllib
@@ -39,6 +40,25 @@ def _run_build(out_dir: Path) -> subprocess.CompletedProcess[str]:
         cwd=str(ROOT),
         check=True,
     )
+
+
+@pytest.fixture(scope="module")
+def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the production wheel once for the install/entrypoint checks."""
+    _requires_uv()
+    out = tmp_path_factory.mktemp("wheel")
+    built = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(out)],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+        check=False,
+    )
+    assert built.returncode == 0, (
+        f"`uv build --wheel` failed:\nstdout={built.stdout}\nstderr={built.stderr}")
+    wheels = sorted(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, found {wheels}"
+    return wheels[0]
 
 
 def _sha256(path: Path) -> str:
@@ -493,3 +513,101 @@ class TestBuildSkill:
                 or "/tests/" in e or "/test_" in e
             ]
         assert not offenders, f"bundle ships test source: {offenders}"
+
+    def test_production_wheel_excludes_test_modules(self, wheel_path: Path):
+        """The wheel is the Python runtime surface, not a source checkout."""
+        with zipfile.ZipFile(wheel_path) as zf:
+            names = zf.namelist()
+
+        offenders = [
+            name for name in names
+            if name.endswith(".py") and (
+                Path(name).name.startswith("test_")
+                or Path(name).stem.endswith("_test")
+            )
+        ]
+        assert not offenders, f"production wheel ships test modules: {offenders}"
+        assert "pipeline/cli.py" in names
+        assert "mesh_io.py" in names
+        assert "preview.py" in names
+        assert "designer_toolkit/__init__.py" in names
+        assert not any(name == "SKILL.md" or name.startswith("roles/") for name in names)
+
+    def test_production_wheel_entrypoint_smoke_from_external_cwd(self, wheel_path: Path):
+        """The installed wheel must expose its entry point outside the checkout."""
+        _requires_uv()
+        with tempfile.TemporaryDirectory() as raw:
+            external = Path(raw) / "external-job"
+            external.mkdir()
+            smoke = subprocess.run(
+                ["uv", "run", "--isolated", "--no-project", "--with", str(wheel_path),
+                 "design-tool", "doctor"],
+                capture_output=True,
+                text=True,
+                cwd=str(external),
+                check=False,
+            )
+        assert smoke.returncode == 0, (
+            f"wheel entrypoint failed from an external CWD:\n{smoke.stderr}")
+        assert "python" in smoke.stdout.lower()
+
+    def test_production_wheel_team_tools_import_from_external_interpreter(self, wheel_path: Path):
+        """The advertised team_tools package must not depend on checkout sys.path."""
+        _requires_uv()
+        with tempfile.TemporaryDirectory() as raw:
+            external = Path(raw) / "external-job"
+            external.mkdir()
+            smoke = subprocess.run(
+                ["uv", "run", "--isolated", "--no-project", "--with", str(wheel_path),
+                 "python", "-c",
+                 "from team_tools import contracts, project, receipts, status, validators; "
+                 "print(contracts.build_parser().prog)"],
+                capture_output=True,
+                text=True,
+                cwd=str(external),
+                check=False,
+            )
+        assert smoke.returncode == 0, (
+            f"team_tools failed from an external interpreter:\n{smoke.stderr}")
+        assert "team_tools.contracts" in smoke.stdout
+
+    def test_production_wheel_runs_job_from_external_cwd(self, wheel_path: Path):
+        """`doctor` is not enough: the installed wheel must commission a job."""
+        _requires_uv()
+        with tempfile.TemporaryDirectory() as raw:
+            external = Path(raw) / "external-job"
+            external.mkdir()
+            job = external / "clip"
+            job.mkdir()
+            (job / "brief.md").write_text("a clip", encoding="utf-8")
+            (job / "job.json").write_text(json.dumps({
+                "job_id": "wheel-clip",
+                "template": "c_clip",
+                "consequence": "INCONSEQUENTIAL",
+                "printer": "Test Printer",
+                "material": {"process": "FDM", "material": "PLA"},
+                "nozzle": {"diameter_mm": 0.4},
+                "orientation": {
+                    "model_to_printer_matrix": "identity", "bed_z_mm": 0.0,
+                },
+                "parameters": {
+                    "bore_d": 12.0, "wall": 3.0, "height": 9.0,
+                    "mouth_gap": 9.0, "flange_w": 40.0, "flange_d": 22.0,
+                    "flange_t": 5.0, "screw_d": 4.8,
+                },
+                "stated": [],
+                "updated_utc": "1970-01-01T00:00:00Z",
+            }), encoding="utf-8")
+            smoke = subprocess.run(
+                ["uv", "run", "--isolated", "--no-project", "--with", str(wheel_path),
+                 "design-tool", "run-job", str(job), "--no-render"],
+                capture_output=True,
+                text=True,
+                cwd=str(external),
+                check=False,
+            )
+            assert smoke.returncode in (0, 1), smoke.stderr
+            assert "Traceback" not in smoke.stderr
+            assert "ModuleNotFoundError" not in smoke.stderr
+            assert (job / "commission_report.json").is_file(), smoke.stderr
+            assert (job / "final_status.json").is_file(), smoke.stderr

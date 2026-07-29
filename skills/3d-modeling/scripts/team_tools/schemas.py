@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from common import Issue, error, warning
+try:
+    from .common import Issue, error, warning
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    from common import Issue, error, warning
 
 NUMBER = (int, float)
 

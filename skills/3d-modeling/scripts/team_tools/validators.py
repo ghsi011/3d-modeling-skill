@@ -16,8 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from common import Issue, error, is_hash_format, normalize_project_path
-from schemas import NUMBER, check_enum, check_fk, check_object_fields, check_rows
+try:
+    from .common import Issue, error, is_hash_format, normalize_project_path
+    from .schemas import NUMBER, check_enum, check_fk, check_object_fields, check_rows
+except ImportError:  # pragma: no cover - direct script/test compatibility
+    from common import Issue, error, is_hash_format, normalize_project_path
+    from schemas import NUMBER, check_enum, check_fk, check_object_fields, check_rows
 
 NULLABLE_NUMBER = (int, float, type(None))
 

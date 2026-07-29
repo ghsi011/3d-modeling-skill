@@ -270,8 +270,17 @@ def _cmd_template(args: argparse.Namespace) -> int:
                            consequence=args.consequence,
                            assembly_mesh_paths=tuple(args.assembly_mesh_paths),
                            assembly_overlap_budget_mm3=args.assembly_overlap_budget_mm3)
+    payload = json.dumps(plan, indent=2) + "\n"
+    # `--out -` means stdout, portably. Windows has no `/dev/stdout`, and a bare
+    # `Path("-").write_text` would create a file literally named `-` in the job
+    # folder. Writing the plan to the text stream instead lets a caller pipe it
+    # (`... plan template --bbox ... --out - | ...`) on any platform. The plan is
+    # ASCII (json.dumps escapes non-ASCII), so no console code page can mangle it.
+    if str(args.out) == "-":
+        sys.stdout.write(payload)
+        return 0
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+    args.out.write_text(payload, encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")
     return 0
 
