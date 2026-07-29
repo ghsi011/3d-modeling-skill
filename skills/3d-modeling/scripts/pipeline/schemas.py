@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
+import re
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 INTENT_SCHEMA = 1
@@ -48,6 +52,72 @@ FINAL_STATUS = ("FAILED", "NEEDS_MORE_EVIDENCE", "COMMISSIONED", "VERIFIED")
 
 class SchemaError(ValueError):
     """An artifact does not match the schema it claims."""
+
+
+class PathEscape(SchemaError):
+    """A referenced path is not a safe project-relative name."""
+
+
+def require_finite_number(value: Any, *, what: str) -> float:
+    """A finite real number, or a SchemaError naming the field.
+
+    Rejects `bool` (an `int` subclass that is never a magnitude), `None`,
+    numeric-looking strings, and the non-standard JSON tokens `NaN`,
+    `Infinity` and `-Infinity`, which Python's `json` module parses into real
+    floats by default. A `float(value)` guarded only by `try/except` accepts
+    every one of those -- `float(True)` is 1.0, `float("3")` is 3.0,
+    `float("nan")` is a NaN -- and each then poisons every arithmetic
+    consequence downstream (a NaN nominal sizes a NaN parameter and builds a
+    part from nothing). This is the one place the pipeline closes that hole
+    before an authoritative number is used.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SchemaError(f"{what}: expected a finite number, got {value!r}")
+    if not math.isfinite(value):
+        raise SchemaError(f"{what}: must be finite (not NaN or Infinity), got {value!r}")
+    return float(value)
+
+
+def resolve_within(base_dir: Path, name: Any, *, what: str = "path") -> Path:
+    """Turn a declared filename into a path proven to stay under `base_dir`.
+
+    Every evidence or witness reference the pipeline hashes arrives as a string
+    from a job file or a review response -- untrusted text. Joined naively,
+    `base_dir / name` will reach an absolute path, a Windows drive (`C:...`), a
+    UNC share (`\\\\host\\share`), or climb out with `..`, and `resolve()` will
+    follow a symlink planted inside the directory straight out of it. Routing
+    every read through this one resolver is what makes "project-relative" a
+    property the code enforces rather than a convention it hopes for.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise PathEscape(f"{what}: must be a non-empty string, got {name!r}")
+    normalized = name.replace("\\", "/")
+    is_windows_drive = bool(re.match(r"^[A-Za-z]:", normalized))
+    is_unc = normalized.startswith("//")
+    pure = PurePosixPath(normalized)
+    if pure.is_absolute() or is_windows_drive or is_unc:
+        raise PathEscape(
+            f"{what}: must be project-relative, got absolute path {name!r}")
+    if ".." in pure.parts:
+        raise PathEscape(
+            f"{what}: must not contain '..' traversal segments, got {name!r}")
+    if not pure.parts:
+        raise PathEscape(f"{what}: must not be empty, got {name!r}")
+    base_real = Path(os.path.realpath(base_dir))
+    candidate = base_dir / normalized
+    # resolve(strict=False) follows existing symlink components even when the
+    # final segment does not exist yet -- exactly what catches a symlink planted
+    # inside the directory that points outside it.
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(base_real)
+    except ValueError:
+        raise PathEscape(
+            f"{what}: {name!r} resolves outside the project directory "
+            "(possible symlink escape)") from None
+    # Return the canonical target that was checked, not a second spelling that
+    # could be redirected differently before the caller opens it.
+    return resolved
 
 
 def canonical_json(payload: Any) -> str:

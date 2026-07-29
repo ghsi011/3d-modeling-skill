@@ -38,6 +38,10 @@ SUPPORT_DISPOSITION = frozenset(
 EXPOSURE_CLASS = frozenset(
     {"EXPOSED_FUNCTIONAL", "EXPOSED_COMFORT", "HIDDEN", "BED_CONTACT", "PERMITTED_SUPPORT_CONTACT"}
 )
+INTERFACE_FIT_TYPE = frozenset(
+    {"clearance", "transition", "interference", "elastic_contact", "crush_rib",
+     "snap", "retention", "seal", "thread", "compliant"}
+)
 
 ARTIFACT_ROLE = frozenset(
     {"reference", "candidate", "coupon", "render", "source", "mating_reference", "other"}
@@ -328,6 +332,7 @@ def validate_print_plan(
     issues += check_object_fields(
         data,
         required={
+            "schema_version": int,
             "contract": str,
             "contract_version": int,
             "job_id": str,
@@ -364,6 +369,13 @@ def validate_print_plan(
         },
         where=where,
     )
+    if "schema_version" in data:
+        version = data["schema_version"]
+        if version != 4:
+            issues.append(error(
+                "BAD_SCHEMA_VERSION", f"{where}.schema_version",
+                f"unsupported print-plan schema_version {version!r}; expected 4",
+            ))
     issues += check_enum(data, "status", PRINT_PLAN_STATUS, where)
     if "reference_sha256" in data and isinstance(data["reference_sha256"], str):
         if not is_hash_format(data["reference_sha256"]):
@@ -485,6 +497,48 @@ def validate_print_plan(
             )
         return found
 
+    def interface_row(row: dict[str, Any], row_where: str) -> list[Issue]:
+        found = check_object_fields(
+            row,
+            required={
+                "id": str,
+                "fit_type": str,
+                "contact_state": str,
+                "min_mm": NUMBER,
+                "max_mm": NUMBER,
+                "units": str,
+                "uncertainty_mm": NUMBER,
+                "acceptance_method": str,
+                "motion_path": str,
+                "material": str,
+                "coupon_required": bool,
+            },
+            optional={
+                "reference": str,
+            },
+            where=row_where,
+        )
+        found += check_enum(row, "fit_type", INTERFACE_FIT_TYPE, row_where)
+        if row.get("units") != "mm":
+            found.append(error("BAD_ENUM", f"{row_where}.units", "units must be 'mm'"))
+        minimum, maximum = row.get("min_mm"), row.get("max_mm")
+        if isinstance(minimum, (int, float)) and not isinstance(minimum, bool):
+            if isinstance(maximum, (int, float)) and not isinstance(maximum, bool):
+                if maximum < minimum:
+                    found.append(error("BAD_RANGE", f"{row_where}.max_mm", "must be >= min_mm"))
+                if row.get("fit_type") == "clearance" and (minimum < 0 or maximum < 0):
+                    found.append(error("BAD_RANGE", f"{row_where}.min_mm", "clearance bounds must be >= 0"))
+        uncertainty = row.get("uncertainty_mm")
+        if isinstance(uncertainty, (int, float)) and not isinstance(uncertainty, bool) and uncertainty < 0:
+            found.append(error("BAD_RANGE", f"{row_where}.uncertainty_mm", "must be >= 0"))
+        for field in ("contact_state", "acceptance_method"):
+            if isinstance(row.get(field), str) and not row[field].strip():
+                found.append(error("BAD_VALUE", f"{row_where}.{field}", "must be non-empty"))
+        for field in ("motion_path", "material"):
+            if isinstance(row.get(field), str) and not row[field].strip():
+                found.append(error("BAD_VALUE", f"{row_where}.{field}", "must be non-empty"))
+        return found
+
     if "geometry_rules" in data:
         found, _ = check_rows(
             data["geometry_rules"], where=f"{where}.geometry_rules", row_validator=geometry_rule_row
@@ -496,6 +550,11 @@ def validate_print_plan(
     if "support_rules" in data:
         found, _ = check_rows(
             data["support_rules"], where=f"{where}.support_rules", row_validator=support_rule_row
+        )
+        issues += found
+    if "interfaces" in data:
+        found, _ = check_rows(
+            data["interfaces"], where=f"{where}.interfaces", row_validator=interface_row
         )
         issues += found
     if "transform" in data and isinstance(data["transform"], dict):

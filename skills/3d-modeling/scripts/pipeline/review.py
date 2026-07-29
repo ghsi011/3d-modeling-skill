@@ -44,7 +44,15 @@ def _file_hashes(filenames, base_dir: Path) -> dict[str, str]:
             # boundary only ever raises ReviewError.
             raise ReviewError(
                 f"evidence entries must be strings, got {type(name).__name__}: {name!r}")
-        path = base_dir / name
+        # Every evidence/witness reference is untrusted text from a job file or a
+        # review response. The canonical resolver is the one gate for it: it
+        # refuses absolute paths, Windows drives, UNC shares, `..` traversal and
+        # symlink escapes, so an envelope cannot bind a hash of a file outside
+        # the project directory.
+        try:
+            path = S.resolve_within(base_dir, name, what="evidence file")
+        except S.PathEscape as exc:
+            raise ReviewError(str(exc)) from None
         if not path.is_file():
             raise MissingEvidenceError(
                 f"evidence file not found: {name} (looked in {base_dir})")
@@ -179,10 +187,31 @@ def _envelope_from_dict(env: dict[str, Any]) -> ReviewEnvelope:
     will serialize is checked here, where the controlled error lives.
     """
     try:
+        protocol_version = _int_field(env, "protocol_version")
+        answer_schema_version = _int_field(env, "answer_schema_version")
+        kind = _str_field(env, "kind")
+        # Version and kind are validated before anything trusts the rest. An
+        # envelope from a protocol or answer schema this build does not know is
+        # not a stale answer to compare digests against -- it is one whose
+        # meaning this reader cannot vouch for, and guessing is exactly the
+        # silent reinterpretation `schema_version` exists to forbid. The refusal
+        # is explicit here rather than an opaque digest mismatch two calls later.
+        if protocol_version != REVIEW_PROTOCOL_VERSION:
+            raise ReviewError(
+                f"review_envelope: unknown protocol_version {protocol_version} "
+                f"(this build speaks {REVIEW_PROTOCOL_VERSION})")
+        if kind not in REVIEW_KIND:
+            raise ReviewError(
+                f"review_envelope: kind {kind!r} is not one of {list(REVIEW_KIND)}")
+        expected_schema = SCHEMA_VERSION_BY_KIND[kind]
+        if answer_schema_version != expected_schema:
+            raise ReviewError(
+                f"review_envelope: answer_schema_version {answer_schema_version} does "
+                f"not match schema {expected_schema} for a {kind} review")
         return ReviewEnvelope(
-            protocol_version=_int_field(env, "protocol_version"),
-            answer_schema_version=_int_field(env, "answer_schema_version"),
-            kind=_str_field(env, "kind"),
+            protocol_version=protocol_version,
+            answer_schema_version=answer_schema_version,
+            kind=kind,
             job_id=_str_field(env, "job_id"),
             revision=_str_field(env, "revision"),
             packet_sha256=_str_field(env, "packet_sha256"),

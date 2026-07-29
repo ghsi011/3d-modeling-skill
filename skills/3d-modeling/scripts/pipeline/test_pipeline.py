@@ -70,7 +70,7 @@ def _run_looked(out: Path, **kw):
 def _full_spec(request):
     response = {
         "measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
-                          "uncertainty_mm": 0.15, "method": "caliper",
+                          "uncertainty_mm": 0.05, "method": "caliper",
                           "datum": "widest section", "confidence": "A"}],
         "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
                         "fit_class": "slip"}],
@@ -1239,6 +1239,29 @@ class DomainCompletenessTest(unittest.TestCase):
                                  external_geometry=False, ambiguities=())
         self.assertNotEqual("DIRECT", decision.route)
 
+    def test_count_parameters_reject_fractional_vent_grid(self) -> None:
+        template = T.get("vented_enclosure")
+        params = {name: (bound.low + bound.high) / 2
+                  for name, bound in template.bounds.items()}
+        params.update({"inner_w": 100.0, "inner_d": 100.0, "inner_h": 100.0,
+                       "wall": 2.0, "floor": 2.0, "vent_cols": 3.5,
+                       "vent_rows": 3.0, "vent_w": 5.0, "vent_h": 5.0,
+                       "boss_d": 8.0, "boss_bore": 3.0})
+        reasons = template.rejects(params)
+        self.assertTrue(any("vent_cols" in reason and "whole number" in reason
+                            for reason in reasons), reasons)
+
+    def test_count_parameters_reject_bool_and_numeric_string(self) -> None:
+        template = T.get("vented_enclosure")
+        params = {name: (bound.low + bound.high) / 2
+                  for name, bound in template.bounds.items()}
+        for bad in (True, "3"):
+            with self.subTest(value=bad):
+                params["vent_cols"] = bad
+                reasons = template.rejects(params)
+                self.assertTrue(any("vent_cols" in reason and "not a number" in reason
+                                    for reason in reasons), reasons)
+
 
 class ModifierTest(unittest.TestCase):
     def test_a_modifier_nobody_measures_is_deferred_not_satisfied(self) -> None:
@@ -1249,6 +1272,15 @@ class ModifierTest(unittest.TestCase):
             self.assertEqual("DEFERRED", report["overall"])
             for row in report["predicates"]:
                 self.assertNotEqual("SATISFIED", row["result"], row)
+
+    def test_motion_path_without_a_sweep_is_explicitly_deferred(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            _run_full_looked(out, modifiers=("motion_path",))
+            report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
+            self.assertEqual("DEFERRED", report["overall"])
+            self.assertEqual("DEFERRED", report["predicates"][0]["result"])
+            self.assertIn("swept-volume", report["predicates"][0]["predicate"])
 
     def test_an_unknown_modifier_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1364,7 +1396,7 @@ class FittedRouteTest(unittest.TestCase):
     computed from it deterministically."""
 
     SPEC = {"measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
-                              "uncertainty_mm": 0.15, "method": "caliper, three reads",
+                              "uncertainty_mm": 0.05, "method": "caliper, three reads",
                               "datum": "widest section", "confidence": "A"}],
             "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
                             "fit_class": "slip"}],
@@ -1510,6 +1542,142 @@ class FittedRouteTest(unittest.TestCase):
                 with self.assertRaises(Exception):
                     fitted.validate({"measurements": [row], "interfaces": [],
                                      "unresolved": []})
+
+    def test_non_finite_boolean_and_numeric_string_measurements_are_refused(self) -> None:
+        good = {"feature": "a", "nominal_mm": 10.0, "uncertainty_mm": 0.1,
+                "method": "caliper", "datum": "x", "confidence": "A"}
+        for field, bad in (("nominal_mm", True), ("nominal_mm", "10.0"),
+                           ("nominal_mm", float("nan")), ("uncertainty_mm", float("inf"))):
+            with self.subTest(field=field, value=bad):
+                with self.assertRaises(S.SchemaError):
+                    fitted.validate({"measurements": [{**good, field: bad}],
+                                     "interfaces": [], "unresolved": []})
+
+    def test_fitted_acceptance_reports_propagated_uncertainty(self) -> None:
+        measurements, interfaces, unresolved = fitted.validate(self.SPEC)
+        report = fitted.report(measurements=measurements, interfaces=interfaces,
+                               unresolved=unresolved, reviewer={})
+        interface = report["interfaces"][0]
+        self.assertEqual(0.1, interface["uncertainty_mm"])
+        # slip is a 0.20 mm per-side band; its half-window is 0.20 mm and
+        # +/-0.10 mm propagated uncertainty consumes 0.10 mm of that margin.
+        self.assertEqual(0.1, interface["acceptance_tolerance_mm"])
+
+    def test_fitted_acceptance_contract_is_carried_into_commission(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result, _ = self._job(out, self.SPEC)
+            contract = json.loads(
+                (out / "model_contract.json").read_text(encoding="utf-8"))
+            fit = next(feature for feature in contract["features"]
+                       if feature["kind"] == "fit_acceptance")
+            self.assertEqual("channel", fit["expectation"]["interface_id"])
+            self.assertEqual(0.1, fit["expectation"]["acceptance_tolerance_mm"])
+            self.assertEqual(0.1, fit["tolerance"]["abs"])
+            self.assertEqual("channel-section",
+                             fit["expectation"]["candidate_feature_id"])
+            report = json.loads(
+                (out / "commission_report.json").read_text(encoding="utf-8"))
+            check = next(item for item in report["checks"]
+                         if item["check_id"] == "feature-fit-channel")
+            self.assertEqual("PASS", check["result"])
+            self.assertIn("candidate_check", check["measured"])
+
+    def test_fitted_acceptance_fails_when_built_candidate_measurement_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            contract = runner._contract_from(
+                T.get("c_clip"),
+                _request(out, template="c_clip", params=self.BASE),
+                fit_acceptance=fitted.acceptance_contract(
+                    *fitted.validate(self.SPEC)[:2], {"channel": "bore_d"}
+                ),
+            )
+            # Exercise the existing contract/check path with a real candidate
+            # whose declared feature measurement is wrong. The fit row must not
+            # pass just because its external metadata remains well formed.
+            mesh = _clean_clip()
+            mesh.apply_translation((0.0, 0.0, 1.0))
+            _ctx, report, _screen = _measure(mesh, contract, out)
+            fit_check = next(item for item in report["checks"]
+                             if item["check_id"] == "feature-fit-channel")
+            self.assertEqual("FAIL", fit_check["result"])
+            self.assertEqual("FAIL", report["verdict"])
+
+    def test_fitted_acceptance_rejects_candidate_inside_generic_but_outside_fit_band(self) -> None:
+        """10.09 is inside a generic +/-0.12 check, but not target 10.00 +/-0.01."""
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            params = dict(self.BASE)
+            params["bore_d"] = 10.09
+            params["wall"] = 2.977512
+            request = _request(out, template="c_clip", params=params)
+            fit_rows = ({
+                "interface_id": "channel",
+                "measurement_feature": "bundle_across",
+                "parameter": "bore_d",
+                "nominal_mm": 10.0,
+                "clearance_mm": [0.0, 0.0],
+                "target_mm": 10.0,
+                "uncertainty_mm": 0.0,
+                "acceptance_tolerance_mm": 0.01,
+            },)
+            contract = runner._contract_from(
+                T.get("c_clip"), request, fit_acceptance=fit_rows)
+            from .backends.trimesh_manifold import build_c_clip
+            mesh, _ = build_c_clip(params)
+            _ctx, report, _screen = _measure(mesh, contract, out)
+            generic = next(item for item in report["checks"]
+                           if item["check_id"] == "feature-channel-section")
+            fitted_check = next(item for item in report["checks"]
+                                if item["check_id"] == "feature-fit-channel")
+            self.assertEqual("PASS", generic["result"], generic)
+            self.assertEqual("FAIL", fitted_check["result"], fitted_check)
+            self.assertEqual(["channel-section"],
+                             list(fitted_check["measured"]["candidate_check"]))
+
+    def test_unsupported_fit_parameter_is_unavailable_not_inferred(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            measurements, interfaces, _ = fitted.validate(self.SPEC)
+            rows = fitted.acceptance_contract(
+                measurements, interfaces, {"channel": "unsupported_parameter"})
+            contract = runner._contract_from(
+                T.get("c_clip"), _request(out, template="c_clip", params=self.BASE),
+                fit_acceptance=rows)
+            _ctx, report, _screen = _measure(_clean_clip(), contract, out)
+            fitted_check = next(item for item in report["checks"]
+                                if item["check_id"] == "feature-fit-channel")
+            self.assertEqual("FAIL", fitted_check["result"])
+            self.assertEqual("UNAVAILABLE", fitted_check["status"])
+            self.assertEqual("FIT_CANDIDATE_UNBOUND", fitted_check["error_code"])
+
+    def test_fitted_acceptance_refuses_uncertainty_that_consumes_fit_band(self) -> None:
+        response = {**self.SPEC,
+                    "measurements": [{**self.SPEC["measurements"][0],
+                                       "uncertainty_mm": 0.15}]}
+        measurements, interfaces, unresolved = fitted.validate(response)
+        with self.assertRaises(S.SchemaError) as caught:
+            fitted.report(measurements=measurements, interfaces=interfaces,
+                          unresolved=unresolved, reviewer={})
+        self.assertIn("consumes the entire", str(caught.exception))
+
+    def test_fitted_acceptance_refuses_a_tiny_remaining_margin(self) -> None:
+        response = {**self.SPEC,
+                    "measurements": [{**self.SPEC["measurements"][0],
+                                       "uncertainty_mm": 0.145}]}
+        measurements, interfaces, _ = fitted.validate(response)
+        with self.assertRaises(S.SchemaError) as caught:
+            fitted.fit_acceptance(measurements, interfaces)
+        self.assertIn("minimum credible margin", str(caught.exception))
+
+    def test_fitted_sizing_gate_rejects_uncertainty_before_deriving_parameters(self) -> None:
+        response = {**self.SPEC,
+                    "measurements": [{**self.SPEC["measurements"][0],
+                                       "uncertainty_mm": 0.15}]}
+        measurements, interfaces, _ = fitted.validate(response)
+        with self.assertRaises(S.SchemaError):
+            fitted.parameters_from(measurements, interfaces, {"channel": "bore_d"})
 
     def test_malformed_field_types_raise_schema_error_never_type_error(self) -> None:
         """Every one of these shapes reaches a set operation, a hash or float()
@@ -1787,6 +1955,22 @@ class CacheTest(unittest.TestCase):
             (slot / "cache_receipt.json").write_text("{ not json", encoding="utf-8")
             self.assertIsNone(store.lookup(key))
 
+    def test_a_cache_receipt_with_an_unknown_schema_is_a_miss(self) -> None:
+        from . import cache as K
+
+        with tempfile.TemporaryDirectory() as raw:
+            cache = Path(raw) / "cache"
+            out = Path(raw) / "a"
+            self._job(out, cache)
+            contract = _contract(out)
+            key = K.key_for(contract, backend_version="x", tessellation={}, root=Path(raw))
+            store = K.Cache(cache)
+            slot = next(p for p in cache.iterdir() if p.is_dir())
+            payload = json.loads((slot / "cache_receipt.json").read_text(encoding="utf-8"))
+            payload["schema_version"] = K.CACHE_RECEIPT_SCHEMA + 1
+            (slot / "cache_receipt.json").write_text(json.dumps(payload), encoding="utf-8")
+            self.assertIsNone(store.lookup(key))
+
     def test_a_tampered_artifact_is_a_miss(self) -> None:
         """Hashes are recomputed from the bytes. This pipeline exists because an
         entered hash is not a hash."""
@@ -1999,6 +2183,22 @@ class ReviewEnvelopeTest(unittest.TestCase):
     def _good_verification(self):
         return {"decision": "PASS", "defects": [], "unmet_requirements": [],
                 "missing_evidence": [], "summary": "ok"}
+
+    def test_evidence_paths_must_stay_project_relative(self) -> None:
+        from . import review as R
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "inside.jpg").write_bytes(b"evidence")
+            for name in ("../outside.jpg", "/outside.jpg", "C:/outside.jpg",
+                         "\\\\server\\share\\outside.jpg"):
+                with self.subTest(path=name):
+                    with self.assertRaises(R.ReviewError):
+                        R.build_envelope(
+                            kind="safety", job_id="t", revision="r", packet_hash="p",
+                            reviewer={}, contract_hash="c", evidence=(name,),
+                            evidence_dir=root,
+                        )
 
     def test_safety_response_is_bound_to_its_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

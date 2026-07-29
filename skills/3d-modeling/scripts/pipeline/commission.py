@@ -26,6 +26,7 @@ from .contract import Contract, Feature
 KNOWN_CHECKS = frozenset({
     "section_area", "bed_contact", "through_hole", "bore_by_displacement",
     "void_region", "envelope", "watertight", "bodies", "unit_scale", "seated",
+    "fit_acceptance",
 })
 
 
@@ -93,8 +94,24 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         except MeasurementFailed as exc:
             return _unavailable_check(
                 feature, f"Section area at z={z:.2f}", str(exc), exc.code, want, tol)
+        measured: Any = round(got, 3)
+        probe = exp.get("fit_probe")
+        if isinstance(probe, dict):
+            at = probe.get("at")
+            z_probe = probe.get("z")
+            fit_value = None
+            if (isinstance(at, dict) and isinstance(z_probe, (int, float))
+                    and not isinstance(z_probe, bool)
+                    and isinstance(at.get("x"), (int, float))
+                    and isinstance(at.get("y"), (int, float))):
+                try:
+                    fit_value = round(ctx.section_bore_diameter_mm(
+                        z=float(z_probe), at=(float(at["x"]), float(at["y"]))), 4)
+                except MeasurementFailed:
+                    fit_value = None
+            measured = {"area_mm2": round(got, 3), "fit_value_mm": fit_value}
         return Check(f"feature-{feature.feature_id}", feature.feature_id,
-                     f"Section area at z={z:.2f}", True, "measured", want, round(got, 3), tol,
+                     f"Section area at z={z:.2f}", True, "measured", want, measured, tol,
                      _verdict(feature, abs(got - want) <= tol, True))
 
     if kind == "bed_contact":
@@ -200,6 +217,77 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         "UNKNOWN_CHECK_KIND", None, None)
 
 
+def _fit_acceptance_check(feature: Feature, checks: list[Check]) -> Check:
+    """Bind an uncertainty-aware fit row to measurements of this candidate.
+
+    The fit row is not allowed to pass merely because its metadata is present.
+    ``candidate_feature_id`` names the one ordinary geometry check that measured
+    the mapped parameter on the exported candidate. A fit acceptance row passes
+    only when that measurement ran and lies inside the fitted band; a mutated
+    candidate therefore fails the fit gate even when the external measurement
+    and tolerance metadata are unchanged.
+    """
+    expectation = feature.expectation
+    candidate_id = expectation.get("candidate_feature_id")
+    if not isinstance(candidate_id, str) or not candidate_id:
+        return _unavailable_check(
+            feature, f"Fit acceptance {expectation.get('interface_id', '?')}",
+            "no candidate geometry check is bound to this fit acceptance row",
+            "FIT_CANDIDATE_UNBOUND", expectation, feature.tolerance)
+
+    by_id = {check.feature_id: check for check in checks if check.feature_id}
+    candidate = by_id.get(candidate_id)
+    if candidate is None:
+        return _unavailable_check(
+            feature, f"Fit acceptance {expectation.get('interface_id', '?')}",
+            f"candidate geometry check is missing: {candidate_id}",
+            "FIT_CANDIDATE_CHECK_MISSING", expectation, feature.tolerance)
+
+    measured = candidate.measured
+    values: list[float]
+    if isinstance(measured, dict):
+        raw_value = measured.get("fit_value_mm")
+        if raw_value is None:
+            return _unavailable_check(
+                feature, f"Fit acceptance {expectation.get('interface_id', '?')}",
+                f"candidate measurement {candidate_id} could not produce the fit dimension",
+                "FIT_MEASUREMENT_UNAVAILABLE", expectation, feature.tolerance)
+        values = [float(raw_value)] if isinstance(raw_value, (int, float)) else []
+    elif isinstance(measured, (int, float)) and not isinstance(measured, bool):
+        values = [float(measured)]
+    elif isinstance(measured, list):
+        values = [float(value) for value in measured
+                  if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    else:
+        values = []
+    raw_target = expectation.get("target_mm")
+    raw_tolerance = expectation.get("acceptance_tolerance_mm")
+    target = (float(raw_target)
+              if isinstance(raw_target, (int, float)) and not isinstance(raw_target, bool)
+              and math.isfinite(raw_target) else None)
+    tolerance = (float(raw_tolerance)
+                 if isinstance(raw_tolerance, (int, float)) and not isinstance(raw_tolerance, bool)
+                 and math.isfinite(raw_tolerance) else None)
+    numeric = target is not None and tolerance is not None
+    target_value = target if target is not None else 0.0
+    tolerance_value = tolerance if tolerance is not None else 0.0
+    ok = (candidate.ran and candidate.result == "PASS" and numeric and bool(values)
+          and all(abs(value - target_value) <= tolerance_value for value in values))
+    results = {candidate_id: candidate.result}
+    return Check(
+        check_id=f"feature-{feature.feature_id}", feature_id=feature.feature_id,
+        title=f"Fit acceptance {expectation.get('interface_id', '?')}",
+        ran=True,
+        reason="candidate measurement is inside the fitted target band" if ok else
+               "candidate measurement is outside the fitted target band",
+        expected={key: expectation.get(key) for key in (
+            "nominal_mm", "clearance_mm", "target_mm", "uncertainty_mm",
+            "acceptance_tolerance_mm")},
+        measured={"candidate_check": results, "candidate_value_mm": values},
+        tolerance=feature.tolerance,
+        result="PASS" if ok else "FAIL")
+
+
 def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     checks: list[Check] = []
 
@@ -236,7 +324,13 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
 
     bed_contact = _bed_contact(ctx)
     for feature in contract.features:
+        if feature.kind == "fit_acceptance":
+            continue
         checks.append(_feature_check(ctx, feature, bed_contact))
+
+    for feature in contract.features:
+        if feature.kind == "fit_acceptance":
+            checks.append(_fit_acceptance_check(feature, checks))
 
     declared = [f for f in contract.features if f.mandatory]
     covered = [c for c in checks if c.feature_id and c.ran]

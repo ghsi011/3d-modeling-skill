@@ -192,6 +192,55 @@ class ValidatePlanTest(unittest.TestCase):
 
         self.assertIn("[-1, 0]", " ".join(plan.validate_plan(broken)))
 
+    def test_plan_schema_version_is_required(self) -> None:
+        built = plan.direct_template((40.0, 22.0, 14.0))
+        del built["schema_version"]
+        self.assertTrue(any("schema_version" in problem
+                            for problem in plan.validate_plan(built)))
+
+    def test_normative_interface_fields_are_required(self) -> None:
+        built = plan.direct_template((40.0, 22.0, 14.0))
+        built["interfaces"] = [{
+            "id": "I-01", "fit_type": "clearance", "min_mm": 0.1,
+            "max_mm": 0.2, "units": "mm", "contact_state": "sliding",
+            "uncertainty_mm": 0.02, "acceptance_method": "gauge",
+        }]
+        for field in ("motion_path", "material", "coupon_required"):
+            with self.subTest(field=field):
+                row = dict(built["interfaces"][0])
+                if field == "coupon_required":
+                    row[field] = True
+                else:
+                    row[field] = "declared"
+                built["interfaces"] = [row]
+                # The fields are normative and all three must be present in a
+                # passing row; remove each one in turn.
+                del built["interfaces"][0][field]
+                self.assertTrue(any(field in problem
+                                    for problem in plan.validate_plan(built)))
+
+    def test_an_interface_without_explicit_bounds_is_rejected(self) -> None:
+        built = plan.direct_template((40.0, 22.0, 14.0))
+        built["interfaces"] = [{
+            "id": "I-01", "fit_type": "clearance", "units": "mm",
+            "contact_state": "sliding", "uncertainty_mm": 0.05,
+            "acceptance_method": "gauge",
+        }]
+        problems = plan.validate_plan(built)
+        self.assertTrue(any("min_mm" in problem for problem in problems), problems)
+        self.assertTrue(any("max_mm" in problem for problem in problems), problems)
+
+    def test_interface_uncertainty_and_units_are_checked(self) -> None:
+        built = plan.direct_template((40.0, 22.0, 14.0))
+        built["interfaces"] = [{
+            "id": "I-01", "fit_type": "clearance", "min_mm": 0.1,
+            "max_mm": 0.2, "units": "inch", "contact_state": "sliding",
+            "uncertainty_mm": -0.1, "acceptance_method": "gauge",
+        }]
+        problems = plan.validate_plan(built)
+        self.assertTrue(any("units" in problem for problem in problems), problems)
+        self.assertTrue(any("uncertainty_mm" in problem for problem in problems), problems)
+
     def test_check_exits_nonzero_on_an_unbuildable_plan(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "plan.json"
@@ -235,7 +284,7 @@ class UnboundedThresholdTest(unittest.TestCase):
         self.assertEqual([], [p for p in plan.validate_plan(built) if "tolerance" in p])
 
     def test_a_body_count_that_is_not_a_positive_whole_number_is_refused(self) -> None:
-        for bad in (0, -2, 1.5, "six"):
+        for bad in (0, -2, 1.5, "six", True):
             with self.subTest(bodies=bad):
                 built = plan.direct_template((30.0, 30.0, 10.0), job_id="t")
                 built["expected_bodies"] = bad

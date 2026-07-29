@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import BuildArtifacts
+import mesh_io
 
 # STL tessellation, recorded into the artifact manifest. A section area measured
 # off a coarser mesh is a different number, so a receipt that does not say which
@@ -85,6 +86,9 @@ class Build123dBackend:
 
         output_dir.mkdir(parents=True, exist_ok=True)
         stl_path = output_dir / "candidate.stl"
+        mesh_io.validate_brep_tessellation(
+            part, tolerance=LINEAR_DEFLECTION, angular_tolerance=ANGULAR_DEFLECTION
+        )
         export_stl(part, str(stl_path),
                    tolerance=LINEAR_DEFLECTION, angular_tolerance=ANGULAR_DEFLECTION)
 

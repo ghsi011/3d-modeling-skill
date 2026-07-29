@@ -113,6 +113,7 @@ def run(request: JobRequest) -> JobResult:
     written: dict[str, Path] = {}
     llm_calls = 0
     specification: dict[str, Any] | None = None
+    fit_rows: tuple[dict[str, Any], ...] = ()
     safety_envelope: R.ReviewEnvelope | None = None
     verification_envelope: R.ReviewEnvelope | None = None
 
@@ -205,8 +206,12 @@ def run(request: JobRequest) -> JobResult:
         measurements = [fitted.Measurement(**{k: v for k, v in row.items() if k != "band_mm"})
                         for row in spec["measurements"]]
         interfaces = [fitted.Interface(**{k: v for k, v in row.items()
-                                          if k not in ("clearance_mm", "clearance_owner")})
+                                          if k not in ("clearance_mm", "clearance_owner",
+                                                       "uncertainty_mm", "acceptance_tolerance_mm")})
                       for row in spec["interfaces"]]
+        fit_rows = fitted.acceptance_contract(
+            measurements, interfaces, request.interface_map
+        )
         derived = fitted.parameters_from(measurements, interfaces, request.interface_map)
         request = dataclasses.replace(
             request, parameters={**request.parameters, **derived},
@@ -247,7 +252,10 @@ def run(request: JobRequest) -> JobResult:
 
     # ---- contract ---------------------------------------------------------
     mark = time.perf_counter()
-    model_contract = _contract_from(template, request)
+    model_contract = _contract_from(
+        template, request,
+        fit_acceptance=fit_rows,
+    )
     written["model_contract"] = _write(out / "model_contract.json", model_contract.as_payload())
     problems = C.preflight(model_contract, known_checks=commission.KNOWN_CHECKS)
     timings["contract"] = time.perf_counter() - mark
@@ -473,7 +481,10 @@ def run(request: JobRequest) -> JobResult:
                      llm_calls, final)
 
 
-def _contract_from(template: T.CertifiedTemplate, request: JobRequest) -> C.Contract:
+def _contract_from(
+    template: T.CertifiedTemplate, request: JobRequest,
+    *, fit_acceptance: tuple[dict[str, Any], ...] = (),
+) -> C.Contract:
     """Build the immutable contract from the template's own declarations."""
     rows = template.expectations(request.parameters)
     features: list[C.Feature] = []
@@ -492,6 +503,31 @@ def _contract_from(template: T.CertifiedTemplate, request: JobRequest) -> C.Cont
             provenance=row.get("note", "derived from the certified template's parameters"),
             expectation=expectation, tolerance=tolerance, verified_by=kind,
             on_unrunnable="ESCALATE", mandatory=True))
+
+    if fit_acceptance:
+        for row in fit_acceptance:
+            interface_id = row.get("interface_id")
+            parameter = row.get("parameter")
+            matches = [
+                feature.feature_id for feature in features
+                if feature.expectation.get("fit_parameter") == parameter
+            ]
+            expectation = {
+                **row,
+                # The acceptance row is only valid if it is checked against one
+                # measurement taken from this built candidate. Never broaden
+                # this to every template feature: an unrelated passing feature
+                # cannot prove the mapped fit parameter.
+                "candidate_feature_id": matches[0] if len(matches) == 1 else None,
+            }
+            features.append(C.Feature(
+                feature_id=f"fit-{interface_id}",
+                kind="fit_acceptance",
+                provenance="derived from the bounded external measurement and fit band",
+                expectation=expectation,
+                tolerance={"abs": float(row["acceptance_tolerance_mm"])},
+                verified_by="fit_acceptance",
+                on_unrunnable="FAIL", mandatory=True))
 
     return C.Contract(
         job_id=request.job_id, template=template.name,

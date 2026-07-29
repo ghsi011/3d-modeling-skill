@@ -63,6 +63,7 @@ class Key:
 # Packages whose version can change the geometry or the measurement. Used to
 # identify the toolchain when no lockfile is available.
 TOOLCHAIN_PACKAGES = ("trimesh", "manifold3d", "build123d", "numpy")
+CACHE_RECEIPT_SCHEMA = 1
 
 
 def find_lock(start: Path) -> Path | None:
@@ -154,17 +155,42 @@ class Cache:
             payload = json.loads(receipt.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        if payload.get("key", {}).get("digest") != key.digest():
+        if (not isinstance(payload, dict)
+                or not isinstance(payload.get("schema_version"), int)
+                or isinstance(payload.get("schema_version"), bool)
+                or payload.get("schema_version") != CACHE_RECEIPT_SCHEMA):
+            return None
+        key_payload = payload.get("key")
+        files = payload.get("files")
+        hashes = payload.get("hashes")
+        if (not isinstance(key_payload, dict) or not isinstance(files, list)
+                or not all(isinstance(name, str) for name in files)
+                or not isinstance(hashes, dict)
+                or not all(isinstance(name, str) and isinstance(digest, str)
+                           for name, digest in hashes.items())):
+            return None
+        if key_payload.get("digest") != key.digest():
             # The digest names the directory, so a mismatch means the entry was
             # written by a different key and the filesystem is lying to us.
             return None
-        for name in payload.get("files", []):
-            if not (slot / name).is_file():
+        file_paths: dict[str, Path] = {}
+        for name in files:
+            try:
+                file_paths[name] = S.resolve_within(slot, name, what="cache artifact")
+            except S.PathEscape:
+                return None
+            if not file_paths[name].is_file():
                 return None
         # Recompute from the bytes rather than trusting what was written down --
         # this whole pipeline exists because an entered hash is not a hash.
-        for name, digest in payload.get("hashes", {}).items():
-            if S.sha256_file(slot / name) != digest:
+        for name, digest in hashes.items():
+            try:
+                path = file_paths.get(name) or S.resolve_within(
+                    slot, name, what="cache artifact"
+                )
+            except S.PathEscape:
+                return None
+            if not path.is_file() or S.sha256_file(path) != digest:
                 return None
         return payload
 
@@ -179,6 +205,7 @@ class Cache:
             shutil.copy2(source, slot / name)
             hashes[name] = S.sha256_file(slot / name)
         receipt = {
+            "schema_version": CACHE_RECEIPT_SCHEMA,
             "key": key.as_dict(),
             "files": sorted(hashes),
             "hashes": hashes,

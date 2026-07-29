@@ -276,7 +276,9 @@ def normalize_project_path(
             )
         )
         return issues, None
-    return issues, candidate
+    # Return the canonical target that was checked. Callers must not re-join
+    # the untrusted spelling after this point.
+    return issues, resolved
 
 
 def resolve_timestamp(explicit: str | None) -> str:

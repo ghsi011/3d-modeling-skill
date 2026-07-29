@@ -43,6 +43,10 @@ FIT_CLEARANCE = {
 # reading's own spread, because an operator who repeats a measurement three times
 # has bounded repeatability and not accuracy.
 INSTRUMENT_UNCERTAINTY_MM = 0.05
+# A margin smaller than this is below the credibility of the print and
+# measurement process.  Treat it as ungateable rather than reporting a rounded
+# zero that looks like a successful acceptance decision.
+MIN_ACCEPTANCE_MARGIN_MM = 0.01
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,7 +78,7 @@ class Interface:
         try:
             return FIT_CLEARANCE[self.fit_class]
         except KeyError:
-            raise ValueError(
+            raise S.SchemaError(
                 f"{self.interface_id}: fit class {self.fit_class!r} is not one of "
                 f"{sorted(FIT_CLEARANCE)}. The pipeline owns the clearance, so an "
                 "unknown class has no band to apply.") from None
@@ -166,14 +170,14 @@ def validate(response: dict[str, Any], *,
                 f"measurement {row['feature']!r}: confidence must be a string")
         confidence = S.require_enum(row["confidence"], ("A", "B", "C", "D"),
                                     what=f"measurement {row['feature']!r} confidence")
-        try:
-            nominal = float(row["nominal_mm"])
-        except (TypeError, ValueError) as exc:
-            raise S.SchemaError(f"{row['feature']}: nominal_mm must be a number") from exc
-        try:
-            uncertainty = float(row["uncertainty_mm"])
-        except (TypeError, ValueError) as exc:
-            raise S.SchemaError(f"{row['feature']}: uncertainty_mm must be a number") from exc
+        # Strict finite numbers: a bool, a numeric-looking string, or a
+        # NaN/Infinity smuggled through `json` would each survive a bare
+        # `float(...)` and size a nonsense parameter. This route reads
+        # model-produced numbers, so it is exactly where that has to be refused.
+        nominal = S.require_finite_number(row["nominal_mm"],
+                                          what=f"{row['feature']}: nominal_mm")
+        uncertainty = S.require_finite_number(row["uncertainty_mm"],
+                                              what=f"{row['feature']}: uncertainty_mm")
         if uncertainty < 0:
             raise S.SchemaError(f"{row['feature']}: uncertainty cannot be negative")
         if nominal <= 0:
@@ -195,8 +199,9 @@ def validate(response: dict[str, Any], *,
         for field in ("interface_id", "measurement", "fit_class"):
             if field not in row:
                 raise S.SchemaError(f"interface: missing {field}")
-        if not isinstance(row["interface_id"], str):
-            raise S.SchemaError("interface: interface_id must be a string")
+        if (not isinstance(row["interface_id"], str)
+                or not row["interface_id"].strip()):
+            raise S.SchemaError("interface: interface_id must be a non-empty string")
         if not isinstance(row["measurement"], str):
             raise S.SchemaError(
                 f"interface {row['interface_id']!r}: measurement must be a string")
@@ -224,6 +229,88 @@ def validate(response: dict[str, Any], *,
     return measurements, interfaces, [str(u) for u in unresolved]
 
 
+def acceptance_tolerance(measurement: Measurement, interface: Interface) -> float:
+    """The print tolerance left once the measurement's uncertainty is spent.
+
+    A per-side clearance applies to both sides, so the controlled printed
+    dimension has a full fit window of `2 * (high - low)`.  The acceptance
+    tolerance is the *half* window: `high - low`.  The measured nominal is only
+    known to +/- its total uncertainty (the reading's own spread plus the
+    instrument's), and that uncertainty consumes the same amount from the
+    half-window.  Returning the full window here doubled the credible print
+    margin and let a candidate pass outside the uncertainty-aware band.
+
+    If the remaining half-window is tiny or non-positive, the measurement
+    cannot decide the fit at the resolution of this process.  A part whose fit
+    is a guess is exactly what the FITTED route exists to prevent.
+    """
+    low, high = interface.clearance()
+    half_window = high - low
+    total_uncertainty = measurement.uncertainty_mm + INSTRUMENT_UNCERTAINTY_MM
+    remaining = half_window - total_uncertainty
+    if remaining < MIN_ACCEPTANCE_MARGIN_MM:
+        raise S.SchemaError(
+            f"{interface.interface_id}: the measurement of {measurement.feature!r} is "
+            f"uncertain to +/-{total_uncertainty:.3f} mm, which consumes the entire "
+            f"{half_window:.3f} mm half-window of the {interface.fit_class} fit band, "
+            f"leaving {remaining:.4f} mm, below the {MIN_ACCEPTANCE_MARGIN_MM:.3f} mm "
+            "minimum credible margin. No print tolerance is left, "
+            "so whether the part fits cannot be decided from this measurement.")
+    return round(remaining, 4)
+
+
+def fit_acceptance(measurements: list[Measurement],
+                   interfaces: list[Interface]) -> dict[str, dict[str, float]]:
+    """Per interface, the uncertainty that went in and the tolerance that came out.
+
+    Raises `SchemaError` for any interface whose measurement uncertainty consumes
+    its fit band, so the job stops here rather than sizing a part nobody can say
+    fits.
+    """
+    by_feature = {m.feature: m for m in measurements}
+    acceptance: dict[str, dict[str, float]] = {}
+    for interface in interfaces:
+        measurement = by_feature[interface.measurement]
+        total_uncertainty = measurement.uncertainty_mm + INSTRUMENT_UNCERTAINTY_MM
+        acceptance[interface.interface_id] = {
+            "uncertainty_mm": round(total_uncertainty, 4),
+            "acceptance_tolerance_mm": acceptance_tolerance(measurement, interface),
+        }
+    return acceptance
+
+
+def acceptance_contract(
+    measurements: list[Measurement], interfaces: list[Interface],
+    mapping: dict[str, str],
+) -> tuple[dict[str, Any], ...]:
+    """Return the immutable fit-gate rows carried into the model contract.
+
+    The rows deliberately retain the external measurement, pipeline-owned
+    clearance band, propagated uncertainty, mapped parameter, and the remaining
+    half-window.  ``commission`` uses the row to bind the fit gate to the
+    candidate feature checks; it must not reconstruct a tolerance from a
+    stripped interface dataclass or from a designer-supplied value.
+    """
+    acceptance = fit_acceptance(measurements, interfaces)
+    by_feature = {m.feature: m for m in measurements}
+    rows: list[dict[str, Any]] = []
+    for interface in interfaces:
+        measurement = by_feature[interface.measurement]
+        low, high = interface.clearance()
+        details = acceptance[interface.interface_id]
+        rows.append({
+            "interface_id": interface.interface_id,
+            "measurement_feature": measurement.feature,
+            "parameter": mapping.get(interface.interface_id),
+            "nominal_mm": measurement.nominal_mm,
+            "clearance_mm": [low, high],
+            "target_mm": round(measurement.nominal_mm + low + high, 4),
+            "uncertainty_mm": details["uncertainty_mm"],
+            "acceptance_tolerance_mm": details["acceptance_tolerance_mm"],
+        })
+    return tuple(rows)
+
+
 def parameters_from(measurements: list[Measurement], interfaces: list[Interface],
                     mapping: dict[str, str]) -> dict[str, float]:
     """Template parameters, derived from the measurements and the pipeline's bands.
@@ -232,6 +319,10 @@ def parameters_from(measurements: list[Measurement], interfaces: list[Interface]
     is here rather than in the model's answer, so the parameter is a function of
     a measurement anyone can re-check against the object.
     """
+    # This is the sizing gate as well as a report calculation. Callers that
+    # derive parameters directly must not bypass the uncertainty decision by
+    # skipping report().
+    fit_acceptance(measurements, interfaces)
     by_feature = {m.feature: m for m in measurements}
     params: dict[str, float] = {}
     for interface in interfaces:
@@ -247,6 +338,11 @@ def parameters_from(measurements: list[Measurement], interfaces: list[Interface]
 
 def report(*, measurements: list[Measurement], interfaces: list[Interface],
            unresolved: list[str], reviewer: dict[str, Any]) -> dict[str, Any]:
+    # Raises if any interface's measurement uncertainty consumes its fit band;
+    # otherwise the propagated acceptance tolerance rides on each interface, so a
+    # reader sees the margin the print actually has rather than the clearance
+    # band as if the measurement were exact.
+    acceptance = fit_acceptance(measurements, interfaces)
     return {
         "schema_version": S.SPECIFICATION_SCHEMA,
         "route": "FITTED",
@@ -256,7 +352,9 @@ def report(*, measurements: list[Measurement], interfaces: list[Interface],
             for m in measurements],
         "interfaces": [
             {**dataclasses.asdict(i), "clearance_mm": list(i.clearance()),
-             "clearance_owner": "pipeline"}
+             "clearance_owner": "pipeline",
+             "uncertainty_mm": acceptance[i.interface_id]["uncertainty_mm"],
+             "acceptance_tolerance_mm": acceptance[i.interface_id]["acceptance_tolerance_mm"]}
             for i in interfaces],
         "unresolved": list(unresolved),
         "instrument_uncertainty_mm": INSTRUMENT_UNCERTAINTY_MM,

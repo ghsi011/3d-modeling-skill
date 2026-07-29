@@ -16,7 +16,8 @@ from typing import Any, Iterable
 
 import manifest_checks as MC
 import validators as V
-from common import ContractError, Issue, check_finite, error, load_json_object, load_markdown_contract
+from common import (ContractError, Issue, check_finite, error, load_json_object,
+                    load_markdown_contract, normalize_project_path)
 
 
 @dataclass
@@ -51,10 +52,41 @@ def _load_one(project_dir: Path, key: str, filenames: tuple[str, ...], *, requir
     and every binding field are available while the prose body is left alone;
     a JSON contract additionally gets its full structural validator.
     """
-    path = next((project_dir / name for name in filenames if (project_dir / name).is_file()), None)
+    path = None
+    for name in filenames:
+        path_issues, candidate = normalize_project_path(
+            name, field=key, where=key, project_dir=project_dir
+        )
+        if path_issues:
+            # Canonical filenames are trusted spellings, but an attacker can
+            # still replace one with a symlink that escapes the project. Do not
+            # follow it, and do not assert merely because the safe resolver
+            # refused to return a target.
+            return ContractFile(
+                key=key,
+                filename=name,
+                path=project_dir / name,
+                present=False,
+                data=None,
+                issues=path_issues,
+            )
+        if candidate is not None and candidate.is_file():
+            path = candidate
+            break
     if path is None:
         filename = filenames[0]
-        path = project_dir / filename
+        path_issues, path = normalize_project_path(
+            filename, field=key, where=key, project_dir=project_dir
+        )
+        if path is None:
+            return ContractFile(
+                key=key,
+                filename=filename,
+                path=project_dir / filename,
+                present=False,
+                data=None,
+                issues=path_issues,
+            )
         # Absence is silent unless the caller declared the contract required.
         # Mid-pipeline a project legitimately holds only the contracts its phase
         # has produced, so a warning here fires on every correct run -- and the
@@ -150,23 +182,41 @@ def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectV
 
 
 def run_manifest_checks(project: ProjectValidation) -> None:
-    """Mutates project.files['artifact_manifest'].issues in place with the
-    filesystem/mesh-backed checks (exists, hash match, bbox, unit-scale,
-    component count, paired STL/STEP compare). Call only when those checks are
-    actually wanted (validate command) -- status/hash callers that only need
-    revisions or raw hashes should not pay for mesh loads.
+    """Mutates project.files' issues in place with the filesystem/mesh-backed
+    checks: the manifest's per-artifact checks (exists, hash match, bbox,
+    unit-scale, component count, paired STL/STEP compare) and the final-prep
+    binding recompute. Call only when those checks are actually wanted (validate
+    command) -- status/hash callers that only need revisions or raw hashes
+    should not pay for mesh loads.
     """
     manifest_file = project.files["artifact_manifest"]
-    if manifest_file.data is None:
-        return
-    artifact_ids: dict[str, Any] = manifest_file.index.get("artifact_ids", {})
-    for artifact_id, row in artifact_ids.items():
-        manifest_file.issues += MC.check_artifact_files(
-            artifact=row,
-            artifact_id=artifact_id,
-            project_dir=project.project_dir,
-            where=f"artifact_manifest.artifacts[{artifact_id}]",
+    if manifest_file.data is not None:
+        artifact_ids: dict[str, Any] = manifest_file.index.get("artifact_ids", {})
+        for artifact_id, row in artifact_ids.items():
+            manifest_file.issues += MC.check_artifact_files(
+                artifact=row,
+                artifact_id=artifact_id,
+                project_dir=project.project_dir,
+                where=f"artifact_manifest.artifacts[{artifact_id}]",
+            )
+        manifest_file.issues += MC.compare_paired_stl_step(
+            artifacts=artifact_ids, project_dir=project.project_dir, where="artifact_manifest"
         )
-    manifest_file.issues += MC.compare_paired_stl_step(
-        artifacts=artifact_ids, project_dir=project.project_dir, where="artifact_manifest"
+
+    # The final-prep contracts carry bound hashes that validators.py can only
+    # format-check (they are Markdown). Recompute them against the current
+    # candidate STL and final_print_prep.md so a well-formed hash bound to a
+    # stale/wrong artifact fails the gate instead of reading as a live binding.
+    # Not gated on the manifest being present: final_prep_review's binding to
+    # final_print_prep.md needs neither the manifest nor a mesh load.
+    prep_file = project.files["final_print_prep"]
+    review_file = project.files["final_prep_review"]
+    binding_issues = MC.check_final_prep_bindings(
+        final_print_prep=prep_file.data,
+        final_prep_review=review_file.data,
+        final_print_prep_path=prep_file.path if prep_file.present else None,
+        manifest=manifest_file.data,
+        project_dir=project.project_dir,
     )
+    prep_file.issues += binding_issues["final_print_prep"]
+    review_file.issues += binding_issues["final_prep_review"]

@@ -18,6 +18,7 @@ its own receipts rather than quietly redefining success.
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any
 
 from . import schemas as S
@@ -153,12 +154,48 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
                 f"{where}: tolerance declares no 'abs', 'frac' or 'band'. A bare "
                 "number is either untestable or secretly exact.")
 
+        if feature.kind == "fit_acceptance":
+            expectation = feature.expectation
+            required = (
+                "interface_id", "nominal_mm", "clearance_mm", "target_mm",
+                "uncertainty_mm", "acceptance_tolerance_mm",
+                "candidate_feature_id", "parameter",
+            )
+            for field in required:
+                if field not in expectation:
+                    problems.append(
+                        f"{where}: fit acceptance is missing {field}; the fit gate must "
+                        "carry its complete uncertainty-aware contract")
+            for field in ("nominal_mm", "target_mm", "uncertainty_mm",
+                          "acceptance_tolerance_mm"):
+                value = expectation.get(field)
+                if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                        or not math.isfinite(value)):
+                    problems.append(
+                        f"{where}: fit acceptance {field} must be finite numeric")
+            margin = expectation.get("acceptance_tolerance_mm")
+            if isinstance(margin, (int, float)) and not isinstance(margin, bool):
+                if margin < 0.01:
+                    problems.append(
+                        f"{where}: fit acceptance margin {margin!r} is below the "
+                        "minimum credible 0.01 mm")
+            # A mapped parameter with no supported candidate instrument is a
+            # validly recorded UNAVAILABLE outcome, not permission to bind an
+            # unrelated template feature. Commission reports that outcome.
+            parameter = expectation.get("parameter")
+            if not isinstance(parameter, str) or not parameter.strip():
+                problems.append(
+                    f"{where}: fit acceptance parameter must name the mapped built "
+                    "parameter")
+
     if not contract.expected_bbox_mm:
         problems.append("no expected_bbox_mm: nothing would check the part's own size, "
                         "and a candidate once shipped 31% too thick that way")
     if contract.bbox_tolerance_mm <= 0:
         problems.append("bbox_tolerance_mm must be positive")
-    if contract.expected_bodies < 1:
+    if (not isinstance(contract.expected_bodies, int)
+            or isinstance(contract.expected_bodies, bool)
+            or contract.expected_bodies < 1):
         problems.append("expected_bodies must be at least 1")
     if not 0.0 < contract.minimum_coverage <= 1.0:
         problems.append("minimum_coverage must be in (0, 1]")

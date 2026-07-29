@@ -90,10 +90,26 @@ class CertifiedTemplate:
             if name not in params:
                 reasons.append(f"{name} is required by {self.name} and was not given")
                 continue
+            # A count is a number of discrete things -- vent columns, vent rows.
+            # 3.5 of them is not a smaller grid, it is a nonsense one: the builder
+            # rounds it with `int(...)` and then the geometry, the constraints and
+            # the volume screen each see a different integer. The domain is the
+            # one place that can refuse the fraction before any of them guesses.
+            raw_value = params[name]
+            if (bound.unit == "count"
+                    and (isinstance(raw_value, bool)
+                         or not isinstance(raw_value, (int, float)))):
+                reasons.append(f"{name}={raw_value!r} is not a number")
+                continue
             try:
-                value = float(params[name])
+                value = float(raw_value)
             except (TypeError, ValueError):
-                reasons.append(f"{name}={params[name]!r} is not a number")
+                reasons.append(f"{name}={raw_value!r} is not a number")
+                continue
+            if bound.unit == "count" and not value.is_integer():
+                reasons.append(
+                    f"{name}={raw_value!r} is a count and must be a whole number "
+                    f"in [{bound.low:g}, {bound.high:g}]")
                 continue
             if not bound.contains(value):
                 reasons.append(

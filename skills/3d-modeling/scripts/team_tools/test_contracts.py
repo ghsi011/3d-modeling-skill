@@ -125,6 +125,7 @@ _DIMENSIONS = {
 _MATRIX = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 
 _PRINT_PLAN = {
+    "schema_version": 4,
     "contract": "print-plan",
     "contract_version": 4,
     "job_id": "unit-test-job",
@@ -412,6 +413,17 @@ class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
         issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
         self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_schema_version_is_required_and_supported(self) -> None:
+        missing = clone(_PRINT_PLAN)
+        del missing["schema_version"]
+        self.assertIn("MISSING_FIELD@print_plan.schema_version",
+                      issue_ids(V.validate_print_plan(missing)))
+
+        unknown = clone(_PRINT_PLAN)
+        unknown["schema_version"] = 99
+        self.assertIn("BAD_SCHEMA_VERSION@print_plan.schema_version",
+                      issue_ids(V.validate_print_plan(unknown)))
 
     def test_second_structurally_different_fixture_support_allowed(self) -> None:
         alt = clone(_PRINT_PLAN)
@@ -1015,6 +1027,89 @@ class ProjectValidateReceiptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_dir:
             errors = self._corrupt_final_prep(Path(raw_dir), "owner", "print-engineer")
             self.assertIn("BAD_ENUM@final_prep_review.owner", errors)
+
+    def test_correct_final_prep_bindings_recompute_clean(self) -> None:
+        """A binding whose declared hash matches the current artifact passes: the
+        review's candidate_stl_sha256 and final_print_prep_sha256, recomputed
+        from the bytes on disk, equal what it declared -- so no BINDING_STALE.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            self._build_full_project(project_dir)
+            receipt, _ = R.build_validate_receipt(project_dir, timestamp=None, argv=[])
+            self.assertEqual([], [e for e in receipt["error_ids"] if e.startswith("BINDING_STALE")])
+            self.assertEqual("PASS", receipt["results"]["overall"], receipt["issues"])
+
+    def test_a_final_prep_review_bound_to_a_stale_candidate_stl_is_rejected(self) -> None:
+        """The review signs off a specific candidate STL. A well-formed hash that
+        no longer matches the current candidate binds the sign-off to a stale or
+        wrong STL and passes every format check -- so it is recomputed from the
+        bytes on disk, the way the manifest's HASH_MISMATCH is.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "candidate_stl_sha256", HASH_A)
+            self.assertIn("BINDING_STALE@final_prep_review.candidate_stl_sha256", errors)
+
+    def test_a_final_prep_review_bound_to_a_stale_prep_file_is_rejected(self) -> None:
+        """The review binds final_print_prep_sha256 to the prep contract it
+        reviewed. A well-formed hash that does not match the current
+        final_print_prep.md bytes reviews a version that is no longer there.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "final_print_prep_sha256", HASH_B)
+            self.assertIn("BINDING_STALE@final_prep_review.final_print_prep_sha256", errors)
+
+    def test_a_well_formed_binding_hash_still_gets_the_format_check_not_the_recompute(self) -> None:
+        """A malformed hash is BAD_HASH (format), never BINDING_STALE: the
+        recompute is skipped for it so a single field carries one clear finding,
+        not two.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            errors = self._corrupt_final_prep(Path(raw_dir), "candidate_stl_sha256", "TBD")
+            self.assertIn("BAD_HASH@final_prep_review.candidate_stl_sha256", errors)
+            self.assertNotIn("BINDING_STALE@final_prep_review.candidate_stl_sha256", errors)
+
+    def test_final_print_prep_bound_to_a_stale_candidate_stl_is_rejected(self) -> None:
+        """The print engineer's own contract also binds the candidate STL; the
+        recompute holds it to the current candidate exactly as it does the review.
+        """
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            self._build_full_project(project_dir)
+            path = project_dir / "final_print_prep.md"
+            lines = [
+                f"candidate_stl_sha256: {HASH_A}"
+                if line.startswith("candidate_stl_sha256:") else line
+                for line in path.read_text(encoding="utf-8").splitlines()
+            ]
+            path.write_text("\n".join(lines), encoding="utf-8")
+            receipt, _ = R.build_validate_receipt(project_dir, timestamp=None, argv=[])
+            self.assertIn(
+                "BINDING_STALE@final_print_prep.candidate_stl_sha256", receipt["error_ids"]
+            )
+
+    def test_final_prep_binding_fails_closed_when_candidate_row_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            self._build_full_project(project_dir)
+            manifest_path = project_dir / "artifact_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["artifacts"] = [
+                row for row in manifest["artifacts"] if row["role"] != "candidate"
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            receipt, _ = R.build_validate_receipt(project_dir, timestamp=None, argv=[])
+            self.assertTrue(any(error.startswith("BINDING_UNRESOLVED@")
+                                for error in receipt["error_ids"]), receipt["error_ids"])
+
+    def test_final_prep_binding_fails_closed_when_candidate_file_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            self._build_full_project(project_dir)
+            (project_dir / "candidate_01.stl").unlink()
+            receipt, _ = R.build_validate_receipt(project_dir, timestamp=None, argv=[])
+            self.assertTrue(any(error.startswith("BINDING_UNRESOLVED@")
+                                for error in receipt["error_ids"]), receipt["error_ids"])
 
     def test_absent_contract_is_silent_and_recorded_in_validated_paths(self) -> None:
         """An early-phase project holds only what its phase produced, so absence

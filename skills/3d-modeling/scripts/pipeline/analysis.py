@@ -49,6 +49,7 @@ class MeshAnalysisContext:
     vertex_merge: tuple[int, int] = (0, 0)
     _sections: dict[tuple, float] = dataclasses.field(default_factory=dict)
     _windows: dict[tuple, float] = dataclasses.field(default_factory=dict)
+    _fit_dimensions: dict[tuple, float] = dataclasses.field(default_factory=dict)
 
     @property
     def bounds(self) -> np.ndarray:
@@ -77,6 +78,49 @@ class MeshAnalysisContext:
         if key not in self._sections:
             self._sections[key] = self._slab_area(z)
         return self._sections[key]
+
+    def section_bore_diameter_mm(self, *, z: float, at: tuple[float, float]) -> float:
+        """Measure the nearest circular void boundary from candidate geometry.
+
+        This is a geometry probe, not an inverse of a section-area formula. It
+        intersects the exported candidate with the requested plane, finds the
+        nearest section vertex to the declared datum, and reports twice that
+        radius. Contract wall, mouth, and other design parameters never enter
+        this measurement, so compensating one of them cannot mask a bore error.
+        """
+        key = (round(float(z), 6), round(float(at[0]), 6), round(float(at[1]), 6))
+        if key in self._fit_dimensions:
+            return self._fit_dimensions[key]
+        try:
+            section = self.normalized.section(
+                plane_origin=[0.0, 0.0, float(z)], plane_normal=[0.0, 0.0, 1.0]
+            )
+        except Exception as exc:
+            raise MeasurementFailed(
+                f"the section instrument could not measure the candidate at z={z:.3f}: {exc}",
+                code="SECTION_INSTRUMENT_REFUSED",
+            ) from exc
+        if section is None or len(section.discrete) == 0:
+            raise MeasurementFailed(
+                f"the candidate has no measurable section at z={z:.3f}",
+                code="SECTION_INSTRUMENT_EMPTY",
+            )
+        try:
+            points = np.vstack([np.asarray(path, dtype=float) for path in section.discrete])
+            distances = np.linalg.norm(points[:, :2] - np.asarray(at, dtype=float), axis=1)
+            distances = distances[distances > 1e-6]
+            if distances.size == 0:
+                raise ValueError("section has no non-central boundary vertices")
+            value = 2.0 * float(np.min(distances))
+        except Exception as exc:
+            if isinstance(exc, MeasurementFailed):
+                raise
+            raise MeasurementFailed(
+                f"the section instrument could not identify a circular void boundary: {exc}",
+                code="SECTION_INSTRUMENT_INDETERMINATE",
+            ) from exc
+        self._fit_dimensions[key] = value
+        return value
 
     def _slab_area(self, z: float) -> float:
         span = float(max(self.extents)) * 4.0 + 10.0

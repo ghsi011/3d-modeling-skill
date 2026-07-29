@@ -27,6 +27,7 @@ import argparse
 import dataclasses
 import importlib.util
 import json
+import math
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,11 +38,15 @@ import numpy as np
 from ._bootstrap import as_mesh  # noqa: F401  (also puts scripts/ on sys.path)
 
 from . import edges, fit, orient, static  # noqa: E402
-from .metrics import BARE_45_DEG, measure  # noqa: E402
+from pipeline import schemas as pipeline_schemas  # noqa: E402
+from .metrics import measure  # noqa: E402
 from .verdict import FAIL as _FAIL  # noqa: E402
 from .verdict import PASS as _PASS  # noqa: E402
 from .verdict import SKIP as _SKIP  # noqa: E402
 from .verdict import Check  # noqa: E402
+
+
+ASSEMBLY_OVERLAP_EPSILON_MM3 = 1e-3
 
 
 @dataclass
@@ -245,9 +250,18 @@ def _check_solid(commission: Commission, report, plan: dict[str, Any]) -> None:
     pieces. The count comes from the plan rather than from the mesh, because
     "however many came out" is not a check.
     """
-    expected = plan.get("expected_bodies", 1)
-    expected = int(expected) if isinstance(expected, int) and expected > 0 else 1
+    raw_expected = plan.get("expected_bodies", 1)
+    expected_valid = (isinstance(raw_expected, int)
+                      and not isinstance(raw_expected, bool)
+                      and raw_expected > 0)
+    expected = raw_expected if expected_valid else 1
     ok = report.watertight and report.components == expected
+    if not expected_valid:
+        commission.add(Check(
+            "solid-plan", "Plan expected_bodies is a positive integer", _FAIL,
+            f"expected_bodies must be a positive whole number, got {raw_expected!r}",
+            "Declare an integer body count; do not coerce strings or booleans.",
+        ))
     commission.add(Check(
         "solid", f"Watertight, {expected} bod{'y' if expected == 1 else 'ies'}",
         _PASS if ok else _FAIL,
@@ -297,7 +311,7 @@ def _check_repair(commission: Commission, report) -> None:
 
 
 def _check_seated(commission: Commission, mesh, plan: dict[str, Any],
-                  rule: dict[str, Any], placement) -> None:
+                  rule: dict[str, Any], placement) -> bool:
     """Does the part actually sit on the bed the plan declares?
 
     `bed_z_mm` and `bed_tolerance_mm` were required of every support rule and
@@ -311,7 +325,7 @@ def _check_seated(commission: Commission, mesh, plan: dict[str, Any],
     bed_z = rule.get("bed_z_mm")
     tolerance = rule.get("bed_tolerance_mm")
     if bed_z is None or tolerance is None:
-        return          # validate_plan refuses this before a build; nothing to add
+        return False   # validate_plan refuses this before a build
     placed = mesh.copy()
     placed.apply_transform(placement.transform)
     lowest = float(placed.bounds[0][2])
@@ -322,7 +336,7 @@ def _check_seated(commission: Commission, mesh, plan: dict[str, Any],
     if abs(off) <= float(tolerance):
         commission.add(Check(f"seated-{rule_id}", "Part sits on the declared bed",
                              _PASS, detail))
-        return
+        return True
     commission.add(Check(
         f"seated-{rule_id}", "Part sits on the declared bed", _FAIL,
         f"{detail}: off by {off:+.3f} mm",
@@ -331,6 +345,7 @@ def _check_seated(commission: Commission, mesh, plan: dict[str, Any],
         "the bed. Seat the model at the plan's bed_z -- templates return parts already "
         "seated, so a hand-written model is the usual cause."
     ))
+    return False
 
 
 def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> None:
@@ -381,12 +396,23 @@ def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> Non
 
 
 def _check_assembly_interference(commission: Commission, mesh,
-                                 plan: dict[str, Any]) -> None:
+                                 plan: dict[str, Any],
+                                 reference: str | None = None,
+                                 path_base: Path | None = None) -> None:
     """Compare the candidate with every declared assembly mesh.
 
     Assembly meshes are optional context, but once declared they are a release
     gate. A collision hidden in a whole assembly is not made safe by passing the
     candidate's own envelope, support, and fit checks.
+
+    The overlap budget tolerates the *intended* contact at a named interface --
+    the small press or mating overlap a plan declares with a `reference`. But the
+    budget was measured as one total-overlap number, and one number cannot tell
+    that intended contact apart from a real collision elsewhere on the part: a
+    crash anywhere under the budget passed exactly as the press fit did. So once
+    the plan names interface geometry, any overlap that does *not* sit at one of
+    those interfaces is a collision the budget was never meant to excuse, and it
+    fails on its own account however far under the budget it falls.
     """
     paths = plan.get("assembly_mesh_paths")
     budget = plan.get("assembly_overlap_budget_mm3")
@@ -412,12 +438,45 @@ def _check_assembly_interference(commission: Commission, mesh,
         ))
         return
 
-    measured: dict[str, float] = {}
+    # The total budget may excuse a deliberately small press/mating overlap,
+    # but it must not excuse an unrelated collision elsewhere in the part.
+    # Interface references are the only geometry this check is allowed to
+    # excuse.
+    contact_sources = [
+        row.get("reference") for row in (plan.get("interfaces") or [])
+        if isinstance(row, dict) and isinstance(row.get("reference"), str)
+    ]
+    if reference is not None and reference not in contact_sources:
+        contact_sources.append(reference)
+    contacts: list[Any] = []
+    for contact_index, source in enumerate(contact_sources, start=1):
+        try:
+            contact_path = (pipeline_schemas.resolve_within(
+                path_base, source, what=f"assembly interface reference {contact_index}"
+            ) if path_base is not None else source)
+            contacts.append(as_mesh(contact_path))
+        except (OSError, TypeError, ValueError, RuntimeError,
+                pipeline_schemas.PathEscape) as exc:
+            commission.add(Check(
+                f"assembly-interface-{contact_index:02d}",
+                "Named assembly interface geometry is readable", _FAIL,
+                f"cannot read named interface reference {source!r}: {exc}",
+                "Fix the named interface mesh; an unreadable contact cannot excuse "
+                "an assembly collision.",
+            ))
+
+    measured: dict[str, dict[str, float]] = {}
     for index, path in enumerate(paths, start=1):
         check_id = f"assembly-overlap-{index:02d}"
         try:
-            overlap = float(fit.interference(mesh, str(path)))
-        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            resolved_path = (pipeline_schemas.resolve_within(
+                path_base, path, what=f"assembly mesh {index}"
+            ) if path_base is not None else path)
+            overlap = float(fit.interference(mesh, str(resolved_path)))
+            away = (float(fit.overlap_away_from(mesh, str(resolved_path), contacts))
+                    if contacts else overlap)
+        except (OSError, TypeError, ValueError, RuntimeError,
+                pipeline_schemas.PathEscape) as exc:
             commission.add(Check(
                 check_id, f"Assembly mesh {index} is within the overlap budget", _FAIL,
                 f"cannot measure interference against {path!r}: {exc}",
@@ -425,16 +484,19 @@ def _check_assembly_interference(commission: Commission, mesh,
                 "not a passing clearance check.",
             ))
             continue
-        measured[str(path)] = overlap
-        ok = overlap <= limit + 1e-9
+        measured[str(path)] = {"total_mm3": overlap,
+                               "away_from_interfaces_mm3": away}
+        ok = (overlap <= limit + ASSEMBLY_OVERLAP_EPSILON_MM3
+              and away <= ASSEMBLY_OVERLAP_EPSILON_MM3)
         commission.add(Check(
             check_id, f"Assembly mesh {index} is within the overlap budget",
             _PASS if ok else _FAIL,
-            f"interference {overlap:.4f} mm3 against budget {limit:.4f} mm3 for {path}",
+            f"interference {overlap:.4f} mm3 (away from named interfaces "
+            f"{away:.4f} mm3) against budget {limit:.4f} mm3 for {path}",
             "" if ok else (
-                "The candidate overlaps a declared assembly mesh beyond the budget. "
-                "Resolve the collision before delivery; do not widen the budget to fit "
-                "the geometry."),
+                "The candidate overlaps a declared assembly mesh beyond the budget or "
+                "away from its named interface. Resolve the collision before delivery; "
+                "do not widen the budget to fit the geometry."),
         ))
     commission.evidence["assembly_interference_mm3"] = measured
 
@@ -452,10 +514,44 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
 
     placements = []
     for rule in rules:
+        if not isinstance(rule, dict):
+            commission.add(Check(
+                "support-threshold-invalid", "Support rule is an object", _FAIL,
+                f"support rule is not an object: {rule!r}",
+                "Declare each support rule as a complete object before measuring.",
+            ))
+            continue
         rule_id = rule.get("id", "S-01")
-        threshold = float(rule.get("downward_normal_z_max", BARE_45_DEG))
+        raw_threshold = rule.get("downward_normal_z_max")
+        raw_ceiling = rule.get("max_out_of_limit_area_mm2")
+        raw_bed_z = rule.get("bed_z_mm")
+        raw_bed_tolerance = rule.get("bed_tolerance_mm")
+        try:
+            raw_values = (raw_threshold, raw_ceiling, raw_bed_z, raw_bed_tolerance)
+            if any(isinstance(value, bool) or not isinstance(value, (int, float))
+                   for value in raw_values):
+                raise ValueError
+            threshold = float(raw_threshold)
+            ceiling = float(raw_ceiling)
+            bed_z = float(raw_bed_z)
+            bed_tolerance = float(raw_bed_tolerance)
+            if (not np.isfinite(threshold) or not -1.0 <= threshold <= 0.0
+                    or not np.isfinite(ceiling) or ceiling < 0
+                    or not np.isfinite(bed_z) or not np.isfinite(bed_tolerance)
+                    or bed_tolerance < 0):
+                raise ValueError
+        except (TypeError, ValueError):
+            commission.add(Check(
+                f"support-threshold-{rule_id}", f"{rule_id} support thresholds are valid",
+                _FAIL,
+                f"downward_normal_z_max must be finite in [-1, 0] and "
+                f"max_out_of_limit_area_mm2 finite and >= 0; bed_z_mm finite and "
+                f"bed_tolerance_mm finite and >= 0, got {raw_threshold!r}, "
+                f"{raw_ceiling!r}, {raw_bed_z!r}, {raw_bed_tolerance!r}",
+                "Declare finite support thresholds before measuring the candidate.",
+            ))
+            continue
         disposition = rule.get("disposition", "SELF_SUPPORT_REQUIRED")
-        ceiling = float(rule.get("max_out_of_limit_area_mm2", 0.0))
 
         # The contract says SELF_SUPPORT_REQUIRED means zero out-of-limit area, and
         # the gate accepted any non-negative ceiling. Two archived runs declared
@@ -477,9 +573,10 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
 
         placement = planned_placement(rule, mesh, threshold)
         placements.append(placement)
-        _check_seated(commission, mesh, plan, rule, placement)
+        seated = _check_seated(commission, mesh, plan, rule, placement)
         area = placement.overhang_mm2
-        ok = area <= ceiling
+        has_bed_contact = placement.bed_contact_mm2 > 1e-9
+        ok = seated and has_bed_contact and area <= ceiling
         best = orient.best(mesh, threshold=threshold)
         # Name the remedies rather than leaving them to be rediscovered. One
         # measured run spent three full build/export/measure cycles arriving at
@@ -504,7 +601,7 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
             f"support-{rule_id}", f"{rule_id} downward-facing area within its limit",
             _PASS if ok else _FAIL,
             f"{area:.2f} mm2 past {threshold} in the '{placement.name}' placement "
-            f"(limit {ceiling} mm2)",
+            f"(limit {ceiling} mm2, bed contact {placement.bed_contact_mm2:.3f} mm2)",
             "" if ok else advice,
         ))
     return placements
@@ -578,7 +675,8 @@ def seated_clearance_mm(candidate, reference) -> float:
         return -float(np.max(signed))
 
 
-def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], reference) -> None:
+def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], reference,
+                       path_base: Path | None = None) -> None:
     """Each declared interface against its own mating part and its own band.
 
     One reference yields one number -- the tightest point of the whole assembly --
@@ -602,8 +700,16 @@ def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], refere
                              "the plan declares no mating interfaces, so there is no "
                              "fit to measure"))
         return
+    if not isinstance(interfaces, list):
+        commission.add(Check(
+            "fit", "Declared interface fit", _FAIL,
+            "the plan's interfaces field is not a list",
+            "Declare interfaces as a list of complete interface objects.",
+        ))
+        return
 
-    unnamed = [i for i in interfaces if not i.get("reference")]
+    unnamed = [i for i in interfaces
+               if isinstance(i, dict) and not i.get("reference")]
     if len(unnamed) > 1:
         ids = ", ".join(str(i.get("id", "?")) for i in unnamed)
         commission.add(Check(
@@ -629,18 +735,42 @@ def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], refere
 
     measured: dict[str, float] = {}
     for interface in interfaces:
+        if not isinstance(interface, dict):
+            commission.add(Check(
+                "fit-invalid-interface", "Declared interface fit", _FAIL,
+                f"interface row is not an object: {interface!r}",
+                "Declare an id and explicit finite min_mm/max_mm for every interface.",
+            ))
+            continue
         ident = str(interface.get("id", "I-01"))
         source = interface.get("reference") or reference
         try:
-            partner = as_mesh(source) if isinstance(source, str) else source
+            resolved_source = (pipeline_schemas.resolve_within(
+                path_base, source, what=f"interface {ident} reference"
+            ) if path_base is not None and isinstance(source, str) else source)
+            partner = (as_mesh(str(resolved_source))
+                       if isinstance(resolved_source, (str, Path)) else resolved_source)
             clearance = seated_clearance_mm(mesh, partner)
-        except (OSError, ValueError) as exc:
+        except (OSError, TypeError, ValueError, RuntimeError,
+                pipeline_schemas.PathEscape) as exc:
             commission.add(Check(
                 f"fit-{ident}", f"Interface {ident} fit", _FAIL,
                 f"cannot read the mating reference {source!r}: {exc}",
                 "A band whose partner cannot be loaded is a band nothing measured."))
             continue
-        low, high = float(interface.get("min_mm", 0.0)), float(interface.get("max_mm", 0.0))
+        raw_low, raw_high = interface.get("min_mm"), interface.get("max_mm")
+        if (isinstance(raw_low, bool) or not isinstance(raw_low, (int, float))
+                or not math.isfinite(raw_low)
+                or isinstance(raw_high, bool) or not isinstance(raw_high, (int, float))
+                or not math.isfinite(raw_high) or raw_high < raw_low):
+            commission.add(Check(
+                f"fit-{ident}", f"Interface {ident} fit", _FAIL,
+                f"interface {ident} must declare finite min_mm/max_mm with max_mm >= min_mm; "
+                f"got {raw_low!r}, {raw_high!r}",
+                "Do not omit or replace a fit band with an invented zero bound.",
+            ))
+            continue
+        low, high = float(raw_low), float(raw_high)
         ok = low - 1e-6 <= clearance <= high + 1e-6
         measured[ident] = clearance
         commission.add(Check(
@@ -659,8 +789,14 @@ def _check_interfaces(commission: Commission, mesh, plan: dict[str, Any], refere
     if len(interfaces) == 1 and measured:
         only = next(iter(measured.values()))
         partner = interfaces[0].get("reference") or reference
+        if path_base is not None and isinstance(partner, str):
+            partner = pipeline_schemas.resolve_within(
+                path_base, partner, what="single interface reference"
+            )
+        if isinstance(partner, Path):
+            partner = as_mesh(str(partner))
         commission.evidence["seated_interference_mm3"] = fit.interference(
-            mesh, as_mesh(partner) if isinstance(partner, str) else partner)
+            mesh, as_mesh(str(partner)) if isinstance(partner, str) else partner)
         commission.evidence["seated_clearance_mm"] = only
 
 def run(
@@ -674,6 +810,7 @@ def run(
     render: bool = True,
     candidate_id: str = "candidate_01",
     plan_path: Path | None = None,
+    path_base: Path | None = None,
     writes_receipts: bool = True,
 ) -> Commission:
     """Build (if given a model), verify everything deterministic, write evidence."""
@@ -724,6 +861,8 @@ def run(
     report = export_and_hash(source, str(stem), also_step=stl is None)
     exported = Path(report.stl_path)
     mesh = as_mesh(str(exported))
+    plan_root = (path_base.resolve() if path_base is not None else
+                 (plan_path.resolve().parent if plan_path is not None else None))
 
     if writes_receipts:
         _check_receipt_location(commission, out_dir, plan_path)
@@ -731,11 +870,17 @@ def run(
     _check_solid(commission, report, plan)
     _check_repair(commission, report)
     _check_envelope(commission, report, plan)
-    _check_assembly_interference(commission, mesh, plan)
+    _check_assembly_interference(
+        commission, mesh, plan, reference,
+        path_base=plan_root,
+    )
 
     placements = _check_support(commission, mesh, plan)
     placement = placements[0] if placements else orient.best(mesh)
-    _check_interfaces(commission, mesh, plan, reference)
+    _check_interfaces(
+        commission, mesh, plan, reference,
+        path_base=plan_root,
+    )
 
     measured_edges = {}
     for edge in plan.get("edges") or []:
@@ -948,6 +1093,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", default="job",
                         help="job_id stamped into the emitted receipts")
     parser.add_argument("--candidate-id", default="candidate-01")
+    parser.add_argument("--path-base", type=Path,
+                        help="project directory used to resolve plan-relative mesh paths; "
+                             "defaults to the plan's parent")
     parser.add_argument("--dimensions-revision", type=int,
                         help="the dimensions.md revision this candidate was built against; "
                              "recorded in the receipts so `contracts status` can see it go "
@@ -976,6 +1124,12 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"  {problem}\n")
         sys.stderr.write("Fix the plan, or regenerate it with `dt.py plan template`.\n")
         return 2
+
+    if args.path_base is not None:
+        # `run` uses the plan path's parent as its default resolver root. Keep
+        # the plan contents loaded from the supplied file, but bind relative
+        # mesh references to the explicitly supplied project root.
+        args.plan = args.path_base / args.plan.name
 
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,

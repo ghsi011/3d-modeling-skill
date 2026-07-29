@@ -56,9 +56,12 @@ def _built_project(root: Path) -> Path:
     return project
 
 
-def _audit(project: Path, out: Path):
-    done = _dt("audit", str(project), "--out", str(out), "--job-id", "a",
-               "--updated-utc", "1970-01-01T00:00:00Z")
+def _audit(project: Path, out: Path, reference: str | None = None):
+    args = ["audit", str(project), "--out", str(out), "--job-id", "a",
+            "--updated-utc", "1970-01-01T00:00:00Z"]
+    if reference is not None:
+        args += ["--reference", reference]
+    done = _dt(*args)
     payload = json.loads(done.stdout) if done.stdout.strip().startswith("{") else None
     return done, payload
 
@@ -201,6 +204,160 @@ class TestAudit(unittest.TestCase):
             root = Path(raw)
             done, _payload = _audit(_built_project(root), root / "verify")
             self.assertEqual(0, done.returncode, done.stderr[-600:])
+
+    def test_audit_resolves_plan_relative_assembly_from_project_not_verify_output(self) -> None:
+        """A copied plan used for recomputation must retain the project's path base."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            plan_path = project / "print_plan_checks.json"
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            clear = trimesh.creation.box(extents=(10, 10, 10))
+            clear.apply_translation((100, 100, 5))
+            clear.export(project / "clear.stl")
+            plan["assembly_mesh_paths"] = ["clear.stl"]
+            plan["assembly_overlap_budget_mm3"] = 0.0
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            recommission = _dt(
+                "commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+                "--out", ".", "--job-id", "a", "--updated-utc",
+                "1970-01-01T00:00:00Z", "--no-render", cwd=project)
+            self.assertEqual(0, recommission.returncode, recommission.stderr[-600:])
+
+            done, payload = _audit(project, root / "verify")
+
+            self.assertEqual(0, done.returncode, done.stderr[-600:])
+            self.assertEqual("PASS", _by_id(payload)["recompute"])
+
+    def test_audit_rejects_traversing_reference_before_recompute(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+
+            done, payload = _audit(project, root / "verify", reference="../outside.stl")
+
+            self.assertEqual(2, done.returncode)
+            self.assertIsNone(payload)
+            self.assertIn("reference path is unsafe", done.stderr)
+
+    def test_audit_rejects_symlinked_reference_before_recompute(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            outside = root / "outside-reference.stl"
+            outside.write_bytes((project / "candidate-01.stl").read_bytes())
+            linked = project / "linked-reference.stl"
+            try:
+                linked.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation is not permitted in this environment")
+
+            done, payload = _audit(project, root / "verify", reference=linked.name)
+
+            self.assertEqual(2, done.returncode)
+            self.assertIsNone(payload)
+            self.assertIn("reference path is unsafe", done.stderr)
+
+    def test_audit_rejects_unsafe_manifest_candidate_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            manifest_path = project / "artifact_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            candidate = next(row for row in manifest["artifacts"]
+                             if row["id"] == manifest["candidate_id"])
+            candidate["path"] = "../candidate-01.stl"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            done, payload = _audit(project, root / "verify")
+
+            self.assertEqual(2, done.returncode)
+            self.assertIsNone(payload)
+            self.assertIn("unsafe or unresolved", done.stderr)
+
+    def test_audit_reference_is_project_relative_in_production(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            reference = project / "reference.stl"
+            reference.write_bytes((project / "candidate-01.stl").read_bytes())
+            plan_path = project / "print_plan_checks.json"
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan["interfaces"] = [{
+                "id": "I-01", "fit_type": "interference",
+                "min_mm": -100.0, "max_mm": 100.0, "units": "mm",
+                "contact_state": "seated", "uncertainty_mm": 0.01,
+                "acceptance_method": "commission", "motion_path": "seated",
+                "material": "PLA", "coupon_required": False,
+            }]
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            recommission = _dt(
+                "commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+                "--reference", "reference.stl", "--out", ".", "--job-id", "a",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--no-render", cwd=project)
+            self.assertEqual(0, recommission.returncode, recommission.stderr[-600:])
+
+            done, payload = _audit(project, root / "verify", reference="reference.stl")
+
+            self.assertEqual(0, done.returncode, done.stderr[-600:])
+            self.assertEqual("PASS", _by_id(payload)["recompute"])
+
+    def test_audit_missing_safe_reference_fails_fit_measurement(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            reference = project / "reference.stl"
+            reference.write_bytes((project / "candidate-01.stl").read_bytes())
+            plan_path = project / "print_plan_checks.json"
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan["interfaces"] = [{
+                "id": "I-01", "fit_type": "interference",
+                "min_mm": -100.0, "max_mm": 100.0, "units": "mm",
+                "contact_state": "seated", "uncertainty_mm": 0.01,
+                "acceptance_method": "commission", "motion_path": "seated",
+                "material": "PLA", "coupon_required": False,
+            }]
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            recommission = _dt(
+                "commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+                "--reference", "reference.stl", "--out", ".", "--job-id", "a",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--no-render", cwd=project)
+            self.assertEqual(0, recommission.returncode, recommission.stderr[-600:])
+
+            done, payload = _audit(
+                project, root / "verify", reference="missing-reference.stl")
+
+            self.assertEqual(1, done.returncode, done.stderr[-600:])
+            fit = json.loads(
+                (root / "verify" / "commission.json").read_text(encoding="utf-8"))
+            fit_check = next(check for check in fit["checks"] if check["id"] == "fit-I-01")
+            self.assertEqual("FAIL", fit_check["result"])
+            self.assertIn("cannot read", fit_check["detail"])
+            self.assertEqual("FAIL", _by_id(payload)["recompute"])
+
+    def test_audit_rejects_symlinked_manifest_candidate_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            project = _built_project(root)
+            outside = root / "outside.stl"
+            outside.write_bytes((project / "candidate-01.stl").read_bytes())
+            linked = project / "linked-candidate.stl"
+            try:
+                linked.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation is not permitted in this environment")
+            manifest_path = project / "artifact_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            candidate = next(row for row in manifest["artifacts"]
+                             if row["id"] == manifest["candidate_id"])
+            candidate["path"] = linked.name
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            done, payload = _audit(project, root / "verify")
+
+            self.assertEqual(2, done.returncode)
+            self.assertIsNone(payload)
+            self.assertIn("unsafe or unresolved", done.stderr)
 
     def test_writing_over_the_project_is_refused(self) -> None:
         """The comparison is against the designer's receipts. A run that writes

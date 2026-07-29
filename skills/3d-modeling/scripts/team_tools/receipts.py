@@ -11,7 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
-from common import TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors, resolve_timestamp, sha256_file, sort_issues
+from common import (TOOL_NAME, TOOL_SCHEMA_VERSION, TOOL_VERSION, has_errors,
+                    normalize_project_path, resolve_timestamp, sha256_file, sort_issues)
 from project import ProjectValidation, load_project, run_manifest_checks
 
 DISCLAIMER = (
@@ -53,8 +54,11 @@ def build_validate_receipt(
     for artifact_id, row in sorted(artifact_ids.items()):
         raw_path = row.get("path")
         if isinstance(raw_path, str):
-            full_path = (project_dir / raw_path.replace("\\", "/")).resolve(strict=False)
-            if full_path.is_file():
+            _, full_path = normalize_project_path(
+                raw_path, field="path", where=f"artifact_manifest.artifacts[{artifact_id}]",
+                project_dir=project_dir
+            )
+            if full_path is not None and full_path.is_file():
                 computed_sha256[raw_path] = sha256_file(full_path)
 
     results = {
@@ -104,8 +108,11 @@ def build_hash_receipt(project_dir: Path, *, timestamp: str | None, argv: list[s
         raw_path = row.get("path")
         if not isinstance(raw_path, str):
             continue
-        full_path = (project_dir / raw_path.replace("\\", "/")).resolve(strict=False)
-        if not full_path.is_file():
+        _, full_path = normalize_project_path(
+            raw_path, field="path", where=f"artifact_manifest.artifacts[{artifact_id}]",
+            project_dir=project_dir
+        )
+        if full_path is None or not full_path.is_file():
             artifact_sha256[artifact_id] = None
             continue
         computed = sha256_file(full_path)

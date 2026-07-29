@@ -40,6 +40,13 @@ def load_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
+    version = value.get("schema_version")
+    if (not isinstance(version, int) or isinstance(version, bool)
+            or version != SCHEMA_VERSION):
+        raise ValueError(
+            f"{path}: unsupported schema_version {version!r}; "
+            f"this build requires {SCHEMA_VERSION}"
+        )
     return value
 
 
@@ -154,6 +161,11 @@ def support_audit(
     downward_normal_z_max = require_finite(
         rule.get("downward_normal_z_max"), label=f"{rule_id}: downward_normal_z_max"
     )
+    if not -1.0 <= downward_normal_z_max <= 0.0:
+        raise ValueError(
+            f"{rule_id}: downward_normal_z_max must lie in [-1, 0], "
+            f"got {downward_normal_z_max!r}"
+        )
     maximum_area = require_finite(
         rule.get("max_out_of_limit_area_mm2"), label=f"{rule_id}: max_out_of_limit_area_mm2"
     )
@@ -201,6 +213,8 @@ def support_audit(
     downward = normals[:, 2] <= downward_normal_z_max
     out_of_limit = valid & downward & ~bed_contact
     out_of_limit_area = float(areas[out_of_limit].sum())
+    bed_contact_area = float(areas[valid & bed_contact].sum())
+    has_bed_contact = bed_contact_area > 1e-9
 
     result = {
         "schema_version": SCHEMA_VERSION,
@@ -220,12 +234,20 @@ def support_audit(
         "bed_z_mm": bed_z,
         "bed_tolerance_mm": bed_tolerance,
         "downward_normal_z_max": downward_normal_z_max,
-        "bed_contact_area_mm2": float(areas[valid & bed_contact].sum()),
+        "bed_contact_area_mm2": bed_contact_area,
+        "bed_contact_required": True,
         "out_of_limit_faces": int(np.count_nonzero(out_of_limit)),
         "out_of_limit_area_mm2": out_of_limit_area,
         "max_out_of_limit_area_mm2": maximum_area,
-        "result": "PASS" if out_of_limit_area <= maximum_area + 1e-9 else "FAIL",
+        "result": ("PASS" if has_bed_contact and out_of_limit_area <= maximum_area + 1e-9
+                   else "FAIL"),
     }
+    if not has_bed_contact:
+        result["failure"] = (
+            f"{rule_id}: no non-zero face area contacts bed_z_mm={bed_z:.3f} "
+            f"within tolerance {bed_tolerance:.3f}; support analysis cannot pass "
+            "for a floating part"
+        )
     return result, maximum_area
 
 
@@ -246,7 +268,7 @@ def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
     """
     errors: list[str] = []
     interface_ids: list[str] = []
-    raw = plan.get("interfaces")
+    raw = plan.get("interfaces") if isinstance(plan, dict) else plan
 
     if raw is not None:
         if not isinstance(raw, list):
@@ -258,7 +280,7 @@ def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
                     errors.append(f"interfaces[{index}]: expected an object")
                     continue
                 interface_id = row.get("id")
-                if not isinstance(interface_id, str) or not interface_id:
+                if not isinstance(interface_id, str) or not interface_id.strip():
                     errors.append(f"interfaces[{index}]: id must be a non-empty string")
                     continue
                 if interface_id in seen_ids:
@@ -268,13 +290,15 @@ def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
                 interface_ids.append(interface_id)
 
                 fit_type = row.get("fit_type")
-                if fit_type not in INTERFACE_FIT_TYPES:
+                if (not isinstance(fit_type, str)
+                        or fit_type not in INTERFACE_FIT_TYPES):
                     errors.append(
                         f"{interface_id}: fit_type must be one of "
                         f"{sorted(INTERFACE_FIT_TYPES)}, got {fit_type!r}"
                     )
 
-                if not isinstance(row.get("contact_state"), str) or not row.get("contact_state"):
+                if (not isinstance(row.get("contact_state"), str)
+                        or not row.get("contact_state").strip()):
                     errors.append(f"{interface_id}: contact_state must be a non-empty string")
 
                 min_ok = _finite(row.get("min_mm"))
@@ -299,8 +323,17 @@ def validate_interfaces(plan: dict[str, Any]) -> dict[str, Any]:
                         )
 
                 for field in ("motion_path", "material", "acceptance_method"):
-                    if not isinstance(row.get(field), str) or not row.get(field):
+                    if (not isinstance(row.get(field), str)
+                            or not row.get(field).strip()):
                         errors.append(f"{interface_id}: {field} must be a non-empty string")
+
+                if row.get("units") != "mm":
+                    errors.append(f"{interface_id}: units must be 'mm'")
+                uncertainty = row.get("uncertainty_mm")
+                if not _finite(uncertainty):
+                    errors.append(f"{interface_id}: uncertainty_mm must be a finite number")
+                elif uncertainty < 0:
+                    errors.append(f"{interface_id}: uncertainty_mm must be >= 0")
 
                 if not isinstance(row.get("coupon_required"), bool):
                     errors.append(f"{interface_id}: coupon_required must be a boolean")

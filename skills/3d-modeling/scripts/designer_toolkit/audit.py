@@ -32,6 +32,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pipeline import schemas as pipeline_schemas
+
 from .verdict import FAIL as _FAIL
 from .verdict import PASS as _PASS
 from .verdict import Check
@@ -101,7 +103,7 @@ def _run(argv: list[str], cwd: Path) -> tuple[int, str, str]:
 
 
 def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
-          stl: Path, plan: Path, reference: Path | None = None) -> dict[str, Any]:
+          stl: Path, plan: Path, reference: Path | str | None = None) -> dict[str, Any]:
     scripts = Path(__file__).resolve().parents[1]
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -137,10 +139,12 @@ def audit(project: Path, out_dir: Path, *, job_id: str, updated_utc: str,
 
     argv = ["designer_toolkit.commission", "--stl", str(stl),
             "--plan", str(plan_for_recompute),
+            "--path-base", str(project),
             "--out", str(out_dir), "--job-id", job_id, "--updated-utc", updated_utc,
             "--no-receipts", "--no-render"]
     if reference is not None:
-        argv += ["--reference", str(reference)]
+        argv += ["--reference", _project_relative_name(
+            project, reference, what="audit reference")]
     code, stdout, stderr = _run(argv, scripts)
     mine = json.loads(stdout) if stdout.strip().startswith("{") else None
     if mine is None:
@@ -231,13 +235,31 @@ def _delivered_candidate(project: Path) -> Path:
     same file is a trap, so this one asks the manifest, which records what was
     written, and only falls back to the conventional name.
     """
-    manifest = _read_json(project / "artifact_manifest.json") or {}
-    for artifact in manifest.get("artifacts") or []:
-        if isinstance(artifact, dict) and artifact.get("role") == "candidate":
-            path = artifact.get("path")
-            if isinstance(path, str):
-                return project / path.replace("\\", "/")
-    return project / "candidate-01.stl"
+    manifest_path = project / "artifact_manifest.json"
+    if not manifest_path.is_file():
+        return pipeline_schemas.resolve_within(project, "candidate-01.stl",
+                                               what="default candidate STL")
+    manifest = _read_json(manifest_path)
+    if not isinstance(manifest, dict):
+        raise ValueError("artifact_manifest.json is unreadable; candidate path is unresolved")
+    candidate_id = manifest.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        raise ValueError("artifact_manifest.json has no non-empty candidate_id")
+    rows = [row for row in (manifest.get("artifacts") or [])
+            if isinstance(row, dict) and row.get("id") == candidate_id]
+    if len(rows) != 1 or rows[0].get("role") != "candidate" or rows[0].get("type") != "stl":
+        raise ValueError(
+            f"artifact_manifest.json candidate_id {candidate_id!r} does not name exactly "
+            "one candidate STL artifact")
+    return pipeline_schemas.resolve_within(
+        project, rows[0].get("path"), what="artifact_manifest candidate STL"
+    )
+
+
+def _project_relative_name(project: Path, raw: Path | str, *, what: str) -> str:
+    """Validate a project-relative input and return its stable spelling."""
+    resolved = pipeline_schemas.resolve_within(project, str(raw), what=what)
+    return resolved.relative_to(project.resolve()).as_posix()
 
 
 def _gather_views(project: Path, out_dir: Path) -> list[str]:
@@ -342,16 +364,25 @@ def main(argv: list[str] | None = None) -> int:
     # straight through resolved against the wrong root.
     project = args.project.resolve()
     out = args.out.resolve()
-    stl = (args.stl or _delivered_candidate(project)).resolve()
+    try:
+        manifest_candidate = _delivered_candidate(project)
+        stl = (args.stl or manifest_candidate).resolve()
+    except (OSError, ValueError, pipeline_schemas.PathEscape) as exc:
+        sys.stderr.write(f"audit: candidate path is unsafe or unresolved: {exc}\n")
+        return 2
     plan = (args.plan or project / "print_plan_checks.json").resolve()
     for path, what in ((stl, "candidate STL"), (plan, "print plan")):
         if not path.is_file():
             sys.stderr.write(f"audit: no {what} at {path}\n")
             return 2
 
-    result = audit(project, out, job_id=args.job_id,
-                   updated_utc=args.updated_utc, stl=stl, plan=plan,
-                   reference=args.reference.resolve() if args.reference else None)
+    try:
+        result = audit(project, out, job_id=args.job_id,
+                       updated_utc=args.updated_utc, stl=stl, plan=plan,
+                       reference=str(args.reference) if args.reference else None)
+    except (OSError, ValueError, pipeline_schemas.PathEscape) as exc:
+        sys.stderr.write(f"audit: reference path is unsafe or unresolved: {exc}\n")
+        return 2
     (out / "audit.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     sys.stdout.write(json.dumps(result, indent=2) + "\n")
     for check in result["checks"]:

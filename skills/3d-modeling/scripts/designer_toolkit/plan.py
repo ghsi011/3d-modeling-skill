@@ -48,6 +48,83 @@ DEFAULT_BBOX_TOLERANCE_MM = 0.5
 
 _CONSEQUENCES = ("INCONSEQUENTIAL", "CONSEQUENTIAL")
 
+_INTERFACE_FIT_TYPES = frozenset({
+    "clearance", "transition", "interference", "elastic_contact", "crush_rib",
+    "snap", "retention", "seal", "thread", "compliant",
+})
+
+
+def _finite_number(value: Any) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _validate_interface_rows(plan: dict[str, Any]) -> list[str]:
+    """Validate interface bounds before any geometry is built.
+
+    A missing bound is not a zero-width bound. Treating it as zero made a
+    malformed interface look like an intentional press fit and let the
+    commission gate compare a real measurement against an invented number.
+    """
+    problems: list[str] = []
+    interfaces = plan.get("interfaces")
+    if interfaces is None:
+        return problems
+    if not isinstance(interfaces, list):
+        return ["interfaces must be a list"]
+
+    seen: set[str] = set()
+    required = ("id", "fit_type", "min_mm", "max_mm", "units",
+                "contact_state", "uncertainty_mm", "acceptance_method",
+                "motion_path", "material", "coupon_required")
+    for index, row in enumerate(interfaces):
+        if not isinstance(row, dict):
+            problems.append(f"interfaces[{index}] must be an object")
+            continue
+        ident = row.get("id")
+        if not isinstance(ident, str) or not ident.strip():
+            problems.append(f"interfaces[{index}]: id must be a non-empty string")
+            ident = f"interfaces[{index}]"
+        elif ident in seen:
+            problems.append(f"{ident}: duplicate interface id")
+        else:
+            seen.add(ident)
+
+        for field in required:
+            if field not in row:
+                problems.append(f"{ident}: missing {field}; the gate must not invent it")
+        fit_type = row.get("fit_type")
+        if not isinstance(fit_type, str) or fit_type not in _INTERFACE_FIT_TYPES:
+            problems.append(f"{ident}: fit_type must be one of {sorted(_INTERFACE_FIT_TYPES)}, got {fit_type!r}")
+        if row.get("units") != "mm":
+            problems.append(f"{ident}: units must be 'mm', got {row.get('units')!r}")
+        for field in ("contact_state", "acceptance_method"):
+            if not isinstance(row.get(field), str) or not row.get(field).strip():
+                problems.append(f"{ident}: {field} must be a non-empty string")
+        for field in ("motion_path", "material"):
+            if not isinstance(row.get(field), str) or not row.get(field).strip():
+                problems.append(f"{ident}: {field} must be a non-empty string")
+        if not isinstance(row.get("coupon_required"), bool):
+            problems.append(f"{ident}: coupon_required must be a boolean")
+
+        minimum, maximum = row.get("min_mm"), row.get("max_mm")
+        if not _finite_number(minimum):
+            problems.append(f"{ident}: min_mm must be a finite number")
+        if not _finite_number(maximum):
+            problems.append(f"{ident}: max_mm must be a finite number")
+        if _finite_number(minimum) and _finite_number(maximum):
+            if maximum < minimum:
+                problems.append(f"{ident}: max_mm must be >= min_mm")
+            if fit_type == "clearance" and (minimum < 0 or maximum < 0):
+                problems.append(f"{ident}: clearance fit_type requires min_mm and max_mm >= 0")
+
+        uncertainty = row.get("uncertainty_mm")
+        if not _finite_number(uncertainty):
+            problems.append(f"{ident}: uncertainty_mm must be a finite number")
+        elif uncertainty < 0:
+            problems.append(f"{ident}: uncertainty_mm must be >= 0")
+    return problems
+
 # A DIRECT part is modelled in its print orientation -- seated on the bed, so
 # its minimum Z is 0 -- which makes model and printer frames coincide. Declaring
 # the identity explicitly still matters: the audit reads the matrix rather than
@@ -74,7 +151,10 @@ def direct_template(
     x, y, z = (float(v) for v in bbox_mm)
     if min(x, y, z) <= 0:
         raise ValueError(f"bbox must be positive in every axis, got {bbox_mm}")
+    if not isinstance(bodies, int) or isinstance(bodies, bool) or bodies < 1:
+        raise ValueError(f"bodies must be a positive whole number, got {bodies!r}")
     plan = {
+        "schema_version": 4,
         "contract": "print-plan",
         "contract_version": 4,
         "job_id": job_id,
@@ -146,28 +226,53 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
     None of these depend on the geometry, so none of them need to wait for it.
     """
     problems: list[str] = []
+    if not isinstance(plan, dict):
+        return ["plan must be a JSON object"]
+    if plan.get("contract") != "print-plan":
+        problems.append(f"contract must be 'print-plan', got {plan.get('contract')!r}")
+    schema_version = plan.get("schema_version")
+    if (not isinstance(schema_version, int) or isinstance(schema_version, bool)
+            or schema_version != 4):
+        problems.append(
+            f"schema_version must be supported integer 4, got {schema_version!r}"
+        )
+    version = plan.get("contract_version")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 4:
+        problems.append(
+            f"contract_version must be supported integer 4, got {plan.get('contract_version')!r}"
+        )
     rules = plan.get("support_rules") or []
     if not rules:
         problems.append("no support_rules: nothing constrains the print orientation")
+    elif not isinstance(rules, list):
+        problems.append("support_rules must be a list")
+        rules = []
 
     seen: set[str] = set()
     for index, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            problems.append(f"support_rules[{index}] must be an object")
+            continue
         rule_id = str(rule.get("id") or f"support_rules[{index}]")
         if rule_id in seen:
             problems.append(f"{rule_id}: duplicate support rule id")
         seen.add(rule_id)
 
         disposition = rule.get("disposition")
-        if disposition not in _DISPOSITIONS:
+        if not isinstance(disposition, str) or disposition not in _DISPOSITIONS:
             problems.append(f"{rule_id}: disposition must be one of {', '.join(_DISPOSITIONS)}")
         elif disposition == "SELF_SUPPORT_REQUIRED":
-            if float(rule.get("max_out_of_limit_area_mm2", 0.0)) > 0:
+            ceiling = rule.get("max_out_of_limit_area_mm2")
+            if not _finite_number(ceiling):
+                problems.append(f"{rule_id}: max_out_of_limit_area_mm2 must be a finite number")
+            elif ceiling > 0:
                 problems.append(
                     f"{rule_id}: SELF_SUPPORT_REQUIRED means zero out-of-limit area, "
                     f"but declares {rule['max_out_of_limit_area_mm2']} mm2"
                 )
         elif disposition == "BRIDGED_NO_SUPPORT":
-            if float(rule.get("max_out_of_limit_area_mm2", 0.0)) <= 0:
+            ceiling = rule.get("max_out_of_limit_area_mm2")
+            if not _finite_number(ceiling) or ceiling <= 0:
                 problems.append(
                     f"{rule_id}: BRIDGED_NO_SUPPORT needs a positive "
                     "max_out_of_limit_area_mm2 -- it is the budget for area that bridges, "
@@ -187,19 +292,28 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
         # Required by `team_preflight.support_audit` unconditionally -- it raises
         # on the plan before reading any mesh, so their absence is a plan defect
         # that no geometry can work around.
-        for field in ("model_to_printer_matrix", "bed_z_mm", "bed_tolerance_mm"):
+        for field in ("model_to_printer_matrix", "bed_z_mm", "bed_tolerance_mm",
+                      "downward_normal_z_max", "max_out_of_limit_area_mm2"):
             if rule.get(field) is None:
                 problems.append(
                     f"{rule_id}: missing {field}, which support_audit requires before it "
                     "reads the candidate at all"
                 )
         tolerance = rule.get("bed_tolerance_mm")
-        if tolerance is not None and float(tolerance) < 0:
+        if tolerance is not None and not _finite_number(tolerance):
+            problems.append(f"{rule_id}: bed_tolerance_mm must be a finite number")
+        elif tolerance is not None and tolerance < 0:
             problems.append(f"{rule_id}: bed_tolerance_mm must be >= 0, got {tolerance}")
 
         angle = rule.get("downward_normal_z_max")
-        if angle is not None and not (-1.0 <= float(angle) <= 0.0):
+        if angle is not None and not _finite_number(angle):
+            problems.append(f"{rule_id}: downward_normal_z_max must be a finite number")
+        elif angle is not None and not (-1.0 <= angle <= 0.0):
             problems.append(f"{rule_id}: downward_normal_z_max must lie in [-1, 0], got {angle}")
+
+        ceiling = rule.get("max_out_of_limit_area_mm2")
+        if ceiling is not None and (not _finite_number(ceiling) or ceiling < 0):
+            problems.append(f"{rule_id}: max_out_of_limit_area_mm2 must be finite and >= 0")
 
     bbox = plan.get("expected_bbox_mm")
     if bbox is None:
@@ -207,8 +321,9 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
             "no expected_bbox_mm: the envelope check silently skips, which is how a "
             "candidate shipped 31% too thick"
         )
-    elif any(float(bbox.get(axis, 0.0)) <= 0 for axis in "xyz"):
-        problems.append(f"expected_bbox_mm must be positive in every axis, got {bbox}")
+    elif not isinstance(bbox, dict) or any(
+            not _finite_number(bbox.get(axis)) or bbox[axis] <= 0 for axis in "xyz"):
+        problems.append(f"expected_bbox_mm must contain finite positive x/y/z, got {bbox}")
     else:
         # A tolerance nobody bounds is a check nobody performs. `--tolerance 1e9`
         # validated clean and then passed a part 100% over its envelope, with the
@@ -218,18 +333,19 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
         # real band and still forbids that.
         band = plan.get("bbox_tolerance_mm")
         smallest = min(float(bbox[axis]) for axis in "xyz")
-        if band is None or float(band) <= 0:
+        if not _finite_number(band) or band <= 0:
             problems.append(
                 f"bbox_tolerance_mm must be positive, got {band}: a zero or absent band "
                 "makes the envelope check unable to fail")
-        elif float(band) > 0.1 * smallest:
+        elif band > 0.1 * smallest:
             problems.append(
                 f"bbox_tolerance_mm {band} is more than a tenth of the smallest declared "
                 f"axis ({smallest}), so the envelope check cannot reject anything a "
                 "reader would call the wrong size")
 
     bodies = plan.get("expected_bodies")
-    if bodies is not None and (not isinstance(bodies, int) or bodies < 1):
+    if bodies is not None and (
+            not isinstance(bodies, int) or isinstance(bodies, bool) or bodies < 1):
         problems.append(
             f"expected_bodies must be a positive whole number, got {bodies!r}: it says how "
             "many solids the part is meant to be, and the `solid` check compares against it")
@@ -237,6 +353,8 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
     consequence = plan.get("consequence")
     if consequence is not None and consequence not in _CONSEQUENCES:
         problems.append(f"consequence must be one of {', '.join(_CONSEQUENCES)}, got {consequence!r}")
+
+    problems.extend(_validate_interface_rows(plan))
 
     assembly_paths = plan.get("assembly_mesh_paths")
     budget = plan.get("assembly_overlap_budget_mm3")
@@ -251,11 +369,7 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
     elif budget is not None:
         problems.append("assembly_overlap_budget_mm3 requires assembly_mesh_paths")
     if budget is not None:
-        try:
-            numeric_budget = float(budget)
-        except (TypeError, ValueError):
-            numeric_budget = math.nan
-        if not math.isfinite(numeric_budget) or numeric_budget < 0:
+        if not _finite_number(budget) or budget < 0:
             problems.append("assembly_overlap_budget_mm3 must be a finite non-negative number")
 
     return problems

@@ -9,13 +9,14 @@ attempted opportunistically and skipped, not failed, when unavailable).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import trimesh
 
-from common import INCH_TO_MM, Issue, error, sha256_file, warning
+from common import INCH_TO_MM, Issue, error, is_hash_format, normalize_project_path, sha256_file, warning
 
 # Tolerances for the "obvious 25.4x mismatch" heuristic.
 _SCALE_BLOCK_TOL = 0.005  # within 0.5% of an exact 25.4x ratio -> hard error
@@ -64,7 +65,7 @@ def _connected_component_count(mesh: trimesh.Trimesh) -> int:
             return int(np.unique(labels).size)
 
 
-def _load_mesh_bounds(path: Path) -> tuple[float, float, float] | None:
+def _load_mesh_bounds(path: Path) -> trimesh.Trimesh | None:
     """Best-effort mesh load returning (min, max) triples, or None if this file
     type/toolchain cannot be loaded (e.g. STEP without an OCC/cascadio backend).
     Never raises: a failed opportunistic load is reported as informational only.
@@ -91,7 +92,11 @@ def check_artifact_files(
     raw_path = artifact.get("path")
     if not isinstance(raw_path, str):
         return issues  # already flagged by validators.py
-    full_path = (project_dir / raw_path.replace("\\", "/")).resolve(strict=False)
+    path_issues, full_path = normalize_project_path(
+        raw_path, field="path", where=where, project_dir=project_dir
+    )
+    if path_issues or full_path is None:
+        return issues
 
     if not full_path.is_file():
         issues.append(error("ARTIFACT_MISSING", f"{where}.path", f"declared artifact file not found: {raw_path}"))
@@ -235,8 +240,16 @@ def compare_paired_stl_step(
         stl_row = artifact if artifact.get("type") == "stl" else other
         step_row = other if artifact.get("type") == "stl" else artifact
 
-        stl_path = project_dir / str(stl_row.get("path", "")).replace("\\", "/")
-        step_path = project_dir / str(step_row.get("path", "")).replace("\\", "/")
+        _, stl_path = normalize_project_path(
+            stl_row.get("path"), field="path", where=f"{where}.artifacts[{stl_row.get('id')}]",
+            project_dir=project_dir
+        )
+        _, step_path = normalize_project_path(
+            step_row.get("path"), field="path", where=f"{where}.artifacts[{step_row.get('id')}]",
+            project_dir=project_dir
+        )
+        if stl_path is None or step_path is None:
+            continue
         if not stl_path.is_file() or not step_path.is_file():
             continue
         stl_mesh = _load_mesh_bounds(stl_path)
@@ -258,3 +271,135 @@ def compare_paired_stl_step(
                     )
                 )
     return issues
+
+
+def _current_candidate_stl(manifest: dict[str, Any] | None, *, project_dir: Path) -> Path | None:
+    """The project-relative path of the candidate STL the final-prep bindings
+    must match, or None when it cannot be resolved unambiguously.
+
+    The artifact_manifest is the authoritative record of the current candidate:
+    Its top-level ``candidate_id`` must name one real ``role: candidate`` STL
+    row. A missing, mismatched, ambiguous, traversal-escaping or symlinked row
+    is unresolved; the binding check fails closed rather than guessing which
+    candidate a sign-off meant. The path is run through
+    ``normalize_project_path`` before it is opened.
+    """
+    if not isinstance(manifest, dict):
+        return None
+    artifacts = [row for row in (manifest.get("artifacts") or []) if isinstance(row, dict)]
+    row: dict[str, Any] | None = None
+    candidate_id = manifest.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        return None
+    row = next((a for a in artifacts if a.get("id") == candidate_id), None)
+    if (row is None or row.get("role") != "candidate"
+            or row.get("type") != "stl"):
+        return None
+    _, safe_path = normalize_project_path(
+        row.get("path"), field="path", where="artifact_manifest", project_dir=project_dir
+    )
+    return safe_path
+
+
+def _recompute_hash_binding(
+    *, declared: Any, field: str, where: str, target: Path | None, artifact_label: str
+) -> list[Issue]:
+    """Compare one declared binding hash against the recomputed sha256 of the
+    artifact it names, and flag a mismatch. This is the manifest's HASH_MISMATCH
+    philosophy one contract layer up: the entered hash is never trusted.
+
+    Two cases degrade to a silent skip rather than a finding. A hash that is not
+    well-formed is left to validators.py, which already emits BAD_HASH /
+    MISSING_FIELD on that exact field -- a second finding would only add noise.
+    An artifact that cannot be resolved or whose file is absent is also skipped:
+    when a manifest row names a missing file the manifest's own ARTIFACT_MISSING
+    already reports it, so recomputing here would only duplicate that error.
+    """
+    if not is_hash_format(declared):
+        return []
+    if target is None:
+        return [error(
+            "BINDING_UNRESOLVED", f"{where}.{field}",
+            f"cannot resolve the {artifact_label}; binding fails closed",
+        )]
+    if not target.is_file():
+        return [error(
+            "BINDING_UNRESOLVED", f"{where}.{field}",
+            f"the {artifact_label} is absent at {target}; binding fails closed",
+        )]
+    computed = sha256_file(target)
+    if declared == computed:
+        return []
+    return [
+        error(
+            "BINDING_STALE",
+            f"{where}.{field}",
+            f"declared {declared} != current {computed} for the {artifact_label} "
+            "(binding is to a stale or wrong artifact; never trust an entered hash)",
+        )
+    ]
+
+
+def check_final_prep_bindings(
+    *,
+    final_print_prep: dict[str, Any] | None,
+    final_prep_review: dict[str, Any] | None,
+    final_print_prep_path: Path | None,
+    manifest: dict[str, Any] | None,
+    project_dir: Path,
+) -> dict[str, list[Issue]]:
+    """Recompute the final-prep bound hashes against the CURRENT artifacts.
+
+    The final-prep contracts are Markdown, so validators.py can only check their
+    bound hashes for *format*: a well-formed hash that no longer matches the
+    bytes it names still passes. That is the whole failure this closes -- a
+    ``final_prep_review`` can declare a ``candidate_stl_sha256`` /
+    ``final_print_prep_sha256`` that looks like a hash but points at a stale or
+    wrong artifact, so the sign-off reads as a binding that holds when it binds
+    to nothing current. Recompute each from the bytes on disk and compare, the
+    same way check_artifact_files recomputes a manifest row's sha256.
+
+    Both artifact kinds are hashed by their file bytes (``sha256_file``): the
+    candidate STL, and the ``final_print_prep.md`` contract -- which is how the
+    validate receipt and the review author hash that contract elsewhere. Returns
+    issues keyed by contract so each attaches to the file that declared the bad
+    binding.
+    """
+    out: dict[str, list[Issue]] = {"final_print_prep": [], "final_prep_review": []}
+    candidate_stl = _current_candidate_stl(manifest, project_dir=project_dir)
+    final_prep_target = final_print_prep_path
+    if final_prep_target is not None:
+        try:
+            relative = os.path.relpath(final_prep_target, project_dir)
+        except ValueError:
+            relative = ".."
+        _, final_prep_target = normalize_project_path(
+            relative, field="final_print_prep", where="final_print_prep",
+            project_dir=project_dir
+        )
+
+    if isinstance(final_print_prep, dict):
+        out["final_print_prep"] += _recompute_hash_binding(
+            declared=final_print_prep.get("candidate_stl_sha256"),
+            field="candidate_stl_sha256",
+            where="final_print_prep",
+            target=candidate_stl,
+            artifact_label="current candidate STL",
+        )
+
+    if isinstance(final_prep_review, dict):
+        out["final_prep_review"] += _recompute_hash_binding(
+            declared=final_prep_review.get("candidate_stl_sha256"),
+            field="candidate_stl_sha256",
+            where="final_prep_review",
+            target=candidate_stl,
+            artifact_label="current candidate STL",
+        )
+        out["final_prep_review"] += _recompute_hash_binding(
+            declared=final_prep_review.get("final_print_prep_sha256"),
+            field="final_print_prep_sha256",
+            where="final_prep_review",
+            target=final_prep_target,
+            artifact_label="current final_print_prep.md",
+        )
+    return out

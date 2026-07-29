@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,7 @@ def _plan(**overrides):
     without complaint until it started validating what it reads.
     """
     plan = {
+        "schema_version": 4,
         "contract": "print-plan", "contract_version": 4, "job_id": "t", "revision": 1,
         "owner": "print-engineer",
         "support_rules": [{
@@ -172,6 +174,101 @@ class AssemblyOverlapCheckTest(unittest.TestCase):
             self.assertIn("budget", checks["assembly-overlap-01"].detail)
             self.assertTrue(result.failed)
 
+    def test_overlap_away_from_named_interface_fails_even_under_total_budget(self) -> None:
+        """The budget may cover an intended mating overlap, not an unrelated crash.
+
+        The old scalar check saw the sum below the budget and passed, even though
+        half of that overlap was at a second, unnamed collision.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            candidate = _box_stl(work)
+
+            contact = trimesh.creation.box(extents=(2, 20, 10))
+            contact.apply_translation((15, 0, 5))
+            contact_path = work / "contact.stl"
+            contact.export(contact_path)
+
+            stray = trimesh.creation.box(extents=(2, 20, 10))
+            stray.apply_translation((-14, 0, 5))
+            assembly_path = work / "assembly.stl"
+            trimesh.util.concatenate((contact, stray)).export(assembly_path)
+
+            result = commission.run(
+                model=None, stl=candidate, out_dir=work / "out",
+                plan=_plan(
+                    interfaces=[{"id": "I-01", "reference": str(contact_path),
+                                "min_mm": 0.0, "max_mm": 1.0}],
+                    assembly_mesh_paths=[str(assembly_path)],
+                    assembly_overlap_budget_mm3=400.0,
+                ),
+                render=False,
+            )
+
+            check = next(c for c in result.checks if c.id == "assembly-overlap-01")
+            self.assertEqual("FAIL", check.result, check.detail)
+            self.assertIn("away from named interfaces", check.detail)
+
+    def test_boolean_residue_within_explicit_epsilon_does_not_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            candidate = _box_stl(work)
+            plan = _plan(assembly_mesh_paths=["assembly.stl"],
+                         assembly_overlap_budget_mm3=0.0)
+            with mock.patch.object(commission.fit, "interference", return_value=0.0005):
+                result = commission.run(
+                    model=None, stl=candidate, out_dir=work / "out", plan=plan,
+                    render=False,
+                )
+            check = next(c for c in result.checks if c.id == "assembly-overlap-01")
+            self.assertEqual("PASS", check.result, check.detail)
+
+
+class ProductionPlanPathResolverTest(unittest.TestCase):
+    def test_plan_relative_interface_and_assembly_paths_are_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            candidate = _box_stl(work)
+            clear = trimesh.creation.box(extents=(10, 10, 10))
+            clear.apply_translation((30, 0, 5))
+            clear.export(work / "clear.stl")
+            plan = _plan(
+                interfaces=[{"id": "I-01", "reference": "clear.stl",
+                             "min_mm": 0.0, "max_mm": 100.0}],
+                assembly_mesh_paths=["clear.stl"],
+                         assembly_overlap_budget_mm3=0.0)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            result = commission.run(
+                model=None, stl=candidate, out_dir=work / "out", plan=plan,
+                plan_path=plan_path, render=False,
+            )
+            check = next(c for c in result.checks if c.id == "assembly-overlap-01")
+            self.assertEqual("PASS", check.result, check.detail)
+            fit_check = next(c for c in result.checks if c.id == "fit-I-01")
+            self.assertNotIn("cannot read", fit_check.detail)
+
+    def test_plan_absolute_or_traversing_assembly_path_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            candidate = _box_stl(work)
+            outside = work.parent / "outside-assembly.stl"
+            trimesh.creation.box(extents=(10, 10, 10)).apply_translation(
+                (30, 0, 5)).export(outside)
+            plan = _plan(assembly_mesh_paths=[str(outside)],
+                         assembly_overlap_budget_mm3=0.0)
+            plan_path = work / "print_plan_checks.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            result = commission.run(
+                model=None, stl=candidate, out_dir=work / "out", plan=plan,
+                plan_path=plan_path, render=False,
+            )
+            check = next(c for c in result.checks if c.id == "assembly-overlap-01")
+            self.assertEqual("FAIL", check.result)
+            self.assertIn("project-relative", check.detail)
+
 
 class SupportCheckTest(unittest.TestCase):
     def test_self_support_required_with_a_nonzero_ceiling_is_rejected(self) -> None:
@@ -183,6 +280,9 @@ class SupportCheckTest(unittest.TestCase):
             plan = _plan(support_rules=[{
                 "id": "S-01", "disposition": "SELF_SUPPORT_REQUIRED",
                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 1850.0,
+                "model_to_printer_matrix": [[1, 0, 0, 0], [0, 1, 0, 0],
+                                             [0, 0, 1, 0], [0, 0, 0, 1]],
+                "bed_z_mm": 0.0, "bed_tolerance_mm": 0.05,
             }])
 
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
@@ -204,13 +304,15 @@ class SupportCheckTest(unittest.TestCase):
                 "id": "S-01", "disposition": "SUPPORT_ALLOWED",
                 "model_to_printer_matrix": on_end,
                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0,
+                "bed_z_mm": 0.0, "bed_tolerance_mm": 0.05,
             }])
 
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",
                                     plan=plan, render=False)
 
             support = next(c for c in result.checks if c.id == "support-S-01")
-            self.assertEqual(support.result, "PASS")
+            self.assertEqual(support.result, "FAIL",
+                             "a declared orientation without bed contact cannot pass")
             self.assertIn("plan model_to_printer_matrix", support.detail)
             self.assertEqual(on_end, result.evidence["planned_placements"][0]["transform"])
 
@@ -221,9 +323,15 @@ class SupportCheckTest(unittest.TestCase):
             work = Path(raw)
             plan = _plan(support_rules=[
                 {"id": "S-01", "disposition": "SUPPORT_ALLOWED",
-                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0},
+                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 10000.0,
+                 "model_to_printer_matrix": [[1, 0, 0, 0], [0, 1, 0, 0],
+                                              [0, 0, 1, 0], [0, 0, 0, 1]],
+                 "bed_z_mm": 0.0, "bed_tolerance_mm": 0.05},
                 {"id": "S-02", "disposition": "SELF_SUPPORT_REQUIRED",
-                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 2150.0},
+                 "downward_normal_z_max": -0.73, "max_out_of_limit_area_mm2": 2150.0,
+                 "model_to_printer_matrix": [[1, 0, 0, 0], [0, 1, 0, 0],
+                                              [0, 0, 1, 0], [0, 0, 0, 1]],
+                 "bed_z_mm": 0.0, "bed_tolerance_mm": 0.05},
             ])
 
             result = commission.run(model=None, stl=_box_stl(work), out_dir=work / "out",

@@ -174,6 +174,33 @@ class MeshIoRawVsNormalizedTest(unittest.TestCase):
             self.assertEqual(report.mutation_log.vertices_after, 8)
 
 
+class BrepTessellationDiagnosticTest(unittest.TestCase):
+    def test_null_triangulation_names_the_affected_face(self) -> None:
+        class Face:
+            geom_type = "BSPLINE"
+
+            def center(self):
+                return "(1, 2, 3)"
+
+            def tessellate(self, tolerance, angular_tolerance):
+                _ = tolerance, angular_tolerance
+                return None, None
+
+        class Shape:
+            def faces(self):
+                return [Face()]
+
+        with self.assertRaises(ValueError) as caught:
+            mesh_io.validate_brep_tessellation(
+                Shape(), tolerance=0.01, angular_tolerance=0.1
+            )
+        message = str(caught.exception)
+        self.assertIn("B-rep tessellation failed", message)
+        self.assertIn("face 0", message)
+        self.assertIn("BSPLINE", message)
+        self.assertIn("null triangulation", message)
+
+
 class ConnectedComponentCountTest(unittest.TestCase):
     """The count must be right on a core-only install. ``mesh.split`` is not
     usable for this: it needs scipy for the component labelling and networkx

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from common import sha256_file
+from common import normalize_project_path, sha256_file
 from project import load_project
 
 CONTRACT_ORDER = ("job_state", "dimensions", "print_plan", "verification_report", "artifact_manifest")
@@ -55,8 +55,10 @@ def _current_hash_of(artifact: dict[str, Any] | None, project_dir: Path) -> str 
     raw_path = artifact.get("path")
     if not isinstance(raw_path, str):
         return None
-    full_path = (project_dir / raw_path.replace("\\", "/")).resolve(strict=False)
-    if not full_path.is_file():
+    _, full_path = normalize_project_path(
+        raw_path, field="path", where="artifact_manifest.artifacts", project_dir=project_dir
+    )
+    if full_path is None or not full_path.is_file():
         return None
     return sha256_file(full_path)
 

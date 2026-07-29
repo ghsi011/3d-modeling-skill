@@ -81,6 +81,9 @@ def _write_solid(model: Any, stl_path: Path, step_path: Path | None,
     # load, measured, and a trimesh job must never pay it.
     from build123d import export_step, export_stl
 
+    mesh_io.validate_brep_tessellation(
+        model, tolerance=tolerance, angular_tolerance=angular_tolerance
+    )
     export_stl(model, str(stl_path),
                tolerance=tolerance, angular_tolerance=angular_tolerance)
     if step_path is not None:

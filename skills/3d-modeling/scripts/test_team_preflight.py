@@ -113,6 +113,41 @@ class TeamPreflightTest(unittest.TestCase):
             self.assertEqual(result["result"], "FAIL")
             self.assertGreater(result["out_of_limit_area_mm2"], 10.0)
 
+    def test_support_audit_requires_nonzero_bed_contact(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory)
+            stl_path = directory / "floating.stl"
+            floating = trimesh.creation.box(extents=(2, 2, 2))
+            floating.apply_translation((0, 0, 5))
+            floating.export(stl_path)
+            plan_path = self.write_plan(directory)
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan["support_rules"][0]["max_out_of_limit_area_mm2"] = 100000.0
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            result, _ = team_preflight.support_audit(
+                stl_path=stl_path, plan_path=plan_path, rule_id="S-01"
+            )
+            self.assertEqual("FAIL", result["result"])
+            self.assertEqual(0.0, result["bed_contact_area_mm2"])
+            self.assertIn("no non-zero face area contacts", result["failure"])
+
+    def test_support_audit_rejects_out_of_range_normal_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory)
+            stl_path = directory / "box.stl"
+            trimesh.creation.box(extents=(2, 2, 2)).export(stl_path)
+            plan_path = self.write_plan(directory)
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan["support_rules"][0]["downward_normal_z_max"] = 0.1
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as caught:
+                team_preflight.support_audit(
+                    stl_path=stl_path, plan_path=plan_path, rule_id="S-01"
+                )
+            self.assertIn("[-1, 0]", str(caught.exception))
+
     def test_support_audit_cli(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
             directory = Path(raw_directory)
@@ -283,6 +318,8 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
             "contact_state": "sliding, user-operated insertion",
             "min_mm": 0.15,
             "max_mm": 0.30,
+            "units": "mm",
+            "uncertainty_mm": 0.05,
             "motion_path": "insert along -Z, 12 mm travel to seated stop",
             "material": "PETG on PETG",
             "coupon_required": True,
@@ -299,6 +336,8 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
             "contact_state": "elastic grip, deflect-to-insert",
             "min_mm": -0.30,
             "max_mm": -0.10,
+            "units": "mm",
+            "uncertainty_mm": 0.05,
             "motion_path": "snap over 30 mm handle, radial deflection",
             "material": "PETG fin on painted-steel handle",
             "coupon_required": True,
@@ -349,6 +388,23 @@ class TeamPreflightAdversarialTest(unittest.TestCase):
         self.assertTrue(
             any("I-CLR-01" in e and "material" in e for e in result["errors"]), result["errors"]
         )
+
+    def test_units_and_uncertainty_are_required_and_validated(self) -> None:
+        for field in ("units", "uncertainty_mm"):
+            with self.subTest(field=field):
+                interface = self.clearance_interface()
+                del interface[field]
+                result = team_preflight.validate_interfaces({"interfaces": [interface]})
+                self.assertEqual("FAIL", result["result"])
+                self.assertTrue(any(field in error for error in result["errors"]))
+
+        for bad in (True, -0.01, float("nan"), "0.1"):
+            with self.subTest(uncertainty=bad):
+                result = team_preflight.validate_interfaces(
+                    {"interfaces": [self.clearance_interface(uncertainty_mm=bad)]}
+                )
+                self.assertEqual("FAIL", result["result"])
+                self.assertTrue(any("uncertainty_mm" in error for error in result["errors"]))
 
     def test_bad_fit_type_enum_fails(self) -> None:
         interface = self.clearance_interface(fit_type="press_fit_but_not_a_real_enum_value")

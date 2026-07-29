@@ -41,6 +41,12 @@ NOT_YET_MEASURED = {
     "threads": "thread engagement and pitch as printed",
     "captive-hardware": "whether the hardware can be placed and stays captive",
     "split-body": "seam registration and the sealing method the plan owes",
+    # A motion path is a claim about clearance through a *sweep* -- the part moving
+    # along a trajectory without colliding. Every check in this build reads one
+    # static pose, and a single pose cannot answer a question about motion. Named
+    # explicitly so it is DEFERRED rather than silently implied complete or
+    # falling through to a bare "unknown modifier" that says nothing about why.
+    "motion_path": "swept-volume clearance along the declared motion path",
 }
 
 KNOWN_MODIFIERS = frozenset(SLICER_DEPENDENT) | frozenset(NOT_YET_MEASURED)

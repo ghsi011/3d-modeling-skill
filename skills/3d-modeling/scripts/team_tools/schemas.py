@@ -19,6 +19,8 @@ NUMBER = (int, float)
 
 
 def check_type(value: Any, expected: type | tuple[type, ...]) -> bool:
+    if expected is int and isinstance(value, bool):
+        return False
     if expected is float and isinstance(value, bool):
         return False
     if expected == NUMBER and isinstance(value, bool):
@@ -84,7 +86,7 @@ def check_enum(obj: dict[str, Any], field: str, allowed: frozenset[str], where: 
     if field not in obj:
         return []
     value = obj[field]
-    if value not in allowed:
+    if not isinstance(value, str) or value not in allowed:
         return [
             error(
                 "BAD_ENUM",

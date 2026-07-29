@@ -100,6 +100,56 @@ def _require_parsed_mesh(tm: Any, *, label: str = "mesh file") -> None:
         raise ValueError(f"{label} has non-finite vertex coordinates (NaN or inf)")
 
 
+def validate_brep_tessellation(shape: Any, *, tolerance: float,
+                               angular_tolerance: float) -> None:
+    """Fail with face-level diagnostics before a B-rep is exported.
+
+    OCC represents a face with no usable triangulation as a null polygon. The
+    later exporter error usually says only ``NoneType has no attribute`` and
+    leaves the author guessing which of many faces is responsible. Probe each
+    face through the same public tessellation API and retain its index, type and
+    centre when available so the defective surface can be repaired.
+    """
+    faces_method = getattr(shape, "faces", None)
+    if not callable(faces_method):
+        return
+    try:
+        faces = list(faces_method())
+    except Exception as exc:  # noqa: BLE001 - converted to actionable geometry error
+        raise ValueError(f"B-rep tessellation could not enumerate faces: {exc}") from exc
+
+    failures: list[str] = []
+    for index, face in enumerate(faces):
+        label = f"face {index}"
+        geom_type = getattr(face, "geom_type", None)
+        if geom_type is not None:
+            label += f" ({geom_type})"
+        try:
+            centre = getattr(face, "center", lambda: None)()
+            if centre is not None:
+                label += f" at {centre}"
+        except Exception:  # noqa: BLE001 - label enrichment must not mask the probe
+            pass
+        tessellate = getattr(face, "tessellate", None)
+        try:
+            if not callable(tessellate):
+                raise ValueError("face has no tessellate() method")
+            vertices, triangles = tessellate(tolerance, angular_tolerance)
+            if vertices is None or triangles is None:
+                raise ValueError("null triangulation")
+            if len(vertices) == 0 or len(triangles) == 0:
+                raise ValueError("empty triangulation")
+        except Exception as exc:  # noqa: BLE001 - one report names all bad faces
+            failures.append(f"{label}: {exc}")
+
+    if failures:
+        raise ValueError(
+            "B-rep tessellation failed for affected face(s): "
+            + "; ".join(failures)
+            + ". Repair or remove the named face(s) before export."
+        )
+
+
 def _degenerate_face_count(mesh: trimesh.Trimesh) -> int:
     # nondegenerate_faces() only computes a boolean mask; it does not mutate
     # the mesh (that only happens if a caller feeds the mask to update_faces).
