@@ -55,6 +55,7 @@ _JOB_STATE = {
     "owner": "orchestrator",
     "mode": "PIPELINE",
     "profile": "FITTED",
+    "consequence": "INCONSEQUENTIAL",
     "state": "CANDIDATE_BUILD",
     "backend": "build123d",
     "active_candidate": "none",
@@ -614,10 +615,14 @@ def _write_project(project_dir: Path, *, as_markdown: bool = False, **contracts)
         data = contracts[key]
         markdown_name = next((n for n in filenames if n.endswith(".md")), None)
         if as_markdown and markdown_name:
+            allowed_header = (
+                V.JOB_STATE_HEADER_FIELDS if key == "job_state" else None
+            )
             scalars = "\n".join(
                 f"{k}: {'true' if v is True else 'false' if v is False else v}"
                 for k, v in data.items()
                 if isinstance(v, (str, int, float, bool))
+                and (allowed_header is None or k in allowed_header)
             )
             body = f"---\n{scalars}\n---\n\n# {key}\n\nBody prose is not schema-checked.\n"
             (project_dir / markdown_name).write_text(body, encoding="utf-8")
@@ -1083,50 +1088,64 @@ class ProjectValidateReceiptTest(unittest.TestCase):
             self.assertEqual([], receipt["error_ids"])
             self.assertEqual(sorted(V.CANONICAL_FILENAMES), receipt["required_contracts"])
 
-    def test_r3_job_cannot_carry_an_acceptance_verdict(self) -> None:
-        """The highest-consequence rule in the contract, and it was enforced
-        nowhere: an R3 job with a PASS report used to validate clean.
-        """
+    def test_consequential_job_with_a_pass_report_validates_cleanly(self) -> None:
+        """Consequence adds the bounded safety review; it does not ban verifier PASS."""
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
             job_state = clone(_JOB_STATE)
-            job_state["risk_class"] = "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE"
+            job_state["consequence"] = "CONSEQUENTIAL"
             _write_project(project_dir, as_markdown=True, job_state=job_state,
                            verification_report=clone(_VERIFICATION_REPORT))
             receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
-            self.assertIn("R3_ACCEPTANCE_PROHIBITED@verification_report.status", receipt["error_ids"])
-            self.assertEqual("FAIL", receipt["results"]["overall"])
+            self.assertEqual([], receipt["error_ids"], receipt["issues"])
+            self.assertEqual("PASS", receipt["results"]["overall"])
 
-    def test_r3_job_without_an_acceptance_verdict_is_fine(self) -> None:
+    def test_inconsequential_jobs_may_pass(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
             job_state = clone(_JOB_STATE)
-            job_state["risk_class"] = "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE"
-            report = clone(_VERIFICATION_REPORT)
-            report["status"] = "REJECT"
-            report["verdict"] = "REJECT"
-            _write_project(project_dir, as_markdown=True, job_state=job_state, verification_report=report)
-            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
-            self.assertEqual([], receipt["error_ids"])
-
-    def test_lower_risk_classes_may_pass(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            job_state = clone(_JOB_STATE)
-            job_state["risk_class"] = "R1_LOW_CONSEQUENCE"
+            job_state["consequence"] = "INCONSEQUENTIAL"
             _write_project(project_dir, as_markdown=True, job_state=job_state,
                            verification_report=clone(_VERIFICATION_REPORT))
             receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
             self.assertEqual([], receipt["error_ids"])
 
-    def test_unknown_risk_class_is_rejected(self) -> None:
+    def test_unknown_consequence_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             project_dir = Path(raw_dir)
             job_state = clone(_JOB_STATE)
-            job_state["risk_class"] = "R9_MADE_UP"
+            job_state["consequence"] = "UNSAFE"
             _write_project(project_dir, as_markdown=True, job_state=job_state)
             receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
-            self.assertIn("BAD_ENUM@job_state.risk_class", receipt["error_ids"])
+            self.assertIn("BAD_ENUM@job_state.consequence", receipt["error_ids"])
+
+    def test_job_state_requires_consequence(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            del job_state["consequence"]
+            _write_project(project_dir, as_markdown=True, job_state=job_state)
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertIn("MISSING_FIELD@job_state.consequence", receipt["error_ids"])
+
+    def test_job_state_rejects_legacy_risk_and_unknown_frontmatter_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            project_dir = Path(raw_dir)
+            job_state = clone(_JOB_STATE)
+            _write_project(project_dir, as_markdown=True, job_state=job_state)
+            path = project_dir / "job_state.md"
+            text = path.read_text(encoding="utf-8")
+            path.write_text(
+                text.replace(
+                    "---\n\n# job_state",
+                    "risk_class: R2_ENGINEERING_REVIEW\nlegacy_reviewer: old-agent\n---\n\n# job_state",
+                ),
+                encoding="utf-8",
+            )
+            receipt, _project = R.build_validate_receipt(project_dir, timestamp="fixed", argv=[])
+            self.assertIn("UNKNOWN_FIELD@job_state.risk_class", receipt["error_ids"])
+            self.assertIn("UNKNOWN_FIELD@job_state.legacy_reviewer", receipt["error_ids"])
+            self.assertEqual("FAIL", receipt["results"]["job_state"])
 
     def test_nonexistent_project_dir_raises_instead_of_validating_green(self) -> None:
         """A typo'd path must not be indistinguishable from a clean early-phase

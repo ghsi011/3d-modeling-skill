@@ -75,6 +75,10 @@ render-over-photo overlays.
    class, clearance band, or interference allowance. Fit strategy is the print engineer's
    decision in `print_plan.md`, made from this as-observed geometry plus its uncertainty; the
    metrologist does not choose clearance, interference, or contact intent.
+   When the starting input is an imported or off-template solid and no evidence recovery is
+   needed, it is legitimate to inherit dimensions from that artifact rather than dispatching
+   a transcription pass. Label those rows **inherited from imported solid**, bind the source
+   path and hash, and keep any new values separately labelled **chosen by design**.
 7. Never silently average conflicts or convert an assumed visual proportion into a measured
    fact. Put unresolved conflicts in open questions with their downstream effect.
    **A caliper read and a published spec are both fallible** — the part may not be the exact

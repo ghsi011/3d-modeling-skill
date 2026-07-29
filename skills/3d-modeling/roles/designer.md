@@ -16,6 +16,9 @@ the contracts.
 - Reference commission inputs: `dimensions.md` only.
 - Candidate commission inputs: accepted `dimensions.md`, reference source/export/renders,
   `print_plan.md`, and prior `verification_report.md` when iterating.
+- A trusted imported or off-template solid may be the starting artifact for a `FULL`
+  commission when no evidence recovery is needed. Inspect and bind it by path/hash;
+  do not present it as a certified template or as newly measured evidence.
 - build123d and trimesh outputs: `model.py`, per-part STL, STEP when the contract asks,
   `commission.json`, renders, and `print_notes.md`.
 - Multi-colour jobs also output the required single-file multi-body 3MF.
@@ -106,8 +109,8 @@ one, so reading its patterns is a page bought and unused:
 
    Every number traced from `dimensions.md`; `PARAMS` comes back from the template rather than
    being maintained by hand. What lands is ordinary readable source — read it, and edit it if
-   the part needs a feature the template does not carry. Then run the gate once. A `DIRECT` job
-   that fits a template is that one command, one gate call, a look at the two renders, two
+   the part needs a feature the template does not carry. Then run the gate once. A certified
+   `INCONSEQUENTIAL` `DIRECT` job that fits a template is that one command, one gate call, a look at the two renders, two
    judgment fields and a short `print_notes.md`; build through gate measures under four seconds
    end to end. If you find yourself exploring well beyond that, the shape probably does not fit
    after all, and hand-writing it is the faster answer than fighting the parameters.
@@ -119,6 +122,9 @@ one, so reading its patterns is a page bought and unused:
    interpreter did not have. Everything else about the commission is identical either way.
 4. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
+   If an imported/off-template solid is supplied as the starting artifact and there is no
+   evidence to recover, preserve its inherited dimensions as **inherited from imported
+   solid** and label new adjustments **chosen by design** with their rationale.
 5. Candidate commission: make orientation, layer-vs-load direction, nozzle/wall limits,
    overhangs, support access, shrink/clearance, elephant-foot chamfers, and multi-colour
    constraints geometric inputs from `print_plan.md`. Implement the plan's declared

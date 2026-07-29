@@ -83,8 +83,8 @@ function with no declared validity range. What certifies one, what the domain is
 expressed in, and who may widen it are unspecified.
 
 **2. The anomaly detector that replaces the human look (§5.6, §6.2, §7.1).**
-Clean inconsequential `DIRECT` is specified as zero LLM dispatches with `W1`
-witnesses generated but nobody reading them. Escalation fires when "an anomaly
+Clean certified `INCONSEQUENTIAL` `DIRECT` is specified as zero specialist calls
+with `W1` witnesses generated but nobody reading them. Escalation fires when "an anomaly
 detector fires", but no such detector is specified. Today a human look is
 mandatory on this route for a documented reason: every check is conditioned on a
 declaration, so geometry nobody declared is invisible to all of them — a 4 mm
@@ -107,14 +107,18 @@ Re-measured on the same machine, same method (n=5).
 | `trim_ring` (build123d) | 0.22 s | 3.27 s | < 10 s | met — p95 is the cold kernel import |
 | `trim_ring` + STEP | 0.25 s | — | < 20 s | met |
 
-Dispatches on a clean `INCONSEQUENTIAL DIRECT` job: **0**. On `FITTED`: **1**.
-On `CONSEQUENTIAL`: exactly one more, for the mandatory safety pass.
+Review dispatches on a clean certified `INCONSEQUENTIAL DIRECT` job: **0**.
+On a certified `CONSEQUENTIAL DIRECT` job: exactly **1**, for the mandatory safety
+pass, with no normal geometric verifier. `FITTED` retains its required specification review (with independent
+verification when configured); `FULL` retains specification plus independent
+verification.
 
 Mesh loads per job: **1**, counted rather than declared.
 
 ## What the numbers rest on
 
-Zero-dispatch is gated on the mutation corpus, not on the detectors existing:
+Certified `INCONSEQUENTIAL` `DIRECT` zero-dispatch is gated on the mutation corpus,
+not on the detectors existing:
 58 mutants across all four certified templates and five defect classes, with
 screening's own false-negative rate on defects fused to the part at 0.0 and false
 positives at 0.0. `python -m pipeline.corpus` reproduces it and

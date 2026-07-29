@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,8 @@ DEFAULT_MAX_OUT_OF_LIMIT_AREA_MM2 = 0.0
 
 DEFAULT_BBOX_TOLERANCE_MM = 0.5
 
+_CONSEQUENCES = ("INCONSEQUENTIAL", "CONSEQUENTIAL")
+
 # A DIRECT part is modelled in its print orientation -- seated on the bed, so
 # its minimum Z is 0 -- which makes model and printer frames coincide. Declaring
 # the identity explicitly still matters: the audit reads the matrix rather than
@@ -63,12 +66,15 @@ def direct_template(
     dimensions_revision: int = 1,
     bodies: int = 1,
     updated_utc: str = "1970-01-01T00:00:00Z",
+    consequence: str | None = None,
+    assembly_mesh_paths: tuple[str, ...] = (),
+    assembly_overlap_budget_mm3: float | None = None,
 ) -> dict[str, Any]:
     """A bound plan for a job whose dimensions were stated, not measured."""
     x, y, z = (float(v) for v in bbox_mm)
     if min(x, y, z) <= 0:
         raise ValueError(f"bbox must be positive in every axis, got {bbox_mm}")
-    return {
+    plan = {
         "contract": "print-plan",
         "contract_version": 4,
         "job_id": job_id,
@@ -110,6 +116,13 @@ def direct_template(
         "interfaces": [],
         "edges": [],
     }
+    if consequence is not None:
+        plan["consequence"] = consequence
+    if assembly_mesh_paths:
+        plan["assembly_mesh_paths"] = [str(path) for path in assembly_mesh_paths]
+    if assembly_overlap_budget_mm3 is not None:
+        plan["assembly_overlap_budget_mm3"] = float(assembly_overlap_budget_mm3)
+    return plan
 
 
 # `BRIDGED_NO_SUPPORT` is a third thing, and the schema had no room for it. A
@@ -221,6 +234,30 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
             f"expected_bodies must be a positive whole number, got {bodies!r}: it says how "
             "many solids the part is meant to be, and the `solid` check compares against it")
 
+    consequence = plan.get("consequence")
+    if consequence is not None and consequence not in _CONSEQUENCES:
+        problems.append(f"consequence must be one of {', '.join(_CONSEQUENCES)}, got {consequence!r}")
+
+    assembly_paths = plan.get("assembly_mesh_paths")
+    budget = plan.get("assembly_overlap_budget_mm3")
+    if assembly_paths is not None:
+        if not isinstance(assembly_paths, (list, tuple)) or not assembly_paths:
+            problems.append("assembly_mesh_paths must be a non-empty list of paths")
+        elif any(not isinstance(path, str) or not path.strip() for path in assembly_paths):
+            problems.append("assembly_mesh_paths must contain non-empty string paths")
+        if budget is None:
+            problems.append("assembly_overlap_budget_mm3 is required when assembly_mesh_paths "
+                            "are declared")
+    elif budget is not None:
+        problems.append("assembly_overlap_budget_mm3 requires assembly_mesh_paths")
+    if budget is not None:
+        try:
+            numeric_budget = float(budget)
+        except (TypeError, ValueError):
+            numeric_budget = math.nan
+        if not math.isfinite(numeric_budget) or numeric_budget < 0:
+            problems.append("assembly_overlap_budget_mm3 must be a finite non-negative number")
+
     return problems
 
 
@@ -229,7 +266,10 @@ def _cmd_template(args: argparse.Namespace) -> int:
                            job_id=args.job_id, nozzle_mm=args.nozzle,
                            material=args.material,
                            dimensions_revision=args.dimensions_revision,
-                           bodies=args.bodies, updated_utc=args.updated_utc)
+                           bodies=args.bodies, updated_utc=args.updated_utc,
+                           consequence=args.consequence,
+                           assembly_mesh_paths=tuple(args.assembly_mesh_paths),
+                           assembly_overlap_budget_mm3=args.assembly_overlap_budget_mm3)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     sys.stdout.write(f"{args.out}\n")
@@ -264,6 +304,13 @@ def main(argv: list[str] | None = None) -> int:
     template.add_argument("--dimensions-revision", type=int, default=1)
     template.add_argument("--updated-utc", default="1970-01-01T00:00:00Z",
                           help="injected, never wall-clock, so a rerun is byte-identical")
+    template.add_argument("--consequence", choices=_CONSEQUENCES,
+                          help="optional consequence class carried into the plan")
+    template.add_argument("--assembly-mesh-path", action="append", default=[],
+                          dest="assembly_mesh_paths",
+                          help="optional assembly mesh path; repeat for each mating mesh")
+    template.add_argument("--assembly-overlap-budget-mm3", type=float,
+                          help="maximum allowed candidate/assembly overlap volume")
     template.add_argument("--out", type=Path, required=True)
     template.set_defaults(func=_cmd_template)
 

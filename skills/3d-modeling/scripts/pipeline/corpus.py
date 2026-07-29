@@ -344,7 +344,10 @@ def _contract_at(name: str, params: dict[str, Any]) -> Contract:
     request = R.JobRequest(job_id="corpus", brief_path=Path("none"), template=name,
                            parameters=params, stated=frozenset(),
                            consequence="INCONSEQUENTIAL", out_dir=Path("."),
-                           updated_utc="1970-01-01T00:00:00Z", render=False)
+                           updated_utc="1970-01-01T00:00:00Z", render=False,
+                           printer="corpus", material={"process": "FDM", "material": "PLA"},
+                           nozzle={"diameter_mm": 0.4},
+                           orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0})
     return R._contract_from(T.get(name), request)
 
 
@@ -520,7 +523,10 @@ def _default_templates():
             request = R.JobRequest(job_id="corpus", brief_path=Path("none"), template=name,
                                    parameters=params, stated=frozenset(),
                                    consequence="INCONSEQUENTIAL", out_dir=Path("."),
-                                   updated_utc="1970-01-01T00:00:00Z", render=False)
+                                   updated_utc="1970-01-01T00:00:00Z", render=False,
+                                   printer="corpus", material={"process": "FDM", "material": "PLA"},
+                                   nozzle={"diameter_mm": 0.4},
+                                   orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0})
             return R._contract_from(T.get(name), request)
         return (name, params, contract_of)
 

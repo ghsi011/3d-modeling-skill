@@ -25,18 +25,9 @@ NULLABLE_NUMBER = (int, float, type(None))
 
 PROFILE = frozenset({"DIRECT", "FITTED", "FULL"})
 
-# Consequence/escalation classification (the orchestrator charter's "Consequence and
-# escalation gate"). Optional on job_state for backward compatibility: existing
-# job_state.json files with no risk_class remain valid; when present it must be one of
-# these four values.
-RISK_CLASS = frozenset(
-    {
-        "R0_DECORATIVE",
-        "R1_LOW_CONSEQUENCE",
-        "R2_ENGINEERING_REVIEW",
-        "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE",
-    }
-)
+# Consequence classification (the orchestrator charter's "Consequence and escalation gate").
+# job_state carries one of these two values.
+CONSEQUENCE = frozenset({"INCONSEQUENTIAL", "CONSEQUENTIAL"})
 
 PRINT_PLAN_STATUS = frozenset({"DRAFT", "ACCEPTED", "BLOCKED"})
 SUPPORT_DISPOSITION = frozenset(
@@ -129,6 +120,27 @@ _EXPECTED_OWNERS: dict[str, frozenset[str]] = {
     "final_prep_review": frozenset({"verifier"}),
 }
 
+# Unlike a JSON mirror, a Markdown contract's frontmatter is only its header;
+# body tables and prose do not belong there. Keep this allowlist explicit so a
+# retired compatibility header cannot be accepted merely because the flat
+# frontmatter loader can parse it.
+JOB_STATE_HEADER_FIELDS = frozenset(
+    {
+        "contract",
+        "contract_version",
+        "job_id",
+        "revision",
+        "owner",
+        "mode",
+        "profile",
+        "consequence",
+        "state",
+        "backend",
+        "active_candidate",
+        "updated_utc",
+    }
+)
+
 # The `status` field is the verdict each of these contracts exists to carry, so
 # an unrecognised value is not a typo to shrug at: `FINAL_PRINT_BLOCKED` and
 # `FINAL_PRINT_PASS` decide whether a part is handed over.
@@ -158,7 +170,9 @@ _BOUND_REVISIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> list[Issue]:
+def validate_contract_header(
+    data: dict[str, Any], *, key: str, where: str, source_format: str = "json"
+) -> list[Issue]:
     """Validate the fields every contract carries and the tooling binds on.
 
     This is the whole check for a Markdown contract. It deliberately says
@@ -175,8 +189,34 @@ def validate_contract_header(data: dict[str, Any], *, key: str, where: str) -> l
     job_id = data.get("job_id")
     if not isinstance(job_id, str) or not job_id.strip():
         issues.append(error("MISSING_FIELD", f"{where}.job_id", "required non-empty string field is missing"))
-    if key == "job_state" and "risk_class" in data:
-        issues += check_enum(data, "risk_class", RISK_CLASS, where)
+    if key == "job_state":
+        if "consequence" not in data:
+            issues.append(
+                error(
+                    "MISSING_FIELD",
+                    f"{where}.consequence",
+                    "required consequence field is missing; legacy risk tiers are not supported",
+                )
+            )
+        else:
+            issues += check_enum(data, "consequence", CONSEQUENCE, where)
+        if "risk_class" in data:
+            issues.append(
+                error(
+                    "UNKNOWN_FIELD",
+                    f"{where}.risk_class",
+                    "legacy risk_class is not supported; use consequence",
+                )
+            )
+        if source_format == "markdown":
+            for name in sorted(set(data) - JOB_STATE_HEADER_FIELDS):
+                issues.append(
+                    error(
+                        "UNKNOWN_FIELD",
+                        f"{where}.{name}",
+                        "unknown job-state frontmatter field",
+                    )
+                )
     if key == "job_state" and "profile" in data:
         # `PROFILE` sat here unused while `profile` went unchecked, so a job
         # could declare a route that does not exist and validate clean. One did:

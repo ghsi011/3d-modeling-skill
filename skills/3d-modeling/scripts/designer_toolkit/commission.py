@@ -132,6 +132,39 @@ def _plan_support_rules(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return list(plan.get("support_rules") or [])
 
 
+def _check_consequence(commission: Commission, plan: dict[str, Any],
+                       consequence: str | None) -> None:
+    """Keep the pipeline-only safety boundary visible in this legacy gate.
+
+    `designer_toolkit` has no safety reviewer. In particular, a green geometry
+    receipt must not look like the bounded safety review performed by the
+    canonical `design-tool run-job` route.
+    """
+    declared = plan.get("consequence")
+    if consequence is not None and declared is not None and consequence != declared:
+        commission.add(Check(
+            "consequence", "Commission consequence agrees with the plan", _FAIL,
+            f"commission requested {consequence!r}, but the plan declares {declared!r}",
+            "Use one consequence class consistently in the commission input and plan.",
+        ))
+        return
+    effective = consequence if consequence is not None else declared
+    if effective == "CONSEQUENTIAL":
+        commission.add(Check(
+            "safety-review", "Safety review for consequential use", _SKIP,
+            "SKIPPED: this path has no safety reviewer. Use the canonical "
+            "`design-tool run-job` path or record the safety review separately.",
+            "Do not treat this geometry receipt as a safety approval; use canonical "
+            "`design-tool run-job` or record the review separately before delivery.",
+        ))
+    elif effective not in (None, "INCONSEQUENTIAL"):
+        commission.add(Check(
+            "consequence", "Commission consequence is recognized", _FAIL,
+            f"unknown consequence {effective!r}",
+            "Declare `INCONSEQUENTIAL` or `CONSEQUENTIAL` in the plan.",
+        ))
+
+
 def planned_placement(rule: dict[str, Any], mesh, threshold: float) -> orient.Placement:
     """The orientation the rule declares, or the best available if it declares none.
 
@@ -345,6 +378,65 @@ def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> Non
                       "geometry is wrong or the plan's expected_bbox_mm is. Resolve which "
                       "before proceeding -- do not widen the tolerance to fit the part.",
     ))
+
+
+def _check_assembly_interference(commission: Commission, mesh,
+                                 plan: dict[str, Any]) -> None:
+    """Compare the candidate with every declared assembly mesh.
+
+    Assembly meshes are optional context, but once declared they are a release
+    gate. A collision hidden in a whole assembly is not made safe by passing the
+    candidate's own envelope, support, and fit checks.
+    """
+    paths = plan.get("assembly_mesh_paths")
+    budget = plan.get("assembly_overlap_budget_mm3")
+    if paths is None and budget is None:
+        return
+    if not isinstance(paths, (list, tuple)) or not paths:
+        commission.add(Check(
+            "assembly-overlap", "Declared assembly overlap budget is usable", _FAIL,
+            "assembly_overlap_budget_mm3 is declared without a non-empty "
+            "assembly_mesh_paths list",
+            "Declare one or more assembly_mesh_paths, or remove the overlap budget.",
+        ))
+        return
+    try:
+        limit = float(budget) if budget is not None else float("nan")
+    except (TypeError, ValueError):
+        limit = float("nan")
+    if not np.isfinite(limit) or limit < 0:
+        commission.add(Check(
+            "assembly-overlap", "Declared assembly overlap budget is usable", _FAIL,
+            f"assembly_overlap_budget_mm3 must be finite and non-negative, got {budget!r}",
+            "Declare a finite non-negative assembly_overlap_budget_mm3 in mm3.",
+        ))
+        return
+
+    measured: dict[str, float] = {}
+    for index, path in enumerate(paths, start=1):
+        check_id = f"assembly-overlap-{index:02d}"
+        try:
+            overlap = float(fit.interference(mesh, str(path)))
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            commission.add(Check(
+                check_id, f"Assembly mesh {index} is within the overlap budget", _FAIL,
+                f"cannot measure interference against {path!r}: {exc}",
+                "Fix or replace the declared assembly mesh; an unreadable assembly is "
+                "not a passing clearance check.",
+            ))
+            continue
+        measured[str(path)] = overlap
+        ok = overlap <= limit + 1e-9
+        commission.add(Check(
+            check_id, f"Assembly mesh {index} is within the overlap budget",
+            _PASS if ok else _FAIL,
+            f"interference {overlap:.4f} mm3 against budget {limit:.4f} mm3 for {path}",
+            "" if ok else (
+                "The candidate overlaps a declared assembly mesh beyond the budget. "
+                "Resolve the collision before delivery; do not widen the budget to fit "
+                "the geometry."),
+        ))
+    commission.evidence["assembly_interference_mm3"] = measured
 
 
 def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[Any]:
@@ -578,6 +670,7 @@ def run(
     out_dir: Path,
     plan: dict[str, Any],
     reference: str | None = None,
+    consequence: str | None = None,
     render: bool = True,
     candidate_id: str = "candidate_01",
     plan_path: Path | None = None,
@@ -586,6 +679,7 @@ def run(
     """Build (if given a model), verify everything deterministic, write evidence."""
     out_dir.mkdir(parents=True, exist_ok=True)
     commission = Commission()
+    _check_consequence(commission, plan, consequence)
 
     source: Any = stl
     params: dict[str, Any] | None = None
@@ -637,6 +731,7 @@ def run(
     _check_solid(commission, report, plan)
     _check_repair(commission, report)
     _check_envelope(commission, report, plan)
+    _check_assembly_interference(commission, mesh, plan)
 
     placements = _check_support(commission, mesh, plan)
     placement = placements[0] if placements else orient.best(mesh)
@@ -847,6 +942,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan", type=Path, required=True, help="print_plan_checks.json")
     parser.add_argument("--out", type=Path, required=True, help="output directory")
     parser.add_argument("--reference", help="mating reference mesh for the fit check")
+    parser.add_argument("--consequence", choices=("INCONSEQUENTIAL", "CONSEQUENTIAL"),
+                        help="optional consequence class when it is not in the plan")
     parser.add_argument("--no-render", action="store_true")
     parser.add_argument("--job-id", default="job",
                         help="job_id stamped into the emitted receipts")
@@ -882,7 +979,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         commission = run(model=args.model, stl=args.stl, out_dir=args.out, plan=plan,
-                         reference=args.reference, render=not args.no_render,
+                         reference=args.reference, consequence=args.consequence,
+                         render=not args.no_render,
                          candidate_id=args.candidate_id, plan_path=args.plan,
                          writes_receipts=not args.no_receipts)
     except (FileNotFoundError, ValueError) as exc:

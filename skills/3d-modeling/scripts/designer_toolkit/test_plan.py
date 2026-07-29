@@ -69,6 +69,15 @@ class DirectTemplateTest(unittest.TestCase):
         self.assertEqual(plan.direct_template((5.0, 6.0, 7.0)),
                          plan.direct_template((5.0, 6.0, 7.0)))
 
+    def test_optional_consequence_and_assembly_inputs_are_preserved(self) -> None:
+        built = plan.direct_template(
+            (10.0, 10.0, 10.0), consequence="CONSEQUENTIAL",
+            assembly_mesh_paths=("other.stl",), assembly_overlap_budget_mm3=0.25)
+
+        self.assertEqual("CONSEQUENTIAL", built["consequence"])
+        self.assertEqual(["other.stl"], built["assembly_mesh_paths"])
+        self.assertEqual(0.25, built["assembly_overlap_budget_mm3"])
+
 
 class CliTest(unittest.TestCase):
     def test_it_writes_a_plan_commission_can_read(self) -> None:
@@ -170,6 +179,12 @@ class ValidatePlanTest(unittest.TestCase):
         broken["support_rules"].append(dict(broken["support_rules"][0]))
 
         self.assertIn("duplicate", " ".join(plan.validate_plan(broken)))
+
+    def test_assembly_meshes_without_a_budget_are_rejected(self) -> None:
+        broken = plan.direct_template((40.0, 22.0, 14.0),
+                                      assembly_mesh_paths=("other.stl",))
+
+        self.assertIn("assembly_overlap_budget_mm3", " ".join(plan.validate_plan(broken)))
 
     def test_an_out_of_range_angle_is_rejected(self) -> None:
         broken = plan.direct_template((40.0, 22.0, 14.0))

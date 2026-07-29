@@ -86,6 +86,13 @@ def _load_job(job_dir: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _required(spec: dict[str, Any], key: str) -> Any:
+    if key not in spec:
+        raise SystemExit(
+            f"design-tool: {JOB_FILE} is missing {key!r}; the pipeline does not invent it")
+    return spec[key]
+
+
 def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.JobRequest:
     return runner.JobRequest(
         job_id=spec["job_id"],
@@ -93,7 +100,7 @@ def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.Job
         template=spec.get("template"),
         parameters=spec["parameters"],
         stated=frozenset(spec.get("stated", ())),
-        consequence=S.require_enum(spec.get("consequence", "INCONSEQUENTIAL"),
+        consequence=S.require_enum(_required(spec, "consequence"),
                                    S.CONSEQUENCE, what="job.consequence"),
         out_dir=job_dir,
         updated_utc=spec["updated_utc"],
@@ -110,6 +117,10 @@ def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.Job
         evidence=tuple(spec.get("evidence", ())),
         interface_map=dict(spec.get("interface_map") or {}),
         cache_dir=(job_dir / spec["cache_dir"]) if spec.get("cache_dir") else None,
+        printer=_required(spec, "printer"),
+        material=_required(spec, "material"),
+        nozzle=_required(spec, "nozzle"),
+        orientation=_required(spec, "orientation"),
     )
 
 

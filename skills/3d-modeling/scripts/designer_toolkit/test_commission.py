@@ -126,6 +126,53 @@ class EnvelopeCheckTest(unittest.TestCase):
             self.assertIn("no readable", envelope.detail)
 
 
+class ConsequenceCheckTest(unittest.TestCase):
+    def test_consequential_commission_emits_an_explicit_safety_gap(self) -> None:
+        """The toolkit has no safety reviewer, so a consequential run must not
+        look complete merely because its geometry checks pass.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            result = commission.run(
+                model=None, stl=_box_stl(work), out_dir=work / "out",
+                plan=_plan(consequence="CONSEQUENTIAL"), render=False)
+
+            safety = next(c for c in result.checks if c.id == "safety-review")
+            self.assertEqual("SKIPPED", safety.result)
+            message = f"{safety.detail} {safety.action}"
+            self.assertIn("no safety reviewer", message)
+            self.assertIn("design-tool run-job", message)
+            self.assertIn("record", message)
+
+
+class AssemblyOverlapCheckTest(unittest.TestCase):
+    def test_each_declared_assembly_mesh_is_checked_against_the_candidate(self) -> None:
+        """An undisclosed collision must fail the real gate, not just appear in
+        an optional diagnostic.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            candidate = _box_stl(work)
+            overlap = work / "overlap.stl"
+            trimesh.creation.box(extents=(10, 10, 10)).apply_translation(
+                (5, 0, 5)).export(overlap)
+            clear = trimesh.creation.box(extents=(10, 10, 10))
+            clear.apply_translation((30, 0, 5))
+            clear_path = work / "clear.stl"
+            clear.export(clear_path)
+            result = commission.run(
+                model=None, stl=candidate, out_dir=work / "out",
+                plan=_plan(assembly_mesh_paths=[str(overlap), str(clear_path)],
+                           assembly_overlap_budget_mm3=0.0), render=False)
+
+            checks = {c.id: c for c in result.checks if c.id.startswith("assembly-overlap-")}
+            self.assertEqual({"assembly-overlap-01", "assembly-overlap-02"}, set(checks))
+            self.assertEqual("FAIL", checks["assembly-overlap-01"].result)
+            self.assertEqual("PASS", checks["assembly-overlap-02"].result)
+            self.assertIn("budget", checks["assembly-overlap-01"].detail)
+            self.assertTrue(result.failed)
+
+
 class SupportCheckTest(unittest.TestCase):
     def test_self_support_required_with_a_nonzero_ceiling_is_rejected(self) -> None:
         """The contract says that combination means zero. Two archived runs

@@ -91,47 +91,22 @@ Read `job_state.md`'s profile first, because it decides which of these checks ha
 all — and a check with no input is not a check you owe more cheaply, it is one with nothing
 to compare against.
 
-- **`DIRECT`** — you are not normally dispatched on one. That route has the orchestrator build
-  and check the part in its own turns, and its delivery says so in as many words. So if you
-  are reading this, somebody wanted a fresh pair of eyes on a part its own author already
-  passed — which makes the look the entire point of your being here, not a formality after the
-  numbers.
-
-  The dimensions were stated rather than recovered, so there is no photograph to audit a sheet
-  against, no reference to overlay, and no metrologist judgment to re-derive. What is left is
-  one command and one long look:
-
-  ```bash
-  V=<your-own-dir>                       # never the project root
-  uv run --project <skill> --frozen python <skill>/scripts/dt.py audit <project-dir> --out $V --job-id <job>         --updated-utc <iso8601>
-  uv run --project <skill> --frozen python <skill>/scripts/dt.py screen <project-dir> --out $V     # what nobody declared
-  uv run --project <skill> --frozen python <skill>/scripts/dt.py crop crop <project-dir>/renders/multi.png         --box 0.0 0.5 0.5 1.0 --out $V/bottom.jpg     # zoom a face worth doubting
-  uv run --project <skill> --frozen python <skill>/scripts/dt.py report --commission $V/commission.json         --out verification_report.md --job-id <job> --updated-utc <iso8601>
-  ```
-
-  `audit` settles the binding, the recomputation and both contract checks in one call, because
-  none of that is where your findings come from. **Then LOOK at the images it names in
-  `evidence.look_at`** — that is. Step 7 sets out why in full; the short version is that every
-  number in the audit was computed because somebody asked for it, and a picture was not.
-
-  `audit`'s `still_requires_a_look` lists what it did not settle, and it is not a formality:
-  nothing in that call reads `dimensions.md`, so a part that measures self-consistently and
-  disagrees with what was asked for passes all of it. `evidence.slice_profile` is the one
-  number in there that nobody conditioned — a curve over the whole part at a fixed pitch —
-  so read it alongside the renders rather than instead of them.
-
-  Then answer every `<!-- REQUIRED -->` in the draft, and record steps 3 and 6 as *no evidence
-  to consult* rather than as passed — there is none under this profile. That is the whole job.
-  If it is running long, the inputs are wrong and that is itself the finding.
+- **`DIRECT`** — the canonical runner does not dispatch this role. A certified
+  `INCONSEQUENTIAL` `DIRECT` job has no review callback; a certified `CONSEQUENTIAL`
+  `DIRECT` job has one safety review and still has no normal geometric verifier. The
+  runner ignores a verification callback on this route, so do not create
+  a `verification_report.md` or report an independent verdict for a canonical `DIRECT`
+  job. If a separately commissioned audit is requested outside this route, label it as
+  external manual work rather than changing the route's claim.
 - **`FITTED`** — everything above, plus the whole of steps 3, 6 and 7. This is where the folded
   reference round trip lands: you are the one who overlays the candidate's `mating_reference`
   on the original photographs, and handedness and feature registration are blocking.
 - **`FULL`** — every step, and the conditional final-prep review.
 
-The consequence class scales the depth of steps 6 and 7 on top of this, never the deterministic
-gate. A job whose `risk_class` is `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` never receives a `PASS`
-under any profile — `validate` enforces that mechanically, and you should not be the reason it
-has to.
+The consequence class does not create a geometric verifier for `DIRECT`. On `FITTED` or
+`FULL`, a `CONSEQUENTIAL` job also needs the one bounded safety review, which is separate
+from your geometric verdict. Your `PASS` remains valid for either consequence class;
+`final_status.json` decides what claim the complete evidence permits.
 
 ## Checklist
 
@@ -230,8 +205,8 @@ has to.
    redeclare it.
 
    Scale this judgment by consequence class, never the deterministic gate above. An
-   `INCONSEQUENTIAL` job needs the visual call and the fit-band judgment. A `CONSEQUENTIAL` one
-   needs the whole of this step, with every occluded view resolved and the `SUPPORT_ALLOWED`
+   `INCONSEQUENTIAL` `FITTED`/`FULL` job needs the visual call and the fit-band judgment. A
+   `CONSEQUENTIAL` `FITTED`/`FULL` one needs the whole of this step, with every occluded view resolved and the `SUPPORT_ALLOWED`
    contact inspection written out. What never scales down is that this step happens at all: a purely
    numeric `PASS` reintroduces the exact failure this role exists to catch, a part that
    satisfies every scalar and is the wrong object. Compare the sheet's feature inventory

@@ -6,14 +6,18 @@ what was checked and what was not**.
 
 There are two ways through, and the job picks one:
 
-- **The deterministic pipeline.** If the part is one of the certified templates
-  and its parameters fall inside that template's certified domain, the whole job
-  is one command, **zero model dispatches**, and finishes in under a second. A
+- **The deterministic pipeline.** Route selection is independent of consequence.
+  For a certified template inside its certified domain, a certified
+  `INCONSEQUENTIAL` `DIRECT` job is one command with **zero model dispatches** and
+  finishes in under a second. A certified `CONSEQUENTIAL` `DIRECT` job instead
+  adds exactly one bounded safety review and no normal geometric verifier. A
   contract is written *before* any geometry, frozen, and hashed; the geometry is
   then measured against it.
 - **The five-role file-contract pipeline.** For everything else: recreating a
   part from photos, reconciling against a real object, multi-part assemblies.
-  Five agent roles coordinate through contract files on disk.
+  A trusted imported or off-template solid is also a legitimate starting input
+  when no evidence recovery is needed; record inherited and chosen dimensions
+  separately. Five agent roles coordinate through contract files on disk.
 
 The guiding principle: **a passing software gate is necessary evidence, not proof
 of correctness.** The tooling enforces only what a machine can actually prove,
@@ -30,16 +34,20 @@ Python CLI.
 
 ## Quickstart
 
-### One command, no dispatches
+### Certified INCONSEQUENTIAL DIRECT: one command, no specialist calls
 
-Write a `job.json` naming a certified template and its parameters, then:
+Write a `job.json` naming a certified template and its parameters, including the
+required `printer`, `material`, `nozzle`, and `orientation` manufacturing inputs,
+then:
 
 ```bash
 uv run design-tool run-job job_dir/
 ```
 
-That is the whole job: contract, build, commission, screening, witness, status.
-Measured cold, zero dispatches — a 300-vent enclosure (220 × 180 × 200 mm,
+That is the whole certified `INCONSEQUENTIAL` `DIRECT` job: contract, build,
+commission, screening, witness, status. Measured cold for certified
+`INCONSEQUENTIAL` `DIRECT`: zero specialist calls — a 300-vent enclosure
+(220 × 180 × 200 mm,
 ~4,500 faces) commissions in **0.78 s**.
 
 The five certified templates and their domains:
@@ -57,9 +65,11 @@ it routes to `FITTED` or `FULL` and says which, and why.
 
 ### Reviews are answered by re-running
 
-A `CONSEQUENTIAL` job needs a bounded safety review, and `VERIFIED` needs
-independent verification. Those are judgements about a part, so the CLI does not
-invent them: it writes the evidence packet and stops.
+A certified `INCONSEQUENTIAL` `DIRECT` job has no review callback. A certified
+`CONSEQUENTIAL` `DIRECT` job has exactly one bounded safety review and no normal
+geometric verifier; `FITTED` retains its specification review, and `FULL` retains
+specification plus independent verification. Those are judgements about a part,
+so the CLI does not invent them: it writes the evidence packet and stops.
 
 ```
 design-tool: this job needs a safety review before it can finish.

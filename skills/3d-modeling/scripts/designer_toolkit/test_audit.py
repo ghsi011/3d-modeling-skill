@@ -39,16 +39,20 @@ def _dt(*args, cwd=None):
 def _built_project(root: Path) -> Path:
     """A real gated candidate: the whole thing a verifier is handed.
 
-    Built through `direct` rather than build/plan/commission by hand, because
-    those three leave no `job_state.md` or `dimensions.md` -- an incomplete
-    project, which made the contract checks here fail for a reason that had
-    nothing to do with the audit.
+    The intake, plan, build and commission utilities leave the same complete
+    project that the verifier audits, without a second orchestration route.
     """
     project = root / "job"
-    _dt("direct", "--job-id", "a", "--template", "c_clip", *_CLIP,
-        "--bbox", "40", "22", "14", "--updated-utc", "1970-01-01T00:00:00Z",
-        "--out", str(project), "--no-render",
+    timestamp = "1970-01-01T00:00:00Z"
+    _dt("intake", "--job-id", "a", "--template", "c_clip", *_CLIP,
+        "--updated-utc", timestamp, "--out", str(project),
         "--rationale", "a benchmark fixture", "--acceptance", "nothing")
+    _dt("plan", "template", "--bbox", "40", "22", "14", "--job-id", "a",
+        "--updated-utc", timestamp, "--out", str(project / "print_plan_checks.json"))
+    _dt("build", "--template", "c_clip", *_CLIP, "--out", str(project / "model.py"))
+    _dt("commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+        "--out", ".", "--job-id", "a", "--updated-utc", timestamp, "--no-render",
+        cwd=project)
     return project
 
 

@@ -36,6 +36,13 @@ class JobRequest:
     consequence: str
     out_dir: Path
     updated_utc: str
+    # These are job-owned manufacturing inputs. They are required here rather
+    # than defaulted: the contract must name the machine, process/material,
+    # nozzle and transform that the deterministic checks describe.
+    printer: str
+    material: dict[str, Any]
+    nozzle: dict[str, Any]
+    orientation: dict[str, Any]
     modifiers: tuple[str, ...] = ()
     candidate_strategy: str = "SINGLE"
     external_geometry: bool = False
@@ -48,9 +55,10 @@ class JobRequest:
     # and the evidence it is given. Absent on a DIRECT job, which owns everything
     # it needs by definition.
     spec_call: Callable[[dict[str, Any]], dict[str, Any]] | None = None
-    # The independent verifier. Optional on DIRECT -- the route's whole trade is
-    # that nobody independent looks, and its status says so. Required for FULL,
-    # and the only way any route reaches VERIFIED.
+    # The independent verifier. DIRECT deliberately ignores this callback: its
+    # route trade is deterministic commissioning without an independent look.
+    # It is optional on FITTED and required for FULL, and is the only way any
+    # route reaches VERIFIED.
     verify_call: Callable[[verification.Packet], dict[str, Any]] | None = None
     evidence: tuple[str, ...] = ()
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -58,8 +66,6 @@ class JobRequest:
     # which is the right default for a test: a cache that is on by default makes
     # every test depend on what a previous one left behind.
     cache_dir: Path | None = None
-
-
 class ReviewNeeded(Exception):
     """A review has no answer on disk yet.
 
@@ -119,6 +125,8 @@ def run(request: JobRequest) -> JobResult:
                              parameters=request.parameters,
                              external_geometry=request.external_geometry,
                              ambiguities=request.ambiguities)
+    selected_route = decision.route
+    route_requires_verification = selected_route == "FULL"
     manifest = intent.manifest(
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
         parameters=request.parameters, stated=request.stated,
@@ -213,7 +221,13 @@ def run(request: JobRequest) -> JobResult:
                              "after recovering the specification the derived parameters "
                              f"still do not route DIRECT: {decision.condition}",
                              written, timings, llm_calls, None)
-        manifest["route_decision"] = {**decision.as_dict(), "recovered_via": recovered}
+        # The second selection is an internal template check after recovery. It
+        # must not replace the authoritative route selected for this job: a
+        # FITTED or FULL job is still that route even when recovered parameters
+        # happen to fit a certified template and build through the DIRECT path.
+        manifest["route_decision"] = {
+            **manifest["route_decision"], "recovered_via": recovered,
+        }
         # Rebuilt from the full parameter set, not patched over the old one: a
         # recovered dimension is new, so a comprehension that only updates
         # existing rows drops exactly the values this route exists to produce.
@@ -391,7 +405,11 @@ def run(request: JobRequest) -> JobResult:
             out / "safety_verification_report.json", safety_report)
 
     verification_report = None
-    if request.verify_call is not None:
+    # DIRECT deliberately has no normal verification dispatch. FITTED may take
+    # its optional independent look only after a clear screen, while FULL
+    # retains its required verifier even when screening cannot clear the job.
+    if request.verify_call is not None and selected_route != "DIRECT" and \
+            (screen["overall"] == "CLEAR" or route_requires_verification):
         mark = time.perf_counter()
         packet = verification.build_packet(
             brief=brief_text, intent=manifest, contract=model_contract.as_payload(),
@@ -439,7 +457,7 @@ def run(request: JobRequest) -> JobResult:
                           safety=safety_report, artifact=artifact,
                           verification=verification_report,
                           updated_utc=request.updated_utc,
-                          route=manifest["route_decision"]["route"],
+                          route=selected_route,
                           safety_envelope=safety_envelope if model_contract.consequence == "CONSEQUENTIAL" else None,
                           verification_envelope=verification_envelope if request.verify_call is not None else None)
     written["final_status"] = _write(out / "final_status.json", final)
@@ -481,8 +499,10 @@ def _contract_from(template: T.CertifiedTemplate, request: JobRequest) -> C.Cont
         backend=template.backend, parameters=dict(request.parameters),
         features=tuple(features), expected_bbox_mm=template.bbox(request.parameters),
         bbox_tolerance_mm=0.5, expected_bodies=template.bodies,
-        orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
-        material={"process": "FDM", "material": "PLA"},
+        orientation=request.orientation,
+        material=request.material,
+        nozzle=request.nozzle,
+        printer=request.printer,
         modifiers=request.modifiers, minimum_coverage=1.0,
         step_required=bool(request.step), consequence=request.consequence,
         updated_utc=request.updated_utc)

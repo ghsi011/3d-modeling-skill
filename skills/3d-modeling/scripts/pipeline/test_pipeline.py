@@ -18,22 +18,29 @@ from typing import Any
 import trimesh
 
 from . import analysis, commission, contract as C, fitted, intent, runner, safety, screening
-from . import status, templates as T, verification
+from . import schemas as S, status, templates as T, verification
 from . import witness as W
 
 CLIP = {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
         "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8}
 RING = {"hole_d": 60.0, "lip_w": 5.0, "panel_t": 18.0, "lip_t": 3.0,
         "wall": 2.0, "chamfer": 1.0}
+TEST_PRINTER = "Test Printer"
+TEST_MATERIAL = {"process": "FDM", "material": "PLA"}
+TEST_NOZZLE = {"diameter_mm": 0.4}
+TEST_ORIENTATION = {"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}
 
 
 def _request(out: Path, *, template="c_clip", params=None, consequence="INCONSEQUENTIAL",
+             printer=TEST_PRINTER, material=TEST_MATERIAL, nozzle=TEST_NOZZLE,
+             orientation=TEST_ORIENTATION, render=False,
              **kw) -> runner.JobRequest:
     return runner.JobRequest(
         job_id="t", brief_path=out / "brief.md", template=template,
         parameters=dict(params or CLIP), stated=frozenset({"bore_d"}),
         consequence=consequence, out_dir=out, updated_utc="1970-01-01T00:00:00Z",
-        render=False, **kw)
+        render=render, printer=printer, material=dict(material), nozzle=dict(nozzle),
+        orientation=dict(orientation), **kw)
 
 
 def _looked_at(packet):
@@ -58,6 +65,33 @@ def _run(out: Path, **kw):
 def _run_looked(out: Path, **kw):
     return runner.run(_request(out, verify_call=_looked_at,
                                reviewer={"model_snapshot": "test"}, **kw))
+
+
+def _full_spec(request):
+    response = {
+        "measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
+                          "uncertainty_mm": 0.15, "method": "caliper",
+                          "datum": "widest section", "confidence": "A"}],
+        "interfaces": [{"interface_id": "channel", "measurement": "bundle_across",
+                        "fit_class": "slip"}],
+        "unresolved": [],
+    }
+    if "review_envelope" in request:
+        response["review_envelope"] = request["review_envelope"]
+    return response
+
+
+def _full_request(out: Path, **kw) -> runner.JobRequest:
+    params = dict(kw.pop("params", CLIP))
+    params["bore_d"] = 60.0
+    kw.setdefault("spec_call", _full_spec)
+    kw.setdefault("interface_map", {"channel": "bore_d"})
+    return _request(out, params=params, **kw)
+
+
+def _run_full_looked(out: Path, **kw):
+    return runner.run(_full_request(
+        out, verify_call=_looked_at, reviewer={"model_snapshot": "test"}, **kw))
 
 
 def _contract(out: Path, template="c_clip", params=None) -> C.Contract:
@@ -125,7 +159,10 @@ class VerticalSliceTest(unittest.TestCase):
             (out / "brief.md").write_text("clip\n", encoding="utf-8")
             (out / "job.json").write_text(json.dumps({
                 "job_id": "t", "template": "c_clip", "consequence": "INCONSEQUENTIAL",
-                "parameters": CLIP, "updated_utc": "1970-01-01T00:00:00Z"}), encoding="utf-8")
+                "parameters": CLIP, "updated_utc": "1970-01-01T00:00:00Z",
+                "printer": TEST_PRINTER, "material": TEST_MATERIAL,
+                "nozzle": TEST_NOZZLE, "orientation": TEST_ORIENTATION}),
+                                       encoding="utf-8")
             probe = (
                 "import sys, runpy;"
                 "sys.argv=['design-tool','run-job',%r,'--no-render'];"
@@ -147,7 +184,7 @@ class VerticalSliceTest(unittest.TestCase):
             out = Path(raw)
             result = _run_looked(out, template="trim_ring", params=RING, step=True)
             self.assertTrue((out / "candidate.step").is_file())
-            self.assertTrue(result.ok, result.message)
+            self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
 
     def test_a_trimesh_template_refuses_a_step_it_cannot_produce(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -173,7 +210,8 @@ class PreflightTest(unittest.TestCase):
             job_id="t", template="c_clip", template_version="1.0.0", domain_id="d",
             backend="trimesh-manifold", parameters={}, features=(feature,),
             expected_bbox_mm={"x": 1, "y": 1, "z": 1}, bbox_tolerance_mm=0.5,
-            expected_bodies=1, orientation={}, material={}, modifiers=(),
+            expected_bodies=1, orientation={}, material={}, nozzle={}, printer="",
+            modifiers=(),
             minimum_coverage=1.0, step_required=False,
             consequence="INCONSEQUENTIAL", updated_utc="1970-01-01T00:00:00Z")
 
@@ -213,6 +251,41 @@ class PreflightTest(unittest.TestCase):
             self.assertTrue(C.preflight(broken, known_checks=commission.KNOWN_CHECKS))
             self.assertFalse((out / "candidate.stl").exists(),
                              "no build may have started")
+
+    def test_printer_material_nozzle_and_orientation_are_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = _contract(Path(raw))
+
+        cases = {
+            "printer": {"printer": ""},
+            "material process": {"material": {"material": "PLA"}},
+            "material name": {"material": {"process": "FDM"}},
+            "nozzle shape": {"nozzle": {"diameter_mm": 0}},
+            "nozzle value": {"nozzle": {"diameter_mm": "0.4"}},
+            "orientation matrix": {"orientation": {"bed_z_mm": 0.0}},
+            "orientation bed": {"orientation": {"model_to_printer_matrix": "identity"}},
+            "orientation matrix shape": {
+                "orientation": {"model_to_printer_matrix": "rotated", "bed_z_mm": 0.0}},
+        }
+        for name, overrides in cases.items():
+            with self.subTest(input=name):
+                broken = C.Contract(**{**base.__dict__, **overrides})
+                self.assertTrue(C.preflight(broken, known_checks=commission.KNOWN_CHECKS))
+
+        numeric_orientation = C.Contract(
+            **{**base.__dict__, "orientation": {
+                "model_to_printer_matrix": [[1, 0, 0, 0], [0, 1, 0, 0],
+                                             [0, 0, 1, 0], [0, 0, 0, 1]],
+                "bed_z_mm": 0.0}})
+        self.assertEqual([], C.preflight(numeric_orientation,
+                                         known_checks=commission.KNOWN_CHECKS))
+
+    def test_missing_machine_input_blocks_before_build(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = _run(Path(raw), printer="")
+            self.assertFalse(result.ok)
+            self.assertEqual("preflight", result.stage)
+            self.assertIn("printer", result.message)
 
 
 class RoutingTest(unittest.TestCase):
@@ -465,11 +538,168 @@ class SafetyTest(unittest.TestCase):
                 self.assertNotEqual(base, safety.cache_identity(packet, reviewer=other))
 
 
+class CanonicalPipelineTest(unittest.TestCase):
+    """Dispatch counts and escalation behavior from the approved model."""
+
+    def test_consequence_does_not_change_route_selection(self) -> None:
+        import inspect
+
+        self.assertNotIn("consequence", inspect.signature(intent.select).parameters)
+        for consequence in S.CONSEQUENCE:
+            with self.subTest(consequence=consequence):
+                direct = intent.select(requested_template="c_clip", parameters=dict(CLIP),
+                                       external_geometry=False, ambiguities=())
+                self.assertEqual("DIRECT", direct.route)
+        self.assertEqual(("INCONSEQUENTIAL", "CONSEQUENTIAL"), S.CONSEQUENCE)
+
+    def test_clean_inconsequential_direct_needs_no_review_dispatch(self) -> None:
+        calls = []
+
+        def spec_call(request):
+            calls.append("spec")
+            return _full_spec(request)
+
+        def safety_call(packet):
+            calls.append("safety")
+            return {}
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = _run(out, spec_call=spec_call, safety_call=safety_call,
+                          verify_call=verify_call)
+            self.assertEqual([], calls)
+            self.assertEqual(0, result.llm_calls)
+            self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+            self.assertFalse((out / "safety_verification_report.json").exists())
+            self.assertFalse((out / "verification_report.json").exists())
+
+    def test_clean_consequential_direct_dispatches_exactly_one_safety_review(self) -> None:
+        calls = []
+
+        def spec_call(request):
+            calls.append("spec")
+            return _full_spec(request)
+
+        def safety_call(packet):
+            calls.append("safety")
+            return {"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok",
+                    "review_envelope": packet.payload["review_envelope"]}
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = _run(out, consequence="CONSEQUENTIAL", safety_call=safety_call,
+                          spec_call=spec_call, verify_call=verify_call)
+            self.assertEqual(["safety"], calls)
+            self.assertEqual(1, result.llm_calls)
+            self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+            self.assertTrue((out / "safety_verification_report.json").exists())
+            self.assertFalse((out / "verification_report.json").exists())
+
+    def test_full_retains_specification_and_independent_review_dispatches(self) -> None:
+        calls = []
+
+        def spec_call(request):
+            calls.append("spec")
+            return _full_spec(request)
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = runner.run(_full_request(
+                Path(raw), spec_call=spec_call, verify_call=verify_call,
+                reviewer={"model_snapshot": "test"}))
+            self.assertEqual(["spec", "verification"], calls)
+            self.assertEqual(2, result.llm_calls)
+            self.assertEqual("VERIFIED", result.final_status["final_status"])
+
+    def test_recovery_does_not_rewrite_the_full_route_in_final_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result = runner.run(_full_request(
+                out, verify_call=_looked_at, reviewer={"model_snapshot": "test"}))
+            intent_manifest = json.loads(
+                (out / "intent_manifest.json").read_text(encoding="utf-8"))
+            final_status = json.loads(
+                (out / "final_status.json").read_text(encoding="utf-8"))
+
+            self.assertEqual("FULL", intent_manifest["route_decision"]["route"])
+            self.assertEqual("FULL", final_status["route"])
+            self.assertEqual("FULL", result.final_status["route"])
+            self.assertNotEqual("DIRECT", intent_manifest["route_decision"]["route"])
+            self.assertNotEqual("DIRECT", final_status["route"])
+
+    def _screening_case(self, overall: str, *, consequence: str = "INCONSEQUENTIAL",
+                        safety_call=None, verify_call=None):
+        original = screening.run
+        screening.run = lambda ctx, contract: {"overall": overall, "calibrated": True}
+        try:
+            with tempfile.TemporaryDirectory() as raw:
+                result = _run(Path(raw), consequence=consequence,
+                              safety_call=safety_call, verify_call=verify_call)
+                return result
+        finally:
+            screening.run = original
+
+    def test_anomaly_screening_adds_no_optional_dispatch_and_escalates(self) -> None:
+        calls = []
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        result = self._screening_case("ANOMALY", verify_call=verify_call)
+        self.assertEqual([], calls)
+        self.assertEqual(0, result.llm_calls)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+
+    def test_indeterminate_screening_adds_no_optional_dispatch_and_escalates(self) -> None:
+        calls = []
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        result = self._screening_case("INDETERMINATE", verify_call=verify_call)
+        self.assertEqual([], calls)
+        self.assertEqual(0, result.llm_calls)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+
+    def test_consequential_anomaly_keeps_only_its_safety_review(self) -> None:
+        calls = []
+
+        def safety_call(packet):
+            calls.append("safety")
+            return {"decision": "PASS", "failure_modes": [], "safety_concerns": [],
+                    "missing_evidence": [], "required_actions": [], "summary": "ok",
+                    "review_envelope": packet.payload["review_envelope"]}
+
+        def verify_call(packet):
+            calls.append("verification")
+            return _looked_at(packet)
+
+        result = self._screening_case("ANOMALY", consequence="CONSEQUENTIAL",
+                                      safety_call=safety_call, verify_call=verify_call)
+        self.assertEqual(["safety"], calls)
+        self.assertEqual(1, result.llm_calls)
+        self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
+
+
 class ManufacturingTest(unittest.TestCase):
     def test_a_deferred_predicate_blocks_verified_and_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = _run_looked(out, modifiers=("supports",))
+            result = _run_full_looked(out, modifiers=("supports",))
             report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
 
             self.assertEqual("DEFERRED", report["overall"])
@@ -1023,7 +1253,7 @@ class ModifierTest(unittest.TestCase):
     def test_an_unknown_modifier_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = _run_looked(out, modifiers=("banana",))
+            result = _run_full_looked(out, modifiers=("banana",))
             report = json.loads((out / "manufacturing_report.json").read_text(encoding="utf-8"))
             self.assertEqual("BLOCKED", report["overall"])
             self.assertEqual("FAILED", result.final_status["final_status"])
@@ -1103,8 +1333,9 @@ class CalibrationTest(unittest.TestCase):
             self.assertEqual("NEEDS_MORE_EVIDENCE",
                              result.final_status["final_status"])
         with tempfile.TemporaryDirectory() as raw:
-            looked = _run_looked(Path(raw))
-            self.assertEqual("VERIFIED", looked.final_status["final_status"])
+            looked = _run(Path(raw), verify_call=_looked_at,
+                          reviewer={"model_snapshot": "test"})
+            self.assertEqual("NEEDS_MORE_EVIDENCE", looked.final_status["final_status"])
 
     def test_the_status_reports_the_calibration_state(self) -> None:
         from . import screening as S
@@ -1160,7 +1391,12 @@ class FittedRouteTest(unittest.TestCase):
             updated_utc="1970-01-01T00:00:00Z", render=False,
             external_geometry=True, evidence=("photo1.jpg",), spec_call=call,
             interface_map={"channel": "bore_d"},
-            reviewer={"model_snapshot": "test"}, **kw))
+            reviewer={"model_snapshot": "test"},
+            printer="Test Printer",
+            material={"process": "FDM", "material": "PLA"},
+            nozzle={"diameter_mm": 0.4},
+            orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+            **kw))
         return result, seen
 
     def test_one_dispatch_recovers_the_spec_and_the_job_completes(self) -> None:
@@ -1173,6 +1409,21 @@ class FittedRouteTest(unittest.TestCase):
             self.assertEqual("PASS", json.loads(
                 (out / "commission_report.json").read_text(encoding="utf-8"))["verdict"])
             self.assertTrue((out / "specification.json").is_file())
+
+    def test_recovery_does_not_rewrite_the_fitted_route_in_final_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            result, _ = self._job(out, self.SPEC)
+            intent_manifest = json.loads(
+                (out / "intent_manifest.json").read_text(encoding="utf-8"))
+            final_status = json.loads(
+                (out / "final_status.json").read_text(encoding="utf-8"))
+
+            self.assertEqual("FITTED", intent_manifest["route_decision"]["route"])
+            self.assertEqual("FITTED", final_status["route"])
+            self.assertEqual("FITTED", result.final_status["route"])
+            self.assertNotEqual("DIRECT", intent_manifest["route_decision"]["route"])
+            self.assertNotEqual("DIRECT", final_status["route"])
 
     def test_the_recovered_dimension_reaches_the_manifest_with_its_provenance(self) -> None:
         """A recovered parameter is new, so a manifest patched over the old one
@@ -1220,7 +1471,11 @@ class FittedRouteTest(unittest.TestCase):
                 parameters=dict(self.BASE), stated=frozenset(),
                 consequence="INCONSEQUENTIAL", out_dir=out,
                 updated_utc="1970-01-01T00:00:00Z", render=False,
-                external_geometry=True))
+                external_geometry=True,
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
 
             self.assertFalse(result.ok)
             self.assertIn("no spec reviewer was supplied", result.message)
@@ -1335,8 +1590,8 @@ class IndependentVerificationTest(unittest.TestCase):
                 return {**response, "review_envelope": packet.payload["review_envelope"]}
             return response
 
-        result = runner.run(_request(out, verify_call=call,
-                                     reviewer={"model_snapshot": "test"}, **kw))
+        result = runner.run(_full_request(out, verify_call=call,
+                                          reviewer={"model_snapshot": "test"}, **kw))
         return result, seen
 
     def _reply(self, decision, defects=(), unmet=()):
@@ -1456,7 +1711,11 @@ class IndependentVerificationTest(unittest.TestCase):
                 job_id="f", brief_path=out / "b.md", template=None,
                 parameters={"nothing": 1.0}, stated=frozenset(),
                 consequence="INCONSEQUENTIAL", out_dir=out,
-                updated_utc="1970-01-01T00:00:00Z", render=False))
+                updated_utc="1970-01-01T00:00:00Z", render=False,
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertIn("requires independent verification", result.message)
 
@@ -1580,6 +1839,8 @@ class CliReviewTest(unittest.TestCase):
         "updated_utc": "1970-01-01T00:00:00Z", "stated": [],
         "reviewer": {"model_snapshot": "test"},
         "parameters": CLIP,
+        "printer": TEST_PRINTER, "material": TEST_MATERIAL,
+        "nozzle": TEST_NOZZLE, "orientation": TEST_ORIENTATION,
     }
 
     def _job_dir(self, root: Path, **over) -> Path:
@@ -1607,6 +1868,17 @@ class CliReviewTest(unittest.TestCase):
             self.assertNotIn("verification", payload,
                              "stage 1 must not see the verifier's conclusion")
 
+    def test_missing_explicit_job_inputs_are_refused_not_defaulted(self) -> None:
+        for field in ("consequence", "printer", "material", "nozzle", "orientation"):
+            with self.subTest(missing=field), tempfile.TemporaryDirectory() as raw:
+                job = self._job_dir(Path(raw))
+                spec = json.loads((job / "job.json").read_text(encoding="utf-8"))
+                del spec[field]
+                (job / "job.json").write_text(json.dumps(spec), encoding="utf-8")
+                with self.assertRaises(SystemExit) as caught:
+                    self._run(job)
+                self.assertIn(field, str(caught.exception))
+
     def test_answering_the_packet_completes_the_job(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             job = self._job_dir(Path(raw))
@@ -1619,18 +1891,13 @@ class CliReviewTest(unittest.TestCase):
                 "missing_evidence": [], "required_actions": [],
                 "summary": "a cable clip", "review_envelope": safety_envelope}), encoding="utf-8")
             self._run(job)
-            verification_envelope = json.loads(
-                (room / "verification_packet.json").read_text(encoding="utf-8")).get("review_envelope")
-            (room / "verification_response.json").write_text(json.dumps({
-                "decision": "PASS", "defects": [], "unmet_requirements": [],
-                "missing_evidence": [], "summary": "matches the contract",
-                "review_envelope": verification_envelope}), encoding="utf-8")
-            self._run(job)
 
             final = json.loads((job / "final_status.json").read_text(encoding="utf-8"))
             self.assertEqual("CONSEQUENTIAL", final["consequence"])
-            self.assertIn(final["final_status"], ("VERIFIED", "NEEDS_MORE_EVIDENCE"))
+            self.assertEqual("NEEDS_MORE_EVIDENCE", final["final_status"])
             self.assertNotEqual("FAILED", final["final_status"])
+            self.assertFalse((room / "verification_packet.json").exists(),
+                             "DIRECT consequential jobs do not dispatch the normal verifier")
 
     def test_the_cli_never_answers_a_review_itself(self) -> None:
         """The one thing this program must not do. A deterministic tool that
@@ -1686,14 +1953,12 @@ class CliReviewTest(unittest.TestCase):
     def test_malformed_verification_response_json_is_a_controlled_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             job = self._job_dir(Path(raw), consequence="INCONSEQUENTIAL")
-            self.assertEqual(cli_module().NEEDS_REVIEW, self._run(job))
-            (job / "reviews" / "verification_response.json").write_text(
-                "[not, valid", encoding="utf-8")
+            self.assertEqual(1, self._run(job))
+            self.assertFalse((job / "reviews").exists())
             code = self._run(job)
             self.assertEqual(1, code)
-            receipt = json.loads(
-                (job / "verification_report.json").read_text(encoding="utf-8"))
-            self.assertIn("not valid JSON", receipt["error"])
+            self.assertFalse((job / "verification_report.json").exists(),
+                             "DIRECT does not read or dispatch a normal verification response")
 
 
 def cli_module():
@@ -1750,7 +2015,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
 
     def test_verification_response_is_bound_to_its_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=self._verify_call(self._good_verification()),
                 reviewer={"model_snapshot": "test"}))
             self.assertEqual("VERIFIED", result.final_status["final_status"])
@@ -1797,7 +2062,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 consequence="CONSEQUENTIAL", out_dir=out,
                 updated_utc="2026-01-01T00:00:00Z", render=False,
                 safety_call=lambda p: {**response, "review_envelope": stale},
-                reviewer=self.SAFETY_REVIEWER))
+                reviewer=self.SAFETY_REVIEWER,
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("safety", result.stage)
 
@@ -1809,8 +2078,8 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 seen.append(packet)
                 return {**self._good_verification(),
                         "review_envelope": packet.payload["review_envelope"]}
-            runner.run(_request(out, verify_call=capture,
-                                reviewer={"model_snapshot": "test"}))
+            runner.run(_full_request(out, verify_call=capture,
+                                     reviewer={"model_snapshot": "test"}))
             wrong_envelope = seen[0].payload["review_envelope"]
             result = runner.run(_request(
                 out, consequence="CONSEQUENTIAL",
@@ -1856,7 +2125,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
                                  "expected_vs_observed": "x", "evidence": "x",
                                  "severity": "x"}]}
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=self._verify_call(response),
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -1866,7 +2135,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
         response = {**self._good_verification(),
                     "unmet_requirements": ["strain relief not modelled"]}
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=self._verify_call(response),
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -1875,7 +2144,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
     def test_verification_pass_with_empty_summary_fails_closed(self) -> None:
         response = {**self._good_verification(), "summary": ""}
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=self._verify_call(response),
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -1894,7 +2163,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
 
     def test_malformed_verification_response_produces_controlled_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=lambda p: {"decision": "PASS", "summary": ""},
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -1925,7 +2194,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 updated_utc="1970-01-01T00:00:00Z", render=False,
                 external_geometry=True, evidence=("photo1.jpg",), spec_call=capture,
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             stale = seen[0]["review_envelope"]
 
             (out / "photo1.jpg").write_bytes(b"second")
@@ -1937,7 +2210,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 external_geometry=True, evidence=("photo1.jpg",),
                 spec_call=lambda r: {**spec, "review_envelope": stale},
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
 
@@ -1956,7 +2233,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 spec_call=lambda r: {"measurements": [], "interfaces": [],
                                      "unresolved": []},
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
 
@@ -1970,14 +2251,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
             def capture(packet):
                 seen.append(packet)
                 return {**response, "review_envelope": packet.payload["review_envelope"]}
-            runner.run(_request(out, verify_call=capture,
-                                reviewer={"model_snapshot": "test"}))
+            runner.run(_full_request(out, verify_call=capture,
+                                     reviewer={"model_snapshot": "test"}))
             stale = seen[0].payload["review_envelope"]
-            result = runner.run(runner.JobRequest(
-                job_id="t", brief_path=out / "brief.md", template="c_clip",
-                parameters=dict(CLIP), stated=frozenset({"bore_d"}),
-                consequence="INCONSEQUENTIAL", out_dir=out,
-                updated_utc="1970-01-01T00:00:00Z", render=True,
+            result = runner.run(_full_request(
+                out, render=True,
                 verify_call=lambda p: {**response, "review_envelope": stale},
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -2114,7 +2392,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
 
     def test_a_non_dict_verification_response_is_a_controlled_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=lambda p: 42,
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -2139,7 +2417,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
             raise ValueError("Expecting value: line 1 column 1 (char 0)")
 
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=bad_json,
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -2167,7 +2445,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 spec_call=lambda r: {**bad_spec,
                                      "review_envelope": r["review_envelope"]},
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
             self.assertIn("specification.json",
@@ -2204,7 +2486,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                     spec_call=lambda r: {**bad_spec,
                                          "review_envelope": r["review_envelope"]},
                     interface_map={"channel": "bore_d"},
-                    reviewer={"model_snapshot": "test"}))
+                    reviewer={"model_snapshot": "test"},
+                    printer="Test Printer",
+                    material={"process": "FDM", "material": "PLA"},
+                    nozzle={"diameter_mm": 0.4},
+                    orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
                 self.assertFalse(result.ok)
                 self.assertEqual("specification", result.stage)
                 self.assertNotIn("TypeError", result.message)
@@ -2232,7 +2518,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 updated_utc="1970-01-01T00:00:00Z", render=False,
                 external_geometry=True, evidence=("photo1.jpg",),
                 spec_call=call, interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
             self.assertIn("ReviewError", result.message)
@@ -2296,11 +2586,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
     def test_a_non_string_evidence_entry_is_a_controlled_verification_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 out, verify_call=self._verify_call(self._good_verification()),
                 reviewer={"model_snapshot": "test"}, evidence=(42,)))
             self.assertFalse(result.ok)
-            self.assertEqual("verification", result.stage)
+            self.assertEqual("specification", result.stage)
             self.assertNotIn("TypeError", result.message)
 
     def test_a_non_string_evidence_entry_is_a_controlled_specification_failure(self) -> None:
@@ -2317,7 +2607,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 external_geometry=True, evidence=(42,),
                 spec_call=lambda r: {**spec, "review_envelope": r["review_envelope"]},
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
             self.assertNotIn("TypeError", result.message)
@@ -2341,13 +2635,13 @@ class ReviewEnvelopeTest(unittest.TestCase):
     def test_missing_evidence_file_is_a_controlled_verification_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 out, verify_call=self._verify_call(self._good_verification()),
                 reviewer={"model_snapshot": "test"}, evidence=("ghost.jpg",)))
             self.assertFalse(result.ok)
-            self.assertEqual("verification", result.stage)
+            self.assertEqual("specification", result.stage)
             self.assertIn("MissingEvidenceError", result.message)
-            self.assertIn("verification_report.json",
+            self.assertIn("specification.json",
                           [p.name for p in out.iterdir()])
 
     def test_missing_evidence_file_is_a_controlled_specification_failure(self) -> None:
@@ -2369,7 +2663,11 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 external_geometry=True, evidence=("ghost.jpg",),
                 spec_call=lambda r: {**spec, "review_envelope": r["review_envelope"]},
                 interface_map={"channel": "bore_d"},
-                reviewer={"model_snapshot": "test"}))
+                reviewer={"model_snapshot": "test"},
+                printer="Test Printer",
+                material={"process": "FDM", "material": "PLA"},
+                nozzle={"diameter_mm": 0.4},
+                orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0}))
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
             self.assertIn("MissingEvidenceError", result.message)
@@ -2491,10 +2789,10 @@ class ReviewEnvelopeTest(unittest.TestCase):
             def capture(packet):
                 seen.append(packet)
                 return {**response, "review_envelope": packet.payload["review_envelope"]}
-            runner.run(_request(out, verify_call=capture,
-                                reviewer={"model_snapshot": "test"}))
+            runner.run(_full_request(out, verify_call=capture,
+                                     reviewer={"model_snapshot": "test"}))
             stale = seen[0].payload["review_envelope"]
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 out, verify_call=lambda p: {**response, "review_envelope": stale},
                 params={**CLIP, "wall": 4.0},
                 reviewer={"model_snapshot": "test"}))
@@ -2543,7 +2841,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
                                  "expected_vs_observed": "x", "severity": "x"}],
                     "unmet_requirements": [], "missing_evidence": [], "summary": "x"}
         with tempfile.TemporaryDirectory() as raw:
-            result = runner.run(_request(
+            result = runner.run(_full_request(
                 Path(raw), verify_call=self._verify_call(response),
                 reviewer={"model_snapshot": "test"}))
             self.assertFalse(result.ok)
@@ -2567,8 +2865,7 @@ class NumericOnlyVerificationTest(unittest.TestCase):
         images it answers from numbers, and undeclared geometry is exactly what
         numbers do not cover -- so the claim has to name which one it was."""
         with tempfile.TemporaryDirectory() as raw:
-            result = _run(Path(raw), verify_call=_looked_at,
-                          reviewer={"model_snapshot": "test"})
+            result = _run_full_looked(Path(raw))
             final = result.final_status
 
             self.assertFalse(final["witnesses_rendered"])
@@ -2684,7 +2981,7 @@ class UnavailableRunnerTest(unittest.TestCase):
         try:
             W._sections = sections_with_unavailable
             with tempfile.TemporaryDirectory() as raw:
-                result = _run_looked(Path(raw))
+                result = _run_full_looked(Path(raw))
                 self.assertEqual("NEEDS_MORE_EVIDENCE",
                                  result.final_status["final_status"])
                 self.assertTrue(any("witness sections unavailable" in r
@@ -2731,3 +3028,52 @@ class CommissionInvariantTest(unittest.TestCase):
             self.assertIsNotNone(check["error_code"])
             self.assertIsNotNone(check["error_message"])
             self.assertNotEqual("PASS", check["result"])
+
+
+class ManufacturingInputTest(unittest.TestCase):
+    """Explicit, validated printer, material, nozzle, and orientation."""
+
+    def test_contract_carries_explicit_printer_material_nozzle_orientation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            _run(out)
+            contract = json.loads(
+                (out / "model_contract.json").read_text(encoding="utf-8"))
+            self.assertEqual("Test Printer", contract.get("printer", ""))
+            self.assertEqual({"process": "FDM", "material": "PLA"},
+                             contract.get("material"))
+            self.assertEqual({"diameter_mm": 0.4}, contract.get("nozzle"))
+            self.assertEqual({"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+                             contract.get("orientation"))
+
+    def test_empty_orientation_is_rejected_by_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            contract = _contract(out)
+            broken = C.Contract(**{**contract.__dict__, "orientation": {}})
+            problems = C.preflight(broken, known_checks=commission.KNOWN_CHECKS)
+            self.assertTrue(any("orientation" in p for p in problems), problems)
+
+    def test_empty_material_is_rejected_by_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            contract = _contract(out)
+            broken = C.Contract(**{**contract.__dict__, "material": {}})
+            problems = C.preflight(broken, known_checks=commission.KNOWN_CHECKS)
+            self.assertTrue(any("material" in p for p in problems), problems)
+
+    def test_empty_nozzle_is_rejected_by_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            contract = _contract(out)
+            broken = C.Contract(**{**contract.__dict__, "nozzle": {}})
+            problems = C.preflight(broken, known_checks=commission.KNOWN_CHECKS)
+            self.assertTrue(any("nozzle" in p for p in problems), problems)
+
+    def test_empty_printer_is_rejected_by_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            contract = _contract(out)
+            broken = C.Contract(**{**contract.__dict__, "printer": ""})
+            problems = C.preflight(broken, known_checks=commission.KNOWN_CHECKS)
+            self.assertTrue(any("printer" in p for p in problems), problems)

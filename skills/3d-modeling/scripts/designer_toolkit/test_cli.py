@@ -56,7 +56,7 @@ def test_the_surface_is_the_gate_and_the_coupon() -> None:
     assert "coupon" in result.stdout
     # Absence from --help would also hold for a hidden-but-working subcommand,
     # so invoke one and require the parser to reject it outright.
-    for retired in ("measure", "overhang", "datums", "sweep", "finalize"):
+    for retired in ("measure", "overhang", "datums", "sweep", "finalize", "direct"):
         assert retired not in result.stdout
         rejected = _run(retired, "anything.stl")
         assert rejected.returncode == 2, retired

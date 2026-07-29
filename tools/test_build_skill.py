@@ -117,17 +117,38 @@ class TestBuildSkill:
             assert launcher.is_file(), "the bundle must carry its own launcher"
 
             job = job_dir / "output"
-            done = subprocess.run(
-                ["uv", "run", "--project", str(root), "--frozen",
-                 "python", str(launcher), "direct",
-                 "--job-id", "ship",
-                 "--template", "c_clip",
-                 "--param", "bore_d=12.0", "--param", "wall=3.0", "--param", "height=9.0",
-                 "--param", "mouth_gap=9.0", "--param", "flange=(40.0, 22.0, 5.0)",
-                 "--param", "screw_d=4.5", "--param", "screw_at=(8.0, 11.0)",
-                 "--param", "countersink_d=9.0", "--bbox", "40", "22", "14",
-                 "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(job), "--no-render"],
-                capture_output=True, text=True, cwd=str(job_dir), check=False)
+            base = ["uv", "run", "--project", str(root), "--frozen",
+                    "python", str(launcher)]
+
+            def invoke(*args: str, cwd: Path = job_dir) -> subprocess.CompletedProcess:
+                return subprocess.run(base + list(args), capture_output=True, text=True,
+                                      cwd=str(cwd), check=False)
+
+            timestamp = "1970-01-01T00:00:00Z"
+            intake = invoke(
+                "intake", "--job-id", "ship", "--template", "c_clip",
+                "--param", "bore_d=12.0", "--param", "wall=3.0", "--param", "height=9.0",
+                "--param", "mouth_gap=9.0", "--param", "flange=(40.0, 22.0, 5.0)",
+                "--param", "screw_d=4.5", "--param", "screw_at=(8.0, 11.0)",
+                "--param", "countersink_d=9.0", "--consequence", "INCONSEQUENTIAL",
+                "--updated-utc", timestamp, "--out", str(job))
+            assert intake.returncode == 0, intake.stderr[-2000:]
+
+            plan = invoke("plan", "template", "--bbox", "40", "22", "14",
+                          "--job-id", "ship", "--updated-utc", timestamp,
+                          "--out", str(job / "print_plan_checks.json"))
+            assert plan.returncode == 0, plan.stderr[-2000:]
+
+            build = invoke("build", "--template", "c_clip",
+                           "--param", "bore_d=12.0", "--param", "wall=3.0", "--param", "height=9.0",
+                           "--param", "mouth_gap=9.0", "--param", "flange=(40.0, 22.0, 5.0)",
+                           "--param", "screw_d=4.5", "--param", "screw_at=(8.0, 11.0)",
+                           "--param", "countersink_d=9.0", "--out", str(job / "model.py"))
+            assert build.returncode == 0, build.stderr[-2000:]
+
+            done = invoke("commission", "--model", "model.py", "--plan", "print_plan_checks.json",
+                          "--out", ".", "--job-id", "ship", "--updated-utc", timestamp,
+                          "--no-render", cwd=job)
 
             assert done.returncode == 0, done.stderr[-2000:]
             for name in ("job_state.md", "dimensions.md", "print_plan_checks.json",

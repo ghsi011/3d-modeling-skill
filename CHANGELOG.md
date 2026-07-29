@@ -6,12 +6,14 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
-### Added — a deterministic pipeline that runs a certified job with no dispatches
+### Added — a deterministic pipeline with certified INCONSEQUENTIAL DIRECT zero dispatches
 
 Six iterations of the approved redesign. The entry below describing `DIRECT` as
 "two dispatches" is what this replaced: on a certified template inside its
-domain, `DIRECT` now costs **zero**, and the whole job — contract, build,
-commission, screening, witness, status — completes in well under a second.
+domain, certified `INCONSEQUENTIAL` `DIRECT` now costs **zero specialist calls**, and
+the whole job — contract, build, commission, screening, witness, status — completes
+in well under a second. A certified `CONSEQUENTIAL` `DIRECT` job instead has one
+bounded safety review and no normal geometric verifier.
 
 The shape of it:
 
@@ -29,9 +31,12 @@ The shape of it:
   template and scored on defects fused to the part — the ones the component
   detector does not catch for free. `python -m pipeline.corpus` is the gate, and
   it moves the final status rather than editing a claim string.
-* **Routes**: `DIRECT` (0 dispatches), `FITTED` (1 bounded spec call), `FULL`
-  (requires independent verification). `VERIFIED` is reachable only through
-  verification that never saw the designer's reasoning.
+* **Routes**: certified `INCONSEQUENTIAL DIRECT` has no review callback; certified
+  `CONSEQUENTIAL DIRECT` has exactly one bounded safety review and no normal
+  geometric verifier; `FITTED` requires one bounded specification review; and
+  `FULL` requires specification plus independent verification. `VERIFIED` is
+  reachable only through independent verification that never saw the designer's
+  reasoning.
 * **Five certified templates**, `c_clip`, `box_shell`, `l_bracket`, `trim_ring`
   and `vented_enclosure`, each with parameter bounds that route an
   out-of-domain job away from `DIRECT` rather than building it anyway.
@@ -39,24 +44,23 @@ The shape of it:
   `domain_id`, backend version, lockfile, schema version and tessellation
   settings. Off unless asked for.
 
-Measured, zero dispatches, cold: a 12-vent enclosure in 0.42 s, 72 vents in
-0.53 s, 300 vents in 0.78 s.
+Measured cold on certified `INCONSEQUENTIAL` `DIRECT` jobs: zero specialist calls;
+a 12-vent enclosure in 0.42 s, 72 vents in 0.53 s, 300 vents in 0.78 s.
 
 ### Changed — consequence is two levels, everywhere
 
-The charters classified `R0`–`R3` and then wrote a two-value enum into
-`job.json`, with nothing mapping between them: an `R3` job became
-`CONSEQUENTIAL` and every `R3` guarantee evaporated at the file boundary. Four
-names that decay to two on write are worse than two names, because they read
-like protection that is not there.
+An earlier revision classified jobs with four risk-tier names and then wrote a
+two-value enum into `job.json`, with nothing mapping between them: a highest-tier
+job became `CONSEQUENTIAL` and every finer-grained guarantee evaporated at the
+file boundary. Four names that decay to two on write are worse than two names,
+because they read like protection that is not there.
 
 `INCONSEQUENTIAL` and `CONSEQUENTIAL` are now the only levels in the charters as
-well as the code. The prohibited applications did not become a third level —
-they are `safety.MANDATORY_CONCERNS`, which the mandatory safety review must
-address explicitly. The team route's `risk_class` frontmatter survives because
-`validate` enforces one thing mechanically that no review can, and
-`team-contracts-v4.md` now states the mapping instead of leaving it to be
-guessed.
+well as the code. No legacy risk-tier field survives at the file boundary.
+The prohibited applications did not become a third level — they are
+`safety.MANDATORY_CONCERNS`, which the mandatory safety review must address
+explicitly. `team-contracts-v4.md` documents the two-value consequence field and
+the review obligations instead of leaving a discarded risk mapping to be guessed.
 
 
 ### Changed — the pipeline runs the phases a job actually has
@@ -68,10 +72,12 @@ contradicted itself: `COMPACT` was defined as having "no recreated mating
 geometry", while `REFERENCE_BUILD` exists to reconstruct exactly that.
 
 The profile is now decided by one question, what must be recovered from
-evidence, and it decides which phases run. `DIRECT` (dimensions stated, nothing
-recreated) is two dispatches; `FITTED` (one measured object) is four, with the
-blind rebuild folded into the candidate build and its overlay into
-verification; `FULL` is every phase. `PRINT_PREP` became conditional on what
+evidence, and it decides which phases run. Certified `INCONSEQUENTIAL` `DIRECT`
+(dimensions stated, nothing recreated) has no review callback; certified
+`CONSEQUENTIAL` `DIRECT` has exactly one bounded safety review and no normal
+geometric verifier. `FITTED` retains its required bounded specification review,
+with independent verification when configured; `FULL` retains specification and
+independent-verification review. `PRINT_PREP` became conditional on what
 `commission.json` reports rather than on the profile.
 
 Two rules survive every profile because the archive shows what happens without
@@ -253,15 +259,12 @@ identical inputs after a single change (see AGENTS.md → *Changing a role*).
   — a choice the wall guidance neither caused nor prevents, and one that is now
   clearly systematic rather than a fluke. Accuracy cost about a third more tokens.
 
-### Added — the gates enforce what the contract claims
+### Changed — the gates enforce what the contract claims
 
-- **`R3_ACCEPTANCE_PROHIBITED`.** The contract says the pipeline must never mark a
-  life-safety / medical / load-bearing / regulated job accepted "regardless of what
-  any gate, checklist, or verification report reports", and that a `PASS` report for
-  such a job is invalid for that reason alone. Nothing enforced it: an R3 job with
-  `status: PASS` validated clean. `risk_class` is now a `job_state.md` frontmatter
-  field with a checked enum, and R3 + an acceptance verdict is a hard error. Four
-  regression tests, including that lower risk classes still pass.
+- Mandatory safety concerns are now addressed by the bounded safety review rather
+  than by a discarded R-tier contract. The two-value consequence field
+  remains the only classification at the file boundary, and the safety reviewer
+  must explicitly address any listed concern and its required physical evidence.
 - **`contracts status` is now part of the orchestrator's readiness gate.** It is the
   only check that compares each contract's `revision` against what downstream
   contracts bound to — a `dimensions.md` revised after the plan cited it surfaces as

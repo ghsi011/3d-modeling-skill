@@ -37,10 +37,33 @@ uv run design-tool run-job job_dir/ [--no-render]
 | `template` | a certified template name; omit to let routing decide |
 | `parameters` | the template's parameters, in mm |
 | `consequence` | `INCONSEQUENTIAL` or `CONSEQUENTIAL` — there is no third level |
+| `printer` | **required** printer profile name; the pipeline never invents the machine |
+| `material` | **required** object naming non-empty `process` and `material` strings |
+| `nozzle` | **required** object with positive numeric `diameter_mm` |
+| `orientation` | **required** object with `model_to_printer_matrix` (`identity` or a 4×4 numeric matrix) and numeric `bed_z_mm` |
 | `stated` | which parameters the user actually gave, as opposed to chosen for them |
 | `updated_utc` | timestamp carried into the contract |
 | `reviewer` | who answers the reviews, by their own account — including `fresh_context`, which nothing here can verify and so is never assumed |
 | `modifiers`, `step`, `evidence`, `interface_map`, `cache_dir` | optional; see `runner.JobRequest` |
+
+The manufacturing fields are part of the immutable `model_contract.json`, not
+informal print notes. A minimal complete job has all four:
+
+```json
+{
+  "job_id": "clip-01",
+  "template": "c_clip",
+  "consequence": "INCONSEQUENTIAL",
+  "printer": "Bambu Lab X2D",
+  "material": {"process": "FDM", "material": "PETG"},
+  "nozzle": {"diameter_mm": 0.4},
+  "orientation": {"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+  "parameters": {"bore_d": 12.0, "wall": 3.0, "height": 9.0, "mouth_gap": 9.0,
+                 "flange_w": 40.0, "flange_d": 22.0, "flange_t": 5.0, "screw_d": 4.8},
+  "stated": ["bore_d", "flange_w"],
+  "updated_utc": "<iso8601>"
+}
+```
 
 Exit codes, which extend the table above:
 
@@ -52,10 +75,13 @@ Exit codes, which extend the table above:
 
 ### Answering a review
 
-A `CONSEQUENTIAL` job must make a bounded safety call, a `FITTED` job needs one
-spec call, and `VERIFIED` requires independent verification. Those are judgements
-about a part; a deterministic program that returned one would be inventing it. So
-the CLI writes the evidence and stops:
+A certified `INCONSEQUENTIAL` `DIRECT` job has no review callback. A certified
+`CONSEQUENTIAL` `DIRECT` job has exactly one bounded safety review and no normal
+geometric verifier. `FITTED` requires one bounded specification review; an independent
+verification review may follow when the caller supplies it and the screen is clear.
+`FULL` requires both the specification review and independent verification. These are
+judgements about a part; a deterministic program that returned one would be inventing
+it. So the CLI writes the evidence and stops:
 
 ```
 design-tool: this job needs a safety review before it can finish.
@@ -168,6 +194,8 @@ This package validates the v4 team contracts: the four Markdown ones through the
 frontmatter (identity, revision, binding hashes), and the JSON ones structurally.
 Passing it proves contract structure, identifiers, declared hashes, and revision
 bindings only. It doesn't prove geometric or manufacturing correctness.
+`job_state.md` is a closed header: `consequence` is required, legacy `risk_class` is
+rejected, and unknown frontmatter fields are errors rather than ignored warnings.
 
 ### `validate`
 

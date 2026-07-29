@@ -63,6 +63,8 @@ class Contract:
     expected_bodies: int
     orientation: dict[str, Any]
     material: dict[str, Any]
+    nozzle: dict[str, Any]
+    printer: str
     modifiers: tuple[str, ...]
     minimum_coverage: float
     step_required: bool
@@ -84,6 +86,8 @@ class Contract:
             "expected_bodies": self.expected_bodies,
             "orientation": self.orientation,
             "material": self.material,
+            "nozzle": self.nozzle,
+            "printer": self.printer,
             "modifiers": list(self.modifiers),
             "minimum_coverage": self.minimum_coverage,
             "step_required": self.step_required,
@@ -160,5 +164,37 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
         problems.append("minimum_coverage must be in (0, 1]")
     S.require_enum(contract.consequence, S.CONSEQUENCE, what="contract.consequence")
     S.require_enum(contract.backend, S.BACKEND, what="contract.backend")
+
+    if not isinstance(contract.printer, str) or not contract.printer.strip():
+        problems.append("printer is required and must be a non-empty string")
+
+    material = contract.material
+    if (not isinstance(material, dict)
+            or not isinstance(material.get("process"), str)
+            or not material["process"].strip()
+            or not isinstance(material.get("material"), str)
+            or not material["material"].strip()):
+        problems.append("material must name non-empty process and material strings")
+
+    nozzle = contract.nozzle
+    diameter = nozzle.get("diameter_mm") if isinstance(nozzle, dict) else None
+    if (not isinstance(diameter, (int, float)) or isinstance(diameter, bool)
+            or diameter <= 0):
+        problems.append("nozzle.diameter_mm must be a positive number")
+
+    orientation = contract.orientation
+    matrix = (orientation.get("model_to_printer_matrix")
+              if isinstance(orientation, dict) else None)
+    matrix_ok = matrix == "identity" or (
+        isinstance(matrix, list) and len(matrix) == 4
+        and all(isinstance(row, list) and len(row) == 4
+                and all(isinstance(value, (int, float)) and not isinstance(value, bool)
+                        for value in row)
+                for row in matrix))
+    bed_z = orientation.get("bed_z_mm") if isinstance(orientation, dict) else None
+    if not matrix_ok:
+        problems.append("orientation.model_to_printer_matrix must be 'identity' or a 4x4 matrix")
+    if not isinstance(bed_z, (int, float)) or isinstance(bed_z, bool):
+        problems.append("orientation.bed_z_mm must be a number")
     return problems
 

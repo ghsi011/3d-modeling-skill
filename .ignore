@@ -1,3 +1,10 @@
 #! Keep local deep-work state readable to repository tooling.
 !.slim/deepwork/
 !.slim/deepwork/**
+
+# BEGIN oh-my-opencode-slim worktrees
+!.slim/
+!.slim/worktrees.json
+!.slim/worktrees/
+!.slim/worktrees/**
+# END oh-my-opencode-slim worktrees

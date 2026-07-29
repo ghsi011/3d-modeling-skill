@@ -166,12 +166,11 @@ a render.
 
 ## Everything else the launcher offers
 
-The launcher has sixteen verbs. Every one is listed here, because a charter that
+The launcher has fifteen verbs. Every one is listed here, because a charter that
 tells a reader to run something this file does not mention is a dead end.
 
 | verb | what it is for |
-|---|---|
-| `direct` | the whole no-dispatch route in one call: intake, plan, build, gate, screen question |
+|---|---|---|
 | `intake` | `job_state.md` and `dimensions.md` for a job, judgments left blank |
 | `build` | `model.py` for a template-covered part, parameters checked by building once |
 | `plan template` / `plan check` | the built-in DIRECT plan, and the gate that rejects an unbuildable one before a build |

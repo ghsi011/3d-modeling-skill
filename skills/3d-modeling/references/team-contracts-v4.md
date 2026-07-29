@@ -27,6 +27,24 @@ Rules:
   fork, or re-author shared workflow/tooling patterns. Reading a shared reference does not
   grant write authority over another role's contract.
 
+## `job.json` and manufacturing inputs
+
+`job.json` is the input to `design-tool run-job`; it is not a place for the runner
+to fill in manufacturing assumptions. Every canonical job must carry these required
+fields, which are copied into the immutable `model_contract.json` before geometry is
+built:
+
+| Field | Required shape | Contract meaning |
+|---|---|---|
+| `printer` | non-empty string | named printer profile used for the job |
+| `material` | object with non-empty `process` and `material` strings | process and material assumptions |
+| `nozzle` | object with positive numeric `diameter_mm` | nozzle-dependent geometry and print limits |
+| `orientation` | object with `model_to_printer_matrix` (`identity` or a 4×4 numeric matrix) and numeric `bed_z_mm` | exact model-to-printer transform and bed placement |
+
+The same four keys are required in the model contract payload alongside `parameters`,
+`modifiers`, `step_required`, and `consequence`. A documented `run-job` example that
+omits any one of them is incomplete and must not be copied as a job.
+
 ## `job_state.md`
 
 ```markdown
@@ -38,6 +56,7 @@ revision: <integer>
 owner: orchestrator
 mode: PIPELINE
 profile: DIRECT | FITTED | FULL
+consequence: INCONSEQUENTIAL | CONSEQUENTIAL
 state: INTAKE | METROLOGY | REFERENCE_BUILD | REFERENCE_ACCEPTANCE | PRINT_PLAN | CANDIDATE_BUILD | INDEPENDENT_VERIFICATION | PRINT_PREP | FINAL_PREP_REVIEW | DELIVERY | BLOCKED
 backend: trimesh-manifold | build123d
 active_candidate: <id-or-none>
@@ -66,19 +85,30 @@ updated_utc: <iso-8601>
 |---|---|---|
 ```
 
+The `job_state.md` frontmatter is a closed header: `consequence` is required and
+must be `INCONSEQUENTIAL` or `CONSEQUENTIAL`. Legacy `risk_class` and any other
+unknown frontmatter header field are validation errors, not compatibility warnings. Route,
+bound-input, gate, dispatch, and open-question tables belong in the Markdown body,
+not in the frontmatter header.
+
 The profile decides which phases run. `DIRECT`: every design-driving dimension is stated, nothing is recreated from evidence and a
-template covers the shape, so `METROLOGY`, `REFERENCE_BUILD` and `REFERENCE_ACCEPTANCE` have
-no input and the orchestrator does the whole job in its own turns without dispatching — its
-`## Route` recording "built and checked by the orchestrator; no independent fresh-context
-verification". `FITTED`: one measured real object, so the blind rebuild happens inside the
-candidate build and its overlay inside verification. `FULL`: multi-part/moving mechanisms,
-safety/load consequences, several independent interfaces, multi-colour alignment, or parallel
-candidates -- every phase runs, except that `METROLOGY` is skipped when the job carries no
-photographs, measurements or real object: the metrologist reconciles sources, and given one
-source it can only transcribe. The orchestrator then writes `dimensions.md` itself and records
-in `job_state.md` that no metrologist was dispatched. See [`../SKILL.md`](../SKILL.md) for the
-deciding question and the full sequences. `PRINT_PLAN` and `INDEPENDENT_VERIFICATION` run
-under every profile.
+template covers the shape, so `METROLOGY`, `REFERENCE_BUILD`, `REFERENCE_ACCEPTANCE`,
+and independent verification have no input. The orchestrator does the deterministic job
+in its own turns without dispatching. A certified `INCONSEQUENTIAL` `DIRECT` job has no
+review callback; a certified `CONSEQUENTIAL` `DIRECT` job adds exactly one safety review
+and no normal geometric verifier.
+`FITTED`: one measured real object, so the bounded specification review is required, the
+blind rebuild happens inside the candidate build, and its overlay is checked in
+verification when that review is supplied. `FULL`: multi-part/moving mechanisms, several
+independent interfaces, multi-colour alignment, or parallel candidates -- the bounded
+specification review and independent verification are both required. Every route retains
+its route-required reviews; consequence does not change geometry routing. `METROLOGY` is
+skipped when the job carries no photographs, measurements or real object: the metrologist
+reconciles sources, and given one source it can only transcribe. The orchestrator then
+writes `dimensions.md` itself and records in `job_state.md` that no metrologist was
+dispatched. See [`../SKILL.md`](../SKILL.md) for the deciding question and the full
+sequences. `PRINT_PLAN` is supplied by the certified template on `DIRECT`; it is a
+phase for `FITTED`/`FULL`, not an extra review dispatch on `DIRECT`.
 
 **A multi-part job is many projects, not one directory with many STLs.** Contracts resolve
 as `<project-dir>/<name>` with no search below it, and `dt.py audit` reads
@@ -92,25 +122,8 @@ not itself a project and `validate` should not be pointed at it.
 `job_state.md`'s `## Route` section also records the job's consequence class from the
 orchestrator's [Consequence and escalation gate](../roles/orchestrator.md), its rationale, and
 the claims the pipeline is prohibited from making. That gate carries **two** values,
-`INCONSEQUENTIAL` and `CONSEQUENTIAL`, and they are what `job.json` carries.
-
-The `risk_class` frontmatter field is older and finer-grained: `R0_DECORATIVE` /
-`R1_LOW_CONSEQUENCE` / `R2_ENGINEERING_REVIEW` / `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE`. It is
-not a second consequence model — it exists because `validate` enforces one thing mechanically
-that no review can: it rejects any project whose `job_state` declares
-`R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` while its `verification_report` claims `PASS`, with
-`R3_ACCEPTANCE_PROHIBITED`. That check is live and is worth keeping, so the field stays and the
-mapping is written down here rather than left to be guessed:
-
-| gate value | applications | `risk_class` |
-| --- | --- | --- |
-| `INCONSEQUENTIAL` | cosmetic, display, light functional | `R0_DECORATIVE` or `R1_LOW_CONSEQUENCE` |
-| `CONSEQUENTIAL` | injury-capable failure modes | `R2_ENGINEERING_REVIEW` |
-| `CONSEQUENTIAL` | any of `safety.MANDATORY_CONCERNS` | `R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE` |
-
-`validate` rejects an unknown value. Absence of the field remains valid for backward
-compatibility, but a job with no `risk_class` cannot be checked for the R3 prohibition, so omit
-it only for work that is plainly decorative.
+`INCONSEQUENTIAL` and `CONSEQUENTIAL`, and they are what `job.json` carries. The class does not
+change the geometry profile; a `CONSEQUENTIAL` job adds the bounded safety review.
 
 Both backends are headless and file-based, so candidates isolate by directory rather than by lock. There is no mutation lease and no single-session backend.
 
@@ -157,6 +170,14 @@ updated_utc: <iso-8601>
 Every visible feature must appear in blind-build completeness. A cosmetic feature may use a
 visual/bounded envelope, but cannot be omitted. Camera, control, connector, protective-lip,
 handed, load, and clearance features are functional.
+
+An imported or off-template solid is a legitimate starting input when no evidence recovery
+is needed. Bind the source artifact by its project-relative path and SHA-256, and record
+dimension provenance explicitly: use **inherited from imported solid** for a value read
+from that artifact (including the measurement method), and **chosen by design** for a new
+value or adjustment introduced by the team. Neither label is a substitute for a user
+statement or an external measurement, and an imported solid is not thereby a certified
+`DIRECT` template.
 
 A mating/fit-relevant dimension records **as-observed geometry and its measurement
 uncertainty** (instrument resolution, repeat-read spread, near-feature bias) — not a fit class,

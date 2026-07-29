@@ -1,6 +1,6 @@
 ---
 name: 3d-modeling
-description: Design and verify 3D-printable parts. Use for any request to model, dimension, or print-prep a physical object. Writes an immutable contract before the geometry, builds it with build123d or trimesh, measures the exported mesh against that contract, screens for geometry nobody declared, and reports exactly what was established -- most jobs in one command and no model calls.
+description: Design and verify 3D-printable parts. Use for any request to model, dimension, or print-prep a physical object. Writes an immutable contract before the geometry, builds it with build123d or trimesh, measures the exported mesh against that contract, screens for geometry nobody declared, and reports exactly what was established -- certified INCONSEQUENTIAL DIRECT jobs can use one command with no model calls, while other routes keep their required reviews.
 ---
 
 # 3D modeling

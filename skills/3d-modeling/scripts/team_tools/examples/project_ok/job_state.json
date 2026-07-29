@@ -11,6 +11,7 @@
   ],
   "contract": "job-state",
   "contract_version": 4,
+  "consequence": "INCONSEQUENTIAL",
   "dispatches": [
     {
       "authorized_inputs": "dimensions r1, plan r1",

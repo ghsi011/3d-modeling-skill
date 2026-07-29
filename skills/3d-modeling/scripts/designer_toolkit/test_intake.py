@@ -8,6 +8,7 @@ invented.
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,233 @@ def _run(out: Path, *extra):
 
 
 class TestIntake(unittest.TestCase):
+    def test_off_template_input_writes_valid_contracts_with_visible_provenance(self) -> None:
+        """Imported geometry is a supported starting point, not an accidental
+        template name that should be rejected or silently treated as one.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"imported mesh bytes")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            code = intake.main([
+                "--job-id", "imported", "--template", "none",
+                "--param", "overall_mm=(30.0, 20.0, 10.0)",
+                "--param", "clearance=0.25",
+                "--imported-artifact", str(artifact), "--imported-sha256", digest,
+                "--inherited", "overall_mm", "--chosen", "clearance",
+                "--inherited-method", "overall_mm=CAD bounding-box measurement",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(0, code)
+            for name in ("job_state.md", "dimensions.md"):
+                self.assertTrue((out / name).is_file())
+            job = (out / "job_state.md").read_text(encoding="utf-8")
+            dimensions = (out / "dimensions.md").read_text(encoding="utf-8")
+            self.assertIn("off-template", job)
+            self.assertIn("profile: FULL", job)
+            self.assertNotIn("profile: DIRECT", job)
+            self.assertIn("backend: trimesh-manifold", job)
+            for text in (job, dimensions):
+                self.assertIn("imported.stl", text)
+                self.assertIn(digest, text)
+            self.assertIn("inherited from imported solid", dimensions)
+            self.assertIn("inherited from imported solid; CAD bounding-box measurement", dimensions)
+            self.assertNotIn("none is image-derived or measured", dimensions)
+            self.assertIn("| overall_mm |", dimensions)
+            self.assertIn("| clearance | 0.25 | chosen by design |", dimensions)
+            self.assertNotIn("| clearance | 0.25 | inherited from imported solid |", dimensions)
+
+    def test_inherited_dimensions_require_explicit_methods(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "missing-method", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--inherited", "width",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_inherited_methods_reject_unknown_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "unknown-method", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--inherited", "width",
+                "--inherited-method", "depth=CAD measurement",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_inherited_methods_reject_duplicate_or_ambiguous_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "duplicate-method", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--inherited", "width",
+                "--inherited-method", "width=CAD measurement",
+                "--inherited-method", "width=mesh measurement",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_inherited_methods_reject_chosen_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "chosen-method", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--chosen", "width",
+                "--inherited-method", "width=CAD measurement",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_step_import_maps_to_the_existing_brep_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.step"
+            artifact.write_bytes(b"step source")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            code = intake.main([
+                "--job-id", "step-import", "--template", "none",
+                "--imported-artifact", str(artifact), "--imported-sha256", digest,
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(0, code)
+            job = (out / "job_state.md").read_text(encoding="utf-8")
+            self.assertIn("profile: FULL", job)
+            self.assertIn("backend: build123d", job)
+
+            done = subprocess.run(
+                [sys.executable, "-m", "team_tools.contracts", "validate", str(out),
+                 "--require", "job_state,dimensions"],
+                cwd=str(SCRIPTS), capture_output=True, text=True, check=False)
+            self.assertEqual(0, done.returncode, done.stdout[-1500:])
+
+    def test_off_template_requires_an_existing_imported_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw) / "project"
+            code = intake.main([
+                "--job-id", "missing", "--template", "none",
+                "--imported-artifact", str(out / "missing.stl"),
+                "--imported-sha256", "0" * 64,
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse(out.exists())
+
+    def test_off_template_rejects_a_hash_that_does_not_match_the_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+
+            code = intake.main([
+                "--job-id", "wrong-hash", "--template", "none",
+                "--imported-artifact", str(artifact), "--imported-sha256", "0" * 64,
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_off_template_cannot_be_marked_direct(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "direct-import", "--template", "none", "--profile", "DIRECT",
+                "--imported-artifact", str(artifact), "--imported-sha256", digest,
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_off_template_rejects_unsupported_artifact_types(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.txt"
+            artifact.write_bytes(b"not a supported geometry artifact")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "unsupported", "--template", "none",
+                "--imported-artifact", str(artifact), "--imported-sha256", digest,
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_off_template_rejects_ambiguous_dimension_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "ambiguous", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--inherited", "width", "--chosen", "width",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
+    def test_off_template_rejects_unclassified_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            artifact = out / "imported.stl"
+            artifact.write_bytes(b"mesh")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+            code = intake.main([
+                "--job-id", "unclassified", "--template", "none",
+                "--param", "width=10.0", "--imported-artifact", str(artifact),
+                "--imported-sha256", digest, "--inherited", "other",
+                "--updated-utc", "1970-01-01T00:00:00Z", "--out", str(out),
+            ])
+
+            self.assertEqual(2, code)
+            self.assertFalse((out / "job_state.md").exists())
+
     def test_what_it_writes_validates(self) -> None:
         """A scaffold the contract checker rejects has saved nobody anything."""
         try:
@@ -141,13 +369,25 @@ class TestIntake(unittest.TestCase):
             self.assertEqual("hand-edited",
                              (out / "job_state.md").read_text(encoding="utf-8"))
 
-    def test_it_refuses_to_scaffold_a_prohibited_job(self) -> None:
-        """R3 never reaches delivery, so making its paperwork quicker only
-        smooths a path that must not be walked."""
+    def test_consequential_jobs_are_scaffolded(self) -> None:
+        """CONSEQUENTIAL jobs need independent verification, but intake still
+        scaffolds their contracts — the prohibition is on acceptance, not on
+        writing the job_state."""
+        try:
+            import trimesh  # noqa: F401
+            import manifold3d  # noqa: F401
+        except ImportError:
+            self.skipTest("needs trimesh + manifold3d")
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
-            self.assertEqual(2, _run(out, "--risk", "R3_PROHIBITED_AUTONOMOUS_ACCEPTANCE"))
-            self.assertFalse((out / "job_state.md").exists())
+            self.assertEqual(0, _run(out, "--consequence", "CONSEQUENTIAL"))
+            self.assertTrue((out / "job_state.md").exists())
+
+    def test_legacy_risk_option_is_not_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaises(SystemExit) as raised:
+                _run(Path(raw), "--risk", "INCONSEQUENTIAL")
+            self.assertEqual(2, raised.exception.code)
 
     def test_an_unknown_template_lists_the_real_ones(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
