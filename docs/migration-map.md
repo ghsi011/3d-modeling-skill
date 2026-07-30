@@ -14,8 +14,8 @@ text changed, **ret** = leaves agent instructions but stays importable.
 |---|---|
 | 0 — freeze behavior | **done** (`bea8d66`) |
 | 1 — route and CLI unification | **done** (`43ccd0d`) |
-| 2 — custom from-scratch lane | **partly done** (`6fba60a`) — the authored lane runs, but three rows below were planned and not built: `pipeline/commissions.py`, a `design-tool commission` verb, and a `certified` flag on the starting templates. `dt.py commission` therefore does NOT leave agent instructions yet |
-| 3 — modification lane | **done** (`e2b3d0b`) |
+| 2 — custom from-scratch lane | **superseded** — see [Repair stages](#repair-stages-adr-0002) below |
+| 3 — modification lane | **superseded** — see [Repair stages](#repair-stages-adr-0002) below |
 | 4 — fitted / photo workflow | not started |
 | 5 — motion and assemblies | not started; the declaration and its routing consequences exist, the sweep engine does not |
 | 6 — packaging and hardening | not started |
@@ -25,6 +25,29 @@ Until Phase 5 lands, a job that declares motion routes `FULL` and its
 sweep is named as unmeasured rather than implied complete. Until Phase 6 lands,
 there is no resource governor and no versioned Bambu adapter; `make_3mf.py` and
 `make_bambu_3mf.py` are unchanged from before this work.
+
+## Repair stages (ADR 0002)
+
+Two independent reviews of the Phase 0-3 consolidation found 21 defects, three of
+which mean the `CUSTOM` and `MODIFY` receipts do not carry the meaning they
+claim: the declared route does not control execution, the candidate re-derives
+its own acceptance criteria on every run, and the preservation audit is unseeded
+and nondeterministic.
+
+[ADR 0002](adr/0002-route-and-contract-authority.md) records the decision: settle
+route authority and acceptance-contract authority first, then rebuild the
+`CUSTOM` lane on top of them. Phases 2 and 3 below are therefore **superseded** —
+their tables record what was attempted, not what stands. Until the repair lands,
+`CUSTOM` and `MODIFY` fail closed rather than reaching a successful final status.
+
+The repair runs in five stages: route authority -> acceptance contract -> state
+lifecycle -> gate consolidation -> preservation. No stage after 2 begins until a
+built artifact is structurally unable to influence its own acceptance criteria.
+
+Phase 2 rows that were planned and never built are unchanged by this and still
+owed: `pipeline/commissions.py`, a `design-tool commission` verb, and a
+`certified` flag on the starting templates. `dt.py commission` therefore does NOT
+leave agent instructions yet.
 
 ## Phase 0 — freeze behavior
 
