@@ -127,6 +127,70 @@ source is what keeps that visible.
 value like any other — stated by the brief or chosen by design — and `run`
 refuses with exit 2 rather than guessing it.
 
+## `design-tool diagnose` — what a supplied artifact actually is
+
+```bash
+uv run design-tool diagnose <artifact.step|.stl|.obj|.3mf> [--out report.json]
+```
+
+Measures a supplied file and classifies what can be built on it. **It never
+writes to the artifact** — not a repair, not a normalization, not a re-export.
+The supplied file is frequently the only authoritative copy, and a diagnosis that
+silently fixed what it found would destroy the evidence that it needed fixing.
+
+| classification | meaning |
+| --- | --- |
+| `USABLE_EXACT` | an exact B-rep with solids; boolean edits are exact |
+| `USABLE_MESH` | a closed, consistent mesh; edits are mesh operations |
+| `REPAIR_REQUIRED` | loadable, but not sound enough to build on as it is |
+| `RECONSTRUCTION_REQUIRED` | nothing here can be built on (exit 1) |
+
+Reported per format: body/component count, bbox, watertightness and winding for
+meshes, faces with no usable area for B-reps, degenerate faces, boundary edges,
+and the 3MF scene — objects, components, build items with their transforms, and
+materials — rather than one merged solid, because that structure *is* the
+functional information in a multi-part or multi-colour job.
+
+Units are answered as honestly as the format allows. STL carries none, so the
+bbox is reported as authored with a *suspicion* beside it (`/25.4` and `x1000`
+arithmetic shown) and nothing is converted. 3MF and STEP carry them and they are
+read. A mesh is reported twice — as parsed and after merging coincident vertices
+— because an STL is a triangle soup and an unmerged read calls every sound part
+`REPAIR_REQUIRED`.
+
+## Modification: the edit scope and the preservation audit
+
+A `MODIFY` project declares an `edit_scope` before the edit: the artifact, the
+named region, **a `region_box`**, what must be preserved, what may be removed,
+what is being added, the expected body delta, and whether a mesh fallback is
+allowed. A name alone cannot be compared against, so the box is what the audit
+measures; the name is what a person argues with.
+
+[`pipeline/preservation.py`](../skills/3d-modeling/scripts/pipeline/preservation.py)
+compares everything outside that box, bidirectionally — sampling only the source
+misses material the edit added outside the region, and sampling only the
+candidate misses material it removed. It reaches the commissioning verdict as a
+`preservation` contract feature, not as a separate report, so a job can actually
+fail for it.
+
+| verdict | meaning |
+| --- | --- |
+| `PRESERVED_EXACTLY` | only when the caller declares both sides exact B-rep exports from one kernel |
+| `PRESERVED_WITHIN_TOLERANCE` | no sampled point outside the region moved more than the declared band |
+| `CHANGED` | something outside the declared region moved, with the worst point |
+| `UNMEASURABLE` | no region box, or the region covers the whole part — escalates, never passes |
+
+**The claim never outruns the method.** A sampled mesh comparison cannot
+establish exact preservation, so it does not say it did; the report carries the
+method, the sample count and the tolerance it was measured at.
+
+The support ceiling is inherited on a `MODIFY` job: a generated zero fails a
+supplied part for overhangs that were in the file before anybody touched it, and
+the designer cannot chamfer them away without redrawing the part. The ceiling is
+therefore the source artifact's own measurement — taken from a file fixed before
+the job started, so it is not a threshold tuned to the candidate — and any
+overhang the edit *adds* still fails.
+
 ### `route_decision.json`
 
 The route, the deciding condition, the source mode, the escalation triggers that

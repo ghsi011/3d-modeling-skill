@@ -240,6 +240,10 @@ class EditScope:
 
     artifact_id: str
     region: str
+    # The named region is what a person reads; the box is what the preservation
+    # audit measures against. Both, because a name alone cannot be compared and a
+    # box alone cannot be argued with.
+    region_box: dict[str, Any] | None = None
     preserve: tuple[str, ...] = ()
     may_remove: tuple[str, ...] = ()
     add: tuple[str, ...] = ()
@@ -247,6 +251,10 @@ class EditScope:
     mesh_fallback_allowed: bool = False
     preserve_metadata: bool = True
     alignment_transform: Any = "identity"
+    # The band a sampled comparison may call unchanged. Two tessellations of one
+    # surface disagree by the chord error of whichever is coarser, so this is not
+    # zero -- and it is declared before the edit, like everything else here.
+    preservation_tolerance_mm: float = 0.05
 
     def as_dict(self) -> dict[str, Any]:
         payload = dataclasses.asdict(self)
@@ -262,6 +270,30 @@ class EditScope:
         if not self.region.strip():
             out.append("edit_scope: region must name the edit region; the preservation "
                        "audit measures everything outside it")
+        box = self.region_box
+        if box is None:
+            out.append("edit_scope: region_box is required -- 'outside the edit "
+                       "region' has no geometric meaning without one, and the "
+                       "preservation audit would have nothing to compare")
+        elif (not isinstance(box, dict)
+              or not isinstance(box.get("min"), (list, tuple))
+              or not isinstance(box.get("max"), (list, tuple))
+              or len(box["min"]) != 3 or len(box["max"]) != 3):
+            out.append("edit_scope: region_box must be {'min': [x, y, z], "
+                       "'max': [x, y, z]}")
+        else:
+            for axis, (low, high) in enumerate(zip(box["min"], box["max"])):
+                try:
+                    if S.require_finite_number(
+                            high, what="edit_scope.region_box.max") <=                             S.require_finite_number(
+                                low, what="edit_scope.region_box.min"):
+                        out.append(f"edit_scope: region_box is empty on axis "
+                                   f"{'xyz'[axis]}")
+                except S.SchemaError as exc:
+                    out.append(str(exc))
+        if self.preservation_tolerance_mm <= 0:
+            out.append("edit_scope: preservation_tolerance_mm must be positive; a "
+                       "zero band cannot be met by two tessellations of one surface")
         if isinstance(self.expected_body_delta, bool) or \
                 not isinstance(self.expected_body_delta, int):
             out.append("edit_scope: expected_body_delta must be an integer")
@@ -615,6 +647,9 @@ def from_payload(payload: dict[str, Any]) -> Project:
         edit_scope = EditScope(
             artifact_id=str(edit.get("artifact_id", "")),
             region=str(edit.get("region", "")),
+            region_box=edit.get("region_box"),
+            preservation_tolerance_mm=float(
+                edit.get("preservation_tolerance_mm", 0.05)),
             preserve=tuple(edit.get("preserve") or ()),
             may_remove=tuple(edit.get("may_remove") or ()),
             add=tuple(edit.get("add") or ()),

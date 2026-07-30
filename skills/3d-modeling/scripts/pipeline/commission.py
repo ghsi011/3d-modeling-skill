@@ -26,7 +26,7 @@ from .contract import Contract, Feature
 KNOWN_CHECKS = frozenset({
     "section_area", "bed_contact", "through_hole", "bore_by_displacement",
     "void_region", "envelope", "watertight", "bodies", "unit_scale", "seated",
-    "fit_acceptance", "overhang",
+    "fit_acceptance", "overhang", "preservation",
 })
 
 
@@ -239,6 +239,42 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                      f"faces with normal_z <= {threshold:g}, above the bed band",
                      allowed, round(float(got), 3), tol,
                      _verdict(feature, float(got) - allowed <= tol, True))
+
+    if kind == "preservation":
+        # The half of a MODIFY contract that had nothing measuring it: not "the
+        # new feature is right" but "nothing else moved". A model rebuilt from
+        # scratch to add one boss passes every other check in this file.
+        from . import preservation as PR
+        region = PR.Region.from_declaration(exp.get("region"))
+        tolerance_mm = float(exp.get("tolerance_mm", PR.DEFAULT_TOLERANCE_MM))
+        tol = _tol(feature.tolerance, tolerance_mm)
+        source = ctx.path.parent / str(exp.get("source", ""))
+        if not source.is_file():
+            return _unavailable_check(
+                feature, "Preservation outside the edit region",
+                f"the declared source artifact {exp.get('source')!r} is not beside "
+                "the candidate, so there is nothing to compare against",
+                "SOURCE_MISSING", tolerance_mm, tol)
+        report = PR.audit(source_path=source, candidate_path=ctx.path,
+                          region=region, tolerance_mm=tolerance_mm,
+                          samples=int(exp.get("samples", PR.DEFAULT_SAMPLES)),
+                          exact=bool(exp.get("exact", False)))
+        if report["verdict"] == "UNMEASURABLE":
+            return _unavailable_check(
+                feature, "Preservation outside the edit region",
+                report.get("reason", "the comparison could not run"),
+                "PRESERVATION_UNMEASURABLE", tolerance_mm, tol)
+        preserved = report["verdict"] in ("PRESERVED_EXACTLY",
+                                          "PRESERVED_WITHIN_TOLERANCE")
+        return Check(f"feature-{feature.feature_id}", feature.feature_id,
+                     "Preservation outside the edit region", True,
+                     PR.as_finding(report), tolerance_mm,
+                     {"verdict": report["verdict"],
+                      "max_deviation_mm": report.get("max_deviation_mm"),
+                      "samples_outside_region": report.get("samples_outside_region"),
+                      "method": report.get("method"),
+                      "bodies": report.get("bodies")},
+                     tol, _verdict(feature, preserved, True))
 
     return _unavailable_check(
         feature, f"Feature kind {kind!r}",

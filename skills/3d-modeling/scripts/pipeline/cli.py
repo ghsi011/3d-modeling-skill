@@ -5,6 +5,7 @@
     uv run design-tool route <project>
     uv run design-tool run <project>
     uv run design-tool status <project>
+    uv run design-tool diagnose <artifact>
     uv run design-tool doctor
     uv run design-tool selftest
 
@@ -509,7 +510,47 @@ def _print_plan(project_dir: Path, project: P.Project) -> tuple[dict[str, Any], 
     return plan, problems
 
 
-def _plan_features(plan: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+def _inherited_overhang(project_dir: Path, project: P.Project,
+                        rule: dict[str, Any]) -> tuple[float, str] | None:
+    """How much unsupported area the supplied artifact already had.
+
+    A `MODIFY` job did not choose the geometry it inherited, so a zero-support
+    ceiling generated from the printer would fail it for overhangs that were
+    there before anybody touched the file -- and the designer cannot chamfer them
+    away without redrawing the part, which is the one thing a modification must
+    not do.
+
+    So the ceiling for a modification is the source artifact's own measurement.
+    That is not a threshold tuned to the candidate: it is measured on a file that
+    was fixed before the job started, and any overhang the *edit* adds still
+    fails. Where it cannot be measured, the generated zero stands, because
+    widening a limit on a guess is the failure this whole arrangement avoids.
+    """
+    scope = project.edit_scope
+    if scope is None or project.source_mode != "MODIFY":
+        return None
+    artifact = project.artifact(scope.artifact_id)
+    if artifact is None:
+        return None
+    try:
+        source = S.resolve_within(project_dir, artifact.path, what="edit source")
+        if not source.is_file():
+            return None
+        from designer_toolkit import metrics as M
+        area = float(M.overhang_area(
+            str(source),
+            threshold=float(rule.get("downward_normal_z_max", -0.73)),
+            bed_z=float(rule.get("bed_z_mm", 0.0))))
+    except Exception:                                 # noqa: BLE001 - an
+        return None                                   # unmeasurable source keeps
+                                                      # the generated zero
+    return area, (f"inherited from {artifact.path}, measured before the edit: "
+                  f"{area:.3f} mm2 of the supplied artifact already faces "
+                  "downward. The edit may not add to it.")
+
+
+def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
+                   project: P.Project | None = None) -> tuple[dict[str, Any], ...]:
     """The plan's support rules, as contract features the gate already measures.
 
     One rule, not the whole plan: the support ceiling is what decides whether a
@@ -525,21 +566,58 @@ def _plan_features(plan: dict[str, Any]) -> tuple[dict[str, Any], ...]:
             # than approximated: a rule measured by the wrong instrument reports
             # a number about something else.
             continue
+        ceiling = float(rule.get("max_out_of_limit_area_mm2", 0.0))
+        note = (f"print plan rule {rule.get('id', index)}: "
+                f"{rule.get('disposition')}")
+        inherited = (_inherited_overhang(project_dir, project, rule)
+                     if project_dir is not None and project is not None else None)
+        if inherited is not None:
+            ceiling, why = inherited
+            note = f"{note}; {why}"
         rows.append({
             "feature_id": f"plan-support-{index:02d}",
             "kind": "overhang",
-            "max_area_mm2": float(rule.get("max_out_of_limit_area_mm2", 0.0)),
+            "max_area_mm2": ceiling,
             "downward_normal_z_max": float(
                 rule.get("downward_normal_z_max", -0.73)),
             "bed_z_mm": float(rule.get("bed_z_mm", 0.0)),
-            # Zero allowance on top of a zero ceiling. The plan's own number is
-            # the band; adding a default one here would widen a threshold the
-            # plan set deliberately.
+            # Zero allowance on top of the ceiling. The plan's own number is the
+            # band; adding a default one here would widen a threshold the plan
+            # set deliberately.
             "tolerance": {"abs": 0.0},
-            "note": f"print plan rule {rule.get('id', index)}: "
-                    f"{rule.get('disposition')}",
+            "note": note,
         })
     return tuple(rows)
+
+
+def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
+    """The contract row that measures everything outside the declared edit region.
+
+    A contract feature rather than a report written afterwards, so it reaches the
+    same commissioning verdict and the same status decision as every other
+    expectation. A preservation audit that could only be read in its own JSON
+    would be a receipt: nothing downstream would refuse a job for failing it.
+    """
+    scope = project.edit_scope
+    if scope is None:
+        return ()
+    artifact = project.artifact(scope.artifact_id)
+    if artifact is None:
+        return ()
+    exact = (artifact.classification == "USABLE_EXACT"
+             and not scope.mesh_fallback_allowed)
+    return ({
+        "feature_id": "preservation",
+        "kind": "preservation",
+        "source": artifact.path,
+        "region": scope.region_box,
+        "tolerance_mm": scope.preservation_tolerance_mm,
+        "exact": exact,
+        # `abs: 0.0` on top of the row's own tolerance_mm: the band lives in the
+        # comparison, and a second one here would widen it.
+        "tolerance": {"abs": 0.0},
+        "note": f"everything outside {scope.region!r} must survive the edit",
+    },)
 
 
 def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
@@ -617,7 +695,9 @@ def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecisio
         route=decision.route,
         route_condition=decision.condition,
         require_verification=decision.requires_verification,
-        plan_features=_plan_features(plan),
+        plan_features=(_plan_features(plan, project_dir=project_dir,
+                                      project=project)
+                       + _preservation_feature(project)),
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
         **_review_calls(project_dir, project),
         **fields)
@@ -833,6 +913,11 @@ def status(argv: list[str]) -> int:
     return 0
 
 
+def diagnose(argv: list[str]) -> int:
+    from . import diagnose as _diagnose
+    return _diagnose.main(argv)
+
+
 def doctor(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="design-tool doctor")
     parser.parse_args(argv)
@@ -862,6 +947,7 @@ COMMANDS = {
     "route": route,
     "run": run,
     "status": status,
+    "diagnose": diagnose,
     "run-job": run_job,
 }
 
