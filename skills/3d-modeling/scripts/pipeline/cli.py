@@ -294,18 +294,29 @@ def doctor(argv: list[str]) -> int:
     return 0
 
 
+def selftest(argv: list[str]) -> int:
+    from . import selftest as _selftest
+    return _selftest.main(argv)
+
+
+COMMANDS = ("run-job", "doctor", "selftest")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
-        print("commands: run-job, doctor")
+        print("commands: " + ", ".join(COMMANDS))
         return 0
     command, rest = argv[0], argv[1:]
     if command == "run-job":
         return run_job(rest)
     if command == "doctor":
         return doctor(rest)
-    sys.stderr.write(f"design-tool: unknown command {command!r}; have run-job, doctor\n")
+    if command == "selftest":
+        return selftest(rest)
+    sys.stderr.write(
+        f"design-tool: unknown command {command!r}; have {', '.join(COMMANDS)}\n")
     return 2
 
 

@@ -106,6 +106,29 @@ second opinion.
 **Read `final_status.json`, and read `allowed_claim` before repeating anything
 about the part.** `COMMISSIONED` is not `VERIFIED`, and neither one is "safe".
 
+## `design-tool selftest` — does this installation build what it certifies?
+
+The smoke set that ships inside the distributed bundle. An installed skill has
+the code and none of the repository's tests, so before this existed the
+strongest thing an agent could say about an installation was "it imported".
+
+```bash
+uv run design-tool selftest [--quick] [--json]
+```
+
+It checks the core toolchain, then compares every certified template's contract
+against the hashes frozen in
+[`pipeline/selftest.py`](../skills/3d-modeling/scripts/pipeline/selftest.py),
+then builds each one through the real backends and commissions the exported
+mesh. `--quick` stops after the contracts, so it runs on any interpreter and
+builds no geometry.
+
+The frozen hashes are derived from declared parameters, expectations and the
+envelope — never from a mesh — so they hold across trimesh, manifold3d and
+build123d versions. A mismatch means a certified contract *moved*, which is an
+architecture decision rather than a dependency bump. Exit 1 names every check
+that failed and why.
+
 ## `python -m pipeline.corpus` — the screening corpus measurement
 
 Builds every certified template, mutates each one, and reports what broad
