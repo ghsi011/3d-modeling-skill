@@ -26,7 +26,7 @@ from .contract import Contract, Feature
 KNOWN_CHECKS = frozenset({
     "section_area", "bed_contact", "through_hole", "bore_by_displacement",
     "void_region", "envelope", "watertight", "bodies", "unit_scale", "seated",
-    "fit_acceptance",
+    "fit_acceptance", "overhang",
 })
 
 
@@ -210,6 +210,35 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                      "Void region", True, "material inside a declared-empty window",
                      allowed, round(got, 3), tol,
                      _verdict(feature, got - allowed <= tol, True))
+
+    if kind == "overhang":
+        # The one plan rule that decides whether a novel part prints at all, and
+        # the one four archived runs set *after* reading their own measurement.
+        # It arrives here as a contract feature generated from a print plan that
+        # was written before the geometry existed, so the threshold cannot have
+        # been tuned to the candidate.
+        #
+        # `designer_toolkit.metrics.overhang_area` is the implementation, not a
+        # second one: the downward-normal threshold, the bed band and the reason
+        # the screen sits at -0.73 rather than the bare 45-degree value all live
+        # there, and re-deriving them here would be two answers to one question.
+        from designer_toolkit import metrics as M
+        allowed = float(exp.get("max_area_mm2", 0.0))
+        tol = _tol(feature.tolerance, allowed or 1.0)
+        threshold = float(exp.get("downward_normal_z_max",
+                                  M.DEFAULT_DOWNWARD_NORMAL_Z_MAX))
+        bed_z = float(exp.get("bed_z_mm", M.DEFAULT_BED_Z_MM))
+        try:
+            got = M.overhang_area(ctx.normalized, threshold=threshold, bed_z=bed_z)
+        except Exception as exc:                      # noqa: BLE001 - a measurement
+            return _unavailable_check(                # that cannot run is a finding
+                feature, "Unsupported downward-facing area",
+                f"{type(exc).__name__}: {exc}", "OVERHANG_UNMEASURABLE", allowed, tol)
+        return Check(f"feature-{feature.feature_id}", feature.feature_id,
+                     "Unsupported downward-facing area", True,
+                     f"faces with normal_z <= {threshold:g}, above the bed band",
+                     allowed, round(float(got), 3), tol,
+                     _verdict(feature, float(got) - allowed <= tol, True))
 
     return _unavailable_check(
         feature, f"Feature kind {kind!r}",

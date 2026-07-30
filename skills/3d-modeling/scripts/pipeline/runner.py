@@ -66,6 +66,22 @@ class JobRequest:
     # which is the right default for a test: a cache that is on by default makes
     # every test depend on what a previous one left behind.
     cache_dir: Path | None = None
+    # The CUSTOM lane. When set, the geometry is an authored module rather than a
+    # certified template, so template selection does not run: the route was
+    # already decided over the canonical project, and re-deriving it from a
+    # parameter dict here would answer a different question.
+    authored: Any = None
+    authored_builder: Any = None
+    route: str = "CUSTOM"
+    route_condition: str = "geometry authored for this job"
+    # Route policy computed upstream. On the certified lane it is `route ==
+    # FULL`; on CUSTOM it is whatever the escalation triggers found, and it has
+    # to survive a screen that could not clear the part.
+    require_verification: bool = False
+    # Contract features generated from the print plan -- written before the
+    # geometry existed, which is the only reason they are a gate rather than a
+    # receipt.
+    plan_features: tuple[dict[str, Any], ...] = ()
 class ReviewNeeded(Exception):
     """A review has no answer on disk yet.
 
@@ -122,12 +138,22 @@ def run(request: JobRequest) -> JobResult:
 
     # ---- intent + routing -------------------------------------------------
     mark = time.perf_counter()
-    decision = intent.select(requested_template=request.template,
-                             parameters=request.parameters,
-                             external_geometry=request.external_geometry,
-                             ambiguities=request.ambiguities)
+    if request.authored is not None:
+        # The route was decided over the canonical project by `route.decide`.
+        # Template selection is the wrong question for authored geometry -- it
+        # can only answer "does a certified template cover this", and the answer
+        # is no by construction.
+        decision = intent.RouteDecision(
+            route=request.route, template=None, backend="authored",
+            condition=request.route_condition, candidates=())
+    else:
+        decision = intent.select(requested_template=request.template,
+                                 parameters=request.parameters,
+                                 external_geometry=request.external_geometry,
+                                 ambiguities=request.ambiguities)
     selected_route = decision.route
-    route_requires_verification = selected_route == "FULL"
+    route_requires_verification = (selected_route == "FULL"
+                                   or request.require_verification)
     manifest = intent.manifest(
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
         parameters=request.parameters, stated=request.stated,
@@ -137,13 +163,13 @@ def run(request: JobRequest) -> JobResult:
     written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
     timings["intent"] = time.perf_counter() - mark
 
-    if decision.route == "FULL" and request.verify_call is None:
+    if request.authored is None and decision.route == "FULL" and request.verify_call is None:
         return JobResult(False, "routing",
                          f"route is FULL: {decision.condition}. FULL requires independent "
                          "verification and no verifier was supplied.",
                          written, timings, llm_calls, None)
 
-    if decision.route in ("FITTED", "FULL"):
+    if request.authored is None and decision.route in ("FITTED", "FULL"):
         # Both routes recover geometry the job does not own, so both need the
         # spec call. Guarding only FITTED meant a FULL job with a verifier but no
         # spec reviewer called `None` and raised out of `run` -- no receipt, no
@@ -248,7 +274,7 @@ def run(request: JobRequest) -> JobResult:
             "measurements": spec["measurements"], "interfaces": spec["interfaces"]}
         written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
 
-    template = T.get(decision.template)
+    template = request.authored if request.authored is not None else T.get(decision.template)
 
     # ---- contract ---------------------------------------------------------
     mark = time.perf_counter()
@@ -266,7 +292,7 @@ def run(request: JobRequest) -> JobResult:
 
     # ---- build, or the same bytes from a previous one ---------------------
     mark = time.perf_counter()
-    backend = get_backend(model_contract.backend)
+    backend = get_backend(model_contract.backend, request.authored_builder)
     cache_status, cache_key = "disabled", None
     try:
         built = backend.build(model_contract, out)
@@ -309,7 +335,7 @@ def run(request: JobRequest) -> JobResult:
         "python": platform.python_version(),
         "tessellation": built.tessellation,
         "boolean_ops": list(built.boolean_ops),
-        "boolean_engine": "manifold3d" if built.backend == "trimesh-manifold" else "n/a (B-rep)",
+        "boolean_engine": built.boolean_engine,
         "units": "mm",
         "cache": {"status": cache_status,
                   "key": cache_key.as_dict() if cache_key else None},
@@ -486,13 +512,22 @@ def _contract_from(
     *, fit_acceptance: tuple[dict[str, Any], ...] = (),
 ) -> C.Contract:
     """Build the immutable contract from the template's own declarations."""
-    rows = template.expectations(request.parameters)
+    rows = list(template.expectations(request.parameters))
+    # Appended, never merged: a plan row and a model row can name the same
+    # feature and mean different things, and the preflight refuses a duplicate id
+    # rather than letting one silently win.
+    rows += [dict(row) for row in request.plan_features]
     features: list[C.Feature] = []
     for row in rows:
         kind = row["kind"]
         expectation = {k: v for k, v in row.items()
-                       if k not in ("feature_id", "kind", "note")}
-        if kind in ("section_area", "bed_contact"):
+                       if k not in ("feature_id", "kind", "note", "tolerance")}
+        if isinstance(row.get("tolerance"), dict):
+            # A row that states its own band keeps it. A support ceiling of zero
+            # under a defaulted 1 mm2 allowance is not a zero ceiling, and the
+            # default was reached by every row that did not name a kind above.
+            tolerance = dict(row["tolerance"])
+        elif kind in ("section_area", "bed_contact"):
             tolerance = commission.area_tolerance(float(row["value_mm2"]))
         elif kind == "through_hole":
             tolerance = commission.diameter_tolerance(float(row["d_mm"]))
@@ -541,5 +576,6 @@ def _contract_from(
         printer=request.printer,
         modifiers=request.modifiers, minimum_coverage=1.0,
         step_required=bool(request.step), consequence=request.consequence,
-        updated_utc=request.updated_utc)
+        updated_utc=request.updated_utc,
+        source=(template.as_source() if hasattr(template, "as_source") else None))
 

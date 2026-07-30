@@ -335,10 +335,13 @@ class CliRunTest(unittest.TestCase):
                 (directory / "final_status.json").read_text(encoding="utf-8"))
             self.assertEqual("PASS", final["commission_verdict"])
 
+    def _custom(self) -> P.Project:
+        return _complete(template=None, parameters={},
+                         envelope_mm={"x": 40.0, "y": 30.0, "z": 14.0})
+
     def test_a_custom_job_stops_with_a_designer_commission(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            directory = _project_dir(
-                Path(raw), _complete(template=None, parameters={}))
+            directory = _project_dir(Path(raw), self._custom())
             code = cli.run([str(directory), "--no-render"])
             self.assertEqual(cli.NEEDS_ACTION, code)
             action = json.loads(
@@ -350,17 +353,21 @@ class CliRunTest(unittest.TestCase):
             self.assertTrue(action["bound"]["project_sha256"])
 
     def test_the_commission_carries_no_expected_answer(self) -> None:
-        """A commission that says what to conclude has stopped commissioning."""
+        """A commission that says what to conclude has stopped commissioning.
+
+        The field set is asserted whole rather than sampled: this is the one place
+        an expectation of the answer could be smuggled in, and a new key would
+        otherwise arrive unremarked.
+        """
         with tempfile.TemporaryDirectory() as raw:
-            directory = _project_dir(
-                Path(raw), _complete(template=None, parameters={}))
+            directory = _project_dir(Path(raw), self._custom())
             cli.run([str(directory), "--no-render"])
             action = json.loads(
                 (directory / cli.NEXT_ACTION_FILE).read_text(encoding="utf-8"))
             self.assertEqual(
                 {"schema_version", "job_id", "kind", "role", "stage", "route",
-                 "reason", "authorized_inputs", "required_outputs", "bound",
-                 "unresolved", "required_reviews", "completion_command",
+                 "reason", "authorized_inputs", "required_outputs", "source_api",
+                 "bound", "unresolved", "required_reviews", "completion_command",
                  "updated_utc"},
                 set(action))
 
@@ -490,8 +497,7 @@ class CliRunTest(unittest.TestCase):
 
     def test_status_reports_what_the_job_is_waiting_for(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            directory = _project_dir(
-                Path(raw), _complete(template=None, parameters={}))
+            directory = _project_dir(Path(raw), self._custom())
             cli.run([str(directory), "--no-render"])
             self.assertEqual(cli.NEEDS_ACTION, cli.status([str(directory)]))
 

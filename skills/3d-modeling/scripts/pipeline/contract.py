@@ -71,9 +71,15 @@ class Contract:
     step_required: bool
     consequence: str
     updated_utc: str
+    # Where the geometry comes from when it is not a certified template: the
+    # authored module's project-relative path and its hash. Omitted from the
+    # payload entirely when absent, so every certified contract keeps the hash
+    # it already had -- an added key that is always null is still an added key,
+    # and it would have moved every frozen golden in `selftest.py`.
+    source: dict[str, Any] | None = None
 
     def as_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": S.CONTRACT_SCHEMA,
             "job_id": self.job_id,
             "template": self.template,
@@ -95,6 +101,9 @@ class Contract:
             "consequence": self.consequence,
             "updated_utc": self.updated_utc,
         }
+        if self.source is not None:
+            payload["source"] = self.source
+        return payload
 
     def contract_hash(self) -> str:
         return S.payload_hash(self.as_payload())

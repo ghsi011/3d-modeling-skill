@@ -112,6 +112,7 @@ class Build123dBackend:
             tessellation={"linear_deflection": LINEAR_DEFLECTION,
                           "angular_deflection": ANGULAR_DEFLECTION},
             boolean_ops=tuple(ops),
+            boolean_engine="n/a (B-rep)",
             build_seconds=time.perf_counter() - started,
         )
 

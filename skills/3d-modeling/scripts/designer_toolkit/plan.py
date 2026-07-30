@@ -136,7 +136,7 @@ IDENTITY_TRANSFORM = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 def direct_template(
     bbox_mm: tuple[float, float, float],
     *,
-    tolerance_mm: float = DEFAULT_BBOX_TOLERANCE_MM,
+    tolerance_mm: float | None = None,
     job_id: str = "direct",
     nozzle_mm: float = 0.4,
     material: str = "PETG",
@@ -151,6 +151,15 @@ def direct_template(
     x, y, z = (float(v) for v in bbox_mm)
     if min(x, y, z) <= 0:
         raise ValueError(f"bbox must be positive in every axis, got {bbox_mm}")
+    if tolerance_mm is None:
+        # Derived from the envelope, before any geometry exists, and only ever
+        # downward. `validate_plan` refuses a band wider than a tenth of the
+        # smallest axis -- correctly, since a 0.5 mm band on a 4 mm washer cannot
+        # reject anything a reader would call the wrong size -- so the flat
+        # default emitted a plan that failed the generator's own validator on
+        # every thin part. Tightening here is not a threshold moved after
+        # measuring: nothing has been measured.
+        tolerance_mm = min(DEFAULT_BBOX_TOLERANCE_MM, min(x, y, z) / 10.0)
     if not isinstance(bodies, int) or isinstance(bodies, bool) or bodies < 1:
         raise ValueError(f"bodies must be a positive whole number, got {bodies!r}")
     plan = {

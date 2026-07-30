@@ -455,9 +455,180 @@ def route(argv: list[str]) -> int:
     return 0
 
 
+PLAN_FILE = "print_plan_checks.json"
+
+def _review_calls(project_dir: Path, project: P.Project) -> dict[str, Any]:
+    """Only the reviews the route decision actually named.
+
+    Supplying a callback the route did not ask for is not harmless: the runner
+    dispatches an independent verification whenever one is available and the
+    screen is clear, so an unconditional verifier turned every `CUSTOM` job into
+    one that requires a fresh context -- which is exactly the escalation the
+    route decision exists to make deliberately.
+    """
+    required = set(project.required_reviews)
+    return {
+        "safety_call": _answer(project_dir, "safety") if "safety" in required else None,
+        "spec_call": (_answer(project_dir, "spec")
+                      if "specification" in required else None),
+        "verify_call": (_answer(project_dir, "verification")
+                        if "verification" in required else None),
+    }
+
+
+
+
+def _print_plan(project_dir: Path, project: P.Project) -> tuple[dict[str, Any], list[str]]:
+    """The plan a `CUSTOM` candidate is gated against, written before it exists.
+
+    Generated rather than dispatched, and generated *here* rather than by the
+    designer. Across four archived runs with no plan bound, every designer set
+    its own support ceiling after reading its own measurement -- which is a
+    receipt, not a gate. This template is a legitimate plan for exactly the
+    reason a shipped one is: it depends on the printer and the declared envelope
+    and on nothing about the geometry being judged.
+
+    Regenerated on every run from the same inputs, so it is byte-stable, and
+    refused if it does not validate -- an unbuildable plan discovered after a
+    build is 39 archived minutes of nothing.
+    """
+    from designer_toolkit.plan import direct_template, validate_plan
+
+    envelope = project.envelope_mm
+    plan = direct_template(
+        (envelope["x"], envelope["y"], envelope["z"]),
+        job_id=project.job_id,
+        nozzle_mm=float(project.nozzle["diameter_mm"]),
+        material=str(project.material["material"]),
+        bodies=max(1, sum(c.count for c in project.components) or 1),
+        updated_utc=project.updated_utc,
+        consequence=project.consequence)
+    problems = validate_plan(plan)
+    if not problems:
+        (project_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
+    return plan, problems
+
+
+def _plan_features(plan: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """The plan's support rules, as contract features the gate already measures.
+
+    One rule, not the whole plan: the support ceiling is what decides whether a
+    novel part prints at all, and it is the rule the archived runs violated. The
+    rest of the plan (edges, interfaces, coupons) is measured by
+    `designer_toolkit.commission` and is not duplicated here.
+    """
+    rows: list[dict[str, Any]] = []
+    for index, rule in enumerate(plan.get("support_rules") or []):
+        if rule.get("disposition") != "SELF_SUPPORT_REQUIRED":
+            # SUPPORT_ALLOWED rules name where support may touch, which is a
+            # contact-class question this check does not answer. Skipped rather
+            # than approximated: a rule measured by the wrong instrument reports
+            # a number about something else.
+            continue
+        rows.append({
+            "feature_id": f"plan-support-{index:02d}",
+            "kind": "overhang",
+            "max_area_mm2": float(rule.get("max_out_of_limit_area_mm2", 0.0)),
+            "downward_normal_z_max": float(
+                rule.get("downward_normal_z_max", -0.73)),
+            "bed_z_mm": float(rule.get("bed_z_mm", 0.0)),
+            # Zero allowance on top of a zero ceiling. The plan's own number is
+            # the band; adding a default one here would widen a threshold the
+            # plan set deliberately.
+            "tolerance": {"abs": 0.0},
+            "note": f"print plan rule {rule.get('id', index)}: "
+                    f"{rule.get('disposition')}",
+        })
+    return tuple(rows)
+
+
+def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
+                *, render: bool) -> int:
+    """The `CUSTOM` lane: a print plan, then the authored model, then the gate."""
+    from . import authored as A
+    from . import commission as CM
+
+    if project.envelope_mm is None:
+        return _report_problems(project_dir, project, [
+            "envelope_mm is required on a CUSTOM job: the print plan is written "
+            "before the geometry, and it cannot be written without the envelope "
+            "the part is allowed to occupy. Declare it as a stated or chosen "
+            "requirement."], stage="run")
+
+    plan, plan_problems = _print_plan(project_dir, project)
+    if plan_problems:
+        return _report_problems(project_dir, project, plan_problems, stage="plan")
+
+    model_path = project_dir / (project.model or "model.py")
+    if not model_path.is_file():
+        _write_next_action(project_dir, {
+            "schema_version": NEXT_ACTION_SCHEMA,
+            "job_id": project.job_id,
+            "kind": "AGENT_COMMISSION",
+            "role": "designer",
+            "stage": "candidate_build",
+            "route": decision.route,
+            "reason": decision.condition,
+            "authorized_inputs": [project.brief, P.PROJECT_FILE,
+                                  ROUTE_DECISION_FILE, PLAN_FILE]
+            + [a.path for a in project.source_artifacts],
+            "required_outputs": [model_path.name],
+            "source_api": {
+                "PARAMS": "the numbers the shape is built from",
+                "BBOX_MM": "x/y/z the solid must measure, derived from PARAMS "
+                           "without going through the builder",
+                "BODIES": "how many separate solids the export should contain",
+                "EXPECTED": "feature rows the gate measures; kinds: "
+                            + ", ".join(sorted(CM.KNOWN_CHECKS)),
+                "build()": "returns the solid, or a module-level `part`",
+            },
+            "bound": {"project_sha256": project.project_hash(),
+                      "print_plan_sha256": S.payload_hash(plan),
+                      "source_artifacts": {a.artifact_id: a.sha256
+                                           for a in project.source_artifacts}},
+            "unresolved": list(project.blocking_questions),
+            "required_reviews": list(project.required_reviews),
+            "completion_command": f"design-tool run {project_dir.as_posix()}",
+            "updated_utc": project.updated_utc,
+        })
+        sys.stderr.write(
+            f"\ndesign-tool: this job routes {decision.route} and has no model yet.\n"
+            f"  the commission is written to  {NEXT_ACTION_FILE}\n"
+            f"  the print plan it builds against is  {PLAN_FILE}\n"
+            f"  write the model to            {model_path.name}\n"
+            "  then run the same command again.\n\n"
+            "  This program cannot author geometry, and a deterministic tool that\n"
+            "  returned some would be inventing it.\n")
+        return NEEDS_ACTION
+
+    try:
+        model, builder = A.load(model_path, known_kinds=CM.KNOWN_CHECKS)
+    except A.ModelError as exc:
+        return _report_problems(project_dir, project, [str(exc)], stage="build")
+
+    fields = P.to_job_request_fields(project)
+    fields["template"] = None
+    request = runner.JobRequest(
+        brief_path=project_dir / project.brief,
+        out_dir=project_dir,
+        render=render,
+        authored=model,
+        authored_builder=builder,
+        route=decision.route,
+        route_condition=decision.condition,
+        require_verification=decision.requires_verification,
+        plan_features=_plan_features(plan),
+        cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
+        **_review_calls(project_dir, project),
+        **fields)
+    return _finish(project_dir, project, decision, request)
+
+
 def _run_project(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
                  *, render: bool) -> int:
     """Every deterministic stage this route can execute right now."""
+    if decision.route == "CUSTOM":
+        return _run_custom(project_dir, project, decision, render=render)
     if project.template is None:
         # The certified-template runner is the only build lane wired today; the
         # authored-geometry lane arrives in Phase 2. Stopping here with a written
@@ -496,11 +667,18 @@ def _run_project(project_dir: Path, project: P.Project, decision: RT.RouteDecisi
         brief_path=project_dir / project.brief,
         out_dir=project_dir,
         render=render,
-        safety_call=_answer(project_dir, "safety"),
-        spec_call=_answer(project_dir, "spec"),
-        verify_call=_answer(project_dir, "verification"),
+        route=decision.route,
+        route_condition=decision.condition,
+        require_verification=decision.requires_verification,
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
+        **_review_calls(project_dir, project),
         **fields)
+    return _finish(project_dir, project, decision, request)
+
+
+def _finish(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
+            request: runner.JobRequest) -> int:
+    """Run, then turn whatever came back into a state the next run can resume."""
     try:
         result = runner.run(request)
     except ReviewNeeded as need:

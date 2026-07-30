@@ -164,17 +164,29 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
     """
     from . import templates as T
 
-    try:
-        template = T.get(contract.template)
-    except KeyError:
-        return {"detector": "volume", "result": "INDETERMINATE",
-                "reason": f"no certified template named {contract.template!r}"}
-    if template.volume is None:
-        return {"detector": "volume", "result": "INDETERMINATE",
-                "reason": f"{contract.template} declares no closed-form volume, so "
-                          "there is nothing to compare the solid against"}
-
-    want = float(template.volume(contract.parameters))
+    source = contract.source or {}
+    if source.get("kind") == "authored":
+        # An authored model declares its own closed form, in the contract, hashed
+        # with everything else. Re-importing the module here to ask it again
+        # would mean the number screened against and the number contracted for
+        # are two separate reads of a file that could have changed between them.
+        declared = source.get("volume_mm3")
+        if not isinstance(declared, (int, float)) or isinstance(declared, bool):
+            return {"detector": "volume", "result": "INDETERMINATE",
+                    "reason": "the authored model declares no VOLUME_MM3, so there "
+                              "is nothing to compare the solid against"}
+        want = float(declared)
+    else:
+        try:
+            template = T.get(contract.template)
+        except KeyError:
+            return {"detector": "volume", "result": "INDETERMINATE",
+                    "reason": f"no certified template named {contract.template!r}"}
+        if template.volume is None:
+            return {"detector": "volume", "result": "INDETERMINATE",
+                    "reason": f"{contract.template} declares no closed-form volume, so "
+                              "there is nothing to compare the solid against"}
+        want = float(template.volume(contract.parameters))
     got = float(ctx.normalized.volume)
     delta = (got - want) / want if want else 0.0
     if abs(delta) > VOLUME_FRACTION:
@@ -207,11 +219,15 @@ def reference_envelope(contract: Contract) -> dict[str, Any]:
     from . import templates as T
 
     marks: list[float] = [0.0, float(contract.expected_bbox_mm.get("z", 0.0))]
-    try:
-        marks += [float(v) for v in T.get(contract.template).profile_marks(
-            contract.parameters).get("z", ())]
-    except KeyError:
-        pass
+    source = contract.source or {}
+    if source.get("kind") == "authored":
+        marks += [float(v) for v in (source.get("profile_marks") or {}).get("z", ())]
+    else:
+        try:
+            marks += [float(v) for v in T.get(contract.template).profile_marks(
+                contract.parameters).get("z", ())]
+        except KeyError:
+            pass
     for feature in contract.features:
         exp = feature.expectation
         at = exp.get("at") or {}

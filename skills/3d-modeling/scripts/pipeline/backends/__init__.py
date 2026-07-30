@@ -22,6 +22,11 @@ class BuildArtifacts:
     tessellation: dict[str, Any]
     boolean_ops: tuple[str, ...]
     build_seconds: float
+    # Which engine resolved the booleans, by the backend's own account. Derived
+    # in the runner until an authored model could reach it: "trimesh-manifold
+    # implies manifold3d" is true of the certified backends and false of a model
+    # that selects its own, and the manifest must not assert what nobody saw.
+    boolean_engine: str = "unrecorded"
 
 
 class GeometryBackend(Protocol):
@@ -30,7 +35,7 @@ class GeometryBackend(Protocol):
     def build(self, contract, output_dir: Path) -> BuildArtifacts: ...
 
 
-def get(name: str) -> GeometryBackend:
+def get(name: str, builder=None) -> GeometryBackend:
     """Resolve a backend by name, importing only the one asked for.
 
     The lazy import is not tidiness. `import build123d` costs 10.7 s measured on
@@ -44,4 +49,8 @@ def get(name: str) -> GeometryBackend:
     if name == "build123d":
         from .build123d_backend import Build123dBackend
         return Build123dBackend()
-    raise KeyError(f"no backend named {name!r}; have 'trimesh-manifold', 'build123d'")
+    if name == "authored":
+        from .authored import AuthoredBackend
+        return AuthoredBackend(builder)
+    raise KeyError(f"no backend named {name!r}; have 'trimesh-manifold', "
+                   "'build123d', 'authored'")

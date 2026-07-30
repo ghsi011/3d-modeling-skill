@@ -33,7 +33,12 @@ STATUS_SCHEMA = 1
 
 CONSEQUENCE = ("INCONSEQUENTIAL", "CONSEQUENTIAL")
 CANDIDATE_STRATEGY = ("SINGLE", "PARALLEL")
-BACKEND = ("trimesh-manifold", "build123d")
+# `authored` is the CUSTOM lane: geometry a designer wrote, built through
+# whichever of the two kernels the model itself calls. It is a third *source of
+# geometry*, not a third kernel -- the backend records which kernel actually ran
+# and the artifact manifest carries it, because "authored" alone does not say
+# whether a boolean engine was involved.
+BACKEND = ("trimesh-manifold", "build123d", "authored")
 
 # What happens when a check cannot run. `SKIP` is deliberately absent: a
 # candidate once shipped 31% too thick while three checks reported SKIPPED,

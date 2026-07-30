@@ -347,6 +347,11 @@ class Project:
     template: str | None = None
     parameters: dict[str, Any] = dataclasses.field(default_factory=dict)
     model: str | None = None
+    # The x/y/z the part is allowed to occupy. Required on CUSTOM: the print plan
+    # is written before the geometry, and it cannot be written without knowing
+    # the envelope. It is a design-driving value like any other -- stated by the
+    # brief or chosen by design, and recorded as such in `requirements`.
+    envelope_mm: dict[str, float] | None = None
 
     expected_artifacts: tuple[str, ...] = ()
     required_reviews: tuple[str, ...] = ()
@@ -388,6 +393,7 @@ class Project:
             "template": self.template,
             "parameters": dict(self.parameters),
             "model": self.model,
+            "envelope_mm": self.envelope_mm,
             "requirements": [r.as_dict() for r in self.requirements],
             "source_artifacts": [a.as_dict() for a in self.source_artifacts],
             "interfaces": [i.as_dict() for i in self.interfaces],
@@ -537,6 +543,19 @@ class Project:
             problems.append("source_mode is NEW but source artifacts are declared; "
                             "geometry inherited from a supplied file is MODIFY")
 
+        if self.envelope_mm is not None:
+            envelope = self.envelope_mm
+            if (not isinstance(envelope, dict) or sorted(envelope) != ["x", "y", "z"]):
+                problems.append("envelope_mm must name x, y and z")
+            else:
+                for axis, value in sorted(envelope.items()):
+                    try:
+                        if S.require_finite_number(
+                                value, what=f"envelope_mm.{axis}") <= 0:
+                            problems.append(f"envelope_mm.{axis} must be positive")
+                    except S.SchemaError as exc:
+                        problems.append(str(exc))
+
         if require_buildable and self.template is None and self.model is None:
             problems.append("neither template nor model is named; nothing can be "
                             "built until one of them is")
@@ -621,6 +640,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
         template=payload.get("template"),
         parameters=dict(payload.get("parameters") or {}),
         model=payload.get("model"),
+        envelope_mm=payload.get("envelope_mm"),
         requirements=tuple(
             Requirement(name=str(row.get("name", "")), value=row.get("value"),
                         unit=str(row.get("unit", "mm")),

@@ -141,6 +141,7 @@ class TrimeshManifoldBackend:
                             f"{getattr(manifold3d, '__version__', 'unknown')}",
             tessellation={"cylinder_sections": 96, "note": "primitives are already meshes"},
             boolean_ops=tuple(ops),
+            boolean_engine="manifold3d",
             build_seconds=time.perf_counter() - started,
         )
 
