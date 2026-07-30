@@ -32,6 +32,7 @@ from . import diagnose as D
 from . import preservation as PR
 from . import project as P
 from . import route as RT
+from . import schemas as S
 
 UTC = "1970-01-01T00:00:00Z"
 
@@ -557,6 +558,132 @@ class PreservationTest(unittest.TestCase):
                              "the right to read it as a statement about geometry")
 
 
+class DeterministicEvidenceTest(unittest.TestCase):
+    """The audit is a function of the pair it compares, and of nothing else.
+
+    Before this, `sample_surface` drew from the process-wide generator, so
+    `samples_outside_region` alone moved by hundreds between two runs of one
+    unchanged pair. That is not a cosmetic wobble: the commission report is
+    inside the review packet, the packet hash is inside the review envelope, and
+    an evidence packet that cannot be reproduced cannot be answered.
+    """
+
+    def _pair(self, root: Path) -> tuple[Path, Path]:
+        source_path = root / "bracket.stl"
+        source = _vent_mount()
+        source.export(source_path)
+        ball = trimesh.creation.icosphere(radius=BALL_D / 2.0, subdivisions=3)
+        ball.apply_translation((*VENT_MOUNT_BOSS, 20.0))
+        candidate_path = root / "candidate.stl"
+        trimesh.boolean.difference([source, ball], engine="manifold").export(
+            candidate_path)
+        return source_path, candidate_path
+
+    def test_identical_inputs_produce_byte_identical_evidence(self) -> None:
+        from . import schemas as S
+
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._pair(Path(raw))
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            texts = {S.canonical_json(PR.audit(
+                source_path=source_path, candidate_path=candidate_path,
+                region=region)) for _ in range(3)}
+            self.assertEqual(1, len(texts),
+                             "three audits of one unchanged pair serialized to "
+                             f"{len(texts)} different documents")
+
+    def test_the_plan_is_bound_to_the_exact_pair_it_compared(self) -> None:
+        """A plan reused across pairs would be evidence about neither."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source_path, candidate_path = self._pair(root)
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            first = PR.audit(source_path=source_path,
+                             candidate_path=candidate_path, region=region)
+
+            moved = _vent_mount()
+            moved.apply_translation((0.0, 0.0, 0.25))
+            other = root / "other.stl"
+            moved.export(other)
+            second = PR.audit(source_path=source_path, candidate_path=other,
+                              region=region)
+
+            self.assertNotEqual(first["sample_plan"]["sha256"],
+                                second["sample_plan"]["sha256"])
+            self.assertNotEqual(first["evidence_sha256"], second["evidence_sha256"])
+
+    def test_a_changed_input_changes_the_evidence_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source_path, candidate_path = self._pair(root)
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            before = PR.audit(source_path=source_path,
+                              candidate_path=candidate_path, region=region)
+
+            thicker = trimesh.creation.box(extents=(50.0, 30.0, 8.6))
+            thicker.apply_translation((25.0, 15.0, 4.3))
+            thicker.export(candidate_path)
+            after = PR.audit(source_path=source_path,
+                             candidate_path=candidate_path, region=region)
+
+            self.assertNotEqual(before["evidence_sha256"], after["evidence_sha256"])
+            self.assertEqual("CHANGED", after["verdict"])
+
+    def test_the_two_directions_are_not_the_same_point_set(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._pair(Path(raw))
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            report = PR.audit(source_path=source_path,
+                              candidate_path=candidate_path, region=region)
+            seeds = report["sample_plan"]["direction_seeds"]
+            self.assertEqual(set(PR.DIRECTIONS), set(seeds))
+            self.assertNotEqual(seeds["source_to_candidate"],
+                                seeds["candidate_to_source"])
+
+    def test_the_receipt_does_not_claim_a_sensitivity_it_has_not_earned(self) -> None:
+        """Determinism is not accuracy, and the words must not imply it is."""
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._pair(Path(raw))
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            note = PR.audit(source_path=source_path,
+                            candidate_path=candidate_path,
+                            region=region)["claim_note"]
+            self.assertIn("cannot establish exact preservation", note)
+            self.assertIn("minimum", note)
+            self.assertIn("missed identically on every run", note)
+
+    def test_reordering_the_faces_of_one_file_does_not_move_the_measurement(self) -> None:
+        """The plan indexes into the faces, so their order has to be the mesh's.
+
+        Two exports of one solid can present the same triangles in a different
+        order. Under an ordering that came from the file, that alone would change
+        which points the plan lands on and what the audit reports.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            mesh = _vent_mount()
+            plain = root / "plain.stl"
+            mesh.export(plain)
+
+            shuffled = trimesh.Trimesh(
+                vertices=np.asarray(mesh.vertices),
+                faces=np.asarray(mesh.faces)[::-1], process=False)
+            reordered = root / "reordered.stl"
+            shuffled.export(reordered)
+
+            raw_mesh = PR._load(plain)
+            first = PR._ordered(raw_mesh)
+            second = PR._ordered(PR._load(reordered))
+            np.testing.assert_array_equal(first.faces, second.faces)
+            np.testing.assert_allclose(first.vertices, second.vertices)
+            # Against the mesh as read, not against the other ordered copy: two
+            # copies flipped the same way would agree with each other and be
+            # inside out. `signed_distance` takes its sign from the winding.
+            self.assertAlmostEqual(float(raw_mesh.volume), float(first.volume),
+                                   places=6,
+                                   msg="canonical ordering must not flip a winding")
+
+
 class ModifyRouteTest(unittest.TestCase):
     def test_a_trusted_artifact_with_an_edit_scope_routes_custom(self) -> None:
         decision = RT.decide(_modify_project())
@@ -674,6 +801,138 @@ class ModifyLaneTest(unittest.TestCase):
             self.assertEqual("ESCALATE", check.result)
             self.assertEqual("SOURCE_MISSING", check.error_code)
             self.assertEqual("UNAVAILABLE", check.status)
+
+
+class ModifyReviewRoundTripTest(unittest.TestCase):
+    """Run, answer the review, run again, reach a final status.
+
+    The thing no `MODIFY` job with an edit scope could do. The first run wrote a
+    review packet and stopped; the second run re-measured preservation with a
+    fresh random draw, produced a different `commission_report.json`, and the
+    answer written against the first packet no longer matched the envelope the
+    second one built. There was no answer that could be written, because the
+    question changed every time it was asked.
+
+    The verification review is turned on by an explicit request rather than by
+    raising the consequence class: `verification_requested` adds a review on any
+    route by design, and it leaves the `CUSTOM` lane's one designer commission
+    where it is instead of also pulling in the mandatory safety pass.
+    """
+
+    def _project(self) -> P.Project:
+        return _modify_project(verification_requested=True,
+                               reviewer={"model_snapshot": "test", "fresh_context": True})
+
+    def _answer(self, directory: Path) -> dict:
+        packet = json.loads((directory / "reviews" / "verification_packet.json")
+                            .read_text(encoding="utf-8"))
+        (directory / "reviews" / "verification_response.json").write_text(
+            json.dumps({
+                "decision": "PASS", "defects": [], "unmet_requirements": [],
+                "missing_evidence": [],
+                "summary": "the plate, its outline and both screw holes are as supplied",
+                "review_envelope": packet["review_envelope"],
+            }, indent=2), encoding="utf-8")
+        return packet
+
+    def test_a_modify_job_completes_the_review_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), MODIFIER, self._project())
+
+            first = cli.run([str(directory), "--no-render"])
+            self.assertEqual(cli.NEEDS_ACTION, first,
+                             "the first run must stop and ask for the review")
+            waiting = json.loads(
+                (directory / "next_action.json").read_text(encoding="utf-8"))
+            self.assertEqual("REVIEW", waiting["kind"])
+            self.assertEqual("verification", waiting["review_kind"])
+            after_first = (directory / "commission_report.json").read_bytes()
+
+            packet = self._answer(directory)
+            cli.run([str(directory), "--no-render"])
+
+            after_second = (directory / "commission_report.json").read_bytes()
+            self.assertEqual(after_first, after_second,
+                             "the rerun measured the part differently, so the "
+                             "answer was written against evidence that no longer "
+                             "exists")
+
+            report = json.loads(
+                (directory / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertNotIn("error", report,
+                             "the answer was refused; the round trip did not close")
+            self.assertEqual("PASS", report["decision"])
+            self.assertEqual(packet["review_envelope"], report["review_envelope"])
+
+            final = json.loads(
+                (directory / "final_status.json").read_text(encoding="utf-8"))
+            self.assertIn(final["final_status"], S.FINAL_STATUS)
+            self.assertEqual("PASS", final["verification"],
+                             "the independent look was accepted and recorded")
+            self.assertNotIn("unbound", final["allowed_claim"])
+            # The lane cap is what this stage does not lift. Preservation is
+            # deterministic; the acceptance criteria are still self-issued and
+            # the sample density is still not derived from a defect size.
+            self.assertEqual("EXPERIMENTAL_UNAVAILABLE", final["lane_status"])
+
+    def test_the_review_envelope_names_the_preservation_evidence(self) -> None:
+        """An answer must be checkable against the audit it actually read.
+
+        Binding the packet hash alone says only *that* something moved. The
+        envelope carries the sample plan's digest and the audit's own digest, so
+        a reader of a stale answer can see which measurement it was written
+        against rather than only that it no longer matches.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), MODIFIER, self._project())
+            cli.run([str(directory), "--no-render"])
+
+            packet = json.loads((directory / "reviews" / "verification_packet.json")
+                                .read_text(encoding="utf-8"))
+            digests = packet["review_envelope"]["evidence_digests"]
+            self.assertEqual(
+                {"feature-preservation.sample_plan_sha256",
+                 "feature-preservation.evidence_sha256"}, set(digests))
+
+            measured = next(c for c in packet["commission_report"]["checks"]
+                            if c["check_id"] == "feature-preservation")["measured"]
+            self.assertEqual(measured["sample_plan_sha256"],
+                             digests["feature-preservation.sample_plan_sha256"])
+            self.assertEqual(measured["evidence_sha256"],
+                             digests["feature-preservation.evidence_sha256"])
+
+    def test_an_answer_to_a_different_audit_is_refused(self) -> None:
+        """The binding has to fail closed when the evidence really did move.
+
+        Determinism is what stops the mismatch happening by accident. It must not
+        also stop it happening on purpose: an answer naming a sample plan this run
+        did not use is still an answer to a different question.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), MODIFIER, self._project())
+            cli.run([str(directory), "--no-render"])
+            packet = self._answer(directory)
+
+            response = directory / "reviews" / "verification_response.json"
+            stale = json.loads(response.read_text(encoding="utf-8"))
+            stale["review_envelope"] = {
+                **packet["review_envelope"],
+                "evidence_digests": {
+                    "feature-preservation.sample_plan_sha256": "0" * 64,
+                    "feature-preservation.evidence_sha256": "0" * 64,
+                },
+            }
+            response.write_text(json.dumps(stale, indent=2), encoding="utf-8")
+
+            code = cli.run([str(directory), "--no-render"])
+            self.assertNotEqual(0, code)
+            report = json.loads(
+                (directory / "verification_report.json").read_text(encoding="utf-8"))
+            self.assertIn("ReviewError", report["error"])
+            self.assertNotIn("decision", report,
+                             "a refused answer must not leave a decision behind")
+            self.assertFalse((directory / "final_status.json").is_file(),
+                             "an unbound answer must not produce a final status")
 
 
 if __name__ == "__main__":

@@ -17,20 +17,63 @@ answer is a volume. Two meshes can only be compared by sampling, and the answer
 is a distance with a sample count beside it. Calling the second "preserved
 exactly" would be a claim the instrument cannot make, so it is called
 `PRESERVED_WITHIN_TOLERANCE` and carries the tolerance it was measured at.
+
+**The sample plan is a function of the pair, not of a random draw.** This audit
+used to call `trimesh.sample.sample_surface`, which draws from the process-wide
+generator. Two runs of one unchanged pair therefore disagreed: ADR 0002 recorded
+`max_deviation_mm` moving 1.13 to 2.00 mm over six runs of one pair, and on the
+vent-mount fixture here `samples_outside_region` alone moved between 28,257 and
+28,636 over six.
+
+That is not a cosmetic instability. `commission_report.json` carries the audit,
+the review packet carries the report, and the review envelope binds the packet:
+a reviewer's answer to run *n* could not be checked against run *n+1*, so no
+`MODIFY` job with an edit scope could complete a review round trip at all. It
+could not be resumed, and it could not be finished.
+
+The plan is now derived from the two artifacts' own hashes, the declared region
+and the sample count, and laid out along a low-discrepancy sequence over meshes
+whose vertex and face order has been made canonical first. Identical inputs
+produce byte-identical evidence, and the plan's digest travels with the verdict
+so an answer can name the evidence it was written against.
+
+**Determinism is not sensitivity, and this file must not be read as claiming it
+is.** A plan that misses a 0.5 mm undeclared cube still misses it -- it now
+misses it identically on every run, which is what makes the round trip possible
+and is the whole of what this change buys. The density is still a fixed count
+rather than one derived from a declared minimum detectable defect size, real
+B-rep comparison is still not implemented, and both are owed by stage 5 of
+ADR 0002. The receipts say so in the words they use.
 """
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-PRESERVATION_SCHEMA = 1
+from . import schemas as S
 
-# How many points to sample on the preserved surface. Enough that a missing
-# feature of a few millimetres cannot fall between them on a part of ordinary
-# size, and small enough that the query stays milliseconds.
+# 2: the report carries the sample plan that produced it -- the plan's own
+# digest, the seeds derived from the artifact pair, and a digest over the whole
+# receipt -- so a review answer can be bound to the evidence it read.
+PRESERVATION_SCHEMA = 2
+
+# The plan construction itself is versioned, and separately. A change to the
+# sequence, the ordering rule or the seed material changes every plan digest and
+# invalidates every review bound to one, which is the correct consequence and a
+# silent one unless the version is in the seed material.
+SAMPLE_PLAN_VERSION = 1
+
+# How many points to sample on the preserved surface, per direction. Enough that
+# a missing feature of a few millimetres cannot fall between them on a part of
+# ordinary size, and small enough that the query stays milliseconds.
+#
+# It is a fixed count, not a density derived from a smallest defect this audit
+# undertakes to find. Deriving it is stage 5's work; until then the number is an
+# engineering choice and the receipt does not pretend otherwise.
 DEFAULT_SAMPLES = 20000
 
 # The band a sampled comparison is allowed to call "unchanged". Not zero: two
@@ -41,6 +84,8 @@ DEFAULT_TOLERANCE_MM = 0.05
 
 VERDICT = ("PRESERVED_EXACTLY", "PRESERVED_WITHIN_TOLERANCE", "CHANGED",
            "UNMEASURABLE")
+
+DIRECTIONS = ("source_to_candidate", "candidate_to_source")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,8 +137,131 @@ def _load(path: Path):
     return loaded if isinstance(loaded, trimesh.Trimesh) else loaded.dump(concatenate=True)
 
 
+def _ordered(mesh):
+    """The same geometry, with vertex and face order made a function of it.
+
+    A seeded plan is only reproducible if the thing it indexes into is. Face
+    order decides which face each sample lands on, and nothing guarantees that
+    two reads of one file -- through a different loader path, a scene rather than
+    a mesh, a concatenation whose order came from a dict -- present the faces in
+    the same order. Sorting them here removes the question rather than assuming
+    the answer.
+
+    Winding is preserved: each triangle is rolled so its lowest vertex index
+    leads, which is a cyclic shift, and `signed_distance` reads winding for its
+    sign. This is defined up to exactly coincident vertices, which the merge in
+    `_load` is what removes.
+    """
+    import trimesh
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    if len(vertices) == 0 or len(faces) == 0:
+        return mesh
+
+    vertex_order = np.lexsort((vertices[:, 2], vertices[:, 1], vertices[:, 0]))
+    rank = np.empty(len(vertex_order), dtype=np.int64)
+    rank[vertex_order] = np.arange(len(vertex_order), dtype=np.int64)
+    faces = rank[faces]
+
+    roll = np.argmin(faces, axis=1)
+    columns = (np.arange(3, dtype=np.int64)[None, :] + roll[:, None]) % 3
+    faces = np.take_along_axis(faces, columns, axis=1)
+    face_order = np.lexsort((faces[:, 2], faces[:, 1], faces[:, 0]))
+
+    return trimesh.Trimesh(vertices=vertices[vertex_order],
+                           faces=faces[face_order], process=False)
+
+
+def _generalized_golden(dimensions: int) -> float:
+    """The root of x**(d+1) = x + 1, by the fixed-point iteration that finds it.
+
+    Sixty-four steps of a contraction on doubles: the same arithmetic on every
+    run, and converged long before the last one.
+    """
+    x = 2.0
+    for _ in range(64):
+        x = (1.0 + x) ** (1.0 / (dimensions + 1.0))
+    return x
+
+
+_ALPHA = np.array([1.0 / _generalized_golden(3) ** (j + 1) for j in range(3)],
+                  dtype=np.float64)
+
+
+def _offsets(seed: str) -> np.ndarray:
+    """Three starting phases in [0, 1), read straight out of the seed digest."""
+    raw = hashlib.sha256(seed.encode("utf-8")).digest()
+    return np.array(
+        [int.from_bytes(raw[i * 8:(i + 1) * 8], "big") / float(1 << 64)
+         for i in range(3)], dtype=np.float64)
+
+
+def _plan_points(mesh, count: int, seed: str) -> np.ndarray:
+    """`count` surface points, area-weighted, with no random draw anywhere.
+
+    An additive-recurrence (R3) low-discrepancy sequence, phased by the seed:
+    `t_i = frac(offset + i * alpha)`, three coordinates at a time. The first
+    coordinate indexes the cumulative-area distribution over faces, which is
+    what makes the plan area-weighted; the other two become barycentric weights
+    through the usual square-root map, which is what makes a point uniform
+    inside its triangle.
+
+    Low-discrepancy rather than pseudo-random because the sequence is short,
+    auditable and stable across library versions -- a generator's stream is not
+    something this file should have to pin.
+    """
+    areas = np.asarray(mesh.area_faces, dtype=np.float64)
+    total = float(areas.sum())
+    if count <= 0 or len(areas) == 0 or not np.isfinite(total) or total <= 0.0:
+        return np.zeros((0, 3), dtype=np.float64)
+
+    cumulative = np.cumsum(areas) / total
+    cumulative[-1] = 1.0
+
+    index = np.arange(1, count + 1, dtype=np.float64)
+    t = np.mod(_offsets(seed)[None, :] + index[:, None] * _ALPHA[None, :], 1.0)
+
+    faces = np.searchsorted(cumulative, t[:, 0], side="left")
+    faces = np.clip(faces, 0, len(areas) - 1)
+
+    triangles = np.asarray(mesh.triangles, dtype=np.float64)[faces]
+    root = np.sqrt(t[:, 1])[:, None]
+    v = t[:, 2][:, None]
+    return (triangles[:, 0] * (1.0 - root)
+            + triangles[:, 1] * (root * (1.0 - v))
+            + triangles[:, 2] * (root * v))
+
+
+def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
+                   tolerance_mm: float, samples: int) -> dict[str, Any]:
+    """Everything the plan is a function of, in one hashable structure.
+
+    The two artifact hashes are in it because a plan must be bound to the exact
+    pair it compared -- a receipt that reused one pair's plan on another pair
+    would be evidence about neither. The region, the band and the count are in
+    it because changing any of them is a different measurement, and a
+    measurement that quietly kept the old plan would be reporting the old one.
+    """
+    return {
+        "plan_version": SAMPLE_PLAN_VERSION,
+        "sequence": "R3 additive recurrence over the cumulative face-area distribution",
+        "ordering": "vertices and faces lexicographically ordered before sampling",
+        "source_sha256": source_sha256,
+        "candidate_sha256": candidate_sha256,
+        "region": region.as_dict(),
+        "tolerance_mm": S.canonical_number(tolerance_mm, 6),
+        "samples_per_direction": int(samples),
+        "directions": list(DIRECTIONS),
+    }
+
+
+def _direction_seed(material: dict[str, Any], direction: str) -> str:
+    """One seed per direction, so the two passes are not the same point set."""
+    return S.payload_hash({"plan": material, "direction": direction})
+
+
 def _sampled(source, candidate, region: Region, samples: int,
-             tolerance_mm: float) -> dict[str, Any]:
+             tolerance_mm: float, material: dict[str, Any]) -> dict[str, Any]:
     """Bidirectional surface distance outside the region.
 
     Both directions, because one is not enough in either sense: sampling only the
@@ -103,49 +271,66 @@ def _sampled(source, candidate, region: Region, samples: int,
     import trimesh
 
     results: dict[str, Any] = {}
+    seeds: dict[str, str] = {}
     worst = 0.0
     worst_point: list[float] | None = None
     tested = 0
 
-    for name, (a, b) in (("source_to_candidate", (source, candidate)),
-                         ("candidate_to_source", (candidate, source))):
-        points, _ = trimesh.sample.sample_surface(a, samples)
-        outside = points[~region.contains(points)]
+    # Zipped against `DIRECTIONS` rather than re-spelling the names here: the
+    # plan descriptor publishes that tuple, and two spellings of one list is how
+    # a receipt ends up describing a measurement nobody ran.
+    for name, (a, b) in zip(DIRECTIONS,
+                            ((source, candidate), (candidate, source))):
+        seed = _direction_seed(material, name)
+        seeds[name] = seed
+        points = _plan_points(a, samples, seed)
+        outside = points[~region.contains(points)] if len(points) else points
         tested += int(len(outside))
         if len(outside) == 0:
             results[name] = {"sampled": 0,
-                             "note": "every sample fell inside the declared edit "
-                                     "region, so this direction measured nothing"}
+                             "note": "every planned sample fell inside the declared "
+                                     "edit region, so this direction measured nothing"}
             continue
         distances = np.abs(trimesh.proximity.signed_distance(b, outside))
         index = int(np.argmax(distances))
         peak = float(distances[index])
         results[name] = {"sampled": int(len(outside)),
-                         "max_deviation_mm": round(peak, 4),
-                         "mean_deviation_mm": round(float(distances.mean()), 4)}
+                         "max_deviation_mm": S.canonical_number(peak),
+                         "mean_deviation_mm": S.canonical_number(float(distances.mean()))}
         if peak > worst:
             worst = peak
-            worst_point = [round(float(v), 3) for v in outside[index]]
+            worst_point = [S.canonical_number(float(v), 3) for v in outside[index]]
+
+    plan = {**material, "direction_seeds": seeds}
+    plan["sha256"] = S.payload_hash(plan)
 
     if tested == 0:
         return {"method": "sampled bidirectional surface distance",
                 "verdict": "UNMEASURABLE",
                 "reason": "the declared edit region covers the whole part, so "
                           "there is nothing outside it to preserve",
+                "sample_plan": plan,
                 "directions": results}
 
     return {
         "method": "sampled bidirectional surface distance",
         "verdict": ("PRESERVED_WITHIN_TOLERANCE" if worst <= tolerance_mm
                     else "CHANGED"),
-        "tolerance_mm": tolerance_mm,
-        "max_deviation_mm": round(worst, 4),
+        "tolerance_mm": S.canonical_number(tolerance_mm, 6),
+        "max_deviation_mm": S.canonical_number(worst),
         "worst_point_mm": worst_point,
         "samples_outside_region": tested,
+        "sample_plan": plan,
         "directions": results,
         "claim_note": "a sampled comparison cannot establish exact preservation; "
                       "it establishes that no sampled point outside the declared "
-                      f"region moved more than {tolerance_mm} mm",
+                      f"region moved more than {tolerance_mm} mm. The plan is "
+                      "derived from this pair of artifacts and carries no random "
+                      "draw, so the audit reruns byte-identically -- which is "
+                      "reproducibility and not sensitivity. The density is a fixed "
+                      "count rather than one derived from a declared minimum "
+                      "detectable defect size, so a defect these samples miss is "
+                      "missed identically on every run.",
     }
 
 
@@ -175,15 +360,17 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
                       "edit region' has no geometric meaning and nothing can be "
                       "compared",
         })
-        return report
+        return _sealed(report)
 
     try:
-        source = _load(source_path)
-        candidate = _load(candidate_path)
+        report["source_sha256"] = S.sha256_file(source_path)
+        report["candidate_sha256"] = S.sha256_file(candidate_path)
+        source = _ordered(_load(source_path))
+        candidate = _ordered(_load(candidate_path))
     except Exception as exc:                          # noqa: BLE001 - a file that
         report.update({"method": "none", "verdict": "UNMEASURABLE",
                        "reason": f"{type(exc).__name__}: {exc}"})
-        return report
+        return _sealed(report)
 
     report["bodies"] = {
         "source": int(len(source.split(only_watertight=False))),
@@ -192,12 +379,17 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
     report["bodies"]["changed"] = (
         report["bodies"]["source"] != report["bodies"]["candidate"])
     report["volume_mm3"] = {
-        "source": round(float(source.volume), 3) if source.is_watertight else None,
-        "candidate": (round(float(candidate.volume), 3)
+        "source": (S.canonical_number(float(source.volume), 3)
+                   if source.is_watertight else None),
+        "candidate": (S.canonical_number(float(candidate.volume), 3)
                       if candidate.is_watertight else None),
     }
 
-    measured = _sampled(source, candidate, region, samples, tolerance_mm)
+    material = _seed_material(
+        source_sha256=report["source_sha256"],
+        candidate_sha256=report["candidate_sha256"],
+        region=region, tolerance_mm=tolerance_mm, samples=samples)
+    measured = _sampled(source, candidate, region, samples, tolerance_mm, material)
     report.update(measured)
     if exact and report["verdict"] == "PRESERVED_WITHIN_TOLERANCE":
         # Only reachable when the caller has stated both sides are exact
@@ -208,20 +400,35 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
         report["claim_note"] = (
             "both artifacts were declared exact B-rep exports from one kernel, so "
             "the sampled agreement is a statement about the geometry rather than "
-            "about two tessellations of it")
+            "about two tessellations of it. The comparison is still the sampled "
+            "one, run to a deterministic plan derived from this pair.")
+    return _sealed(report)
+
+
+def _sealed(report: dict[str, Any]) -> dict[str, Any]:
+    """The report's own digest, over everything else in it.
+
+    What binds a review answer to the evidence it was written against. Computed
+    last and over the canonical text, so key order cannot move it and the field
+    cannot be part of what it covers.
+    """
+    report["evidence_sha256"] = S.payload_hash(
+        {k: v for k, v in report.items() if k != "evidence_sha256"})
     return report
 
 
 def as_finding(report: dict[str, Any]) -> str:
     """One line a receipt can carry without the reader opening the JSON."""
     verdict = report.get("verdict")
+    plan = (report.get("sample_plan") or {}).get("sha256")
+    against = f", plan {plan[:12]}" if isinstance(plan, str) else ""
     if verdict in ("PRESERVED_EXACTLY", "PRESERVED_WITHIN_TOLERANCE"):
         return (f"{verdict}: {report.get('samples_outside_region', 0)} sample(s) "
                 f"outside the edit region, worst {report.get('max_deviation_mm')} mm "
-                f"against a {report.get('tolerance_mm')} mm band")
+                f"against a {report.get('tolerance_mm')} mm band{against}")
     if verdict == "CHANGED":
         return (f"CHANGED: geometry outside the declared edit region moved "
                 f"{report.get('max_deviation_mm')} mm at "
                 f"{report.get('worst_point_mm')}, past the "
-                f"{report.get('tolerance_mm')} mm band")
+                f"{report.get('tolerance_mm')} mm band{against}")
     return f"UNMEASURABLE: {report.get('reason', 'no reason recorded')}"

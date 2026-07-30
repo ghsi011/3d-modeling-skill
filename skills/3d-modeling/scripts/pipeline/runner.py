@@ -470,7 +470,13 @@ def run(request: JobRequest) -> JobResult:
                     "step": artifact.get("step_sha256"),
                 },
                 witness=witness.as_dict(), witness_dir=out / "witness",
-                evidence=request.evidence, evidence_dir=out)
+                evidence=request.evidence, evidence_dir=out,
+                # The deterministic measurement plans behind the packet's
+                # evidence, named rather than only hashed into it. A MODIFY job's
+                # preservation audit is the reason this exists: its plan is now a
+                # function of the artifact pair, and an answer written against
+                # one plan must not survive a run that used another.
+                evidence_digests=report.get("evidence_digests"))
             safety_report = safety.run(packet, request.reviewer or {}, request.safety_call,
                                        envelope=safety_envelope)
         except ReviewNeeded:
@@ -527,7 +533,8 @@ def run(request: JobRequest) -> JobResult:
                     "step": artifact.get("step_sha256"),
                 },
                 witness=witness.as_dict(), witness_dir=out / "witness",
-                evidence=request.evidence, evidence_dir=out)
+                evidence=request.evidence, evidence_dir=out,
+                evidence_digests=report.get("evidence_digests"))
             verification_report = verification.run(packet, request.reviewer or {},
                                                    request.verify_call,
                                                    envelope=verification_envelope)

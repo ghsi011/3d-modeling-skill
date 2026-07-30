@@ -225,6 +225,25 @@ fail for it.
 establish exact preservation, so it does not say it did; the report carries the
 method, the sample count and the tolerance it was measured at.
 
+**The sample plan is a function of the pair, not of a draw.** The plan is derived
+from the source and candidate hashes, the declared region, the band and the
+count, and laid along a low-discrepancy sequence over meshes whose vertex and
+face order has been canonicalised first. Identical inputs produce byte-identical
+evidence, and the plan's digest and the audit's own digest are bound into the
+review envelope — which is what lets a reviewer's answer survive a rerun. It did
+not before: the audit drew from the process-wide generator, so the second run
+measured a different part than the one that had been answered, the envelope
+mismatched, and no `MODIFY` job with an edit scope could finish a review round
+trip at all.
+
+That is reproducibility, and it is not sensitivity. The density is still a fixed
+count rather than one derived from a declared minimum detectable defect size, so
+a small undeclared addition outside the edit region can still be missed — now
+identically on every run. Deriving the density, comparing B-reps properly and
+renaming the verdict to `PRESERVED_WITHIN_SAMPLED_TOLERANCE` are stage 5 of
+[ADR 0002](adr/0002-route-and-contract-authority.md), and the `MODIFY` lane stays
+capped until they land.
+
 The support ceiling is inherited on a `MODIFY` job: a generated zero fails a
 supplied part for overhangs that were in the file before anybody touched it, and
 the designer cannot chamfer them away without redrawing the part. The ceiling is

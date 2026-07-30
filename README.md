@@ -267,8 +267,14 @@ tools/                    # gen_harness · build_skill · check_internal_links �
   fixtures.py             #   the benchmark fixture manifest: evidence class,
                           #   licence, and the wall between a request and its answer
   test_diagnosis_l0.py    #   the L0 set — five artifacts, facts asserted not verdicts
-benchmarks/fixtures/      # public request material only; geometry is referenced
-                          # by absolute path and SHA-256, never vendored
+benchmarks/fixtures/      # public request material — everything under a fixture's
+                          # own directory is material an agent may read. Licence
+                          # decides where the bytes live: the owner's own source
+                          # geometry is vendored and recorded repo-relative;
+                          # third-party geometry is never copied, and is
+                          # referenced by absolute path and SHA-256
+benchmarks/references/    # the answers, committed outside every fixture directory
+                          # so walking up from a request cannot reach one
 ```
 
 `skills/roles/*.md` are the source of truth. Edit a role there and run

@@ -145,6 +145,24 @@ def canonical_json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 
+def canonical_number(value: Any, places: int = 4) -> float:
+    """A float whose serialization is a function of its value and nothing else.
+
+    `round` on its own is not enough for an artifact whose identity is its hash.
+    Any small negative magnitude rounds to `-0.0`, which is the same number as
+    `0.0` and different bytes -- so two runs that agree about the geometry can
+    still disagree about the receipt, and a deviation of `-1e-9` mm is exactly
+    the sort of value a distance query produces. `-0.0 == 0` is true, so the
+    comparison below is what collapses the two spellings into the one zero.
+
+    Non-finite values are refused rather than serialized: `NaN` and `Infinity`
+    are not JSON, and Python's encoder emits them anyway.
+    """
+    number = require_finite_number(value, what="canonical number")
+    rounded = round(number, places)
+    return 0.0 if rounded == 0 else rounded
+
+
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

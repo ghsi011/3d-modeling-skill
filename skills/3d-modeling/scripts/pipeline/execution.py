@@ -97,11 +97,16 @@ CUSTOM_LANE_NOTE = (
     "is frozen before the build, a pass here is self-issued and may not be "
     "reported COMMISSIONED or VERIFIED")
 MODIFY_LANE_NOTE = (
-    "the MODIFY lane carries the same self-issued acceptance criteria as CUSTOM, "
-    "and its preservation audit samples unseeded -- two runs of one unchanged "
-    "pair disagree, and a small undeclared addition outside the edit region was "
-    "reported preserved in most of twenty audits; until both are settled this "
-    "lane may not report a part COMMISSIONED or VERIFIED")
+    "the MODIFY lane carries the same self-issued acceptance criteria as CUSTOM. "
+    "Its preservation audit no longer samples unseeded: the plan is derived from "
+    "the source and candidate hashes, so two runs of one unchanged pair produce "
+    "byte-identical evidence and a review answer stays bound across a rerun. What "
+    "is still owed is sensitivity, not repeatability -- the sample density is a "
+    "fixed count rather than one derived from a declared minimum detectable "
+    "defect size, so a small undeclared addition outside the edit region can "
+    "still be missed, and is now missed identically on every run. Until the "
+    "acceptance contract is frozen before the build and that density is derived, "
+    "this lane may not report a part COMMISSIONED or VERIFIED")
 AUTHORED_METROLOGY_NOTE = (
     "this job owes a bounded metrology recovery, and recovery is defined only "
     "against a certified template's covers and bounds -- nothing in this build "

@@ -18,7 +18,15 @@ from typing import Any
 
 from . import schemas as S
 
-REVIEW_PROTOCOL_VERSION = 1
+# 2: the envelope binds `evidence_digests` -- the digests of the deterministic
+# measurement plans that produced the evidence in the packet, and of the evidence
+# itself. A reviewer's answer to a preservation audit could previously only be
+# checked against the packet as a whole, so a reader of a response could see
+# *that* it no longer matched and never *what* it had been written against.
+# Bumping rather than adding silently: every stored response's digest moves, and
+# a build that refuses one by name is telling the truth more usefully than one
+# that reports an unexplained mismatch.
+REVIEW_PROTOCOL_VERSION = 2
 REVIEW_KIND = ("specification", "safety", "verification")
 
 SCHEMA_VERSION_BY_KIND = {
@@ -93,6 +101,11 @@ class ReviewEnvelope:
     artifact_hashes: dict[str, str | None] | None
     witness_hashes: dict[str, str] | None
     evidence_hashes: dict[str, str] | None
+    # Digests of the deterministic measurement plans behind the evidence, and of
+    # the evidence those plans produced. `evidence_hashes` above covers *files*
+    # handed to the reviewer; this covers measurements computed during the run,
+    # which have no file of their own and used not to be nameable at all.
+    evidence_digests: dict[str, str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +123,8 @@ class ReviewEnvelope:
                                else {k: v for k, v in sorted(self.witness_hashes.items())}),
             "evidence_hashes": (None if self.evidence_hashes is None
                                 else {k: v for k, v in sorted(self.evidence_hashes.items())}),
+            "evidence_digests": (None if self.evidence_digests is None
+                                 else {k: v for k, v in sorted(self.evidence_digests.items())}),
         }
 
     def digest(self) -> str:
@@ -122,8 +137,15 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
                    witness: dict[str, Any] | None = None,
                    witness_dir: Path | None = None,
                    evidence: tuple[str, ...] | list[str] = (),
-                   evidence_dir: Path | None = None) -> ReviewEnvelope:
+                   evidence_dir: Path | None = None,
+                   evidence_digests: dict[str, Any] | None = None) -> ReviewEnvelope:
     S.require_enum(kind, REVIEW_KIND, what="review kind")
+    if evidence_digests is not None:
+        for name, digest in sorted(evidence_digests.items()):
+            if not isinstance(name, str) or not isinstance(digest, str):
+                raise ReviewError(
+                    "evidence_digests must map strings to strings, got "
+                    f"{name!r}: {digest!r}")
     return ReviewEnvelope(
         protocol_version=REVIEW_PROTOCOL_VERSION,
         answer_schema_version=SCHEMA_VERSION_BY_KIND[kind],
@@ -136,6 +158,8 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
         artifact_hashes=artifact_hashes,
         witness_hashes=_hash_witness(witness, witness_dir),
         evidence_hashes=_hash_evidence(evidence, evidence_dir),
+        evidence_digests=(None if evidence_digests is None
+                          else dict(evidence_digests)),
     )
 
 
@@ -220,6 +244,8 @@ def _envelope_from_dict(env: dict[str, Any]) -> ReviewEnvelope:
             artifact_hashes=_hash_map_field(env, "artifact_hashes", nullable_values=True),
             witness_hashes=_hash_map_field(env, "witness_hashes", nullable_values=False),
             evidence_hashes=_hash_map_field(env, "evidence_hashes", nullable_values=False),
+            evidence_digests=_hash_map_field(env, "evidence_digests",
+                                             nullable_values=False),
         )
     except KeyError as exc:
         raise ReviewError(f"review_envelope is malformed: missing {exc}") from None

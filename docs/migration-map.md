@@ -31,8 +31,8 @@ there is no resource governor and no versioned Bambu adapter; `make_3mf.py` and
 Two independent reviews of the Phase 0-3 consolidation found 21 defects, three of
 which mean the `CUSTOM` and `MODIFY` receipts do not carry the meaning they
 claim: the declared route does not control execution, the candidate re-derives
-its own acceptance criteria on every run, and the preservation audit is unseeded
-and nondeterministic.
+its own acceptance criteria on every run, and the preservation audit sampled
+unseeded, so no two runs of one `MODIFY` job produced the same evidence.
 
 [ADR 0002](adr/0002-route-and-contract-authority.md) records the decision: settle
 route authority and acceptance-contract authority first, then rebuild the
@@ -44,13 +44,21 @@ The repair runs in five stages: route authority -> acceptance contract -> state
 lifecycle -> gate consolidation -> preservation. No stage after 2 begins until a
 built artifact is structurally unable to influence its own acceptance criteria.
 
+One half-stage sits out of that order. Stage 5's determinism was pulled forward
+as **1.6** because it is not a preservation improvement so much as a precondition
+for measuring anything on the `MODIFY` lane: while the audit sampled unseeded,
+every later stage would have been verified against receipts that no rerun could
+reproduce. It takes the determinism and nothing else — the sensitivity work stays
+in stage 5, and the lane cap stays on.
+
 | stage | state |
 |---|---|
 | 1 — route authority | **done**: `pipeline/execution.py` compiles `execution_plan.json`; the runner consumes it and no longer selects a route; `final_status.json` carries the plan's route, the plan hash and the lane status. An independent review of the first landing found four defects in it, all repaired: the modification cap keyed on the source mode rather than on the declared edit scope, a matched certified template silently outranking a declared authored model, `verification_dispatch: OPTIONAL` naming a look `design-tool run` could not take, and `route._legacy` dropping `verification_requested` |
+| 1.6 — deterministic evidence | **done**: the preservation sample plan is derived from the source and candidate hashes over meshes whose vertex and face order is canonicalised first, floats are serialised through `schemas.canonical_number`, and the plan's digest and the audit's own digest are bound into the review envelope (`review` protocol 2). Identical inputs now produce byte-identical evidence, which is what makes a `MODIFY` review round trip possible: before it, the rerun that read a reviewer's answer had already measured the part differently, the envelope mismatched, and the job could not be resumed. Taken out of stage 5 and landed early because every stage after it that touches a `MODIFY` job is verified by receipts this defect made unreproducible |
 | 2 — acceptance contract | not started |
 | 3 — state lifecycle | not started |
 | 4 — gate consolidation | not started |
-| 5 — preservation | not started |
+| 5 — preservation | not started. Stage 1.6 took the determinism only; sensitivity is untouched and still owed here — density derived from a declared minimum detectable defect size, real B-rep comparison, the `PRESERVED_WITHIN_SAMPLED_TOLERANCE` naming, and the STEP decision. A plan that misses a 0.5 mm undeclared cube still misses it, now identically on every run |
 
 Stage 1 also marks `CUSTOM` and `MODIFY` as `EXPERIMENTAL_UNAVAILABLE`: they
 build, screen, gate and write every receipt, and a passing run reports

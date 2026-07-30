@@ -273,6 +273,15 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                       "max_deviation_mm": report.get("max_deviation_mm"),
                       "samples_outside_region": report.get("samples_outside_region"),
                       "method": report.get("method"),
+                      # The plan that produced this number and the digest of the
+                      # whole audit. Both travel onto the receipt so a review
+                      # answer can be checked against the evidence it read
+                      # rather than against a verdict that happens to agree --
+                      # see `run` below, which lifts them into the report, and
+                      # `review.build_envelope`, which binds them.
+                      "sample_plan_sha256": (
+                          report.get("sample_plan") or {}).get("sha256"),
+                      "evidence_sha256": report.get("evidence_sha256"),
                       "bodies": report.get("bodies")},
                      tol, _verdict(feature, preserved, True))
 
@@ -424,6 +433,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
         "schema_version": S.COMMISSION_SCHEMA,
         "contract_hash": contract.contract_hash(),
         "verdict": verdict,
+        "evidence_digests": _evidence_digests(checks),
         "coverage": {"covered": len(covered), "declared": len(declared),
                      "fraction": round(coverage, 4),
                      "minimum": contract.minimum_coverage},
@@ -433,6 +443,32 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
         "normalization_log": ctx.mutations,
         "checks": [c.as_dict() for c in checks],
     }
+
+
+# The digest fields a check may publish about the measurement it ran, rather
+# than about the answer it got. Named here rather than found by convention so
+# that adding one is a decision: whatever appears in this list is bound into the
+# review envelope, and a reviewer's answer stops matching when it moves.
+EVIDENCE_DIGEST_KEYS = ("sample_plan_sha256", "evidence_sha256")
+
+
+def _evidence_digests(checks: list[Check]) -> dict[str, str]:
+    """Which deterministic measurement plans produced this report's evidence.
+
+    Collected generically from the checks rather than reached for by name. The
+    preservation audit is the only check that publishes one today; a second one
+    that does gets bound by declaring the field, not by editing the runner.
+    """
+    digests: dict[str, str] = {}
+    for check in checks:
+        measured = check.measured
+        if not isinstance(measured, dict):
+            continue
+        for key in EVIDENCE_DIGEST_KEYS:
+            value = measured.get(key)
+            if isinstance(value, str) and value:
+                digests[f"{check.check_id}.{key}"] = value
+    return digests
 
 
 def _bed_contact(ctx: MeshAnalysisContext) -> float:
