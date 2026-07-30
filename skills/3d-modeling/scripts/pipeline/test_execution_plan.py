@@ -26,6 +26,7 @@ property that separates a defect from a stopping condition.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import textwrap
@@ -36,10 +37,26 @@ from . import cli
 from . import execution as EX
 from . import project as P
 from . import route as RT
+from . import runner
 from . import selftest as ST
 
 CLIP = dict(ST.FROZEN_PARAMETERS["c_clip"])
 UTC = "1970-01-01T00:00:00Z"
+
+# A legacy job description, in the shape `run-job` reads and `init
+# --from-job-json` adapts. `external_geometry` is what makes it route FITTED, and
+# FITTED through the two entry points is where they disagreed.
+JOB_JSON = {
+    "job_id": "legacy", "template": "c_clip", "parameters": dict(CLIP),
+    "updated_utc": UTC, "consequence": "INCONSEQUENTIAL",
+    "printer": "Test Printer",
+    "material": {"process": "FDM", "material": "PLA"},
+    "nozzle": {"diameter_mm": 0.4},
+    "orientation": {"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+    "external_geometry": True,
+    "interface_map": {"channel": "bore_d"},
+    "reviewer": {"model_snapshot": "test"},
+}
 
 # A plain block: one body, no overhangs, every expectation the closed form of a
 # rectangle. The geometry is deliberately uninteresting -- what these tests are
@@ -101,14 +118,37 @@ def _authored(**over) -> P.Project:
                     envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}, **over)
 
 
-def _laid_out(root: Path, project: P.Project, *, model: str | None = None) -> Path:
-    directory = root / "project"
+def _laid_out(root: Path, project: P.Project, *, model: str | None = None,
+              name: str = "project", source: bool = False) -> Path:
+    directory = root / name
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "brief.md").write_text("a clip", encoding="utf-8")
     if model is not None:
         (directory / "model.py").write_text(textwrap.dedent(model), encoding="utf-8")
+    if source:
+        _source_artifact(directory)
     project.save(directory)
     return directory
+
+
+# The supplied artifact a modification starts from. Deliberately a plain block:
+# what these tests are about is whether anything reads it at all.
+SOURCE_ARTIFACT = P.SourceArtifact(artifact_id="src", path="source.stl",
+                                   format="STL", classification="USABLE_MESH")
+EDIT_SCOPE = P.EditScope(
+    artifact_id="src", region="the mounting boss",
+    region_box={"min": [5.0, 5.0, 0.0], "max": [15.0, 15.0, 10.0]},
+    preserve=("everything but the boss",))
+
+
+def _source_artifact(directory: Path) -> Path:
+    import trimesh
+
+    block = trimesh.creation.box(extents=(40.0, 30.0, 10.0))
+    block.apply_translation((20.0, 15.0, 5.0))
+    path = directory / "source.stl"
+    block.export(path)
+    return path
 
 
 def _answer(directory: Path, kind: str, payload: dict) -> None:
@@ -274,19 +314,27 @@ class FullWithNothingToMeasureTest(unittest.TestCase):
             "full by parallel candidates": self._parallel(),
             "explicit verification": _project(verification_requested=True),
         }
-        supplied = {"safety": "safety_call", "specification": "spec_call",
-                    "verification": "verify_call"}
+        cases["authored metrology"] = _authored(source_mode="RECONSTRUCT")
+        cases["legacy fitted"] = P.from_job_json(dict(JOB_JSON))
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             for name, project in cases.items():
                 with self.subTest(job=name):
                     plan = EX.compile_plan(project)
                     calls = cli._review_calls(directory, plan)
-                    for review, field in supplied.items():
-                        self.assertEqual(review in plan.required_reviews,
-                                         calls[field] is not None,
-                                         f"{field} and the plan disagree about "
-                                         f"{review}")
+                    # Each reviewer is wired on the predicate the runner reads,
+                    # not on a second reading of the review list. A job that owes
+                    # a recovery nothing can run must not be handed a reviewer
+                    # whose answer nothing would read, and a job the plan invites
+                    # an optional look on must have somebody there to take it.
+                    self.assertEqual("safety" in plan.required_reviews,
+                                     calls["safety_call"] is not None)
+                    self.assertEqual(plan.dispatches_specification,
+                                     calls["spec_call"] is not None,
+                                     "spec_call and the plan disagree")
+                    self.assertEqual(plan.verification_dispatch != "NEVER",
+                                     calls["verify_call"] is not None,
+                                     "verify_call and the plan disagree")
 
 
 class ExplicitVerificationRequestTest(unittest.TestCase):
@@ -438,6 +486,347 @@ class ExperimentalLaneTest(unittest.TestCase):
             self.assertEqual("EXPERIMENTAL_UNAVAILABLE", final["lane_status"])
             self.assertIn(EX.CUSTOM_LANE_NOTE, final["reasons"])
             self.assertEqual(1, code)
+
+
+class EditScopeIsTheObligationTest(unittest.TestCase):
+    """A declared edit scope carries the modification obligations.
+
+    Stage 1 capped the lane on the literal `source_mode == "MODIFY"` and wired
+    the preservation audit into the authored builder alone. Between them, a
+    project that declared an edit scope over a supplied artifact and wrote
+    `RECONSTRUCT` beside it validated cleanly, compiled `lane_status: AVAILABLE`,
+    built a certified template, reached `VERIFIED` -- and never opened the source
+    artifact or mentioned it on any receipt. A sweep of project shapes put 960 in
+    that class. The same project one commit earlier could not claim success, so
+    this was the commit that made the claim reachable.
+    """
+
+    def _edit(self, **over) -> P.Project:
+        return _project(source_mode="RECONSTRUCT", interface_map={"channel": "bore_d"},
+                        source_artifacts=(SOURCE_ARTIFACT,), edit_scope=EDIT_SCOPE,
+                        **over)
+
+    def test_the_cap_follows_the_edit_scope_and_not_the_source_mode(self) -> None:
+        plan = EX.compile_plan(self._edit())
+        self.assertEqual("FITTED", plan.route)
+        self.assertEqual("CERTIFIED_TEMPLATE", plan.builder)
+        self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status,
+                         "a declared modification may not claim success on any "
+                         "builder while the preservation audit is unsettled")
+        self.assertEqual(EX.MODIFY_LANE_NOTE, plan.lane_note)
+        self.assertTrue(plan.requires_preservation)
+
+    def test_no_shape_declares_an_edit_scope_and_keeps_an_available_lane(self) -> None:
+        """Asserted over the shapes rather than over the one example.
+
+        The failing example was the one nobody had written, so the property is
+        checked across every source mode and every route an edit scope can be
+        declared under.
+        """
+        for source_mode in P.SOURCE_MODE:
+            for label, over in (("certified template", {}),
+                                ("authored model", {"model": "model.py"}),
+                                ("two components", {"components": (
+                                    P.Component(component_id="a", role="x"),
+                                    P.Component(component_id="b", role="y"))})):
+                with self.subTest(source_mode=source_mode, builder=label):
+                    plan = EX.compile_plan(_project(
+                        source_mode=source_mode, source_artifacts=(SOURCE_ARTIFACT,),
+                        edit_scope=EDIT_SCOPE,
+                        envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}, **over))
+                    self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+                    self.assertTrue(plan.requires_preservation)
+
+    def test_the_preservation_row_reaches_the_contract_on_a_certified_builder(self) -> None:
+        """Driven through the CLI, because the wiring is where it went missing.
+
+        The run stops at the verification review rather than finishing, and the
+        assertions are on the receipts that exist by then. That is not a
+        convenience: the preservation audit still samples unseeded, so two runs
+        of one unchanged pair disagree and the second run's evidence packet no
+        longer matches the answer written against the first. It is the defect
+        `MODIFY_LANE_NOTE` names and stage 5 settles -- and it is exactly why this
+        lane may not claim success, which is the other half of what is asserted
+        here.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), self._edit(), source=True)
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+            _answer(directory, "spec", SPEC_RESPONSE)
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+
+            contract = json.loads(
+                (directory / "model_contract.json").read_text(encoding="utf-8"))
+            rows = [f for f in contract["features"] if f["kind"] == "preservation"]
+            self.assertEqual(1, len(rows),
+                             "the edit scope was declared and the contract that "
+                             "gates the candidate carries no row measuring it")
+            self.assertEqual("source.stl", rows[0]["expectation"]["source"],
+                             "the supplied artifact is named nowhere the gate reads")
+
+            report = json.loads(
+                (directory / "commission_report.json").read_text(encoding="utf-8"))
+            self.assertIn("feature-preservation",
+                          [c["check_id"] for c in report["checks"]])
+
+            self.assertEqual("EXPERIMENTAL_UNAVAILABLE",
+                             _plan_file(directory)["lane_status"])
+            self.assertFalse((directory / "final_status.json").is_file(),
+                             "this shape reached a successful final status with "
+                             "the source artifact read by nothing")
+
+    def test_a_contract_that_drops_the_row_is_refused_before_the_build_counts(self) -> None:
+        """The obligation is on the plan, so no builder can drop it by omission.
+
+        Wiring the audit into one CLI path is exactly how it went missing. The
+        plan now states the obligation and the runner refuses a contract that
+        does not carry it, which makes a future builder's silence a stop rather
+        than a receipt nobody wrote.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            project = _project()
+            directory = _laid_out(Path(raw), project)
+            plan = dataclasses.replace(EX.compile_plan(project),
+                                       requires_preservation=True)
+            result = runner.run(runner.JobRequest(
+                brief_path=directory / "brief.md", out_dir=directory,
+                render=False, plan=plan, **P.to_job_request_fields(project)))
+            self.assertFalse(result.ok)
+            self.assertEqual("preflight", result.stage)
+            self.assertIn("preservation row", result.message)
+
+
+class ADeclaredModelIsNeverDiscardedTest(unittest.TestCase):
+    """Either the authored model is the builder, or the plan says why not.
+
+    `_builder` preferred a matched certified template over `project.model` on
+    every non-`CUSTOM` route, and nothing reconciled the plan it emitted:
+    `builder: CERTIFIED_TEMPLATE, template: c_clip, model: model.py`. A
+    `RECONSTRUCT` project declaring both built the c_clip -- 40x22x14 -- rather
+    than the model's 40x30x10 block, reached `VERIFIED`, and named `model.py`
+    nowhere in the receipts. The asymmetry was the tell: the same declaration
+    flipped a `NEW` job to `CUSTOM` and capped its lane, and was dropped in
+    silence on `FITTED` and `FULL`.
+    """
+
+    def test_the_declared_model_wins_the_builder_on_a_fitted_job(self) -> None:
+        plan = EX.compile_plan(_project(
+            source_mode="RECONSTRUCT", model="model.py",
+            envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}))
+        self.assertEqual("FITTED", plan.route, "the route is unchanged by this")
+        self.assertEqual("AUTHORED", plan.builder)
+        self.assertIsNone(plan.template)
+        self.assertEqual("model.py", plan.model)
+        self.assertIn("c_clip", plan.builder_rationale,
+                      "the template that was not used has to be named, or it was "
+                      "discarded in silence after all")
+
+    def test_no_plan_names_a_certified_builder_and_a_model_at_once(self) -> None:
+        cases = {
+            "reconstruct": {"source_mode": "RECONSTRUCT"},
+            "one external interface": {"interfaces": (P.Interface(
+                interface_id="channel", kind="fit", external=True,
+                owner="the bundle"),)},
+            "two components": {"components": (
+                P.Component(component_id="a", role="x"),
+                P.Component(component_id="b", role="y"))},
+            "parallel candidates": {"candidate_strategy": "PARALLEL"},
+            "new": {},
+        }
+        for name, over in cases.items():
+            with self.subTest(job=name):
+                plan = EX.compile_plan(_project(
+                    model="model.py",
+                    envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}, **over))
+                self.assertEqual("AUTHORED", plan.builder)
+                self.assertIsNone(plan.template,
+                                  "the plan names a certified template it will "
+                                  "not build and a model it will not build "
+                                  "either")
+
+    def test_the_geometry_that_gets_built_is_the_model_s(self) -> None:
+        """The receipt has to be about the file the designer wrote."""
+        project = _project(
+            model="model.py", envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0},
+            components=(P.Component(component_id="a", role="body"),
+                        P.Component(component_id="b", role="lid")))
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), project, model=BLOCK)
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+            _answer(directory, "verification", PASSED_REVIEW)
+            self.assertEqual(0, cli.run([str(directory), "--no-render"]))
+
+            artifact = json.loads(
+                (directory / "artifact_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual({"x": 40.0, "y": 30.0, "z": 10.0}, artifact["bbox_mm"],
+                             "the certified template was built instead of the "
+                             "model the project declared")
+            self.assertEqual("authored", _final(directory)["backend"])
+
+
+class OneJobOneAnswerThroughEitherEntryPointTest(unittest.TestCase):
+    """`run-job` and `run` on one identical `job.json`.
+
+    `verification_dispatch: OPTIONAL` named a look no `design-tool run` job could
+    take: the compiler returned it exactly when `verification` was absent from
+    `required_reviews`, and `_review_calls` supplied a verifier exactly when it
+    was present. `run-job` hands the runner every callable unconditionally and
+    duly took the look, so the same file finished `VERIFIED` through the
+    deprecated entry point and `NEEDS_MORE_EVIDENCE` through the supported one --
+    the legacy adapter dropping a review its predecessor dispatched, under a name
+    that read like deliberate policy.
+    """
+
+    def _job_dir(self, root: Path, name: str) -> Path:
+        directory = root / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "brief.md").write_text("a clip over a bundle", encoding="utf-8")
+        (directory / "job.json").write_text(json.dumps(JOB_JSON), encoding="utf-8")
+        return directory
+
+    def _drive(self, directory: Path, entry, argv: list[str]) -> int:
+        """Run, answer whatever it asks for, run again -- up to a fixed bound."""
+        for _ in range(5):
+            code = entry(argv)
+            if code != cli.NEEDS_ACTION:
+                return code
+            for kind, payload in (("spec", SPEC_RESPONSE),
+                                  ("verification", PASSED_REVIEW)):
+                packet = directory / "reviews" / f"{kind}_packet.json"
+                response = directory / "reviews" / f"{kind}_response.json"
+                if packet.is_file() and not response.is_file():
+                    _answer(directory, kind, payload)
+                    break
+            else:
+                return code
+        self.fail("the job never settled")
+
+    def test_both_entry_points_reach_the_same_status(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            legacy = self._job_dir(root, "legacy")
+            canonical = self._job_dir(root, "canonical")
+
+            legacy_code = self._drive(legacy, cli.run_job,
+                                      [str(legacy), "--no-render"])
+            self.assertEqual(0, cli.init([
+                str(canonical), "--job-id", "legacy", "--source-mode", "RECONSTRUCT",
+                "--consequence", "INCONSEQUENTIAL", "--updated-utc", UTC,
+                "--from-job-json"]))
+            canonical_code = self._drive(canonical, cli.run,
+                                         [str(canonical), "--no-render"])
+
+            self.assertEqual(legacy_code, canonical_code)
+            self.assertEqual(_final(legacy)["final_status"],
+                             _final(canonical)["final_status"],
+                             "one job.json, two entry points, two answers")
+            self.assertEqual("VERIFIED", _final(canonical)["final_status"])
+            self.assertEqual("PASS", _final(canonical)["verification"])
+
+    def test_the_optional_look_is_compiled_and_a_verifier_is_supplied_for_it(self) -> None:
+        plan = EX.compile_plan(P.from_job_json(dict(JOB_JSON)))
+        self.assertEqual("FITTED", plan.route)
+        self.assertNotIn("verification", plan.required_reviews)
+        self.assertEqual("OPTIONAL", plan.verification_dispatch)
+        with tempfile.TemporaryDirectory() as raw:
+            calls = cli._review_calls(Path(raw), plan)
+            self.assertIsNotNone(calls["verify_call"],
+                                 "the plan invites an independent look and the "
+                                 "run path puts nobody in the room to take it")
+
+    def test_no_dispatch_value_names_behaviour_no_job_can_produce(self) -> None:
+        """Every value in the enum is compiled by some project a user can write."""
+        produced = {
+            EX.compile_plan(_project()).verification_dispatch,
+            EX.compile_plan(_project(verification_requested=True)).verification_dispatch,
+            EX.compile_plan(P.from_job_json(dict(JOB_JSON))).verification_dispatch,
+        }
+        self.assertEqual(set(EX.DISPATCH), produced)
+
+    def test_custom_is_not_bought_an_independent_look_it_did_not_ask_for(self) -> None:
+        """The optional look must not become a round trip on the CUSTOM baseline."""
+        plan = EX.compile_plan(_authored())
+        self.assertEqual("CUSTOM", plan.route)
+        self.assertEqual("NEVER", plan.verification_dispatch)
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertIsNone(cli._review_calls(Path(raw), plan)["verify_call"])
+
+
+class LegacyProjectReadsItsOwnRequestTest(unittest.TestCase):
+    """`route._legacy` never read `verification_requested`.
+
+    `P.load` deserializes the field, so on any `compat: "job.json@1"` project an
+    explicit ask for an independent look reached the router and vanished with no
+    receipt. A request that disappears in silence is worse than one that is
+    refused: nothing downstream can tell which of the two happened.
+    """
+
+    def _adapted(self, root: Path) -> Path:
+        directory = root / "adapted"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "brief.md").write_text("a clip", encoding="utf-8")
+        # No external geometry: this routes DIRECT, which is the route that
+        # trades the independent look away unless somebody asks for it.
+        (directory / "job.json").write_text(
+            json.dumps({**JOB_JSON, "external_geometry": False,
+                        "interface_map": {}}), encoding="utf-8")
+        self.assertEqual(0, cli.init([
+            str(directory), "--job-id", "legacy", "--source-mode", "NEW",
+            "--consequence", "INCONSEQUENTIAL", "--updated-utc", UTC,
+            "--from-job-json"]))
+        project = P.load(directory)
+        project.verification_requested = True
+        project.save(directory)
+        return directory
+
+    def test_the_request_reaches_the_route_decision_and_the_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            project = P.load(self._adapted(Path(raw)))
+            self.assertEqual("job.json@1", project.compat)
+            decision = RT.decide(project)
+            self.assertEqual("DIRECT", decision.route)
+            self.assertTrue(decision.requires_verification)
+            self.assertIn("independent verification was explicitly requested",
+                          decision.escalations)
+            plan = EX.compile_plan(project, decision)
+            self.assertEqual(("verification",), plan.required_reviews)
+            self.assertEqual("REQUIRED", plan.verification_dispatch)
+
+    def test_the_verifier_it_asked_for_actually_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._adapted(Path(raw))
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+            _answer(directory, "verification", PASSED_REVIEW)
+            self.assertEqual(0, cli.run([str(directory), "--no-render"]))
+            final = _final(directory)
+            self.assertEqual("DIRECT", final["route"])
+            self.assertEqual("VERIFIED", final["final_status"])
+
+
+class APlanCannotOweWhatItDeclinesTest(unittest.TestCase):
+    """The runner used to decline a review the plan required, on its own say-so.
+
+    `if plan.requires_specification and plan.builder == "CERTIFIED_TEMPLATE"`
+    meant a FITTED or FULL job on authored geometry carried `specification` in
+    its required reviews, had a reviewer wired for it, and never had it invoked.
+    Every such shape is capped today, so nothing false escaped -- but the cap was
+    the only thing holding it, and a plan stating an obligation the runner
+    unilaterally drops is the two-authorities shape this stage exists to remove.
+    """
+
+    def test_the_compiler_owns_whether_the_recovery_can_run(self) -> None:
+        plan = EX.compile_plan(_authored(source_mode="RECONSTRUCT"))
+        self.assertTrue(plan.requires_specification)
+        self.assertFalse(plan.dispatches_specification)
+        self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+
+    def test_owing_a_review_nothing_can_run_and_claiming_success_is_unrepresentable(self) -> None:
+        available = EX.compile_plan(_project(source_mode="RECONSTRUCT"))
+        self.assertEqual("AVAILABLE", available.lane_status)
+        self.assertTrue(available.dispatches_specification)
+        with self.assertRaises(ValueError) as caught:
+            dataclasses.replace(available, builder="AUTHORED", template=None)
+        self.assertIn("owes a review nothing can run", str(caught.exception))
 
 
 if __name__ == "__main__":

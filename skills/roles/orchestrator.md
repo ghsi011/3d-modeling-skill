@@ -258,9 +258,12 @@ external object. One designer commission, and `design-tool run` writes it: the r
 project path, the authorized inputs, the required outputs, the bound hashes and the
 completion command. The print plan is created before the candidate is measured.
 
-`CUSTOM` and `MODIFY` cannot reach a successful final status yet. Every deterministic stage
-still runs and every receipt is still written — build, gates, screen, preservation audit,
-witnesses — so a designer can iterate against real measurements. What the run reports is
+`CUSTOM`, and any job that declares an `edit_scope`, cannot reach a successful final status
+yet. The modification cap follows the declared edit scope and not the `source_mode` label
+beside it, so an edit scope over a supplied artifact carries the preservation obligation on
+every builder and every route. Every deterministic stage still runs and every receipt is
+still written — build, gates, screen, preservation audit, witnesses — so a designer can
+iterate against real measurements. What the run reports is
 `EXPERIMENTAL_UNAVAILABLE`, with `lane_status` and the reason in `final_status.json`: the
 candidate still supplies its own acceptance criteria, and a receipt issued by the party being
 judged is not a receipt. A real `FAILED` is still `FAILED`. `docs/adr/0002-route-and-contract-authority.md`

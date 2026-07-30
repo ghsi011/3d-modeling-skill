@@ -179,13 +179,23 @@ def run(request: JobRequest) -> JobResult:
     # metrologist is about to recover into that template's bounds.
     built_from = plan.template or request.template
 
-    # The bounded recovery of geometry this job does not own. Gated on the plan's
-    # own review list rather than on a route table repeated here: the runner
-    # demanding a spec call the compiler had not asked for is what deadlocked a
-    # FULL job with two components, no evidence and no external interface --
-    # unresolvable, because no reviewer the agent supplied was ever going to be
-    # the one the runner wanted.
-    if plan.requires_specification and plan.builder == "CERTIFIED_TEMPLATE":
+    # The bounded recovery of geometry this job does not own. Gated on one
+    # predicate the plan compiled rather than on a route table repeated here: the
+    # runner demanding a spec call the compiler had not asked for is what
+    # deadlocked a FULL job with two components, no evidence and no external
+    # interface -- unresolvable, because no reviewer the agent supplied was ever
+    # going to be the one the runner wanted.
+    #
+    # `dispatches_specification` and not `requires_specification`: the recovery
+    # is defined only against a certified template's covers and bounds, so a job
+    # that owes one and builds authored geometry has nothing to run it into. That
+    # used to be the runner's own judgement -- it read the obligation off the plan
+    # and declined it unilaterally, which is the two-authorities shape this stage
+    # exists to remove. The compiler owns it now, and a plan that declines a
+    # review it owes while claiming an available lane cannot be constructed
+    # (`ExecutionPlan.__post_init__`). Stage 2 does not need to revisit this line;
+    # it needs to revisit the compiler, in one place.
+    if plan.dispatches_specification:
         if request.spec_call is None:
             return JobResult(False, "routing",
                              f"route is {plan.route}: {plan.route_rationale}. This job "
@@ -307,6 +317,20 @@ def run(request: JobRequest) -> JobResult:
     )
     written["model_contract"] = _write(out / "model_contract.json", model_contract.as_payload())
     problems = C.preflight(model_contract, known_checks=commission.KNOWN_CHECKS)
+    # The obligation the plan carries, checked against the contract that will
+    # actually be gated. The preservation row reached the contract from one CLI
+    # path only, so a project that declared an edit scope over any other builder
+    # was measured against nothing, mentioned nothing on its receipts, and could
+    # still finish VERIFIED. Refusing here rather than warning: an audit that is
+    # absent from the contract cannot reach the commissioning verdict, so there
+    # is no later place this could be caught.
+    if plan.requires_preservation and not any(
+            feature.kind == "preservation" for feature in model_contract.features):
+        problems = problems + [
+            "this job declares an edit scope over a supplied artifact, so the "
+            "contract must carry the preservation row that measures everything "
+            "outside the edit region. It carries none, and a modification whose "
+            "preservation is unmeasured cannot be commissioned."]
     timings["contract"] = time.perf_counter() - mark
     if problems:
         return JobResult(False, "preflight",
@@ -473,6 +497,13 @@ def run(request: JobRequest) -> JobResult:
     # DIRECT, whose route trade is exactly that nobody independent looks;
     # OPTIONAL, which is worth taking only when the broad screen came back clear;
     # REQUIRED, which survives a screen that could not clear the part.
+    #
+    # OPTIONAL only ever fired here for `run-job`, which hands over every callable
+    # unconditionally. `design-tool run` supplied a verifier exactly when the
+    # route *required* one, so the middle value could not be acted on and one
+    # `job.json` finished VERIFIED through the old entry point and
+    # NEEDS_MORE_EVIDENCE through the new one. `cli._review_calls` now supplies
+    # the verifier on OPTIONAL too, which is what closes that gap.
     if request.verify_call is not None and plan.verification_dispatch != "NEVER" and \
             (screen["overall"] == "CLEAR"
              or plan.verification_dispatch == "REQUIRED"):

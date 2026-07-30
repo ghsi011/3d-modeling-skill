@@ -234,10 +234,32 @@ regression-tested.
 What will actually be executed under that decision, compiled from it by
 [`pipeline/execution.py`](../skills/3d-modeling/scripts/pipeline/execution.py) in
 the same invocation: the route, the **builder** (`CERTIFIED_TEMPLATE` or
-`AUTHORED`), the reviews the job owes, whether an independent verification is
-`NEVER`, `OPTIONAL` or `REQUIRED`, and whether the lane may claim success at all.
-Nobody writes this file by hand and no command exists to produce it on its own —
-`design-tool run` is still one command for a whole job.
+`AUTHORED`) **and why that builder**, the reviews the job owes, whether an
+independent verification is `NEVER`, `OPTIONAL` or `REQUIRED`, whether the job
+must prove it preserved everything outside its declared edit region, and whether
+the lane may claim success at all. Nobody writes this file by hand and no command
+exists to produce it on its own — `design-tool run` is still one command for a
+whole job.
+
+A declared `model` is the builder on every route. Preferring a matched certified
+template over it emitted a plan that contradicted itself — `builder:
+CERTIFIED_TEMPLATE, model: model.py` — and then built the template, so a job
+declaring both reached `VERIFIED` without the designer's file being named on any
+receipt. `builder_rationale` says which declaration won and which was set aside.
+
+`requires_preservation` is set by the **edit scope**, not by the source mode, and
+the runner refuses a contract that does not carry the row it names. Keyed on
+`source_mode == "MODIFY"` instead, a project that declared an edit scope over a
+supplied artifact and wrote `RECONSTRUCT` beside it built a certified template,
+never opened the artifact, and finished `VERIFIED`.
+
+`OPTIONAL` is compiled only for `FITTED` and `FULL`, and `design-tool run`
+supplies a verifier for it. It used to be compiled exactly when no verifier would
+be supplied, so only `run-job` — which hands the runner every callable
+unconditionally — could act on it, and one `job.json` finished `VERIFIED` through
+the deprecated entry point and `NEEDS_MORE_EVIDENCE` through the supported one.
+`DIRECT` and `CUSTOM` reach `NEVER`: `DIRECT` trades the look away, and `CUSTOM`
+is one designer commission that must not grow a second round trip by side effect.
 
 The runner consumes it verbatim and decides no route of its own. It used to keep
 a second copy of the answer, re-derived from `intent.select`, and every guard

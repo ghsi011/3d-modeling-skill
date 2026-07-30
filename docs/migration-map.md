@@ -46,7 +46,7 @@ built artifact is structurally unable to influence its own acceptance criteria.
 
 | stage | state |
 |---|---|
-| 1 — route authority | **done**: `pipeline/execution.py` compiles `execution_plan.json`; the runner consumes it and no longer selects a route; `final_status.json` carries the plan's route, the plan hash and the lane status |
+| 1 — route authority | **done**: `pipeline/execution.py` compiles `execution_plan.json`; the runner consumes it and no longer selects a route; `final_status.json` carries the plan's route, the plan hash and the lane status. An independent review of the first landing found four defects in it, all repaired: the modification cap keyed on the source mode rather than on the declared edit scope, a matched certified template silently outranking a declared authored model, `verification_dispatch: OPTIONAL` naming a look `design-tool run` could not take, and `route._legacy` dropping `verification_requested` |
 | 2 — acceptance contract | not started |
 | 3 — state lifecycle | not started |
 | 4 — gate consolidation | not started |

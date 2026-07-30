@@ -472,7 +472,8 @@ def route(argv: list[str]) -> int:
                      f"  because    {decision.condition}\n"
                      f"  source     {decision.source_mode}\n"
                      f"  builder    {plan.builder}"
-                     f"{f' ({plan.template})' if plan.template else ''}\n")
+                     f"{f' ({plan.template})' if plan.template else ''}\n"
+                     f"             {plan.builder_rationale}\n")
     if project.required_reviews:
         sys.stderr.write(f"  reviews    {', '.join(project.required_reviews)}\n")
     for reason in decision.escalations:
@@ -497,14 +498,32 @@ def _review_calls(project_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
     expectation came from two different derivations, a `FULL` job could be handed
     no spec reviewer by one and refused for the missing spec reviewer by the
     other, with nothing the agent could supply to break the tie.
+
+    The spec reviewer is wired on `dispatches_specification`, not on the bare
+    obligation. A job that owes a bounded recovery it cannot run -- authored
+    geometry, which has no certified bounds to recover into -- would otherwise be
+    handed a reviewer, write a packet asking an agent to answer, and have the
+    answer read by nothing.
     """
     required = set(plan.required_reviews)
     return {
         "safety_call": _answer(project_dir, "safety") if "safety" in required else None,
         "spec_call": (_answer(project_dir, "spec")
-                      if "specification" in required else None),
+                      if plan.dispatches_specification else None),
+        # `!= "NEVER"`, not `"verification" in required`. Those two conditions
+        # were exact complements: the compiler said OPTIONAL precisely when the
+        # review was absent from the list this used to read, so the one setting
+        # meant to invite an independent look was the one setting that guaranteed
+        # nobody was there to take it. `run-job` passes every callable
+        # unconditionally and did take it, so the same `job.json` finished
+        # VERIFIED through the deprecated entry point and NEEDS_MORE_EVIDENCE
+        # through the supported one.
+        #
+        # This does not hand a verifier to a route that traded one away: OPTIONAL
+        # is compiled only for FITTED and FULL, and DIRECT and CUSTOM both reach
+        # NEVER.
         "verify_call": (_answer(project_dir, "verification")
-                        if "verification" in required else None),
+                        if plan.verification_dispatch != "NEVER" else None),
     }
 
 
@@ -628,6 +647,13 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     same commissioning verdict and the same status decision as every other
     expectation. A preservation audit that could only be read in its own JSON
     would be a receipt: nothing downstream would refuse a job for failing it.
+
+    Wired into every builder, not just the authored one. It reached the contract
+    from `_run_authored` alone, so a project that declared an edit scope over a
+    source artifact and matched a certified template built the template, never
+    opened the artifact, named neither on any receipt, and finished `VERIFIED`.
+    The plan carries the obligation now and `runner.run` refuses a contract that
+    does not carry this row, so a builder added later cannot drop it by omission.
     """
     scope = project.edit_scope
     if scope is None:
@@ -760,6 +786,10 @@ def _run_project(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         out_dir=project_dir,
         render=render,
         plan=plan,
+        # The certified builder takes no print plan -- its expectations are the
+        # template's own -- but a declared edit scope is an obligation of the job,
+        # not of the lane that happens to draw the shape.
+        plan_features=_preservation_feature(project),
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
         **_review_calls(project_dir, plan),
         **fields)

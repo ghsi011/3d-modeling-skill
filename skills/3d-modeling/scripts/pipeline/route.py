@@ -150,17 +150,28 @@ def _legacy(project: P.Project) -> RouteDecision:
     motion, so the questions the new model is built on have no answers. Guessing
     at them would silently re-route jobs that were routing correctly, which is
     the one thing a compatibility adapter must not do.
+
+    One thing it does read, because it is on the project in front of it and no
+    guess is involved: `verification_requested`. `P.load` deserializes the field
+    and this function ignored it, so on any `compat: "job.json@1"` project an
+    explicit ask for an independent look vanished with no receipt anywhere. A
+    request that disappears in silence is worse than one that is refused, because
+    nobody downstream can tell which of the two happened.
     """
     decision = intent.select(
         requested_template=project.template, parameters=project.parameters,
         external_geometry=bool(project.status.get("external_geometry", False)),
         ambiguities=project.blocking_questions)
+    escalations = ["the job was adapted from job.json and routes under the legacy "
+                   "rules"]
+    if project.verification_requested:
+        escalations.append("independent verification was explicitly requested")
     return RouteDecision(
         route=decision.route, template=decision.template, backend=decision.backend,
         condition=decision.condition, source_mode=project.source_mode,
-        escalations=("the job was adapted from job.json and routes under the legacy "
-                     "rules",),
-        requires_verification=decision.route == "FULL",
+        escalations=tuple(escalations),
+        requires_verification=(decision.route == "FULL"
+                               or project.verification_requested),
         requires_metrology=decision.route in ("FITTED", "FULL"),
         considered=({"route": "CUSTOM", "taken": False,
                      "why": "job.json carries no source mode, so the CUSTOM "

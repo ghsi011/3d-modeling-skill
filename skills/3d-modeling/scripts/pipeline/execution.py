@@ -58,8 +58,25 @@ BUILDER = ("CERTIFIED_TEMPLATE", "AUTHORED")
 # `NEVER` is `DIRECT`'s own route trade written down: its whole bargain is
 # deterministic commissioning of a certified template with nobody independent
 # looking, and a verifier that happens to be reachable is not a free extra look.
-# `OPTIONAL` is a look worth taking when the broad screen came back clear;
-# `REQUIRED` is an obligation the run cannot drop because a screen was messy.
+# `OPTIONAL` is a look the route did not oblige but that is worth taking when the
+# broad screen came back clear; `REQUIRED` is an obligation the run cannot drop
+# because a screen was messy.
+#
+# `OPTIONAL` used to be a name for behaviour `design-tool run` could not produce.
+# The compiler returned it exactly when `verification` was *absent* from
+# `required_reviews`, and `cli._review_calls` supplied a verifier exactly when it
+# was *present*, so the one setting meant to invite a look was the one setting
+# that guaranteed no verifier was in the room. `run-job`, which hands the runner
+# all three callables unconditionally, did honour it -- so one `job.json` reached
+# `VERIFIED` through `run-job` and `NEEDS_MORE_EVIDENCE` through `run`, with the
+# legacy adapter quietly dropping a review its predecessor dispatched.
+#
+# It is now produced only where it is honoured: on the two routes that recover
+# geometry the job does not own and have not already been obliged to verify. It
+# is deliberately *not* produced on `CUSTOM` -- buying one designer commission a
+# second context it never asked for is the escalation the route decision exists
+# to make deliberately, and it would put an agent round trip on a route the
+# baseline costs at one.
 DISPATCH = ("NEVER", "OPTIONAL", "REQUIRED")
 
 # Whether this lane may claim success at all. `EXPERIMENTAL_UNAVAILABLE` does not
@@ -101,11 +118,22 @@ class ExecutionPlan:
     route_rationale: str
     source_mode: str
     builder: str
+    # Why this builder and not the other one. On the receipt because the builder
+    # is a choice between two declarations that can both be present, and a choice
+    # nobody can read is a choice nobody can dispute.
+    builder_rationale: str
     template: str | None
     backend: str | None
     model: str | None
     required_reviews: tuple[str, ...]
     verification_dispatch: str
+    # Whether this job must prove that everything outside its declared edit
+    # region survived. Carried on the plan rather than left for whichever CLI
+    # path happens to assemble the contract: the audit reached the contract from
+    # `_run_authored` only, so an edit scope declared over any other builder was
+    # never measured and never mentioned. The runner refuses to build a contract
+    # that does not carry the row this names.
+    requires_preservation: bool
     lane_status: str
     lane_note: str
     # Audit detail, not identity: the rejected certified templates are recorded
@@ -114,13 +142,48 @@ class ExecutionPlan:
     # even if a sixth certified template is added to the registry.
     candidates: tuple[intent.Candidate, ...] = ()
 
+    def __post_init__(self) -> None:
+        """The two things a plan may not say at once.
+
+        Checked here rather than in a validator a code path can miss. A plan is
+        the one authority over what runs, so a plan that states an obligation it
+        also declines is not a job that needs a warning -- it is a plan that must
+        not exist.
+        """
+        if (self.requires_specification and not self.dispatches_specification
+                and self.lane_status == "AVAILABLE"):
+            raise ValueError(
+                f"plan for {self.job_id!r} requires a specification, builds "
+                f"through {self.builder}, and claims an available lane: the "
+                "bounded recovery is defined only against a certified "
+                "template's bounds, so this plan owes a review nothing can run "
+                "and would still be allowed to claim success")
+
     @property
     def requires_specification(self) -> bool:
+        """The obligation, which is not the same as the ability to meet it."""
         return "specification" in self.required_reviews
 
     @property
-    def requires_safety(self) -> bool:
-        return "safety" in self.required_reviews
+    def dispatches_specification(self) -> bool:
+        """Whether the bounded recovery this job owes can actually be run.
+
+        One predicate, compiled once and read by the runner and by the CLI's
+        review wiring. The runner used to answer this for itself -- `if
+        plan.requires_specification and plan.builder == "CERTIFIED_TEMPLATE"` --
+        which is the two-authorities shape stage 1 exists to remove: the plan
+        stated the obligation, the runner declined it, and only the lane cap kept
+        that from becoming a job that claimed success without the review it owed.
+        `__post_init__` now makes that combination unrepresentable.
+        """
+        return self.requires_specification and self.builder == "CERTIFIED_TEMPLATE"
+
+    # There is deliberately no `requires_safety`. The safety gate reads
+    # `contract.consequence` instead, and `runner.py` states why: the safety pass
+    # is mandatory on a CONSEQUENTIAL job and must not be droppable by a plan
+    # that failed to list it. A predicate here would invite exactly the gate that
+    # comment forbids, and the property that used to sit at this line was read by
+    # nothing.
 
     @property
     def requires_verification(self) -> bool:
@@ -134,11 +197,13 @@ class ExecutionPlan:
             "route_rationale": self.route_rationale,
             "source_mode": self.source_mode,
             "builder": self.builder,
+            "builder_rationale": self.builder_rationale,
             "template": self.template,
             "backend": self.backend,
             "model": self.model,
             "required_reviews": list(self.required_reviews),
             "verification_dispatch": self.verification_dispatch,
+            "requires_preservation": self.requires_preservation,
             "lane_status": self.lane_status,
             "lane_note": self.lane_note,
         }
@@ -159,31 +224,54 @@ class ExecutionPlan:
 
 
 def _builder(*, route: str, matched: str | None, requested: str | None,
-             requires_specification: bool) -> tuple[str, str | None]:
+             model: str | None,
+             requires_specification: bool) -> tuple[str, str | None, str]:
     """Which geometry provider this job builds through, and never which route.
 
-    Three cases, in order:
+    Four cases, in order:
 
+    * the project declares an authored model -- that is the geometry, on every
+      route. A declaration cannot be outvoted by a match. Preferring a matched
+      certified template over a declared `model.py` emitted a plan that
+      contradicted itself (`builder: CERTIFIED_TEMPLATE, model: model.py`) and
+      then built the template: a `RECONSTRUCT` job declaring both built the
+      certified c_clip, reached `VERIFIED`, and named `model.py` in no receipt.
+      The asymmetry was the tell -- the same declaration flipped a `NEW` job to
+      `CUSTOM` and was dropped in silence on `FITTED` and `FULL`;
+    * `CUSTOM` is one designer commission, so it is authored by definition even
+      before the model file exists;
     * a certified template covers the parameters as they stand -- build it,
       whatever the route says about evidence;
     * no template covers them *yet*, but a metrologist is recovering the
       dimensions this job does not own into the named template's bounds. The
       recovered parameters are re-checked against the certified domain before
-      anything is built, so the domain is still enforced;
-    * otherwise the geometry is authored, which includes every `CUSTOM` job by
-      definition.
+      anything is built, so the domain is still enforced.
+
+    Otherwise the geometry is authored and the commission asks for it.
     """
+    if model is not None:
+        why = f"the project declares an authored model ({model})"
+        if matched is not None:
+            why += (f"; the certified template {matched} covers these parameters "
+                    "and is not used, because a declared model is a decision and "
+                    "a match is only an offer")
+        return "AUTHORED", None, why
     if route == "CUSTOM":
-        return "AUTHORED", None
+        return "AUTHORED", None, ("CUSTOM is one designer commission, so the "
+                                  "geometry is authored for this job")
     if matched is not None:
-        return "CERTIFIED_TEMPLATE", matched
+        return "CERTIFIED_TEMPLATE", matched, (
+            f"{matched} covers the parameters as they stand")
     # Checked against the registry rather than trusted: a project may name a
     # template that no longer exists, and a plan that carried the name anyway
     # would turn a typo into a KeyError out of the CLI instead of a job that
     # stops and says what it is waiting for.
     if requires_specification and requested in T.registry():
-        return "CERTIFIED_TEMPLATE", requested
-    return "AUTHORED", None
+        return "CERTIFIED_TEMPLATE", requested, (
+            f"no certified template covers these parameters yet; the bounded "
+            f"recovery this route owes measures into {requested}'s bounds")
+    return "AUTHORED", None, ("no certified template covers this geometry, so it "
+                              "has to be authored")
 
 
 def _backend(builder: str, template: str | None) -> str | None:
@@ -195,21 +283,41 @@ def _backend(builder: str, template: str | None) -> str | None:
 def _dispatch(route: str, required_reviews: tuple[str, ...]) -> str:
     if "verification" in required_reviews:
         return "REQUIRED"
-    # DIRECT's route trade. Note the order: an explicitly requested verification
-    # reaches `required_reviews` above and is honoured on every route, because a
-    # trade the pipeline makes on the job's behalf is not a reason to discard
-    # something the user asked for out loud.
-    return "NEVER" if route == "DIRECT" else "OPTIONAL"
+    # Note the order: an explicitly requested verification reaches
+    # `required_reviews` above and is honoured on every route, because a trade the
+    # pipeline makes on the job's behalf is not a reason to discard something the
+    # user asked for out loud.
+    #
+    # Below it, only the two routes that recover geometry the job does not own
+    # invite the optional look -- see `DISPATCH`. `DIRECT` trades it away and
+    # `CUSTOM` is one commission that must not grow a second one by side effect.
+    return "OPTIONAL" if route in ("FITTED", "FULL") else "NEVER"
 
 
-def _lane(*, route: str, source_mode: str, builder: str,
+def _lane(*, route: str, edit_scope: bool, source_mode: str, builder: str,
           requires_specification: bool) -> tuple[str, str]:
+    """Which cap this job runs under, keyed on what it declared.
+
+    The modification cap is checked before the `CUSTOM` one, and on the *edit
+    scope* rather than on the literal source mode. Both were defects:
+
+    * keyed on `source_mode == "MODIFY"`, a project that declared an edit scope
+      over a source artifact and called itself `RECONSTRUCT` compiled
+      `lane_status: AVAILABLE`, took the certified builder and reached
+      `VERIFIED` -- with the edit scope and the source artifact read by nothing
+      at all. A declared edit scope is the obligation; the source mode is a
+      label beside it;
+    * `MODIFY_LANE_NOTE` names the preservation audit's own unsettled sampling
+      and `CUSTOM_LANE_NOTE` does not, so an edit job that also routed `CUSTOM`
+      -- which is most of them -- got the note that omits the caveat closest to
+      the work.
+    """
     if requires_specification and builder != "CERTIFIED_TEMPLATE":
         return "EXPERIMENTAL_UNAVAILABLE", AUTHORED_METROLOGY_NOTE
+    if edit_scope or source_mode == "MODIFY":
+        return "EXPERIMENTAL_UNAVAILABLE", MODIFY_LANE_NOTE
     if route == "CUSTOM":
         return "EXPERIMENTAL_UNAVAILABLE", CUSTOM_LANE_NOTE
-    if source_mode == "MODIFY":
-        return "EXPERIMENTAL_UNAVAILABLE", MODIFY_LANE_NOTE
     return "AVAILABLE", ""
 
 
@@ -218,18 +326,28 @@ def compile_plan(project: P.Project,
     """The one compilation from canonical project state to executable plan."""
     decision = RT.decide(project) if decision is None else decision
     reviews = RT.required_reviews(project, decision)
-    builder, template = _builder(
+    builder, template, builder_rationale = _builder(
         route=decision.route, matched=decision.template,
-        requested=project.template, requires_specification="specification" in reviews)
+        requested=project.template, model=project.model,
+        requires_specification="specification" in reviews)
+    # A declared edit scope is the obligation, and `MODIFY` with none is refused
+    # by `Project.validate` before this is reached. Both are read here so that a
+    # project which somehow carried the mode without the scope fails closed
+    # rather than building against nothing.
+    requires_preservation = (project.edit_scope is not None
+                             or project.source_mode == "MODIFY")
     lane_status, lane_note = _lane(
-        route=decision.route, source_mode=project.source_mode, builder=builder,
+        route=decision.route, edit_scope=project.edit_scope is not None,
+        source_mode=project.source_mode, builder=builder,
         requires_specification="specification" in reviews)
     return ExecutionPlan(
         job_id=project.job_id, route=decision.route,
         route_rationale=decision.condition, source_mode=project.source_mode,
-        builder=builder, template=template, backend=_backend(builder, template),
+        builder=builder, builder_rationale=builder_rationale, template=template,
+        backend=_backend(builder, template),
         model=project.model, required_reviews=reviews,
         verification_dispatch=_dispatch(decision.route, reviews),
+        requires_preservation=requires_preservation,
         lane_status=lane_status, lane_note=lane_note,
         candidates=decision.candidates)
 
@@ -261,20 +379,23 @@ def from_job_request(*, job_id: str, template: str | None,
     required = tuple(sorted(reviews))
     if authored:
         builder, name = "AUTHORED", None
+        builder_rationale = "the caller supplied authored geometry with the request"
     else:
-        builder, name = _builder(route=match.route, matched=match.template,
-                                 requested=template,
-                                 requires_specification="specification" in required)
-    lane_status, lane_note = _lane(route=match.route, source_mode="NEW",
-                                   builder=builder,
+        builder, name, builder_rationale = _builder(
+            route=match.route, matched=match.template, requested=template,
+            model=None, requires_specification="specification" in required)
+    lane_status, lane_note = _lane(route=match.route, edit_scope=False,
+                                   source_mode="NEW", builder=builder,
                                    requires_specification="specification" in required)
     return ExecutionPlan(
         job_id=job_id, route=match.route, route_rationale=match.condition,
-        source_mode="NEW", builder=builder, template=name,
+        source_mode="NEW", builder=builder, builder_rationale=builder_rationale,
+        template=name,
         # The matched template's backend, kept rather than re-derived: the intent
         # manifest has always recorded it and a legacy job's receipt must not
         # change shape because the plan moved.
         backend="authored" if authored else match.backend,
         model=None, required_reviews=required,
         verification_dispatch=_dispatch(match.route, required),
+        requires_preservation=False,
         lane_status=lane_status, lane_note=lane_note, candidates=match.candidates)
