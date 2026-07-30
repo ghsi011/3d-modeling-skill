@@ -1,0 +1,50 @@
+{
+  "contract": "artifact-manifest",
+  "contract_version": 1,
+  "job_id": "vent-ball-01",
+  "candidate_id": "candidate-01",
+  "units": "mm",
+  "updated_utc": "2026-07-28T00:00:00Z",
+  "artifacts": [
+    {
+      "id": "candidate-01",
+      "role": "candidate",
+      "path": "candidate-01.stl",
+      "type": "stl",
+      "sha256": "5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507",
+      "printable_deliverable": true,
+      "expected_components": 1,
+      "bbox": {
+        "min": [
+          -53.896446228027344,
+          -35.60288619995117,
+          0.0
+        ],
+        "max": [
+          30.2106990814209,
+          29.99858856201172,
+          50.0
+        ]
+      },
+      "source_revisions": {
+        "print_plan": 1
+      }
+    },
+    {
+      "id": "section_x",
+      "role": "render",
+      "path": "renders/section_x.png",
+      "type": "png",
+      "sha256": "ce46e828e6bf7a27cb49aa20d8975523ea02861c940e882798a4a51ca88f22fc",
+      "printable_deliverable": false
+    },
+    {
+      "id": "multi",
+      "role": "render",
+      "path": "renders/multi.png",
+      "type": "png",
+      "sha256": "cd56eddef1a639fb9ac60484f7388a7a47397b616e33a36f4ff7c0c738eed3f6",
+      "printable_deliverable": false
+    }
+  ]
+}

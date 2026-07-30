@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """The manifest's two claims, tested as claims rather than as documentation.
 
-`tools/fixtures.py` asserts three things about itself: that evidence is recorded
-honestly, that the answer cannot reach a design agent, and that licensed geometry
-cannot leave the machine. The first is a data question and the last two are
+`tools/fixtures.py` asserts four things about itself: that evidence is recorded
+honestly, that the answer cannot reach a design agent, that licensed geometry
+cannot leave the machine, and that the one fixture whose bytes it does keep
+cannot go missing quietly. The first is a data question and the rest are
 structural, so they are tested structurally -- by asking what is reachable from
-the object a design agent is handed, not by checking that a function chose not to
-return something.
+the object a design agent is handed and from the directory it is given, not by
+checking that a function chose not to return something.
 """
 from __future__ import annotations
 
 import dataclasses
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -205,6 +207,39 @@ class TheWallBetweenRequestAndAnswer(unittest.TestCase):
                         for form in _forms(secret_string):
                             self.assertNotIn(form, text, form)
 
+    def test_a_vendored_answer_is_kept_out_of_the_directory_the_agent_is_given(self) -> None:
+        """Committing the answer must not quietly move it to the public side.
+
+        The public record names exactly one location -- the request material --
+        and the fixture directory around it is what a design agent is handed.
+        An answer vendored into that directory would be withheld by the loader
+        and reachable by one `ls ..`: the leak this module was rewritten to
+        close, rebuilt one directory up and inside the repository this time,
+        where no worktree has to survive for it to work.
+
+        So the check is placement rather than disclosure. Everything under a
+        fixture's own directory is material the agent may read, and the answer
+        is not under it.
+        """
+        for fixture_id in FX.fixture_ids():
+            request = FX.REPO_ROOT / FX.public(fixture_id).public_request
+            given = request.parent.parent
+            with self.subTest(fixture=fixture_id):
+                self.assertEqual("public", request.parent.name)
+                self.assertEqual(fixture_id, given.name)
+                for path in given.rglob("*"):
+                    self.assertEqual(
+                        "public", path.relative_to(given).parts[0],
+                        f"{path} sits in the fixture's own directory, which is "
+                        "handed over whole")
+                held = FX._REFERENCES.get(fixture_id)
+                if held is None or not held.vendored:
+                    continue
+                answer = held.location.resolve()
+                self.assertTrue(answer.is_file())
+                self.assertFalse(answer.is_relative_to(given.resolve()),
+                                 "one `cd ..` from the request is not a wall")
+
     def test_asking_for_an_answer_that_is_not_held_is_an_error_not_an_empty_path(self) -> None:
         self.assertFalse(FX.has_reference("component-cycle"))
         with self.assertRaises(KeyError):
@@ -234,22 +269,142 @@ class Licensing(unittest.TestCase):
                                                Path(raw) / "out")
             self.assertTrue((bundle / "request.md").is_file())
 
-    def test_no_licensed_geometry_was_copied_into_the_repository(self) -> None:
-        """Repo weight and third-party licensing argue for the same thing."""
+    def test_whether_geometry_may_be_committed_is_decided_by_who_made_it(self) -> None:
+        """The licensing rule, expressed where it actually bites: placement.
+
+        Vendoring is what stopped the one `PHYSICALLY_PROVEN` fixture from being
+        a single `git worktree prune` away from gone, and having worked once it
+        is the obvious reach the next time a recorded path looks fragile. The
+        next fragile path belongs to somebody else. So the rule is checked
+        rather than remembered: the owner's own work may be committed here, and
+        nothing else may be -- not the CC-BY-NC-SA case, not a third-party file
+        this project has no claim on -- and anything not committed is still
+        absent from the tree rather than merely undeclared.
+        """
         tracked = [FX.REPO_ROOT / name
                    for name in ("benchmarks", "docs", "skills", "tools")]
         present = {path.name for root in tracked for path in root.rglob("*")
                    if path.is_file()}
+        committed = 0
         for fixture_id in FX.fixture_ids():
-            for external in FX.public(fixture_id).sources:
-                with self.subTest(fixture=fixture_id, file=external.name):
-                    self.assertNotIn(
-                        external.name, present,
-                        "external fixtures are referenced by path and hash, "
-                        "never vendored")
+            licence = FX.public(fixture_id).license
+            records = list(FX._SOURCES.get(fixture_id, ()))
+            held = FX._REFERENCES.get(fixture_id)
+            if held is not None:
+                records.append(held)
+            for record in records:
+                with self.subTest(fixture=fixture_id, file=record.name):
+                    if record.vendored:
+                        committed += 1
+                        self.assertIn(
+                            licence, FX.OWN_WORK_LICENSES,
+                            "only the owner's own models are copied into this "
+                            "repository; everything else is referenced")
+                    else:
+                        self.assertNotIn(
+                            record.name, present,
+                            "third-party fixtures are referenced by path and "
+                            "hash, never vendored")
+        self.assertTrue(committed, "the vendoring this rule governs is gone")
+
+    def test_the_by_nc_sa_case_is_still_referenced_and_not_committed(self) -> None:
+        """Named, because it is the one the rule above exists for."""
+        for record in FX._SOURCES["pixel9-card-case"]:
+            self.assertIsInstance(record, FX.ExternalFile)
+            self.assertFalse(record.vendored)
 
 
 class Resolution(unittest.TestCase):
+    _GONE = "benchmarks/references/nowhere/deleted-proof.stl"
+
+    def test_a_missing_vendored_file_is_a_failure_and_not_a_skip(self) -> None:
+        """The exact failure mode the vendoring was done to remove.
+
+        `vent-ball-combine` is the only fixture here that has been printed and
+        used, and it was recorded at a path inside a sibling worktree with no
+        commits behind it. Prune that directory and `resolve` raised
+        `FixtureUnavailable`, every caller skipped on it, and the suite reported
+        green having lost its only evidence that a job of this shape can be
+        finished -- the absence never appearing anywhere a reader would look.
+
+        The bytes are committed now, so their absence is not a fact about the
+        machine and does not get to be quiet. The message has to say so, because
+        whoever reads it will be reading it in a red suite they did not expect.
+        """
+        absent = FX.VendoredFile(path=self._GONE, sha256="0" * 64, bytes=1)
+        with self.assertRaises(FX.FixtureMissing) as caught:
+            FX.resolve(absent, what="the proven fixture")
+        message = str(caught.exception)
+        self.assertIn("deleted-proof.stl", message)
+        self.assertIn("committed", message)
+        self.assertNotIn("skipping", message)
+
+    def test_the_missing_vendored_file_is_not_swallowed_by_a_skip_handler(self) -> None:
+        """Where a loud failure would have gone quiet again.
+
+        Every skip in this suite is spelled `except FixtureUnavailable:
+        skipTest(...)`, in callers nobody would think to re-read. A
+        `FixtureMissing` that inherited from it would raise loudly in the test
+        above and be silently converted back into a skip everywhere it matters,
+        which is the whole defect wearing a new exception name.
+        """
+        self.assertFalse(issubclass(FX.FixtureMissing, FX.FixtureUnavailable))
+        self.assertFalse(issubclass(FX.FixtureUnavailable, FX.FixtureMissing))
+        absent = FX.VendoredFile(path=self._GONE, sha256="0" * 64, bytes=1)
+        with self.assertRaises(FX.FixtureMissing):
+            try:
+                FX.resolve(absent, what="the proven fixture")
+            except FX.FixtureUnavailable as exc:      # what every caller writes
+                self.fail(f"a skip handler caught it: {exc}")
+
+    def test_the_proven_fixture_needs_no_directory_outside_the_repository(self) -> None:
+        """Vendored means vendored: verified, and reached from `REPO_ROOT`.
+
+        Not asserted as "it happens to be here on this machine" -- the recorded
+        paths are checked to be inside the repository, which is what makes the
+        failure above the right one and this fixture unprunable.
+        """
+        answer = FX.reference("vent-ball-combine")
+        self.assertEqual(
+            "5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507",
+            hashlib.sha256(answer.read_bytes()).hexdigest())
+        for index in range(len(FX.public("vent-ball-combine").sources)):
+            path = FX.source_path("vent-ball-combine", index)
+            # Raises ValueError if the file is reached from anywhere else.
+            path.resolve().relative_to(FX.REPO_ROOT)
+        answer.resolve().relative_to(FX.REPO_ROOT)
+
+    def test_git_is_told_not_to_rewrite_the_bytes_it_is_asked_to_preserve(self) -> None:
+        """Vendoring only holds if a clone gives the recorded file back.
+
+        Found by staging it. `vent_mount.step` is ASCII with CRLF line endings,
+        and git's default text handling normalised it to LF going in and would
+        convert it back according to whatever `core.autocrlf` said on the
+        machine checking it out. The blob committed was 632,950 bytes of
+        something else, and `resolve()` would have raised `FixtureMismatch` --
+        correctly, and on every clone, for a file nobody had touched. So the
+        recorded bytes are marked `-text`, and every vendored path is checked
+        for that mark rather than the two that happen to be ASCII today.
+        """
+        paths = sorted({record.path
+                        for records in FX._SOURCES.values() for record in records
+                        if record.vendored}
+                       | {record.path for record in FX._REFERENCES.values()
+                          if record.vendored})
+        self.assertTrue(paths)
+        try:
+            found = subprocess.run(
+                ["git", "check-attr", "text", "--", *paths],
+                cwd=FX.REPO_ROOT, capture_output=True, text=True, check=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.skipTest(f"git is not usable here: {exc}")
+        for line in found.stdout.splitlines():
+            with self.subTest(line=line):
+                self.assertTrue(
+                    line.endswith(": text: unset"),
+                    "a hash-verified file left to git's line-ending conversion "
+                    "comes back from a clone as different bytes")
+
     def test_a_missing_file_is_a_skip_with_the_path_in_the_message(self) -> None:
         absent = FX.ExternalFile(path=r"C:\nowhere\absent.3mf", sha256="0" * 64,
                                  bytes=1)

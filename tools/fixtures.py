@@ -35,14 +35,29 @@ public record carries no filesystem path at all beyond the repo-relative request
 material -- inputs are `SourceRef`s, identified by name and hash, and the paths
 live in `_SOURCES` beside `_REFERENCES`.
 
-**Licence travels with the geometry.** The Pixel 9 case is CC-BY-NC-SA and is
+**Licence decides where the bytes live.** The Pixel 9 case is CC-BY-NC-SA and is
 marked `INTERNAL_ONLY`. `redistributable_bundle()` refuses it outright rather
 than trusting whoever assembles a public release to remember.
 
-Nothing licensed is copied into the repository. External files are recorded by
+Nothing third-party is copied into the repository. Those files are recorded by
 absolute path plus SHA-256; `resolve()` verifies the hash, and raises
 `FixtureUnavailable` when the file is simply not on this machine so the suite
 still runs on a checkout that has none of them.
+
+The owner's own work is vendored instead, because pointing at it did not survive
+contact with reality. `vent-ball-combine` -- the only `PHYSICALLY_PROVEN` entry
+here -- was recorded at a path inside a sibling git worktree that had no commits
+behind it. Prune the worktree and the fixture is gone, and because absence is a
+skip the suite would have stayed green while the set quietly lost its only proof
+that a job of this shape can be completed. So its geometry is committed, its
+recorded paths are repo-relative, and a vendored file that is not on disk raises
+`FixtureMissing`, which nothing skips on.
+
+Vendoring the answer does not move it to the public side. It is committed under
+`benchmarks/references/`, which is not the fixture's own directory and is not
+reachable by walking up from anything the public record names: everything under
+`benchmarks/fixtures/<id>/` is material a design agent may read, and the answer
+is not under it.
 """
 from __future__ import annotations
 
@@ -50,7 +65,8 @@ import dataclasses
 import hashlib
 import json
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import ClassVar
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -73,6 +89,14 @@ INTERNAL_ONLY = "INTERNAL_ONLY"
 REDISTRIBUTABLE = "REDISTRIBUTABLE"
 DISTRIBUTIONS = (INTERNAL_ONLY, REDISTRIBUTABLE)
 
+# Whether a fixture's bytes may be committed here is a question about who made
+# them, not about how convenient it would be. The owner's own models are
+# vendored, so that no directory outside this repository has to keep existing
+# for the fixture to; everything else is somebody else's work and stays outside
+# the tree, recorded by path and hash, so that cloning this repository
+# redistributes nothing that was never ours to redistribute.
+OWN_WORK_LICENSES = ("user-owned", "synthetic")
+
 # Diagnosis is a use case in its own right here: three of these fixtures exist
 # because of what a reader gets wrong on them, not because a part has to be
 # designed from them.
@@ -80,7 +104,23 @@ USE_CASES = ("DIAGNOSE", "MODIFY", "COMBINE", "FROM_SCRATCH")
 
 
 class FixtureUnavailable(RuntimeError):
-    """The recorded file is not on this machine. Callers skip; they do not fail."""
+    """The recorded file is not on this machine. Callers skip; they do not fail.
+
+    Only ever raised for a file the repository points at and does not contain.
+    A checkout on a machine that never had the owner's CAD directory should
+    still run the whole suite.
+    """
+
+
+class FixtureMissing(RuntimeError):
+    """A *vendored* file is not on disk. This is a failure and not a skip.
+
+    Deliberately not a subclass of `FixtureUnavailable`. Every skip in this
+    suite is spelled `except FixtureUnavailable: skipTest(...)`, and making this
+    inherit from it would route the one case that has to be loud straight
+    through the handler that silences it -- which is the exact failure mode
+    vendoring the fixture was meant to remove.
+    """
 
 
 class FixtureMismatch(RuntimeError):
@@ -97,14 +137,52 @@ class LicenceWithheld(RuntimeError):
 
 @dataclasses.dataclass(frozen=True)
 class ExternalFile:
-    """A file the repository points at and never contains."""
+    """A file the repository points at and never contains.
+
+    Somebody else's geometry, or a user file this project has no claim on. The
+    path is absolute and machine-specific, so absence is an ordinary fact about
+    the machine rather than a defect.
+    """
     path: str
     sha256: str
     bytes: int
+    vendored: ClassVar[bool] = False
 
     @property
     def name(self) -> str:
         return Path(self.path).name
+
+    @property
+    def location(self) -> Path:
+        return Path(self.path)
+
+
+@dataclasses.dataclass(frozen=True)
+class VendoredFile:
+    """A file the repository contains, recorded repo-relative.
+
+    The owner's own work, committed so that pruning a directory somewhere else
+    cannot delete a fixture. The path is relative to `REPO_ROOT` and written
+    POSIX-style, so the manifest reads the same on every machine -- and so that
+    a recorded path carries no drive letter to be mistaken for a location on
+    the machine that reads it.
+    """
+    path: str
+    sha256: str
+    bytes: int
+    vendored: ClassVar[bool] = True
+
+    @property
+    def name(self) -> str:
+        return PurePosixPath(self.path).name
+
+    @property
+    def location(self) -> Path:
+        return REPO_ROOT / self.path
+
+
+# Either kind is resolvable; only the consequence of absence differs.
+FixtureFile = ExternalFile | VendoredFile
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,12 +229,15 @@ class PublicFixture:
 # Where the files are
 # --------------------------------------------------------------------------
 #
-# Absolute paths live here and in `_REFERENCES` below, and in nothing that is
-# handed out. Nothing licensed or user-owned is vendored into the repository:
-# each file is recorded by path, size and SHA-256, and `resolve()` checks all
-# three so a machine that lacks one skips rather than measuring the wrong bytes.
+# Paths live here and in `_REFERENCES` below, and in nothing that is handed out.
+# Every file is recorded by path, size and SHA-256, and `resolve()` checks all
+# three, so a file that moved is never quietly measured in place of the recorded
+# one. What differs between the two kinds is only what absence means: an
+# `ExternalFile` belongs to somebody else and may simply not be on this machine,
+# while a `VendoredFile` is committed here and cannot be missing for an innocent
+# reason.
 
-_SOURCES: dict[str, tuple[ExternalFile, ...]] = {
+_SOURCES: dict[str, tuple[FixtureFile, ...]] = {
     "pixel9-card-case": (
         ExternalFile(
             path=r"C:\github\3D\oneplus 8t case"
@@ -178,18 +259,19 @@ _SOURCES: dict[str, tuple[ExternalFile, ...]] = {
             sha256="32f7ce46007cb0b4f5f695222b48b0c98927555466c53516fa8802930ef6"
                    "0a1e",
             bytes=1120727),),
+    # The owner's own two solids, committed. They are public to the agent, so
+    # they sit under the fixture's `public/` directory: a design agent that
+    # lists everything it has been given finds exactly what it was given.
     "vent-ball-combine": (
-        ExternalFile(
-            path=r"C:\github\3d-modeling-skill\.claude\worktrees"
-                 r"\ball-joint-vent-mount-119af1\projects\vent-ball-mount"
-                 r"\source\vent_mount.step",
+        VendoredFile(
+            path="benchmarks/fixtures/vent-ball-combine/public/sources"
+                 "/vent_mount.step",
             sha256="1b1edb15fb78f6491ceaeb761fe8bf0b4b1cc5ea4c70c7a1cabfb4a23d70"
                    "3f96",
             bytes=632950),
-        ExternalFile(
-            path=r"C:\github\3d-modeling-skill\.claude\worktrees"
-                 r"\ball-joint-vent-mount-119af1\projects\vent-ball-mount"
-                 r"\source\ball_male_17mm.stl",
+        VendoredFile(
+            path="benchmarks/fixtures/vent-ball-combine/public/sources"
+                 "/ball_male_17mm.stl",
             sha256="679c7e45fa8a5ccffb1d614079d96c72026a347d77fe0e87cb7f23eaf317"
                    "ed37",
             bytes=352884),
@@ -251,13 +333,12 @@ _DECLARED: tuple[PublicFixture, ...] = (
             notes="Two solids the user had already printed, grafted into one "
                   "part; the result was printed, fitted to a car vent and "
                   "reported working. The only fixture here that proves a job of "
-                  "this shape can be completed -- and the one whose recorded "
-                  "path is least durable: it lives in a sibling git worktree "
-                  "under .claude/worktrees/, which is exactly the kind of "
-                  "directory that gets pruned. When it goes this fixture "
-                  "degrades to a skip, so the set quietly loses its only "
-                  "PHYSICALLY_PROVEN entry. Move it somewhere permanent before "
-                  "anything is scored against it."),
+                  "this shape can be completed, and so the one the repository "
+                  "keeps its own copy of. It used to be recorded at a path "
+                  "inside an uncommitted sibling worktree; pruning that "
+                  "directory would have degraded the set's only "
+                  "PHYSICALLY_PROVEN entry to a skip without failing "
+                  "anything."),
         PublicFixture(
             fixture_id="berlingo-knob",
             use_cases=("FROM_SCRATCH",),
@@ -299,11 +380,16 @@ _FIXTURES: dict[str, PublicFixture] = {
 # the whole public record -- object, repr, JSON, a copied directory -- hands it
 # nothing that locates the answer. A field marked "do not read this" is a
 # comment; a value that is not in the object is a structure.
-_REFERENCES: dict[str, ExternalFile] = {
-    "vent-ball-combine": ExternalFile(
-        path=r"C:\github\3d-modeling-skill\.claude\worktrees"
-             r"\ball-joint-vent-mount-119af1\projects\vent-ball-mount"
-             r"\candidate-01.stl",
+#
+# The vendored answer is committed outside the fixture's own directory, under
+# `benchmarks/references/`. That is the same wall in the filesystem: everything
+# under `benchmarks/fixtures/<id>/` is material the agent may read, so an answer
+# placed there would be one `cd ..` from the request it is meant to withhold --
+# which is the leak this module was rewritten to close, rebuilt in a new place.
+_REFERENCES: dict[str, FixtureFile] = {
+    "vent-ball-combine": VendoredFile(
+        path="benchmarks/references/vent-ball-combine"
+             "/tesla-vent-mount-17mm-ball.stl",
         sha256="5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507",
         bytes=976184),
     "berlingo-knob": ExternalFile(
@@ -348,32 +434,48 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def resolve(external: ExternalFile, *, what: str) -> Path:
-    """The verified path to an external file, or a reason it cannot be used.
+def resolve(record: FixtureFile, *, what: str) -> Path:
+    """The verified path to a recorded file, or a reason it cannot be used.
 
-    Absence is a skip: a fresh checkout on a machine that never had the user's
-    CAD directory should still run the whole suite. A hash that moved is not a
-    skip -- the file is there and it is not the file every number in the L0 set
-    was measured against, and saying nothing about that is how a fixture set
-    stops describing the thing it is named after.
+    What absence means depends on who owns the bytes, and the difference is the
+    whole point of the distinction. An `ExternalFile` is somebody else's and is
+    referenced rather than copied, so a fresh checkout on a machine that never
+    had the user's CAD directory should still run the whole suite: absence
+    skips. A `VendoredFile` is committed here, so absence is not a fact about
+    the machine -- it means the tree is not what it says it is, and skipping it
+    is precisely how a suite reports green while a fixture has evaporated.
+
+    A hash that moved is a failure either way. The file is there and it is not
+    the file every number in the L0 set was measured against, and saying nothing
+    about that is how a fixture set stops describing the thing it is named
+    after.
     """
-    path = Path(external.path)
+    path = record.location
     if not path.is_file():
+        if record.vendored:
+            raise FixtureMissing(
+                f"{what}: {path} is committed to this repository and is not on "
+                "disk. This is not a machine that happens to lack somebody "
+                "else's geometry -- the bytes are tracked, so either the "
+                "checkout is incomplete or the file was deleted. It fails "
+                "loudly rather than passing quietly, because a proof fixture "
+                "that disappears without failing anything leaves the suite "
+                "green with nothing behind it.")
         raise FixtureUnavailable(
             f"{what}: not on this machine at {path}. The file is licensed or "
-            "user-owned third-party geometry and is referenced rather than "
-            "vendored; skipping.")
+            "third-party geometry and is referenced rather than vendored; "
+            "skipping.")
     size = path.stat().st_size
-    if size != external.bytes:
+    if size != record.bytes:
         raise FixtureMismatch(
             f"{what}: {path} is {size} bytes and the manifest records "
-            f"{external.bytes}. This is the same failure the hash would report, "
+            f"{record.bytes}. This is the same failure the hash would report, "
             "found without reading two megabytes.")
     found = _digest(path)
-    if found != external.sha256:
+    if found != record.sha256:
         raise FixtureMismatch(
             f"{what}: {path} is present but hashes {found}, and the manifest "
-            f"records {external.sha256}. Every assertion made against this "
+            f"records {record.sha256}. Every assertion made against this "
             "fixture was measured on the recorded bytes.")
     return path
 
@@ -383,14 +485,14 @@ def source_path(fixture_id: str, index: int = 0) -> Path:
 
     The *contents* are public to a design agent -- a `MODIFY` job cannot start
     without them. The *location* is not, and is why this is a loader call rather
-    than a field: `_SOURCES` is where the absolute paths live.
+    than a field: `_SOURCES` is where the paths live.
     """
     public(fixture_id)                                    # rejects unknown ids
-    externals = _SOURCES.get(fixture_id, ())
-    if not externals:
+    records = _SOURCES.get(fixture_id, ())
+    if not records:
         raise FixtureUnavailable(f"{fixture_id}: this fixture has no source "
                                  "artifact; it is designed from scratch.")
-    return resolve(externals[index], what=f"{fixture_id} source {index}")
+    return resolve(records[index], what=f"{fixture_id} source {index}")
 
 
 # --------------------------------------------------------------------------
@@ -402,10 +504,12 @@ def public_bundle(fixture_id: str, destination: Path) -> Path:
 
     Source geometry is copied in rather than pointed at, and the recorded path is
     left out of what gets written. That is not tidiness. `vent-ball-combine`'s
-    reference sits in the same project directory its sources came from, so a
-    bundle that named the source path would hand an agent the answer's parent
-    directory and one `ls`. Withholding the answer while disclosing where it
-    lives is not withholding it.
+    reference used to sit in the same project directory its sources came from,
+    so a bundle that named the source path would have handed an agent the
+    answer's parent directory and one `ls`. Withholding the answer while
+    disclosing where it lives is not withholding it -- which is also why
+    vendoring put the sources under the fixture's `public/` directory and the
+    answer somewhere else entirely, rather than side by side again.
 
     What the agent ends up with is a self-contained directory: the request, the
     inputs, and the fixture's own metadata -- which already carries sources as
@@ -418,12 +522,12 @@ def public_bundle(fixture_id: str, destination: Path) -> Path:
     (destination / "request.md").write_text(request_text(fixture_id),
                                             encoding="utf-8")
 
-    externals = _SOURCES.get(fixture_id, ())
-    if externals:
+    records = _SOURCES.get(fixture_id, ())
+    if records:
         (destination / "sources").mkdir(exist_ok=True)
-        for index, external in enumerate(externals):
-            verified = resolve(external, what=f"{fixture_id} source {index}")
-            shutil.copyfile(verified, destination / "sources" / external.name)
+        for index, record in enumerate(records):
+            verified = resolve(record, what=f"{fixture_id} source {index}")
+            shutil.copyfile(verified, destination / "sources" / record.name)
     (destination / "fixture.json").write_text(
         json.dumps(dataclasses.asdict(fixture), indent=2, sort_keys=True) + "\n",
         encoding="utf-8")

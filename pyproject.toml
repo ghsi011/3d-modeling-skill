@@ -100,6 +100,12 @@ include = ["pipeline*", "designer_toolkit*", "team_tools*"]
 
 [tool.ruff]
 target-version = "py311"
+# The vendored proof fixture keeps the record of the job that produced it, and
+# that record includes the script the part was actually built by. It is evidence
+# rather than source: its worth is that it is byte-identical to what ran and to
+# the copy in the owner's own project, so linting it would mean editing an
+# artifact whose only claim is that nobody has. Nothing here is imported.
+extend-exclude = ["benchmarks/references"]
 
 [tool.ruff.lint]
 # Ruff's default rule set (pyflakes F + pycodestyle E4/E7/E9). Line length

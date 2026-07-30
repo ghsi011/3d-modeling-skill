@@ -1,0 +1,555 @@
+{
+  "verdict": "PASS",
+  "coverage": {
+    "declared": 9,
+    "ran": 8,
+    "skipped": [
+      "step"
+    ]
+  },
+  "checks": [
+    {
+      "id": "static-wall",
+      "title": "Wall is printable at the planned nozzle",
+      "result": "PASS",
+      "detail": "wall 6.0 mm against a 0.80 mm floor (2x the 0.4 mm nozzle)"
+    },
+    {
+      "id": "step",
+      "title": "STEP exported alongside the STL",
+      "result": "SKIPPED",
+      "detail": "no STEP was written: this part was built through the mesh path, which exports STL only",
+      "next_action": "Nothing is wrong with the geometry. But a downstream consumer wanting editable CAD will not find it, so either rebuild the part in the commissioned kernel backend or record in your handoff that this part ships as mesh only."
+    },
+    {
+      "id": "solid",
+      "title": "Watertight, 1 body",
+      "result": "PASS",
+      "detail": "watertight=True, components=1, plan expects 1"
+    },
+    {
+      "id": "repair",
+      "title": "Export needed no structural repair",
+      "result": "PASS",
+      "detail": "48811 coincident vertices merged, no faces dropped"
+    },
+    {
+      "id": "envelope",
+      "title": "Overall size vs plan",
+      "result": "PASS",
+      "detail": "worst axis y off by -0.01 mm (tolerance 0.5 mm)"
+    },
+    {
+      "id": "seated-S-01",
+      "title": "Part sits on the declared bed",
+      "result": "PASS",
+      "detail": "lowest point sits at z=0.000 against a declared bed at 0.000 (tolerance 0.05)"
+    },
+    {
+      "id": "support-S-01",
+      "title": "S-01 downward-facing area within its limit",
+      "result": "PASS",
+      "detail": "1628.14 mm2 past -0.70710678 in the 'plan model_to_printer_matrix' placement (limit 1700.0 mm2)"
+    },
+    {
+      "id": "fit-I-01",
+      "title": "Interface I-01 fit",
+      "result": "PASS",
+      "detail": "seated clearance -0.0000 mm against a declared band [-0.05, 0.05] mm"
+    },
+    {
+      "id": "fit-I-02",
+      "title": "Interface I-02 fit",
+      "result": "PASS",
+      "detail": "seated clearance 0.1200 mm against a declared band [0.09, 0.18] mm"
+    }
+  ],
+  "evidence": {
+    "reference_path": null,
+    "seated_clearance_mm": {
+      "I-01": -8.450898983672691e-10,
+      "I-02": 0.1199611565802568
+    },
+    "slice_profile": [
+      {
+        "z": 0.8929,
+        "area_mm2": 1233.437
+      },
+      {
+        "z": 2.6786,
+        "area_mm2": 1233.437
+      },
+      {
+        "z": 4.4643,
+        "area_mm2": 1233.437
+      },
+      {
+        "z": 6.25,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 8.0357,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 9.8214,
+        "area_mm2": 1233.408
+      },
+      {
+        "z": 11.6071,
+        "area_mm2": 1304.509
+      },
+      {
+        "z": 13.3929,
+        "area_mm2": 1403.575
+      },
+      {
+        "z": 15.1786,
+        "area_mm2": 473.701
+      },
+      {
+        "z": 16.9643,
+        "area_mm2": 511.809
+      },
+      {
+        "z": 18.75,
+        "area_mm2": 543.051
+      },
+      {
+        "z": 20.5357,
+        "area_mm2": 617.177
+      },
+      {
+        "z": 22.3214,
+        "area_mm2": 681.588
+      },
+      {
+        "z": 24.1071,
+        "area_mm2": 652.018
+      },
+      {
+        "z": 25.8929,
+        "area_mm2": 652.266
+      },
+      {
+        "z": 27.6786,
+        "area_mm2": 681.006
+      },
+      {
+        "z": 29.4643,
+        "area_mm2": 617.3
+      },
+      {
+        "z": 31.25,
+        "area_mm2": 543.263
+      },
+      {
+        "z": 33.0357,
+        "area_mm2": 512.102
+      },
+      {
+        "z": 34.8214,
+        "area_mm2": 473.764
+      },
+      {
+        "z": 36.6071,
+        "area_mm2": 1403.776
+      },
+      {
+        "z": 38.3929,
+        "area_mm2": 1304.688
+      },
+      {
+        "z": 40.1786,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 41.9643,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 43.75,
+        "area_mm2": 1233.231
+      },
+      {
+        "z": 45.5357,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 47.3214,
+        "area_mm2": 1233.466
+      },
+      {
+        "z": 49.1071,
+        "area_mm2": 1233.467
+      }
+    ],
+    "export": {
+      "stl_path": "candidate-01.stl",
+      "step_path": null,
+      "file_sha256": "5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507",
+      "geometry_sha256": "d34b397b92764b36e3a8500cfe50ffd966b55b1d0af3e5c6ef28d18dc3caa271",
+      "watertight": true,
+      "components": 1,
+      "triangle_count": 19522,
+      "volume_mm3": 50077.9922,
+      "bbox_mm": {
+        "x": 84.1071,
+        "y": 65.6015,
+        "z": 50.0
+      }
+    },
+    "overhang_mm2": 1628.144,
+    "placement": {
+      "name": "plan model_to_printer_matrix",
+      "overhang_mm2": 1628.144,
+      "bed_contact_mm2": 1233.438,
+      "height_mm": 50.0,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "placements_considered": [
+      {
+        "name": "as-modelled",
+        "overhang_mm2": 1628.144,
+        "bed_contact_mm2": 1233.438,
+        "height_mm": 50.0,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-x-180",
+        "overhang_mm2": 1630.097,
+        "bed_contact_mm2": 1233.438,
+        "height_mm": 50.0,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            -1.0,
+            -0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            50.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-x-45",
+        "overhang_mm2": 2740.292,
+        "bed_contact_mm2": 0.0,
+        "height_mm": 81.743,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.707106781187,
+            -0.707106781187,
+            0.0
+          ],
+          [
+            0.0,
+            0.707106781187,
+            0.707106781187,
+            25.175042261798
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-x-270",
+        "overhang_mm2": 2781.29,
+        "bed_contact_mm2": 283.686,
+        "height_mm": 65.601,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            -0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            -1.0,
+            -0.0,
+            29.998588562012
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-x-90",
+        "overhang_mm2": 3288.812,
+        "bed_contact_mm2": 4.482,
+        "height_mm": 65.601,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            35.602886199951
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-y-45",
+        "overhang_mm2": 4434.53,
+        "bed_contact_mm2": 2.247,
+        "height_mm": 79.963,
+        "transform": [
+          [
+            0.707106781187,
+            0.0,
+            0.707106781187,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            -0.707106781187,
+            0.0,
+            0.707106781187,
+            6.497587445295
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-y-90",
+        "overhang_mm2": 5120.228,
+        "bed_contact_mm2": 0.0,
+        "height_mm": 84.107,
+        "transform": [
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            -1.0,
+            0.0,
+            0.0,
+            30.210699081421
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "rot-y-270",
+        "overhang_mm2": 5154.22,
+        "bed_contact_mm2": 8.848,
+        "height_mm": 84.107,
+        "transform": [
+          [
+            -0.0,
+            0.0,
+            -1.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            -0.0,
+            53.896446228027
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ],
+    "edges": {},
+    "measure": {
+      "bbox_mm": {
+        "x": 84.10714530944824,
+        "y": 65.60147476196289,
+        "z": 50.0
+      },
+      "volume_mm3": 50077.992238387895,
+      "watertight": true,
+      "components": 1,
+      "triangle_count": 19522,
+      "center_mm": {
+        "x": -11.842873573303224,
+        "y": -2.802148818969725,
+        "z": 25.0
+      }
+    },
+    "stage_reached": "complete",
+    "planned_placements": [
+      {
+        "name": "plan model_to_printer_matrix",
+        "overhang_mm2": 1628.144,
+        "bed_contact_mm2": 1233.438,
+        "height_mm": 50.0,
+        "transform": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ],
+    "renders": [
+      "renders/section_x.png",
+      "renders/multi.png"
+    ]
+  },
+  "judgment_required": {
+    "visual_accept": null,
+    "fit_band_ok": null,
+    "note": "A machine cannot supply these. Look at the renders and decide."
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "contract": "print-plan",
+  "contract_version": 4,
+  "job_id": "vent-ball-01",
+  "revision": 1,
+  "owner": "orchestrator (no print engineer dispatched; DIRECT-style single-part job)",
+  "status": "ACCEPTED",
+  "dimensions_revision": 1,
+  "updated_utc": "2026-07-28T00:00:00Z",
+  "threshold_source": "builtin-default",
+  "expected_bodies": 1,
+  "process": [
+    {
+      "printer_material_nozzle": "PETG; 0.4mm nozzle; 0.2mm layer"
+    }
+  ],
+  "expected_bbox_mm": {
+    "x": 84.11,
+    "y": 65.61,
+    "z": 50.0
+  },
+  "bbox_tolerance_mm": 0.5,
+  "support_rules": [
+    {
+      "id": "S-01",
+      "disposition": "SUPPORT_ALLOWED",
+      "model_to_printer_matrix": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+      ],
+      "bed_z_mm": 0.0,
+      "bed_tolerance_mm": 0.05,
+      "downward_normal_z_max": -0.70710678,
+      "max_out_of_limit_area_mm2": 1700.0,
+      "allowed_contact_class": "non-functional exterior: the upper leg's flat inner side face (z=35mm, ~1440mm2) and the ball's lower spherical cap plus the plinth underside (~150mm2). No support may touch a vent claw profile edge, a snap-bore wall, or the phone-rest face.",
+      "forbidden_faces": [
+        "the two snap bores through the leg tabs and their barrel walls",
+        "every vent-claw prong tip and prong flank",
+        "the 50x60 phone-rest face",
+        "the sphere above its equator"
+      ],
+      "post_print_artifacts": [
+        "photo of the sphere after support removal and knife/400-grit cleanup",
+        "photo of the upper leg's inner face after support removal",
+        "arm snap-in test: the untouched solid[1] arm must seat and pivot freely"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "I-01",
+      "fit_type": "retention",
+      "contact_state": "ball gripped by the user's existing MagSafe cradle socket, held by friction",
+      "min_mm": -0.05,
+      "max_mm": 0.05,
+      "motion_path": "none once seated; the cradle rotates about the ball centre",
+      "material": "PETG ball against the user's existing printed socket",
+      "coupon_required": false,
+      "acceptance_method": "Nobody has the cradle's geometry, so the band is not a socket clearance. The reference is the source ball STL's own spherical cap moved exactly as the graft moves it, and the band asserts congruence: the delivered sphere must still be the validated sphere, within 0.05 mm, after a plinth was fused under it. Vertex sphere d 17.140, centre 22.080 mm off the phone-rest face.",
+      "reference": "reference_ball.stl"
+    },
+    {
+      "id": "I-02",
+      "fit_type": "snap",
+      "contact_state": "the vent arm's peg seated in the leg's barrel bore and free to pivot",
+      "min_mm": 0.09,
+      "max_mm": 0.18,
+      "motion_path": "peg pressed in along the bore axis past a 0.44 mm radial interference at the mouth, then free rotation",
+      "material": "PETG on PETG",
+      "coupon_required": false,
+      "acceptance_method": "Band derived from the two source solids' own surface parameters before measuring: bore r 2.000 -> 2.600 -> 2.000 against peg r 1.900 -> 2.440 -> 1.900 gives a 0.100 mm minimum radial gap at the mouths and 0.160 at the barrel; this build's 0.020 mm mouth relief raises the minimum to 0.120. Anything outside 0.09-0.18 means the bore rebuild moved.",
+      "reference": "reference_peg.stl"
+    }
+  ],
+  "edges": []
+}

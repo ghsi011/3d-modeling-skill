@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# The vendored benchmark fixture is recorded by SHA-256 and must survive a round
+# trip through git unchanged.
+#
+# `vent_mount.step` is ASCII and arrived with CRLF line endings. Left alone, git
+# normalises those to LF on commit and converts back on checkout according to
+# whatever `core.autocrlf` says on the machine doing the checkout -- so the file
+# a clone produces is not the file whose hash `tools/fixtures.py` records, and
+# `resolve()` raises `FixtureMismatch` on a checkout that did nothing wrong. The
+# same applies to the evidence beside the reference, which is worth keeping only
+# because it is exactly what was produced.
+#
+# `-text` turns the conversion off entirely: these bytes are stored and restored
+# verbatim on every platform.
+# ---------------------------------------------------------------------------
+benchmarks/fixtures/vent-ball-combine/public/sources/** -text
+benchmarks/references/** -text
