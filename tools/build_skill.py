@@ -226,10 +226,16 @@ def _bundle_pyproject() -> str:
         for key, value in ruff_scalars.items():
             if isinstance(value, str):
                 lines.append(f'{key} = "{value}"')
-            elif isinstance(value, (int, float)):
-                lines.append(f"{key} = {value}")
+            # Before the numeric branch, because `bool` is a subclass of `int`:
+            # tested after it, every boolean renders through the f-string as
+            # Python's `True`, which is not TOML, and the bundled pyproject
+            # stops parsing. `[tool.uv]` below already had this order; this
+            # block did not, and its `bool` arm was unreachable until the first
+            # boolean was added to `[tool.ruff]`.
             elif isinstance(value, bool):
                 lines.append(f"{key} = {'true' if value else 'false'}")
+            elif isinstance(value, (int, float)):
+                lines.append(f"{key} = {value}")
             elif isinstance(value, list):
                 items = ", ".join(repr(v) for v in value)
                 lines.append(f"{key} = [{items}]")

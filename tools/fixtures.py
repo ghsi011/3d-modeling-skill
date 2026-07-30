@@ -58,6 +58,19 @@ Vendoring the answer does not move it to the public side. It is committed under
 reachable by walking up from anything the public record names: everything under
 `benchmarks/fixtures/<id>/` is material a design agent may read, and the answer
 is not under it.
+
+**A receipt whose artifact cannot be opened is not a receipt.** The vendored job
+record includes the delivery manifest the run wrote, and that manifest names its
+candidate `candidate-01.stl` -- the name the job used, beside a hash that still
+validates. Vendoring kept the same bytes under the name the part is known by and
+left the manifest's own path with nothing behind it. The manifest is not edited
+to match: it is what was delivered, and a record rewritten afterwards to make the
+snapshot tidier is a worse record. So the duplicate is carried at the literal path
+the manifest names, `historical_aliases.json` beside the evidence explains why two
+names hold one file, and `delivery_artifacts()` resolves the path the manifest
+actually spells. The alias record is read and checked and is never consulted to
+find a file, because an alias that can stand in for a missing artifact is a
+redirect, and a redirect is how "every path resolves" stops meaning anything.
 """
 from __future__ import annotations
 
@@ -400,6 +413,48 @@ _REFERENCES: dict[str, FixtureFile] = {
 
 
 # --------------------------------------------------------------------------
+# The record of the job that produced the answer
+# --------------------------------------------------------------------------
+#
+# Two files in the vendored evidence are immutable in the strict sense: their
+# whole worth is that they are byte-identical to what ran, so they are recorded
+# by hash here and are the only things in the tree that formatter and linter are
+# told to leave alone.
+#
+# The delivery manifest is the receipt. It is not rewritten to suit the tree it
+# now sits in -- including the candidate path, which names the file as the job
+# named it. See `historical_aliases()` for what that costs and why it is paid.
+
+_DELIVERY_RECORDS: dict[str, VendoredFile] = {
+    "vent-ball-combine": VendoredFile(
+        path="benchmarks/references/vent-ball-combine/evidence"
+             "/artifact_manifest.json",
+        sha256="fff5c058735cdb2297a8d65ba16da9fb575830b22fe634df3a7112f2e3e71065",
+        bytes=1295),
+}
+
+# The script the part was actually built by. Nothing imports it and nothing may
+# edit it: an artifact whose only claim is that nobody has touched it stops being
+# one the moment a formatter tidies an import.
+_DESIGN_SOURCES: dict[str, VendoredFile] = {
+    "vent-ball-combine": VendoredFile(
+        path="benchmarks/references/vent-ball-combine/evidence/model.py",
+        sha256="c48ec3660669376fedfa589da38401a98e8e0710f38b2aa50a4a2eaefa3f464a",
+        bytes=11820),
+}
+
+# Maintained metadata, deliberately *not* hash-pinned: it is commentary on the
+# evidence and not evidence, so it is expected to be edited when there is more to
+# explain. It sits outside `evidence/` for the same reason.
+_ALIAS_RECORDS: dict[str, str] = {
+    "vent-ball-combine": "benchmarks/references/vent-ball-combine"
+                         "/historical_aliases.json",
+}
+
+BYTE_IDENTICAL = "BYTE_IDENTICAL"
+
+
+# --------------------------------------------------------------------------
 # Reading the public side
 # --------------------------------------------------------------------------
 
@@ -493,6 +548,128 @@ def source_path(fixture_id: str, index: int = 0) -> Path:
         raise FixtureUnavailable(f"{fixture_id}: this fixture has no source "
                                  "artifact; it is designed from scratch.")
     return resolve(records[index], what=f"{fixture_id} source {index}")
+
+
+# --------------------------------------------------------------------------
+# Reading the delivery record
+# --------------------------------------------------------------------------
+
+def delivery_record(fixture_id: str) -> dict:
+    """The artifact manifest the job wrote, verified against its recorded bytes.
+
+    Read rather than reconstructed, and hash-checked on the way in, so that "the
+    record is unchanged" is a fact the loader establishes rather than a habit
+    reviewers are trusted to keep.
+    """
+    record = _DELIVERY_RECORDS.get(fixture_id)
+    if record is None:
+        raise KeyError(f"no delivery record is vendored for {fixture_id!r}")
+    path = resolve(record, what=f"{fixture_id} delivery record")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _resolve_delivered(directory: Path, artifact: dict, *, what: str) -> Path:
+    """One artifact, opened at the exact path the record spells.
+
+    The path is joined and never rewritten. There is no alias lookup here and no
+    fallback to a file with the same hash under another name, because either one
+    turns "every path in the receipt resolves" into "every path in the receipt
+    resolves to something", which is a different and much weaker claim.
+    """
+    raw = artifact["path"]
+    relative = PurePosixPath(raw)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise FixtureMismatch(
+            f"{what}: the record names {raw!r}, which leaves the directory it "
+            "was delivered in. A receipt addresses its own bundle.")
+    path = directory / relative
+    if not path.is_file():
+        raise FixtureMissing(
+            f"{what}: the delivery record names {raw!r} and there is no file at "
+            f"{path}. The record is immutable and the artifacts beside it are "
+            "committed, so a path with nothing behind it means the evidence is "
+            "incomplete -- not that this machine happens to lack something.")
+    found = _digest(path)
+    if found != artifact["sha256"]:
+        raise FixtureMismatch(
+            f"{what}: {path} hashes {found} and the delivery record says "
+            f"{artifact['sha256']}. The receipt is describing other bytes.")
+    return path
+
+
+def delivery_artifacts(fixture_id: str, *,
+                       directory: Path | None = None) -> dict[str, Path]:
+    """Every artifact the record names, resolved and hash-checked.
+
+    `directory` defaults to the manifest's own, which is how a receipt addresses
+    its bundle; it is a parameter so the resolution can be exercised against a
+    tree that is missing a file, which is the only way to show that the alias
+    record is not quietly rescuing one.
+    """
+    manifest = delivery_record(fixture_id)
+    if directory is None:
+        directory = _DELIVERY_RECORDS[fixture_id].location.parent
+    return {artifact["id"]: _resolve_delivered(
+                directory, artifact,
+                what=f"{fixture_id} artifact {artifact['id']!r}")
+            for artifact in manifest["artifacts"]}
+
+
+def historical_aliases(fixture_id: str) -> tuple[dict, ...]:
+    """Why one set of bytes is carried under two names. Explanation only.
+
+    The delivery record calls the candidate `candidate-01.stl`; the repository
+    keeps the same bytes at the top of the reference directory under the name the
+    part is known by. Editing the record to agree would have made the snapshot
+    tidier and less true, and deleting the duplicate would have left a receipt
+    pointing at nothing. So both files are present and this says why.
+
+    Nothing in resolution reads this. It is returned for a reader and asserted
+    against by the tests; `_resolve_delivered` never sees it.
+    """
+    relative = _ALIAS_RECORDS.get(fixture_id)
+    if relative is None:
+        return ()
+    path = REPO_ROOT / relative
+    if not path.is_file():
+        raise FixtureMissing(
+            f"{fixture_id}: the alias record is committed at {path} and is not "
+            "on disk.")
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    return tuple(loaded.get("historical_aliases", ()))
+
+
+def design_source(fixture_id: str) -> Path:
+    """The script the reference was built by, verified.
+
+    Immutable historical source: it is outside formatter and linter control
+    precisely because its worth is that it has not been touched, so the hash is
+    what stops it being touched by accident instead.
+    """
+    record = _DESIGN_SOURCES.get(fixture_id)
+    if record is None:
+        raise KeyError(f"no design source is vendored for {fixture_id!r}")
+    return resolve(record, what=f"{fixture_id} design source")
+
+
+def hash_verified_paths() -> tuple[str, ...]:
+    """Every repo-relative path whose bytes this module checks against a digest.
+
+    Including the ones reached through the delivery record, so that adding an
+    artifact to a vendored manifest brings it under the line-ending check
+    automatically rather than when somebody remembers.
+    """
+    paths = {record.path
+             for records in _SOURCES.values() for record in records
+             if record.vendored}
+    paths |= {record.path for record in _REFERENCES.values() if record.vendored}
+    for fixture_id, record in _DELIVERY_RECORDS.items():
+        paths.add(record.path)
+        base = PurePosixPath(record.path).parent
+        for artifact in delivery_record(fixture_id)["artifacts"]:
+            paths.add(str(base / PurePosixPath(artifact["path"])))
+    paths |= {record.path for record in _DESIGN_SOURCES.values()}
+    return tuple(sorted(paths))
 
 
 # --------------------------------------------------------------------------

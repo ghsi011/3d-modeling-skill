@@ -1,0 +1,16 @@
+{
+  "contract": "historical-aliases",
+  "contract_version": 1,
+  "applies_to": "evidence/artifact_manifest.json",
+  "authority": "NON_AUTHORITATIVE",
+  "why": "The delivery record names the candidate STL 'candidate-01.stl', which is what the job wrote. The same bytes are also carried at this directory's top level under the name the part is known by. Both files are present and byte-identical; this record says so, and says nothing the delivery record does not already contain.",
+  "reading": "original_path is spelled exactly as the delivery record spells it and is relative to the manifest's own directory. retained_equivalent is relative to this file's directory. Nothing here is consulted to resolve a path: the resolver opens the literal path the manifest names, and a manifest path with no file behind it fails whether or not an alias is recorded for it. This is explanation, never substitution.",
+  "historical_aliases": [
+    {
+      "original_path": "candidate-01.stl",
+      "retained_equivalent": "tesla-vent-mount-17mm-ball.stl",
+      "relationship": "BYTE_IDENTICAL",
+      "sha256": "5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507"
+    }
+  ]
+}

@@ -345,6 +345,34 @@ class TestBuildSkill:
             f"Keys only in normalized: {set(normalized) - set(bundled)}\n"
             f"Diff tool keys:\n  repo: {normalized.get('tool', {})}\n  bundle: {bundled.get('tool', {})}")
 
+    def test_bundled_booleans_are_toml_and_not_python(self, build_dir: Path):
+        """The projection writes TOML, and `bool` is a subclass of `int`.
+
+        `[tool.ruff]` tested `(int, float)` before `bool`, so its `bool` arm was
+        unreachable and every boolean rendered through the f-string as Python's
+        `True`. Nothing noticed while the table held no booleans; the first one
+        added broke `uv lock --check` and every test that syncs the bundle, with
+        a TOML parse error pointing at a line the author never wrote.
+
+        Checked as text as well as by parse: a parse alone cannot distinguish
+        "rendered correctly" from "rendered `True` and tomllib was lenient",
+        and tomllib is not lenient, which is exactly why this was a hard failure
+        rather than a silently wrong bundle.
+        """
+        with zipfile.ZipFile(build_dir / ARTIFACT) as zf:
+            raw = zf.read("pyproject.toml").decode("utf-8")
+        bundled = tomllib.loads(raw)
+        booleans = {k: v for k, v in bundled.get("tool", {}).get("ruff", {}).items()
+                    if isinstance(v, bool)}
+        assert booleans, (
+            "this test is only meaningful while [tool.ruff] carries a boolean; "
+            "force-exclude was the first and pins the immutable design source")
+        for key, value in booleans.items():
+            assert f"{key} = {'true' if value else 'false'}" in raw, (
+                f"{key} was not rendered as a TOML boolean")
+        assert not re.search(r"=\s*(True|False)\b", raw), (
+            "a Python boolean literal reached the bundled pyproject.toml")
+
     def test_extracted_lock_passes_uv_lock_check(self, build_dir: Path):
         """`uv lock --check` on the extracted bundle must pass, proving the
         bundled pyproject.toml is satisfiable by the bundled lockfile."""

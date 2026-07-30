@@ -100,12 +100,33 @@ include = ["pipeline*", "designer_toolkit*", "team_tools*"]
 
 [tool.ruff]
 target-version = "py311"
-# The vendored proof fixture keeps the record of the job that produced it, and
-# that record includes the script the part was actually built by. It is evidence
-# rather than source: its worth is that it is byte-identical to what ran and to
-# the copy in the owner's own project, so linting it would mean editing an
-# artifact whose only claim is that nobody has. Nothing here is imported.
-extend-exclude = ["benchmarks/references"]
+# One file, named exactly. `model.py` is the script the proof fixture was
+# actually built by: an immutable historical design source whose worth is that it
+# is byte-identical to what ran and to the copy in the owner's own project, so
+# formatting or linting it would mean editing the one artifact whose only claim
+# is that nobody has. Nothing imports it.
+#
+# The exclusion is a path and not the tree above it on purpose. `benchmarks/`
+# also holds fixture manifests, loaders and metadata that are maintained files
+# and want linting like anything else, and excluding their directory would hide
+# real problems in them under a rule written for something else. This states the
+# ownership boundary where it actually falls: this file is outside tooling
+# control, and the rest of the evidence tree is not.
+#
+# The exclusion protects the file from tooling. `tools/test_fixtures.py` pins its
+# SHA-256, which protects it from being edited by hand. Neither substitutes for
+# the other: an excluded file can still be changed, and a hashed file can still
+# be reformatted into a red suite.
+#
+# If more immutable Python artifacts arrive, they go under a dedicated documented
+# subtree and that subtree is excluded then -- not by widening this line now.
+extend-exclude = ["benchmarks/references/vent-ball-combine/evidence/model.py"]
+# Ruff lints an excluded path anyway when that path is handed to it directly,
+# which is precisely how a pre-commit hook or an editor's format-on-save invokes
+# it -- so without this the exclusion holds for `ruff check .` and lets the one
+# tool most likely to rewrite the file straight through. There is one entry above
+# and it is the file that must not be rewritten, so enforce it unequivocally.
+force-exclude = true
 
 [tool.ruff.lint]
 # Ruff's default rule set (pyflakes F + pycodestyle E4/E7/E9). Line length

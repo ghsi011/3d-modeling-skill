@@ -14,9 +14,11 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -385,13 +387,24 @@ class Resolution(unittest.TestCase):
         correctly, and on every clone, for a file nobody had touched. So the
         recorded bytes are marked `-text`, and every vendored path is checked
         for that mark rather than the two that happen to be ASCII today.
+
+        The set comes from `hash_verified_paths()` rather than being listed here,
+        because the trap is worst for the files that look least like geometry:
+        `model.py` and `artifact_manifest.json` are plain text, are pinned by
+        hash, and would be exactly the ones a reader assumed were safe to let git
+        normalise.
         """
-        paths = sorted({record.path
-                        for records in FX._SOURCES.values() for record in records
-                        if record.vendored}
-                       | {record.path for record in FX._REFERENCES.values()
-                          if record.vendored})
+        paths = list(FX.hash_verified_paths())
         self.assertTrue(paths)
+        for expected in ("benchmarks/references/vent-ball-combine/evidence"
+                         "/model.py",
+                         "benchmarks/references/vent-ball-combine/evidence"
+                         "/artifact_manifest.json",
+                         "benchmarks/references/vent-ball-combine/evidence"
+                         "/candidate-01.stl"):
+            self.assertIn(expected, paths,
+                          "a hash-pinned text file left out of the line-ending "
+                          "check is the whole CRLF defect again")
         try:
             found = subprocess.run(
                 ["git", "check-attr", "text", "--", *paths],
@@ -452,6 +465,169 @@ class Resolution(unittest.TestCase):
                 checked += 1
         if not checked:
             self.skipTest("none of the external fixtures are on this machine")
+
+
+class TheDeliveryRecord(unittest.TestCase):
+    """Three claims about the receipt: unchanged, resolvable, and not redirected.
+
+    The manifest names its candidate `candidate-01.stl`, which is what the job
+    wrote. Vendoring committed those bytes under the name the part is known by
+    and left the manifest's own path with nothing behind it -- a receipt whose
+    artifact cannot be opened, which is not a receipt. The two tidy fixes were
+    both worse: editing the record makes the snapshot cleaner and less true, and
+    dropping the name leaves the dangle. So the duplicate is carried at the
+    literal path, and what has to be tested is that carrying it did not turn into
+    a lookup that lets any missing artifact find some other file.
+    """
+    FIXTURE = "vent-ball-combine"
+    ANSWER = "5d2d7324e87a195eef0b21bf155ac0792184eec33fdfbf6a1273b0b24b03d507"
+
+    def _staged(self, root: Path) -> Path:
+        evidence = FX._DELIVERY_RECORDS[self.FIXTURE].location.parent
+        copy = root / "evidence"
+        shutil.copytree(evidence, copy)
+        return copy
+
+    def test_the_record_the_job_wrote_is_the_record_that_is_here(self) -> None:
+        """Unchanged, established by hash rather than by reviewer discipline."""
+        record = FX._DELIVERY_RECORDS[self.FIXTURE]
+        path = record.location
+        self.assertEqual(record.sha256,
+                         hashlib.sha256(path.read_bytes()).hexdigest())
+        manifest = FX.delivery_record(self.FIXTURE)
+        candidate = [a for a in manifest["artifacts"] if a["role"] == "candidate"]
+        self.assertEqual(["candidate-01.stl"], [a["path"] for a in candidate],
+                         "the record still spells the name the job used; if this "
+                         "changed, the snapshot was rewritten after the fact")
+        self.assertEqual(self.ANSWER, candidate[0]["sha256"])
+
+    def test_every_path_the_record_names_resolves_to_the_recorded_bytes(self) -> None:
+        resolved = FX.delivery_artifacts(self.FIXTURE)
+        manifest = FX.delivery_record(self.FIXTURE)
+        self.assertEqual({a["id"] for a in manifest["artifacts"]},
+                         set(resolved))
+        for artifact_id, path in resolved.items():
+            with self.subTest(artifact=artifact_id):
+                self.assertTrue(path.is_file())
+                path.resolve().relative_to(FX.REPO_ROOT)
+
+    def test_the_duplicate_at_the_manifest_path_is_the_retained_artifact(self) -> None:
+        """Equivalence stated, not assumed, because it is why the cost is near nil.
+
+        Byte-identical means git stores one blob and this is a second tree entry.
+        If the two ever diverge, that reasoning is wrong and the repository is
+        quietly carrying two different candidates under one hash claim.
+        """
+        delivered = FX.delivery_artifacts(self.FIXTURE)["candidate-01"]
+        retained = FX.reference(self.FIXTURE)
+        self.assertNotEqual(delivered, retained)
+        self.assertEqual(delivered.read_bytes(), retained.read_bytes())
+        self.assertEqual(self.ANSWER,
+                         hashlib.sha256(delivered.read_bytes()).hexdigest())
+
+    def test_the_alias_record_says_what_the_duplicate_is_and_is_not_evidence(self) -> None:
+        aliases = FX.historical_aliases(self.FIXTURE)
+        self.assertEqual(1, len(aliases))
+        alias = aliases[0]
+        self.assertEqual("candidate-01.stl", alias["original_path"])
+        self.assertEqual(Path(FX.reference(self.FIXTURE)).name,
+                         alias["retained_equivalent"])
+        self.assertEqual(FX.BYTE_IDENTICAL, alias["relationship"])
+        self.assertEqual(self.ANSWER, alias["sha256"])
+        evidence = FX._DELIVERY_RECORDS[self.FIXTURE].location.parent
+        record = FX.REPO_ROOT / FX._ALIAS_RECORDS[self.FIXTURE]
+        self.assertFalse(record.resolve().is_relative_to(evidence.resolve()),
+                         "commentary on the evidence does not live inside it")
+
+    def test_the_alias_record_cannot_stand_in_for_the_file_it_explains(self) -> None:
+        """The property that keeps 'every path resolves' worth asserting.
+
+        An alias is recorded for exactly this path, and its retained equivalent
+        is on disk with the right hash. Resolution still has to fail, because the
+        moment a missing artifact can be satisfied by a same-hash file under
+        another name, the check stops being about the record and starts being
+        about whether the bytes exist somewhere.
+        """
+        self.assertIn("candidate-01.stl",
+                      [a["original_path"]
+                       for a in FX.historical_aliases(self.FIXTURE)])
+        self.assertTrue(FX.reference(self.FIXTURE).is_file())
+        with tempfile.TemporaryDirectory() as raw:
+            staged = self._staged(Path(raw))
+            (staged / "candidate-01.stl").unlink()
+            with self.assertRaises(FX.FixtureMissing) as caught:
+                FX.delivery_artifacts(self.FIXTURE, directory=staged)
+            self.assertIn("candidate-01.stl", str(caught.exception))
+
+    def test_a_delivered_artifact_whose_bytes_moved_is_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            staged = self._staged(Path(raw))
+            (staged / "candidate-01.stl").write_bytes(b"not the delivered bytes")
+            with self.assertRaises(FX.FixtureMismatch) as caught:
+                FX.delivery_artifacts(self.FIXTURE, directory=staged)
+            self.assertIn(self.ANSWER, str(caught.exception))
+
+    def test_a_record_that_addresses_outside_its_own_bundle_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaises(FX.FixtureMismatch):
+                FX._resolve_delivered(
+                    Path(raw), {"path": "../escaped.stl", "sha256": "0" * 64},
+                    what="escaping artifact")
+
+
+class TheImmutableFiles(unittest.TestCase):
+    """What is outside tooling control, and what stops it drifting anyway."""
+    FIXTURE = "vent-ball-combine"
+    MODEL = "benchmarks/references/vent-ball-combine/evidence/model.py"
+
+    def test_the_design_source_is_byte_identical_to_what_ran(self) -> None:
+        """The hash the lint exclusion does not provide.
+
+        Excluding the file stops a formatter rewriting it. It does nothing about
+        a hand edit, and the file's entire claim is that there has not been one.
+        """
+        path = FX.design_source(self.FIXTURE)
+        self.assertEqual(
+            "c48ec3660669376fedfa589da38401a98e8e0710f38b2aa50a4a2eaefa3f464a",
+            hashlib.sha256(path.read_bytes()).hexdigest())
+        path.resolve().relative_to(FX.REPO_ROOT)
+
+    def test_the_lint_exclusion_names_one_file_and_not_the_tree_above_it(self) -> None:
+        """The ownership boundary, checked where it is actually written.
+
+        `benchmarks/references/` also holds the delivery record, the alias record
+        and the renders; a directory-level exclusion would put any maintained
+        file later dropped in there outside the linter without anyone deciding
+        that. The exclusion is one path, and it is a path this module also pins
+        by hash -- excluding a file nothing verifies would be the worse half of
+        the pair on its own.
+        """
+        config = tomllib.loads(
+            (FX.REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        excluded = config["tool"]["ruff"]["extend-exclude"]
+        self.assertEqual([self.MODEL], excluded)
+        self.assertTrue(
+            config["tool"]["ruff"].get("force-exclude"),
+            "without this ruff lints -- and `--fix` rewrites -- an excluded path "
+            "that is passed to it directly, which is how pre-commit and "
+            "format-on-save call it")
+        self.assertTrue((FX.REPO_ROOT / self.MODEL).is_file(),
+                        "an exclusion pointing at nothing is a stale rule")
+        self.assertIn(self.MODEL, FX.hash_verified_paths())
+        for entry in excluded:
+            with self.subTest(entry=entry):
+                self.assertTrue((FX.REPO_ROOT / entry).is_file(),
+                                "exclusions here name files, not directories")
+
+    def test_the_rest_of_the_evidence_tree_is_still_linted(self) -> None:
+        """Named, because the previous rule silently covered all of it."""
+        tree = FX.REPO_ROOT / "benchmarks" / "references"
+        scripts = sorted(p.relative_to(FX.REPO_ROOT).as_posix()
+                         for p in tree.rglob("*.py"))
+        self.assertEqual([self.MODEL], scripts,
+                         "a second Python file under the evidence tree is now "
+                         "linted; if it is another immutable artifact it wants "
+                         "its own documented subtree, not a wider exclusion")
 
 
 if __name__ == "__main__":
