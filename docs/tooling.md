@@ -182,6 +182,16 @@ which frame it is in). The transform is not decoration: a build item carrying a
 `1.07` scale makes its part 7% larger than the numbers in its mesh part, and a
 reader that skips it measures every scaled part undersize.
 
+**A component chain that does not terminate is a finding.** Two objects whose
+components refer to each other resolve cleanly, dangle nothing and parse — and
+the scene they describe cannot be assembled. Cycles are searched over the whole
+object graph rather than along the placement walk, for the same reason dangling
+ids are: an unreferenced object whose components loop is still a broken file. A
+chain more than 32 deep is reported separately, because it is a different
+malformation. Either finding costs a file its `USABLE_MESH` — geometry inside a
+loop that is watertight and consistently wound is still `REPAIR_REQUIRED`, and a
+scene with no reachable mesh at all remains `RECONSTRUCTION_REQUIRED`.
+
 Units are answered as honestly as the format allows. STL carries none, so the
 bbox is reported as authored with a *suspicion* beside it (`/25.4` and `x1000`
 arithmetic shown) and nothing is converted. 3MF and STEP carry them and they are

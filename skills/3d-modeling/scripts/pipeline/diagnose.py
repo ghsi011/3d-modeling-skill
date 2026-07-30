@@ -389,9 +389,64 @@ def _resolve(ref: dict[str, Any], referring_part: str,
     return candidate if candidate in objects else None
 
 
-def _leaves(target, matrix, objects, dangling: set, chain: tuple = ()):
-    """Every mesh reachable from `target`, with its accumulated placement."""
-    if len(chain) > _MAX_COMPONENT_DEPTH or target in chain:
+def _cycle_edges(objects: dict[tuple[str, str], dict[str, Any]]) -> set[tuple]:
+    """Every component reference that closes a loop, anywhere in the file.
+
+    Driven from every object rather than from the build, for the same reason the
+    dangling sweep is: an unreferenced object whose components loop is still a
+    broken file, and a walk that only follows what the build reaches calls it
+    fine. Doing this in `_leaves` had exactly that blind spot.
+
+    A cycle is not a dangling reference and must not be reported as one. Every id
+    involved is present; the file resolves; it simply describes a scene that
+    cannot be assembled, because following the components never terminates.
+
+    Iterative rather than recursive: the depth cap belongs to the placement walk,
+    which has a matrix to carry, and a graph search that inherited it would
+    silently stop looking for cycles on a file deep enough to need one found.
+    """
+    found: set[tuple] = set()
+    finished: set[tuple] = set()
+    for start in objects:
+        if start in finished:
+            continue
+        stack = [(start, iter(objects[start]["components"]))]
+        on_path = {start}
+        while stack:
+            node, refs = stack[-1]
+            descended = False
+            for ref in refs:
+                child = _resolve(ref, node[0], objects)
+                if child is None or child in finished:
+                    continue                  # dangling, or already cleared
+                if child in on_path:
+                    found.add((node, child))
+                    continue
+                stack.append((child, iter(objects[child]["components"])))
+                on_path.add(child)
+                descended = True
+                break
+            if not descended:
+                stack.pop()
+                on_path.discard(node)
+                finished.add(node)
+    return found
+
+
+def _leaves(target, matrix, objects, dangling: set, too_deep: set,
+            chain: tuple = ()):
+    """Every mesh reachable from `target`, with its accumulated placement.
+
+    Both guards have to stop the walk. Only one of them is reported here: a cycle
+    is found by `_cycle_edges` over the whole file, so returning quietly on one is
+    not losing the finding. A chain that is merely too deep is a different thing
+    and has no other detector, so it is recorded -- silently dropping the geometry
+    under it would leave a report that looks complete and is not.
+    """
+    if target in chain:
+        return
+    if len(chain) > _MAX_COMPONENT_DEPTH:
+        too_deep.add(target)
         return
     record = objects.get(target)
     if record is None:
@@ -405,7 +460,7 @@ def _leaves(target, matrix, objects, dangling: set, chain: tuple = ()):
             continue
         child, _ok = _transform(ref.get("transform"))
         yield from _leaves(resolved, matrix @ child, objects, dangling,
-                           chain + (target,))
+                           too_deep, chain + (target,))
 
 
 def _diagnose_3mf(path: Path) -> dict[str, Any]:
@@ -515,14 +570,17 @@ def _diagnose_3mf(path: Path) -> dict[str, Any]:
     build = root.find(f"{_MODEL_NS}build")
     build_elements = build.findall(f"{_MODEL_NS}item") if build is not None else []
     dangling: set[str] = set()
+    too_deep: set[tuple] = set()
 
     # Every component in the file is resolved, not only the ones the build
     # happens to reach: an unreferenced object with a broken component is still
-    # a broken file.
+    # a broken file. The same argument applies to a loop, so the cycle search
+    # runs over the whole graph here rather than along the placement walk.
     for record in ordered:
         for ref in record["components"]:
             if _resolve(ref, record["part"], objects) is None:
                 dangling.add(ref["objectid"])
+    cycles = _cycle_edges(objects)
 
     items: list[dict[str, Any]] = []
     placed: list[dict[str, Any]] = []
@@ -548,7 +606,8 @@ def _diagnose_3mf(path: Path) -> dict[str, Any]:
                       "resolved": target is not None})
         if target is None:
             continue
-        for leaf, placement in _leaves(target, matrix, objects, dangling):
+        for leaf, placement in _leaves(target, matrix, objects, dangling,
+                                       too_deep):
             mesh = meshes.get(leaf)
             if mesh is None or len(mesh.faces) == 0:
                 continue
@@ -583,6 +642,19 @@ def _diagnose_3mf(path: Path) -> dict[str, Any]:
     if unplaced:
         findings.append(f"build item(s) reference object id(s) that are not in the "
                         f"file: {sorted(unplaced)}")
+    for (parent, child) in sorted(cycles):
+        findings.append(
+            f"object {parent[1]!r} in {parent[0]!r} reaches object {child[1]!r} "
+            f"in {child[0]!r}, which is already on the way there: the component "
+            "chain is a cycle and assembling this scene does not terminate")
+        unsound = True
+    for target in sorted(too_deep):
+        findings.append(
+            f"the component chain reaching object {target[1]!r} in {target[0]!r} "
+            f"is more than {_MAX_COMPONENT_DEPTH} deep, which is a malformed "
+            "file rather than a scene; the walk stopped short of it, so that "
+            "object and anything under it were not placed")
+        unsound = True
 
     for record in mesh_records:
         geometry = record["geometry"]

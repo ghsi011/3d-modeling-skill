@@ -264,6 +264,11 @@ skills/
   roles/                  # neutral role sources — edit these, then regenerate
 .claude/agents/3d-*.md    # Claude Code agent definitions   \
 tools/                    # gen_harness · build_skill · check_internal_links · bench
+  fixtures.py             #   the benchmark fixture manifest: evidence class,
+                          #   licence, and the wall between a request and its answer
+  test_diagnosis_l0.py    #   the L0 set — five artifacts, facts asserted not verdicts
+benchmarks/fixtures/      # public request material only; geometry is referenced
+                          # by absolute path and SHA-256, never vendored
 ```
 
 `skills/roles/*.md` are the source of truth. Edit a role there and run
