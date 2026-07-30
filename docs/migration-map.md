@@ -8,6 +8,24 @@ the skill already declares.
 Legend: **new** = file created, **ext** = existing file extended, **doc** = agent-facing
 text changed, **ret** = leaves agent instructions but stays importable.
 
+## Status
+
+| phase | state |
+|---|---|
+| 0 — freeze behavior | **done** (`bea8d66`) |
+| 1 — route and CLI unification | **done** (`43ccd0d`) |
+| 2 — custom from-scratch lane | **done** (`6fba60a`) |
+| 3 — modification lane | **done** (`e2b3d0b`) |
+| 4 — fitted / photo workflow | not started |
+| 5 — motion and assemblies | not started; the declaration and its routing consequences exist, the sweep engine does not |
+| 6 — packaging and hardening | not started |
+
+Until Phase 5 lands, a job that declares motion routes `FULL` and its
+`motion_path` modifier is reported `DEFERRED` by `status.manufacturing` — the
+sweep is named as unmeasured rather than implied complete. Until Phase 6 lands,
+there is no resource governor and no versioned Bambu adapter; `make_3mf.py` and
+`make_bambu_3mf.py` are unchanged from before this work.
+
 ## Phase 0 — freeze behavior
 
 Establish what "unchanged" means before anything moves.
