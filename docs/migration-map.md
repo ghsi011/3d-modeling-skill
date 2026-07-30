@@ -14,7 +14,7 @@ text changed, **ret** = leaves agent instructions but stays importable.
 |---|---|
 | 0 — freeze behavior | **done** (`bea8d66`) |
 | 1 — route and CLI unification | **done** (`43ccd0d`) |
-| 2 — custom from-scratch lane | **done** (`6fba60a`) |
+| 2 — custom from-scratch lane | **partly done** (`6fba60a`) — the authored lane runs, but three rows below were planned and not built: `pipeline/commissions.py`, a `design-tool commission` verb, and a `certified` flag on the starting templates. `dt.py commission` therefore does NOT leave agent instructions yet |
 | 3 — modification lane | **done** (`e2b3d0b`) |
 | 4 — fitted / photo workflow | not started |
 | 5 — motion and assemblies | not started; the declaration and its routing consequences exist, the sweep engine does not |
