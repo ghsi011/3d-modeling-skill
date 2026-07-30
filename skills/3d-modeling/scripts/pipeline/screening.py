@@ -17,6 +17,19 @@ absence, and reading it that way is how the next defect ships.
 **They escalate; they do not fail.** A broad screen has false positives, and a
 false positive that fails a correct part teaches its reader to widen the
 threshold until nothing fires.
+
+**A screen calibrated by its own subject is not a screen.** The volume and
+profile detectors need an expectation to compare against. On the certified lane
+that expectation comes from `templates.py`, which the designer does not write. On
+the authored lanes it comes from the party whose work is being screened, so
+neither detector may issue a `CLEAR` there: the volume detector reports
+`NOT_APPLICABLE` and records the measurement, and the profile detector reports
+`NOT_APPLICABLE` when every step sits at a declared height and `ANOMALY` when one
+does not. The asymmetry is deliberate and it is not a weakened threshold -- a
+step the designer's own declarations fail to explain is evidence against the part
+whoever wrote the declarations, while a step they *do* explain is evidence of
+nothing at all. ADR 0002 section 3 has the reasoning; `expected_volume_basis`
+carries which of the legitimate sources, if any, the expectation came from.
 """
 from __future__ import annotations
 
@@ -86,8 +99,20 @@ FRAGMENT_FRACTION = 0.02
 VOLUME_FRACTION = 0.0025
 
 
+def _independent(contract: Contract) -> bool:
+    """Whether the expectations this screen calibrates against are second-party.
+
+    One predicate, read by both calibrated detectors. `source` is absent on a
+    certified contract and present on every authored one, which is exactly the
+    line: a certified template's closed forms are written in `templates.py` by
+    somebody who is not the designer, and an authored contract's come from the
+    proposal the designer wrote.
+    """
+    return (contract.source or {}).get("kind") != "authored"
+
+
 def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any],
-                    label: str) -> dict[str, Any]:
+                    label: str, *, independent: bool) -> dict[str, Any]:
     """One axis of profile screening, against the heights a step is explained at.
 
     Legitimate parts step abruptly all the time -- ribs, pockets, shoulders,
@@ -95,6 +120,10 @@ def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any
     envelope is what makes the difference sayable, and `reference_envelope`
     always produces one: the bed and the top of the part are steps on every
     shape, so there is no shape for which the list is empty.
+
+    When the heights were declared by the party being screened, a clean result
+    means only that the declarations and the geometry agree -- which they were
+    written to. That is `NOT_APPLICABLE`, not `CLEAR`.
     """
     try:
         profile = ctx.axis_profile(axis, SAMPLES, jitter=0.13)
@@ -119,6 +148,13 @@ def _profile_screen(ctx: MeshAnalysisContext, axis: int, envelope: dict[str, Any
         return {"detector": f"profile-{label}", "result": "ANOMALY",
                 "reason": f"{len(unexplained)} step(s) the contract does not explain",
                 "steps": unexplained, "profile": profile}
+    if not independent:
+        return {"detector": f"profile-{label}", "result": "NOT_APPLICABLE",
+                "reason": (f"{len(steps)} step(s), all at heights the frozen proposal "
+                           "declares -- and the proposal is the designer's own, so "
+                           "agreement here is not independent evidence and this "
+                           "detector may not clear the part"),
+                "calibration": "NOT_INDEPENDENTLY_SPECIFIED", "profile": profile}
     return {"detector": f"profile-{label}", "result": "CLEAR",
             "reason": f"{len(steps)} step(s), all at declared feature heights",
             "profile": profile}
@@ -165,16 +201,28 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
     from . import templates as T
 
     source = contract.source or {}
+    got = float(ctx.normalized.volume)
     if source.get("kind") == "authored":
-        # An authored model declares its own closed form, in the contract, hashed
-        # with everything else. Re-importing the module here to ask it again
-        # would mean the number screened against and the number contracted for
-        # are two separate reads of a file that could have changed between them.
-        declared = source.get("volume_mm3")
-        if not isinstance(declared, (int, float)) or isinstance(declared, bool):
-            return {"detector": "volume", "result": "INDETERMINATE",
-                    "reason": "the authored model declares no VOLUME_MM3, so there "
-                              "is nothing to compare the solid against"}
+        # ADR 0002 section 3: expected volume is an acceptance input only when it
+        # is independently available. It was not, here, in the shape that mattered
+        # -- the number came out of the same `model.py` the screen was screening,
+        # so the detector was calibrated by its own subject and could be made
+        # tautologically CLEAR by editing one line.
+        #
+        # No second-party source is invented to fill the gap. The measurement is
+        # still on the receipt; what it may not do is clear a detector by
+        # comparing against itself.
+        basis = source.get("expected_volume_basis")
+        declared = source.get("expected_volume_mm3")
+        if (basis == "NOT_INDEPENDENTLY_SPECIFIED"
+                or not isinstance(declared, (int, float))
+                or isinstance(declared, bool)):
+            return {"detector": "volume", "result": "NOT_APPLICABLE",
+                    "reason": ("no independently specified expected volume exists for "
+                               "this part, so there is nothing to compare the solid "
+                               "against that the solid's own author did not write"),
+                    "calibration": "NOT_INDEPENDENTLY_SPECIFIED",
+                    "expected_mm3": None, "measured_mm3": round(got, 3)}
         want = float(declared)
     else:
         try:
@@ -187,7 +235,6 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
                     "reason": f"{contract.template} declares no closed-form volume, so "
                               "there is nothing to compare the solid against"}
         want = float(template.volume(contract.parameters))
-    got = float(ctx.normalized.volume)
     delta = (got - want) / want if want else 0.0
     if abs(delta) > VOLUME_FRACTION:
         return {"detector": "volume", "result": "ANOMALY",
@@ -243,13 +290,24 @@ def reference_envelope(contract: Contract) -> dict[str, Any]:
 
 def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     envelope = reference_envelope(contract)
+    independent = _independent(contract)
     detectors = [
-        _profile_screen(ctx, 2, envelope, "z"),
+        _profile_screen(ctx, 2, envelope, "z", independent=independent),
         _volume_screen(ctx, contract),
         _component_screen(ctx, contract),
         _bed_screen(ctx),
     ]
     results = {d["result"] for d in detectors}
+    # `NOT_APPLICABLE` is deliberately not in this ladder. It says a detector had
+    # nothing valid to compare against, which is neither a finding nor a
+    # clearance, and promoting it to either would be the same mistake in a
+    # different direction -- `INDETERMINATE` would park every authored job on
+    # NEEDS_MORE_EVIDENCE for a detector that was never going to apply, and
+    # counting it towards `CLEAR` is the self-issued pass this stage removes.
+    # What stops a part being claimed on the strength of a screen full of them is
+    # `CALIBRATED`, which is False and which `status.decide` reads: an
+    # uncalibrated screen with nobody independent looking cannot reach
+    # COMMISSIONED at all.
     overall = "ANOMALY" if "ANOMALY" in results else (
         "INDETERMINATE" if "INDETERMINATE" in results else "CLEAR")
     return {
@@ -257,6 +315,10 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
         "escalates": overall != "CLEAR",
         "calibrated": CALIBRATED,
         "calibration_note": CALIBRATION_NOTE,
+        # Which lane's policy the two calibrated detectors ran under, and whether
+        # the expectations they compare against came from anyone other than the
+        # party being screened.
+        "expectation_source": "SECOND_PARTY" if independent else "SELF_DECLARED",
         "axes_screened": ["z"],
         # Stated rather than faked. An X/Y profile needs its own reference
         # envelope and its own calibrated threshold -- a round channel's area

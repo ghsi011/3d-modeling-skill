@@ -59,16 +59,32 @@ design. It requires an independent verification when the job is
 `CONSEQUENTIAL`, has an external mating interface, declares motion, needs
 imported-geometry repair, has open questions, or when one is asked for.
 
-**`CUSTOM`, and any job that declares an `edit_scope`, cannot claim success right
-now.** The modification cap follows the declared edit scope, not the
-`source_mode` label beside it — an edit scope over a supplied artifact carries
-the preservation obligation on every builder and every route. These jobs build,
-screen, gate and write every receipt, and a designer can iterate against real
-measurements — but the run reports `EXPERIMENTAL_UNAVAILABLE` instead of
-`COMMISSIONED` or `VERIFIED`, because the candidate still supplies its own
-acceptance criteria. `final_status.json` carries `lane_status` and the reason,
-and a genuine `FAILED` is still reported as `FAILED`. The repository's
-`docs/adr/0002-route-and-contract-authority.md` records why, and what lifts it.
+A `CUSTOM` job is one designer commission that returns two files:
+`design_proposal.json`, which says what the part must measure, and `model.py`,
+which says how it is built. The pipeline validates and freezes the proposal,
+generates `acceptance_contract.json` from it and the system-owned inputs, and
+only then executes the model — so the built artifact cannot influence what it is
+judged against. Acceptance bands are the pipeline's, not the designer's. Changing
+the proposal cuts a new contract revision, invalidates the receipts issued
+against the old one, and says so in `acceptance_history.json`.
+
+**Any job that declares an `edit_scope` cannot claim success right now.** The
+modification cap follows the declared edit scope, not the `source_mode` label
+beside it — an edit scope over a supplied artifact carries the preservation
+obligation on every builder and every route. These jobs build, screen, gate and
+write every receipt, and a designer can iterate against real measurements — but
+the run reports `EXPERIMENTAL_UNAVAILABLE` instead of `COMMISSIONED` or
+`VERIFIED`, because the preservation audit's sample density is not yet derived
+from a declared minimum detectable defect size. `final_status.json` carries
+`lane_status` and the reason, and a genuine `FAILED` is still reported as
+`FAILED`.
+
+A `FITTED` or `FULL` job built from authored geometry reports `UNSUPPORTED`
+instead: the bounded metrology recovery those routes owe is defined only against
+a certified template's bounds, so there is nothing to recover into. That is a
+limit of what this build can do rather than a stage that is coming — name a
+certified template, or drop the obligation. The repository's
+`docs/adr/0002-route-and-contract-authority.md` records the rest.
 
 `VERIFIED` requires an independent context on every route. Nothing else reaches
 it.

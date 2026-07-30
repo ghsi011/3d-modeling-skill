@@ -366,9 +366,9 @@ class CliRunTest(unittest.TestCase):
                 (directory / cli.NEXT_ACTION_FILE).read_text(encoding="utf-8"))
             self.assertEqual(
                 {"schema_version", "job_id", "kind", "role", "stage", "route",
-                 "reason", "authorized_inputs", "required_outputs", "source_api",
-                 "bound", "unresolved", "required_reviews", "completion_command",
-                 "updated_utc"},
+                 "reason", "authorized_inputs", "required_outputs", "proposal_api",
+                 "source_api", "bound", "unresolved", "required_reviews",
+                 "completion_command", "updated_utc"},
                 set(action))
 
     def test_a_consequential_job_asks_for_its_safety_review_then_continues(self) -> None:

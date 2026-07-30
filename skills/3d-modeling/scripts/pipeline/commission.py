@@ -482,17 +482,3 @@ def _bed_contact(ctx: MeshAnalysisContext) -> float:
     if not keep.any():
         return 0.0
     return float(mesh.area_faces[keep].sum())
-
-
-def area_tolerance(expected: float) -> dict[str, Any]:
-    """The default band for an area expectation.
-
-    A floor of 1 mm2 and a fraction of 0.5%: tessellation noise on a section is
-    about 0.04 mm2, and the smallest defect worth catching moved 67. Anything
-    between those two numbers is the whole design.
-    """
-    return {"abs": max(1.0, 0.005 * abs(float(expected)))}
-
-
-def diameter_tolerance(expected: float) -> dict[str, Any]:
-    return {"abs": max(0.12, 0.01 * abs(float(expected)))}

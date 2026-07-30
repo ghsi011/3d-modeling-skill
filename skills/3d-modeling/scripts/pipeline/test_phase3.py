@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
+from . import acceptance as ACC
 from . import cli
 from . import commission as CM
 from . import diagnose as D
@@ -58,19 +59,13 @@ def _vent_mount() -> trimesh.Trimesh:
 
 
 # The model the designer writes: import the supplied bracket, cut the socket,
-# change nothing else. Its expectations are the closed form of what it added and
-# of what it inherited.
+# change nothing else. What it must measure is the proposal beside it, frozen
+# before this file is executed -- the closed form of what it added and of what it
+# inherited.
 MODIFIER = '''
 import trimesh
 
 PARAMS = {{"ball_d": {ball_d}, "socket_x": {bx}, "socket_y": {by}}}
-BBOX_MM = {{"x": 50.0, "y": 30.0, "z": 20.0}}
-BODIES = 1
-PROFILE_MARKS = {{"z": [8.0]}}
-EXPECTED = [
-    {{"feature_id": "plate-section", "kind": "section_area",
-     "at": {{"z": 4.0}}, "value_mm2": 50.0 * 30.0 - 2 * 3.14159265 * 2.5 ** 2}},
-]
 
 
 def build():
@@ -90,13 +85,6 @@ REDRAWN = '''
 import trimesh
 
 PARAMS = {{"ball_d": {ball_d}}}
-BBOX_MM = {{"x": 50.0, "y": 30.0, "z": 20.6}}
-BODIES = 1
-PROFILE_MARKS = {{"z": [8.6]}}
-EXPECTED = [
-    {{"feature_id": "plate-section", "kind": "section_area",
-     "at": {{"z": 4.0}}, "value_mm2": 50.0 * 30.0 - 2 * 3.14159265 * 2.5 ** 2}},
-]
 
 
 def build():
@@ -115,6 +103,37 @@ def build():
     seat.apply_translation(({bx}, {by}, 16.3))
     return trimesh.boolean.difference([body, seat], engine="manifold")
 '''
+
+# The plate as supplied, less its two screw shanks. The closed form, and the one
+# thing this edit inherits rather than adds.
+_PLATE_SECTION = 50.0 * 30.0 - 2 * 3.14159265 * 2.5 ** 2
+
+MODIFIER_PROPOSAL = {
+    "schema_version": 1,
+    "job_id": "vent-mount",
+    "design_id": "vent-mount-ball-socket",
+    "rationale": "a 17 mm seat bored into the supplied bracket's boss face",
+    "params": {"ball_d": BALL_D, "socket_x": VENT_MOUNT_BOSS[0],
+               "socket_y": VENT_MOUNT_BOSS[1]},
+    "bbox_mm": {"x": 50.0, "y": 30.0, "z": 20.0},
+    "bodies": 1,
+    "profile_marks": {"z": [8.0]},
+    "features": [
+        {"feature_id": "plate-section", "kind": "section_area",
+         "at": {"z": 4.0}, "value_mm2": _PLATE_SECTION},
+    ],
+}
+
+# What the redrawer proposed, which is a plate 0.6 mm thicker than the one they
+# were given. The proposal is internally consistent; the preservation audit is
+# what notices that it is not the supplied artifact.
+REDRAWN_PROPOSAL = {
+    **MODIFIER_PROPOSAL,
+    "design_id": "vent-mount-ball-socket-redrawn",
+    "params": {"ball_d": BALL_D},
+    "bbox_mm": {"x": 50.0, "y": 30.0, "z": 20.6},
+    "profile_marks": {"z": [8.6]},
+}
 
 
 # --- 3MF fixtures -----------------------------------------------------------
@@ -214,7 +233,8 @@ def _modify_project(**over) -> P.Project:
     return P.Project(**base)
 
 
-def _laid_out(root: Path, source_template: str | None, project: P.Project) -> Path:
+def _laid_out(root: Path, source_template: str | None, project: P.Project,
+              proposal: dict | None = None) -> Path:
     directory = root / "project"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "brief.md").write_text(
@@ -226,6 +246,9 @@ def _laid_out(root: Path, source_template: str | None, project: P.Project) -> Pa
             textwrap.dedent(source_template).format(
                 ball_d=BALL_D, bx=VENT_MOUNT_BOSS[0], by=VENT_MOUNT_BOSS[1],
                 source=str(bracket).replace("\\", "\\\\")),
+            encoding="utf-8")
+        (directory / ACC.PROPOSAL_FILE).write_text(
+            json.dumps(proposal or MODIFIER_PROPOSAL, indent=2, sort_keys=True),
             encoding="utf-8")
     project.save(directory)
     return directory
@@ -763,7 +786,8 @@ class ModifyLaneTest(unittest.TestCase):
         """Every other check passes. This is the one that catches it."""
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), REDRAWN, _modify_project(
-                envelope_mm={"x": 50.0, "y": 30.0, "z": 21.0}))
+                envelope_mm={"x": 50.0, "y": 30.0, "z": 21.0}),
+                REDRAWN_PROPOSAL)
             code = cli.run([str(directory), "--no-render"])
             checks = self._checks(directory)
             self.assertEqual("FAIL", checks["feature-preservation"]["result"])

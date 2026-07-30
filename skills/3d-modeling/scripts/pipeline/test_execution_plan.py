@@ -33,6 +33,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from . import acceptance as ACC
 from . import cli
 from . import execution as EX
 from . import project as P
@@ -61,19 +62,13 @@ JOB_JSON = {
 # A plain block: one body, no overhangs, every expectation the closed form of a
 # rectangle. The geometry is deliberately uninteresting -- what these tests are
 # about is which lane builds it and what the receipt is allowed to say.
+#
+# Two files since stage 2: the proposal says what it must measure and the model
+# says how it is built, and the second may not restate the first after a result.
 BLOCK = '''
 import trimesh
 
 PARAMS = {"w": 40.0, "d": 30.0, "h": 10.0}
-BBOX_MM = {"x": 40.0, "y": 30.0, "z": 10.0}
-BODIES = 1
-PROFILE_MARKS = {"z": []}
-VOLUME_MM3 = 40.0 * 30.0 * 10.0
-EXPECTED = [
-    {"feature_id": "block-section", "kind": "section_area",
-     "at": {"z": 5.0}, "value_mm2": 40.0 * 30.0},
-    {"feature_id": "bed-footprint", "kind": "bed_contact", "value_mm2": 40.0 * 30.0},
-]
 
 
 def build():
@@ -81,6 +76,23 @@ def build():
     block.apply_translation((20.0, 15.0, 5.0))
     return block
 '''
+
+BLOCK_PROPOSAL = {
+    "schema_version": 1,
+    "job_id": "stage1",
+    "design_id": "plain-block",
+    "rationale": "a 40x30x10 block; the lane is the subject, not the shape",
+    "params": {"w": 40.0, "d": 30.0, "h": 10.0},
+    "bbox_mm": {"x": 40.0, "y": 30.0, "z": 10.0},
+    "bodies": 1,
+    "profile_marks": {"z": []},
+    "features": [
+        {"feature_id": "block-section", "kind": "section_area",
+         "at": {"z": 5.0}, "value_mm2": 40.0 * 30.0},
+        {"feature_id": "bed-footprint", "kind": "bed_contact",
+         "value_mm2": 40.0 * 30.0},
+    ],
+}
 
 SPEC_RESPONSE = {
     "measurements": [{"feature": "bundle_across", "nominal_mm": 12.4,
@@ -119,16 +131,24 @@ def _authored(**over) -> P.Project:
 
 
 def _laid_out(root: Path, project: P.Project, *, model: str | None = None,
-              name: str = "project", source: bool = False) -> Path:
+              proposal: dict | None = None, name: str = "project",
+              source: bool = False) -> Path:
     directory = root / name
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "brief.md").write_text("a clip", encoding="utf-8")
     if model is not None:
         (directory / "model.py").write_text(textwrap.dedent(model), encoding="utf-8")
+        _propose(directory, proposal or BLOCK_PROPOSAL)
     if source:
         _source_artifact(directory)
     project.save(directory)
     return directory
+
+
+def _propose(directory: Path, proposal: dict) -> Path:
+    path = directory / ACC.PROPOSAL_FILE
+    path.write_text(json.dumps(proposal, indent=2, sort_keys=True), encoding="utf-8")
+    return path
 
 
 # The supplied artifact a modification starts from. Deliberately a plain block:
@@ -381,8 +401,14 @@ class AuthoredGeometryOffTheCustomRouteTest(unittest.TestCase):
             self.assertEqual("AGENT_COMMISSION", action["kind"])
             self.assertEqual("FULL", action["route"])
 
+            self.assertEqual([ACC.PROPOSAL_FILE, "model.py"],
+                             action["required_outputs"],
+                             "one commission, for both files: freezing the proposal "
+                             "is a pipeline step and must not become a dispatch")
+
             (directory / "model.py").write_text(textwrap.dedent(BLOCK),
                                                 encoding="utf-8")
+            _propose(directory, BLOCK_PROPOSAL)
             cli.run([str(directory), "--no-render"])
             self.assertNotEqual("AGENT_COMMISSION", _next_action(directory)["kind"],
                                 "the model the run asked for was sitting beside the "
@@ -415,8 +441,12 @@ class AuthoredGeometryOffTheCustomRouteTest(unittest.TestCase):
                                   model=BLOCK)
             plan = EX.compile_plan(P.load(directory))
             self.assertTrue(plan.requires_specification)
-            self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+            self.assertEqual("UNSUPPORTED", plan.lane_status,
+                             "not EXPERIMENTAL_UNAVAILABLE: no stage on the map "
+                             "lifts this, and a reader told to wait for one waits "
+                             "forever")
             self.assertIn("certified template's covers and bounds", plan.lane_note)
+            self.assertIn("not a stage that is coming", plan.lane_note)
 
             # The verification this route also requires is dispatched normally;
             # it is only the recovery that has nothing to run.
@@ -427,29 +457,56 @@ class AuthoredGeometryOffTheCustomRouteTest(unittest.TestCase):
             _answer(directory, "verification", PASSED_REVIEW)
             cli.run([str(directory), "--no-render"])
             final = _final(directory)
-            self.assertEqual("EXPERIMENTAL_UNAVAILABLE", final["lane_status"])
+            self.assertEqual("UNSUPPORTED", final["lane_status"])
+            self.assertEqual("UNSUPPORTED", final["final_status"])
             self.assertIn(plan.lane_note, final["reasons"])
             self.assertEqual("PASS", json.loads(
                 (directory / "commission_report.json").read_text(encoding="utf-8")
             )["verdict"], "the deterministic work must still run")
 
+    def test_the_cap_that_carried_this_combination_can_no_longer_carry_it(self) -> None:
+        """Which cap holds it is the whole point of naming it separately.
 
-class ExperimentalLaneTest(unittest.TestCase):
-    """CUSTOM and MODIFY build, measure and report -- and may not claim success."""
+        `_lane` used to answer this shape with whichever cap it reached first, so
+        on most jobs it was the `CUSTOM` cap doing the work. Stage 2 removes that
+        cap. If the combination had still been leaning on a stage gate, lifting
+        one would have uncovered it in silence.
+        """
+        for status in ("AVAILABLE", "EXPERIMENTAL_UNAVAILABLE"):
+            with self.subTest(lane_status=status):
+                plan = EX.compile_plan(_authored(source_mode="RECONSTRUCT"))
+                with self.assertRaises(ValueError) as caught:
+                    dataclasses.replace(plan, lane_status=status)
+                self.assertIn("must be recorded as UNSUPPORTED",
+                              str(caught.exception))
 
-    def test_a_custom_part_is_built_and_measured(self) -> None:
+
+class TheCustomLaneMayNowClaimTest(unittest.TestCase):
+    """The cap said the criteria came out of the file being judged. They do not.
+
+    `CUSTOM_LANE_NOTE` read: "the CUSTOM lane still re-reads its acceptance
+    criteria out of the model file it is judging, so a designer can widen an
+    expectation after seeing it missed and be commissioned on the next run". Stage
+    2 moved those criteria into `design_proposal.json`, froze them into
+    `acceptance_contract.json` before the builder runs, and removed the fields
+    from `AuthoredModel` so nothing can read them back. What is asserted here is
+    that the cap went with the reason, and that `MODIFY`'s -- which owes a
+    different thing entirely -- did not.
+    """
+
+    def test_a_custom_part_is_built_measured_and_claimable(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), _authored(), model=BLOCK)
             cli.run([str(directory), "--no-render"])
             report = json.loads(
                 (directory / "commission_report.json").read_text(encoding="utf-8"))
             self.assertEqual("PASS", report["verdict"], report["checks"])
-            self.assertEqual("CLEAR", report["screening"]["overall"])
-            for receipt in ("model_contract.json", "artifact_manifest.json",
-                            "final_status.json"):
+            self.assertEqual("AVAILABLE", _final(directory)["lane_status"])
+            for receipt in ("acceptance_contract.json", "model_contract.json",
+                            "artifact_manifest.json", "final_status.json"):
                 self.assertTrue((directory / receipt).is_file(), receipt)
 
-    def test_but_it_cannot_claim_success_while_the_lane_is_experimental(self) -> None:
+    def test_a_verified_custom_part_reaches_verified(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), _authored(verification_requested=True),
                                   model=BLOCK)
@@ -459,32 +516,34 @@ class ExperimentalLaneTest(unittest.TestCase):
 
             final = _final(directory)
             self.assertEqual("CUSTOM", final["route"])
-            self.assertEqual("PASS", final["verification"],
-                             "the independent look ran and passed")
-            self.assertEqual("EXPERIMENTAL_UNAVAILABLE", final["final_status"],
-                             "a passing verification on an experimental lane is "
-                             "still not a claim this lane may make")
-            self.assertIn(EX.CUSTOM_LANE_NOTE, final["allowed_claim"])
-            self.assertEqual(1, code)
-            self.assertEqual("LANE_UNAVAILABLE", _next_action(directory)["kind"],
-                             "no answer an agent writes lifts this, so it must not "
-                             "read as a job waiting for one")
+            self.assertEqual("PASS", final["verification"])
+            self.assertEqual("VERIFIED", final["final_status"])
+            self.assertEqual(0, code)
+
+    def test_the_modify_cap_is_not_lifted_with_it(self) -> None:
+        """A different lane owes a different thing: the preservation audit's
+        sample density is still a fixed count rather than one derived from a
+        declared minimum detectable defect size."""
+        plan = EX.compile_plan(_project(
+            source_mode="MODIFY", source_artifacts=(SOURCE_ARTIFACT,),
+            edit_scope=EDIT_SCOPE))
+        self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+        self.assertIn("minimum detectable defect size", plan.lane_note)
+        self.assertNotIn("acceptance criteria", plan.lane_note,
+                         "the half of this note that stage 2 settled is still in "
+                         "it, so a reader cannot tell what is actually owed")
 
     def test_a_real_failure_is_still_reported_as_a_failure(self) -> None:
-        """The cap withholds a claim; it must not hide a finding.
-
-        Overwriting FAILED with the architectural caveat would bury a part that
-        does not match its contract behind a note about the roadmap.
-        """
-        source = textwrap.dedent(BLOCK).replace(
-            '"value_mm2": 40.0 * 30.0}', '"value_mm2": 40.0 * 30.0 * 2}')
+        """A part that does not match its contract fails, on any lane."""
+        widened = [dict(row) for row in BLOCK_PROPOSAL["features"]]
+        widened[0]["value_mm2"] = 40.0 * 30.0 * 2
         with tempfile.TemporaryDirectory() as raw:
-            directory = _laid_out(Path(raw), _authored(), model=source)
+            directory = _laid_out(Path(raw), _authored(), model=BLOCK,
+                                  proposal={**BLOCK_PROPOSAL, "features": widened})
             code = cli.run([str(directory), "--no-render"])
             final = _final(directory)
             self.assertEqual("FAILED", final["final_status"])
-            self.assertEqual("EXPERIMENTAL_UNAVAILABLE", final["lane_status"])
-            self.assertIn(EX.CUSTOM_LANE_NOTE, final["reasons"])
+            self.assertEqual("AVAILABLE", final["lane_status"])
             self.assertEqual(1, code)
 
 
@@ -534,7 +593,12 @@ class EditScopeIsTheObligationTest(unittest.TestCase):
                         source_mode=source_mode, source_artifacts=(SOURCE_ARTIFACT,),
                         edit_scope=EDIT_SCOPE,
                         envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}, **over))
-                    self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+                    # Which cap, not merely that there is one: a `RECONSTRUCT`
+                    # job on an authored model is `UNSUPPORTED` for a reason that
+                    # has nothing to do with the edit scope, and asserting the
+                    # weaker property would let the preservation obligation go
+                    # missing behind it.
+                    self.assertNotEqual("AVAILABLE", plan.lane_status)
                     self.assertTrue(plan.requires_preservation)
 
     def test_the_preservation_row_reaches_the_contract_on_a_certified_builder(self) -> None:
@@ -818,7 +882,7 @@ class APlanCannotOweWhatItDeclinesTest(unittest.TestCase):
         plan = EX.compile_plan(_authored(source_mode="RECONSTRUCT"))
         self.assertTrue(plan.requires_specification)
         self.assertFalse(plan.dispatches_specification)
-        self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+        self.assertEqual("UNSUPPORTED", plan.lane_status)
 
     def test_owing_a_review_nothing_can_run_and_claiming_success_is_unrepresentable(self) -> None:
         available = EX.compile_plan(_project(source_mode="RECONSTRUCT"))

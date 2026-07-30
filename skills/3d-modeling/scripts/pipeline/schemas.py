@@ -56,14 +56,16 @@ ON_UNRUNNABLE = ("ESCALATE", "FAIL")
 MEASUREMENT_STATUS = ("MEASURED", "UNAVAILABLE")
 
 SAFETY_DECISION = ("PASS", "BLOCK", "NEEDS_MORE_EVIDENCE")
-# `EXPERIMENTAL_UNAVAILABLE` is not a fifth verdict about the geometry. It says
-# the lane that produced the receipt is not yet allowed to certify its own
-# result: the build, the gates, the screen and the witnesses all ran and are on
-# disk, and the one thing withheld is the claim. It is separate from
-# NEEDS_MORE_EVIDENCE because no evidence an agent can supply lifts it -- see
-# `execution.LANE_STATUS`.
+# The last two are not verdicts about the geometry. They say the lane that
+# produced the receipt is not allowed to certify its own result: the build, the
+# gates, the screen and the witnesses all ran and are on disk, and the one thing
+# withheld is the claim. Both are separate from NEEDS_MORE_EVIDENCE because no
+# evidence an agent can supply lifts either -- and separate from *each other*
+# because a named stage of ADR 0002 lifts `EXPERIMENTAL_UNAVAILABLE` and nothing
+# lifts `UNSUPPORTED`. A reader told to wait for a stage that is not coming waits
+# forever; see `execution.LANE_STATUS`.
 FINAL_STATUS = ("FAILED", "NEEDS_MORE_EVIDENCE", "COMMISSIONED", "VERIFIED",
-                "EXPERIMENTAL_UNAVAILABLE")
+                "EXPERIMENTAL_UNAVAILABLE", "UNSUPPORTED")
 
 
 class SchemaError(ValueError):

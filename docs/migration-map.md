@@ -55,16 +55,24 @@ in stage 5, and the lane cap stays on.
 |---|---|
 | 1 — route authority | **done**: `pipeline/execution.py` compiles `execution_plan.json`; the runner consumes it and no longer selects a route; `final_status.json` carries the plan's route, the plan hash and the lane status. An independent review of the first landing found four defects in it, all repaired: the modification cap keyed on the source mode rather than on the declared edit scope, a matched certified template silently outranking a declared authored model, `verification_dispatch: OPTIONAL` naming a look `design-tool run` could not take, and `route._legacy` dropping `verification_requested` |
 | 1.6 — deterministic evidence | **done**: the preservation sample plan is derived from the source and candidate hashes over meshes whose vertex and face order is canonicalised first, floats are serialised through `schemas.canonical_number`, and the plan's digest and the audit's own digest are bound into the review envelope (`review` protocol 2). Identical inputs now produce byte-identical evidence, which is what makes a `MODIFY` review round trip possible: before it, the rerun that read a reviewer's answer had already measured the part differently, the envelope mismatched, and the job could not be resumed. Taken out of stage 5 and landed early because every stage after it that touches a `MODIFY` job is verified by receipts this defect made unreproducible |
-| 2 — acceptance contract | not started |
+| 2 — acceptance contract | **done**: the designer commission returns `design_proposal.json` and `model.py` together; `pipeline/acceptance.py` generates `acceptance_contract.json` from the frozen proposal and the system-owned inputs and writes it before the builder is imported. `AuthoredModel` no longer has an `expectations`, a `bbox` or a `bodies`, so the object the builder came out of cannot reach the function that writes the contract; acceptance bands are computed by the pipeline from each row's own magnitude and are not proposable. A changed proposal or requirement cuts a revision, invalidates the receipts issued against the old one and records both in `acceptance_history.json`. The `CUSTOM` cap is lifted with the reason it named; `MODIFY`'s is not, because what it owes is stage 5's sample density |
 | 3 — state lifecycle | not started |
 | 4 — gate consolidation | not started |
 | 5 — preservation | not started. Stage 1.6 took the determinism only; sensitivity is untouched and still owed here — density derived from a declared minimum detectable defect size, real B-rep comparison, the `PRESERVED_WITHIN_SAMPLED_TOLERANCE` naming, and the STEP decision. A plan that misses a 0.5 mm undeclared cube still misses it, now identically on every run |
 
-Stage 1 also marks `CUSTOM` and `MODIFY` as `EXPERIMENTAL_UNAVAILABLE`: they
-build, screen, gate and write every receipt, and a passing run reports
-`EXPERIMENTAL_UNAVAILABLE` rather than `COMMISSIONED` or `VERIFIED`. A real
-`FAILED` or `NEEDS_MORE_EVIDENCE` is still reported as itself -- withholding a
-claim must not bury a finding.
+Stage 1 marked `CUSTOM` and `MODIFY` `EXPERIMENTAL_UNAVAILABLE`: they build,
+screen, gate and write every receipt, and a passing run reports the cap rather
+than `COMMISSIONED` or `VERIFIED`. A real `FAILED` or `NEEDS_MORE_EVIDENCE` is
+still reported as itself -- withholding a claim must not bury a finding. Stage 2
+lifts `CUSTOM`'s, because the reason it named is gone. `MODIFY` stays capped on
+what stage 5 owes.
+
+A third lane status arrives with stage 2 and is not a cap at all in the same
+sense. `UNSUPPORTED` is a combination this build cannot execute -- a `FITTED` or
+`FULL` job on authored geometry owes a bounded recovery that is defined only
+against a certified template's bounds -- and no stage on this map lifts it. It
+used to be spelled `EXPERIMENTAL_UNAVAILABLE` too, so every reader of such a
+receipt was told to wait for something that was never coming.
 
 Phase 2 rows that were planned and never built are unchanged by this and still
 owed: `pipeline/commissions.py`, a `design-tool commission` verb, and a

@@ -77,6 +77,12 @@ FROZEN_CONTRACTS: dict[str, dict[str, Any]] = {
 FROZEN_ARTIFACTS: dict[str, frozenset[str]] = {
     "DIRECT": frozenset({"intent_manifest", "model_contract", "artifact_manifest",
                          "commission_report", "final_status"}),
+    # `acceptance_contract` is the one the authored lanes add, and it is on this
+    # list rather than in a comment because it is the receipt that says what the
+    # part was measured against was written before the part existed. A run that
+    # stops producing it has removed the evidence stage 2 exists to create.
+    "CUSTOM": frozenset({"intent_manifest", "acceptance_contract", "model_contract",
+                         "artifact_manifest", "commission_report", "final_status"}),
     "FITTED": frozenset({"intent_manifest", "specification", "model_contract",
                          "artifact_manifest", "commission_report", "final_status",
                          "verification_report"}),

@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""The `CUSTOM` lane's source API: a model module the pipeline can commission.
+"""The `CUSTOM` lane's source API: a model module the pipeline can build.
 
-A certified template declares its geometry, its validity domain and its
-expectations separately, and `DIRECT` is gated on all three. An authored model
-cannot have a certified domain -- nobody has certified it -- but it can and must
-have the other two, because the property that makes commissioning worth anything
-is that the expectation was not derived from the geometry.
+A model module declares the numbers its shape is built from, and returns the
+solid:
 
-So a model module declares:
-
-    PARAMS      = {...}                 # the numbers the shape is built from
-    BBOX_MM     = {"x": .., "y": .., "z": ..}
-    BODIES      = 1
-    EXPECTED    = [ {feature rows} ]    # what the solid must measure
+    PARAMS = {...}                      # the numbers the shape is built from
     def build(): ...                    # or a module-level `part`
 
 and optionally `COMPONENTS`, `INTERFACES` and `PROVENANCE`.
 
-`BBOX_MM` and `EXPECTED` are declarations, not measurements. Writing them by
-running the build and copying what came out is the failure this whole
-arrangement exists to prevent -- a threshold authored by the party being
-measured, after measuring, is a receipt rather than a gate. Derive them from
-`PARAMS` by arithmetic that does not go through the builder.
+**What is deliberately not here.** `EXPECTED`, `BBOX_MM`, `BODIES`,
+`VOLUME_MM3`, `PROFILE_MARKS` and any acceptance tolerance used to be read out of
+this file on every run, and the contract was overwritten with what was found. A
+designer could read a failure, widen the expectation and be commissioned on the
+next run with nothing recording that the expectation had moved -- a model
+declaring a 24x18 pad, building a 10x8 one, with a self-declared 500 mm2 band,
+was commissioned `PASS` on a 352 mm2 miss. Those declarations now live in
+`design_proposal.json`, which `acceptance.py` freezes into
+`acceptance_contract.json` before this module is executed at all.
 
-What is deliberately *not* here: a validity domain. An authored model is not
+The separation is structural rather than checked: `AuthoredModel` has no
+`expectations`, no `bbox` and no `bodies`, so the object the builder came out of
+cannot be handed to the function that writes the contract. A module that still
+carries the old names is refused as well, but only so that a designer who has
+not read this docstring is told where the declarations went -- the refusal is not
+what makes the property hold.
+
+What is also deliberately not here: a validity domain. An authored model is not
 certified and never routes `DIRECT`, so there is no bound to check a parameter
 against and pretending otherwise would sell an assurance nobody produced.
 """
@@ -38,9 +41,20 @@ from typing import Any
 from . import schemas as S
 
 # Every declaration a model must carry before anything is built from it.
-REQUIRED = ("PARAMS", "BBOX_MM", "EXPECTED")
+REQUIRED = ("PARAMS",)
 
-AUTHORED_VERSION = "authored"
+# Declarations a model may no longer carry, and where each one went. Refused
+# rather than ignored: a designer who edits a number that nothing reads is
+# iterating against a file the gate does not consult, which is a worse failure
+# than being told to move it.
+RELOCATED = {
+    "EXPECTED": "features",
+    "BBOX_MM": "bbox_mm",
+    "BODIES": "bodies",
+    "PROFILE_MARKS": "profile_marks",
+    "VOLUME_MM3": None,
+    "TOLERANCE": None,
+}
 
 
 class ModelError(S.SchemaError):
@@ -49,50 +63,21 @@ class ModelError(S.SchemaError):
 
 @dataclasses.dataclass(frozen=True)
 class AuthoredModel:
-    """A loaded model module, reduced to what the contract needs.
+    """A loaded model module, reduced to who built the geometry.
 
-    Shaped so that `runner._contract_from` can take it wherever it takes a
-    `CertifiedTemplate`: same attribute names, same call signatures. That is the
-    whole reason the `CUSTOM` lane costs a backend and not a second runner --
-    contract, preflight, commissioning, screening, witnesses and status are
-    reached unchanged, and there is one definition of each.
+    Identity and provenance, and nothing the gate reads. Every acceptance field
+    this dataclass used to carry is now on the frozen acceptance contract, and
+    the absence of the fields -- not a validator in front of them -- is what makes
+    the built artifact unable to influence what it is judged against.
     """
 
     name: str
     module_path: Path
     module_sha256: str
     params: dict[str, Any]
-    expected: tuple[dict[str, Any], ...]
-    bbox_mm: dict[str, float]
-    bodies: int
-    components: tuple[dict[str, Any], ...]
-    interfaces: tuple[dict[str, Any], ...]
-    provenance: dict[str, Any]
-    # What broad screening needs in order to tell a rib from a defect: where this
-    # shape legitimately steps along Z, and what it should displace. Optional,
-    # and their absence is reported as an uncalibrated screen rather than
-    # silently treated as a clean one.
-    profile_marks: dict[str, list[float]] = dataclasses.field(default_factory=dict)
-    volume_mm3: float | None = None
-
-    # -- the CertifiedTemplate surface --------------------------------------
-    version: str = AUTHORED_VERSION
-    domain_id: str | None = None
-    backend: str = "authored"
-    covers: str = "geometry authored for this job"
-
-    def expectations(self, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return [dict(row) for row in self.expected]
-
-    def bbox(self, params: dict[str, Any]) -> dict[str, float]:
-        return dict(self.bbox_mm)
-
-    def as_source(self) -> dict[str, Any]:
-        return {"kind": "authored", "module": self.module_path.name,
-                "module_sha256": self.module_sha256,
-                "provenance": dict(self.provenance),
-                "profile_marks": {"z": list(self.profile_marks.get("z", ()))},
-                "volume_mm3": self.volume_mm3}
+    components: tuple[dict[str, Any], ...] = ()
+    interfaces: tuple[dict[str, Any], ...] = ()
+    provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def _finite(value: Any, what: str) -> float:
@@ -108,19 +93,13 @@ def _finite(value: Any, what: str) -> float:
         raise ModelError(str(exc)) from None
 
 
-def _numbers(value: Any, what: str) -> dict[str, float]:
-    if not isinstance(value, dict):
-        raise ModelError(f"{what} must be an object of finite numbers")
-    return {str(key): _finite(item, f"{what}.{key}") for key, item in value.items()}
+def load(module_path: Path) -> tuple[AuthoredModel, Any]:
+    """Import a model module and return its identity and its builder.
 
-
-def load(module_path: Path, *, known_kinds: frozenset[str] | None = None) -> tuple[AuthoredModel, Any]:
-    """Import a model module and return its declarations and its builder.
-
-    Returns the declarations *and* the buildable object separately, so the
-    contract can be written and preflighted before any geometry is paid for --
-    the same ordering the certified lane uses, and for the same reason: an
-    incomplete contract should cost nothing to discover.
+    Returns them separately from anything the contract is written out of, which
+    is the whole arrangement: the acceptance contract is frozen from
+    `design_proposal.json` before this runs, and nothing this function returns
+    can reach it.
     """
     module_path = Path(module_path)
     if not module_path.is_file():
@@ -141,8 +120,23 @@ def load(module_path: Path, *, known_kinds: frozenset[str] | None = None) -> tup
     if missing:
         raise ModelError(
             f"{module_path.name} does not declare {', '.join(missing)}. A model the "
-            "pipeline can commission declares PARAMS, BBOX_MM and EXPECTED, and "
-            "derives the last two from the first without going through the builder.")
+            "pipeline can build declares PARAMS and returns the solid; what it must "
+            "measure is declared in design_proposal.json and frozen into "
+            "acceptance_contract.json before this file is executed.")
+
+    relocated = [name for name in RELOCATED if hasattr(module, name)]
+    if relocated:
+        where = ", ".join(
+            f"{name} -> design_proposal.json.{RELOCATED[name]}"
+            if RELOCATED[name] else
+            f"{name} -> nowhere; it is not an acceptance input on this lane"
+            for name in sorted(relocated))
+        raise ModelError(
+            f"{module_path.name} declares {', '.join(sorted(relocated))}, which the "
+            f"model may not own. {where}. Acceptance criteria are frozen from the "
+            "proposal before this file runs, so a number here would be read by "
+            "nothing -- and when it was read, a model declaring a 24x18 pad and "
+            "building a 10x8 one was commissioned PASS on a 352 mm2 miss.")
 
     builder = getattr(module, "part", None)
     if builder is None:
@@ -157,59 +151,12 @@ def load(module_path: Path, *, known_kinds: frozenset[str] | None = None) -> tup
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             _finite(value, f"PARAMS.{key}")
 
-    bbox = _numbers(getattr(module, "BBOX_MM"), "BBOX_MM")
-    if sorted(bbox) != ["x", "y", "z"] or any(v <= 0 for v in bbox.values()):
-        raise ModelError("BBOX_MM must be positive in x, y and z")
-
-    expected = getattr(module, "EXPECTED")
-    if not isinstance(expected, (list, tuple)) or not expected:
-        raise ModelError(
-            f"{module_path.name}: EXPECTED must be a non-empty list. A contract that "
-            "requires nothing of the solid cannot fail, and a gate that cannot fail "
-            "is not one.")
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for index, row in enumerate(expected):
-        if not isinstance(row, dict):
-            raise ModelError(f"EXPECTED[{index}] must be an object")
-        feature_id = row.get("feature_id")
-        kind = row.get("kind")
-        if not isinstance(feature_id, str) or not feature_id.strip():
-            raise ModelError(f"EXPECTED[{index}] must carry a non-empty feature_id")
-        if feature_id in seen:
-            raise ModelError(f"EXPECTED: duplicate feature_id {feature_id!r} -- "
-                             "receipts could not name which one")
-        seen.add(feature_id)
-        if not isinstance(kind, str) or (known_kinds is not None
-                                         and kind not in known_kinds):
-            raise ModelError(
-                f"EXPECTED[{index}] kind {kind!r} names no check this build "
-                f"implements. Known: {sorted(known_kinds or ())}")
-        rows.append(dict(row))
-
-    bodies = getattr(module, "BODIES", 1)
-    if isinstance(bodies, bool) or not isinstance(bodies, int) or bodies < 1:
-        raise ModelError("BODIES must be a whole number of at least 1")
-
-    marks = getattr(module, "PROFILE_MARKS", {}) or {}
-    if not isinstance(marks, dict):
-        raise ModelError("PROFILE_MARKS must be an object like {'z': [6.0]}")
-    profile_marks = {"z": [_finite(v, "PROFILE_MARKS.z")
-                           for v in (marks.get("z") or ())]}
-
-    volume = getattr(module, "VOLUME_MM3", None)
-    if volume is not None:
-        volume = _finite(volume, "VOLUME_MM3")
-        if volume <= 0:
-            raise ModelError("VOLUME_MM3 must be positive")
-
     return AuthoredModel(
         name=module_path.stem,
         module_path=module_path,
         module_sha256=S.sha256_file(module_path),
-        params=dict(params), expected=tuple(rows), bbox_mm=bbox, bodies=bodies,
+        params=dict(params),
         components=tuple(getattr(module, "COMPONENTS", ()) or ()),
         interfaces=tuple(getattr(module, "INTERFACES", ()) or ()),
         provenance=dict(getattr(module, "PROVENANCE", {}) or {}),
-        profile_marks=profile_marks, volume_mm3=volume,
     ), builder

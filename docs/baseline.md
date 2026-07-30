@@ -53,6 +53,31 @@ The `trim_ring` figures here are warm: the 3.69 s build123d cold import above is
 paid once per interpreter and is untouched. Differences are inside the run-to-run
 spread; no route gained or lost a dispatch.
 
+## Re-measured after repair stage 2 (acceptance contract)
+
+Same machine, same method. The stage adds a step to the authored lanes -- load
+and validate `design_proposal.json`, generate the acceptance contract, compare it
+against the frozen one -- and touches the certified path only where the
+system-owned tolerance helpers moved module.
+
+| route | stage 1 | stage 2 | llm calls |
+|---|---|---|---|
+| `DIRECT` `c_clip` | 0.193 s | 0.192 s | 0 -> 0 |
+| `DIRECT` `trim_ring` (warm) | 0.237 s | 0.245 s | 0 -> 0 |
+| `FITTED` `c_clip` | 0.189 s | 0.188 s | 2 -> 2 |
+| `FULL` `c_clip`, `bore_d=60` | 0.186 s | 0.188 s (min of five) | 2 -> 2 |
+
+A whole `CUSTOM` run of the two-tier riser -- validate the proposal, compare
+against the frozen contract, build, export, re-import, commission, screen, write
+the witnesses and decide the status -- is **0.046 s**, of which the proposal load
+and the no-op freeze are **0.00055 s**. The freeze is a file read, a payload hash
+and a dictionary comparison; it is not on the same order as the mesh work it
+precedes.
+
+`CUSTOM` stays at one designer commission. The proposal and the model are
+required outputs of the same commission, and freezing is a pipeline step between
+them rather than a second dispatch.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

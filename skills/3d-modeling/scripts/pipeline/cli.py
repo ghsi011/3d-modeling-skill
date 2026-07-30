@@ -44,6 +44,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import acceptance as ACC
 from . import execution as EX
 from . import project as P
 from . import review as R
@@ -677,9 +678,126 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     },)
 
 
+def _requirement_hash(project: P.Project, brief_hash: str) -> str:
+    """What the user asked for, hashed, so the contract binds to it.
+
+    The designer's own `CHOSEN` values are deliberately out: they are the
+    proposal, and the proposal is already bound by its own hash. What this pins
+    is the half of the job that nobody on the design side owns -- the brief, the
+    values somebody stated or measured, the envelope, the interfaces and the
+    component list. A contract that survived a change to any of those would be
+    gating a part against a job that no longer exists.
+    """
+    return S.payload_hash({
+        "brief_sha256": brief_hash,
+        "requirements": [r.as_dict() for r in project.requirements
+                         if r.provenance in ("STATED", "INHERITED", "MEASURED")],
+        "envelope_mm": project.envelope_mm,
+        "interfaces": [i.as_dict() for i in project.interfaces],
+        "components": [c.as_dict() for c in project.components],
+        "modifiers": list(project.modifiers),
+    })
+
+
+def _source_artifact_hashes(project_dir: Path, project: P.Project) -> dict[str, str]:
+    """The supplied artifacts as they stand, hashed before anything is built."""
+    hashes: dict[str, str] = {}
+    for artifact in project.source_artifacts:
+        try:
+            path = S.resolve_within(project_dir, artifact.path,
+                                    what="source artifact")
+        except S.PathEscape:
+            continue
+        if path.is_file():
+            hashes[artifact.artifact_id] = S.sha256_file(path)
+        elif artifact.sha256:
+            hashes[artifact.artifact_id] = str(artifact.sha256)
+    return hashes
+
+
+PROPOSAL_API = {
+    "design_id": "a short stable name for what is being proposed",
+    "params": "the numbers the shape is built from; model.py declares the same "
+              "PARAMS and must agree with them",
+    "bbox_mm": "x/y/z the solid must measure, derived from params by arithmetic "
+               "that does not go through the builder",
+    "bodies": "how many separate solids the export should contain",
+    "profile_marks": "{'z': [...]} -- the heights this shape legitimately steps "
+                     "at. They explain a step; they cannot clear the part",
+    "features": "rows the gate measures. Geometry only -- position and size. "
+                "Proposable kinds: " + ", ".join(sorted(ACC.PROPOSABLE))
+                + ". A row may not carry a tolerance: the band is the "
+                  "pipeline's and is computed from the row's own magnitude",
+}
+
+
+def _commission_authored(project_dir: Path, project: P.Project,
+                         plan: EX.ExecutionPlan, print_plan: dict[str, Any],
+                         missing: list[str]) -> int:
+    """One designer commission, for the proposal and the model together.
+
+    One, not two. Freeze-proposal-then-build is a deterministic pipeline step and
+    must not become a second dispatch: asking the designer to come back and
+    confirm a contract generated from their own proposal would buy nothing and
+    cost the round trip the `CUSTOM` route exists to avoid.
+    """
+    _write_next_action(project_dir, {
+        "schema_version": NEXT_ACTION_SCHEMA,
+        "job_id": project.job_id,
+        "kind": "AGENT_COMMISSION",
+        "role": "designer",
+        "stage": "candidate_build",
+        "route": plan.route,
+        "reason": plan.route_rationale,
+        "authorized_inputs": [project.brief, P.PROJECT_FILE,
+                              ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
+                              PLAN_FILE]
+        + [a.path for a in project.source_artifacts],
+        "required_outputs": missing,
+        "proposal_api": dict(PROPOSAL_API),
+        "source_api": {
+            "PARAMS": "the numbers the shape is built from",
+            "build()": "returns the solid, or a module-level `part`",
+            "not here": "EXPECTED, BBOX_MM, BODIES, PROFILE_MARKS, VOLUME_MM3 and "
+                        "any acceptance tolerance. They belong to "
+                        + ACC.PROPOSAL_FILE + ", which is frozen into "
+                        + ACC.ACCEPTANCE_FILE + " before this file is executed",
+        },
+        "bound": {"project_sha256": project.project_hash(),
+                  "execution_plan_sha256": plan.plan_hash(),
+                  "print_plan_sha256": S.payload_hash(print_plan),
+                  "source_artifacts": {a.artifact_id: a.sha256
+                                       for a in project.source_artifacts}},
+        "unresolved": list(project.blocking_questions),
+        "required_reviews": list(plan.required_reviews),
+        "completion_command": f"design-tool run {project_dir.as_posix()}",
+        "updated_utc": project.updated_utc,
+    })
+    sys.stderr.write(
+        f"\ndesign-tool: this job routes {plan.route} and is missing "
+        f"{', '.join(missing)}.\n"
+        f"  the commission is written to  {NEXT_ACTION_FILE}\n"
+        f"  the print plan it builds against is  {PLAN_FILE}\n"
+        f"  write both files, in one pass, then run the same command again.\n\n"
+        f"  {ACC.PROPOSAL_FILE} is what the part must measure; the model is how it\n"
+        "  is built. They are separated so that the second cannot restate the\n"
+        "  first after seeing a result.\n\n"
+        "  This program cannot author geometry, and a deterministic tool that\n"
+        "  returned some would be inventing it.\n")
+    return NEEDS_ACTION
+
+
 def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
                   *, render: bool) -> int:
-    """The authored builder: a print plan, then the model, then the same gate.
+    """The authored builder: freeze the acceptance contract, then build.
+
+    The ordering is the whole of stage 2. The proposal is validated and frozen,
+    the acceptance contract is generated from it and the system-owned inputs and
+    written to disk, and only then is `model.py` imported and executed. Nothing
+    downstream of the freeze can reach back into it: `acceptance.freeze` takes a
+    proposal, a project and a plan and has no parameter a mesh could arrive
+    through, and `runner.py` contains no function that writes an acceptance
+    contract at all.
 
     Selected by the plan's builder and not by its route. Reaching this lane only
     from `CUSTOM` is what stranded a `FITTED` or `FULL` job whose geometry a
@@ -688,7 +806,6 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     the project file, and could not progress by any action the designer took.
     """
     from . import authored as A
-    from . import commission as CM
 
     if project.envelope_mm is None:
         return _report_problems(project_dir, project, [
@@ -702,66 +819,109 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         return _report_problems(project_dir, project, plan_problems, stage="plan")
 
     model_path = project_dir / (project.model or "model.py")
-    if not model_path.is_file():
-        _write_next_action(project_dir, {
-            "schema_version": NEXT_ACTION_SCHEMA,
-            "job_id": project.job_id,
-            "kind": "AGENT_COMMISSION",
-            "role": "designer",
-            "stage": "candidate_build",
-            "route": plan.route,
-            "reason": plan.route_rationale,
-            "authorized_inputs": [project.brief, P.PROJECT_FILE,
-                                  ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
-                                  PLAN_FILE]
-            + [a.path for a in project.source_artifacts],
-            "required_outputs": [model_path.name],
-            "source_api": {
-                "PARAMS": "the numbers the shape is built from",
-                "BBOX_MM": "x/y/z the solid must measure, derived from PARAMS "
-                           "without going through the builder",
-                "BODIES": "how many separate solids the export should contain",
-                "EXPECTED": "feature rows the gate measures; kinds: "
-                            + ", ".join(sorted(CM.KNOWN_CHECKS)),
-                "build()": "returns the solid, or a module-level `part`",
-            },
-            "bound": {"project_sha256": project.project_hash(),
-                      "execution_plan_sha256": plan.plan_hash(),
-                      "print_plan_sha256": S.payload_hash(print_plan),
-                      "source_artifacts": {a.artifact_id: a.sha256
-                                           for a in project.source_artifacts}},
-            "unresolved": list(project.blocking_questions),
-            "required_reviews": list(plan.required_reviews),
-            "completion_command": f"design-tool run {project_dir.as_posix()}",
-            "updated_utc": project.updated_utc,
-        })
-        sys.stderr.write(
-            f"\ndesign-tool: this job routes {plan.route} and has no model yet.\n"
-            f"  the commission is written to  {NEXT_ACTION_FILE}\n"
-            f"  the print plan it builds against is  {PLAN_FILE}\n"
-            f"  write the model to            {model_path.name}\n"
-            "  then run the same command again.\n\n"
-            "  This program cannot author geometry, and a deterministic tool that\n"
-            "  returned some would be inventing it.\n")
-        return NEEDS_ACTION
+    proposal_path = project_dir / ACC.PROPOSAL_FILE
+    missing = [name for name, path in ((ACC.PROPOSAL_FILE, proposal_path),
+                                       (model_path.name, model_path))
+               if not path.is_file()]
+    if missing:
+        return _commission_authored(project_dir, project, plan, print_plan, missing)
 
+    brief_path = project_dir / project.brief
+    brief_hash = S.sha256_text(
+        brief_path.read_text(encoding="utf-8") if brief_path.is_file() else "")
+
+    # ---- validate and freeze, before the builder exists --------------------
     try:
-        model, builder = A.load(model_path, known_kinds=CM.KNOWN_CHECKS)
+        proposal = ACC.load_proposal(proposal_path)
+        # Checked before the freeze, not after: a proposal for another job would
+        # otherwise cut a revision and invalidate this job's receipts on its way
+        # to being refused.
+        if proposal.job_id and proposal.job_id != project.job_id:
+            raise ACC.ProposalError(
+                f"{ACC.PROPOSAL_FILE} names job {proposal.job_id!r} and this "
+                f"project is {project.job_id!r}. A proposal copied from another "
+                "job describes another part, and every hash on the receipt would "
+                "say it was this one.")
+        body = ACC.generate(
+            proposal=proposal, job_id=project.job_id, route=plan.route,
+            requirement_sha256=_requirement_hash(project, brief_hash),
+            source_artifact_sha256=_source_artifact_hashes(project_dir, project),
+            print_plan_sha256=S.payload_hash(print_plan),
+            print_plan_features=_plan_features(print_plan, project_dir=project_dir,
+                                               project=project),
+            preservation_features=_preservation_feature(project),
+            route_gates={
+                "required_reviews": list(plan.required_reviews),
+                "verification_dispatch": plan.verification_dispatch,
+                "requires_preservation": plan.requires_preservation,
+                "requires_specification": plan.requires_specification,
+                "consequence": project.consequence,
+            },
+            expected_artifacts={
+                "stl": "candidate.stl",
+                "step": "candidate.step" if project.step else None,
+                "source": model_path.name,
+                "declared": list(project.expected_artifacts),
+            },
+            # ADR 0002 section 3, and the honest answer for novel authored
+            # geometry. The five legitimate sources are a certified template, an
+            # analytic formula the pipeline generates from the frozen proposal,
+            # an immutable source artifact plus a bounded delta, a previously
+            # approved revision, and an independent verifier's predeclared bound.
+            # This build has none of them for a part somebody just drew, and
+            # inventing one -- a second agent's estimate, a heuristic over the
+            # proposal text -- would restore the shape of the certified lane's
+            # screen without restoring its substance.
+            expected_volume_mm3=None,
+            expected_volume_basis="NOT_INDEPENDENTLY_SPECIFIED")
+        frozen = ACC.freeze(project_dir, body, updated_utc=project.updated_utc)
+    except ACC.ProposalError as exc:
+        return _report_problems(project_dir, project, [str(exc)], stage="proposal")
+
+    if frozen.disposition == "SUPERSEDED":
+        sys.stderr.write(
+            f"\ndesign-tool: the acceptance contract moved to revision "
+            f"{frozen.revision}.\n"
+            + "".join(f"    - {line}\n" for line in frozen.changed[:8])
+            + (f"    ... and {len(frozen.changed) - 8} more\n"
+               if len(frozen.changed) > 8 else "")
+            + f"  {len(frozen.invalidated)} receipt(s) bound to revision "
+              f"{frozen.revision - 1} were invalidated and removed;\n"
+              f"  {ACC.HISTORY_FILE} records their digests.\n")
+
+    # ---- only now is the model executed ------------------------------------
+    try:
+        model, builder = A.load(model_path)
     except A.ModelError as exc:
         return _report_problems(project_dir, project, [str(exc)], stage="build")
+
+    divergent = sorted(
+        key for key in set(model.params) | set(proposal.params)
+        if model.params.get(key) != proposal.params.get(key))
+    if divergent:
+        return _report_problems(project_dir, project, [
+            f"{model_path.name} and {ACC.PROPOSAL_FILE} disagree about "
+            f"{', '.join(divergent)}. The proposal is what the part is measured "
+            "against and PARAMS is what it is built from; when they differ the "
+            "job is building one part and gating another."], stage="build")
 
     fields = P.to_job_request_fields(project)
     fields["template"] = None
     request = runner.JobRequest(
-        brief_path=project_dir / project.brief,
+        brief_path=brief_path,
         out_dir=project_dir,
         render=render,
-        authored=model,
+        acceptance=ACC.AcceptanceSource(
+            frozen=frozen, module=model_path.name,
+            module_sha256=model.module_sha256, provenance=model.provenance),
+        authored_model=model,
         authored_builder=builder,
         plan=plan,
-        plan_features=(_plan_features(print_plan, project_dir=project_dir,
-                                      project=project)
-                       + _preservation_feature(project)),
+        # No `plan_features` here: the print plan's support rows and the
+        # preservation row are inside the frozen contract, where they are subject
+        # to the same revision discipline as everything else the part is gated
+        # against. Passing them again would append a duplicate id and the
+        # preflight would refuse the contract.
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
         **_review_calls(project_dir, plan),
         **fields)
@@ -839,13 +999,13 @@ def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         # unasked. They call for different work, and collapsing both into exit 1
         # made the second read as a rejection of the geometry.
         #
-        # `EXPERIMENTAL_UNAVAILABLE` is a third thing again, and it is not
-        # `NEEDS_ACTION`: no answer the agent writes lifts it, so a job parked
-        # there waiting for a response nobody can give is the livelock this stage
-        # exists to remove. The deterministic work ran and its receipts are on
-        # disk to iterate against.
+        # A capped lane is a third thing again, and it is not `NEEDS_ACTION`: no
+        # answer the agent writes lifts it, so a job parked there waiting for a
+        # response nobody can give is the livelock this stage exists to remove.
+        # The deterministic work ran and its receipts are on disk to iterate
+        # against.
         needs_evidence = final == "NEEDS_MORE_EVIDENCE"
-        unavailable = final == "EXPERIMENTAL_UNAVAILABLE"
+        unavailable = final in ("EXPERIMENTAL_UNAVAILABLE", "UNSUPPORTED")
         _write_next_action(project_dir, {
             "schema_version": NEXT_ACTION_SCHEMA,
             "job_id": project.job_id,
@@ -960,7 +1120,8 @@ def status(argv: list[str]) -> int:
         for problem in report["problems"]:
             print(f"  problem      {problem}")
 
-    if report["final_status"] in ("FAILED", "EXPERIMENTAL_UNAVAILABLE"):
+    if report["final_status"] in ("FAILED", "EXPERIMENTAL_UNAVAILABLE",
+                                 "UNSUPPORTED"):
         # Not NEEDS_ACTION: there is no answer an agent can write that lifts
         # either of these, and an exit code that says "waiting" would send a
         # caller round a loop that cannot terminate.

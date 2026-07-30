@@ -69,7 +69,18 @@ class JobRequest:
     # The authored builder: geometry is a module the designer wrote rather than a
     # certified template. Which builder to use is the plan's answer, not a
     # property of the route.
-    authored: Any = None
+    #
+    # Two objects, and the split is the point of stage 2. `acceptance` is the
+    # frozen `acceptance_contract.json`, generated from the design proposal and
+    # written to disk *before* this runner was called; it is what the contract is
+    # built from. `authored_builder` is the callable that produces the geometry.
+    # They used to be one object -- the loaded `model.py` supplied both the
+    # expectations and the solid -- which is how a designer could widen an
+    # expectation after seeing it missed. There is nothing in this module that
+    # writes an acceptance contract, so no ordering of the code below can put the
+    # built artifact upstream of what it is judged against.
+    acceptance: Any = None
+    authored_model: Any = None
     authored_builder: Any = None
     # The compiled plan: the route, the builder, the reviews this job owes and
     # what it is allowed to claim. Supplied by `design-tool run`, which compiles
@@ -148,7 +159,7 @@ def run(request: JobRequest) -> JobResult:
         job_id=request.job_id, template=request.template,
         parameters=request.parameters, external_geometry=request.external_geometry,
         ambiguities=request.ambiguities, consequence=request.consequence,
-        authored=request.authored is not None)
+        authored=request.acceptance is not None)
     decision = plan.as_intent_decision()
     manifest = intent.manifest(
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
@@ -166,12 +177,19 @@ def run(request: JobRequest) -> JobResult:
                          "supplied.",
                          written, timings, llm_calls, None)
 
-    if plan.builder == "AUTHORED" and request.authored is None:
+    if plan.builder == "AUTHORED" and request.acceptance is None:
         return JobResult(False, "routing",
                          f"route is {plan.route}: {plan.route_rationale}. The plan "
-                         "builds this job from authored geometry and no model was "
-                         "supplied, so there is nothing to build.",
+                         "builds this job from authored geometry and no frozen "
+                         "acceptance contract was supplied, so there is nothing to "
+                         "build against.",
                          written, timings, llm_calls, None)
+    if request.acceptance is not None:
+        # Recorded as a receipt of this run even though this run did not write it.
+        # The freeze happened upstream, before the builder existed; naming the
+        # file here is what puts it in `JobResult.artifacts` beside the receipts
+        # that bind its hash.
+        written["acceptance_contract"] = request.acceptance.frozen.path
 
     # Which certified template the contract is built from, when the plan names
     # one. `request.template` is the fallback for a job that named a template the
@@ -299,7 +317,7 @@ def run(request: JobRequest) -> JobResult:
         written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
 
     if plan.builder == "AUTHORED":
-        template = request.authored
+        template = request.acceptance
     elif built_from is None:
         return JobResult(False, "routing",
                          f"route is {plan.route}: {plan.route_rationale}. The plan "
@@ -583,7 +601,15 @@ def _contract_from(
     template: T.CertifiedTemplate, request: JobRequest,
     *, fit_acceptance: tuple[dict[str, Any], ...] = (),
 ) -> C.Contract:
-    """Build the immutable contract from the template's own declarations."""
+    """Build the immutable contract from the template's own declarations.
+
+    `template` is a certified template or the frozen acceptance contract, which
+    present the same surface. What it can never be is the loaded `model.py`:
+    `authored.AuthoredModel` has no `expectations`, no `bbox` and no `bodies`, so
+    the object the builder came out of does not fit this signature.
+    """
+    parameters = (request.acceptance.parameters if request.acceptance is not None
+                  else dict(request.parameters))
     rows = list(template.expectations(request.parameters))
     # Appended, never merged: a plan row and a model row can name the same
     # feature and mean different things, and the preflight refuses a duplicate id
@@ -600,9 +626,9 @@ def _contract_from(
             # default was reached by every row that did not name a kind above.
             tolerance = dict(row["tolerance"])
         elif kind in ("section_area", "bed_contact"):
-            tolerance = commission.area_tolerance(float(row["value_mm2"]))
+            tolerance = C.area_tolerance(float(row["value_mm2"]))
         elif kind == "through_hole":
-            tolerance = commission.diameter_tolerance(float(row["d_mm"]))
+            tolerance = C.diameter_tolerance(float(row["d_mm"]))
         else:
             tolerance = {"abs": 1.0}
         features.append(C.Feature(
@@ -639,7 +665,7 @@ def _contract_from(
     return C.Contract(
         job_id=request.job_id, template=template.name,
         template_version=template.version, domain_id=template.domain_id,
-        backend=template.backend, parameters=dict(request.parameters),
+        backend=template.backend, parameters=parameters,
         features=tuple(features), expected_bbox_mm=template.bbox(request.parameters),
         bbox_tolerance_mm=0.5, expected_bodies=template.bodies,
         orientation=request.orientation,

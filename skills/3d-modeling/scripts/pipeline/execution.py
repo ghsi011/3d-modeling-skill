@@ -79,39 +79,48 @@ BUILDER = ("CERTIFIED_TEMPLATE", "AUTHORED")
 # baseline costs at one.
 DISPATCH = ("NEVER", "OPTIONAL", "REQUIRED")
 
-# Whether this lane may claim success at all. `EXPERIMENTAL_UNAVAILABLE` does not
-# stop the deterministic work: the build, the gates, the screen and the witnesses
-# all run and all write their receipts, because a designer has to be able to
-# iterate against real measurements. What it stops is the claim -- see
-# `status.decide`.
-LANE_STATUS = ("AVAILABLE", "EXPERIMENTAL_UNAVAILABLE")
+# Whether this lane may claim success at all. Neither cap stops the
+# deterministic work: the build, the gates, the screen and the witnesses all run
+# and all write their receipts, because a designer has to be able to iterate
+# against real measurements. What they stop is the claim -- see `status.decide`.
+#
+# The two caps are different kinds of thing and are named separately, because a
+# reader who cannot tell them apart cannot tell which one waiting will lift.
+# `EXPERIMENTAL_UNAVAILABLE` is a stage gate: a named stage of ADR 0002 removes
+# it. `UNSUPPORTED` is a capability statement about a combination this build
+# cannot execute at all, and no stage on the map lifts it -- it was previously
+# spelled `EXPERIMENTAL_UNAVAILABLE` too, which told every reader of an authored
+# `FITTED` job's receipt to wait for a stage that was never going to arrive.
+LANE_STATUS = ("AVAILABLE", "EXPERIMENTAL_UNAVAILABLE", "UNSUPPORTED")
 
-# Why each lane cannot yet certify its own result -- the specific failure, not a
+# Why each lane cannot certify its own result -- the specific failure, not a
 # general caveat, and stated once here so the receipt and the CLI say the same
-# sentence. Both are lifted by named stages of ADR 0002 and not by anything an
-# agent can supply on a run.
-CUSTOM_LANE_NOTE = (
-    "the CUSTOM lane still re-reads its acceptance criteria out of the model "
-    "file it is judging, so a designer can widen an expectation after seeing it "
-    "missed and be commissioned on the next run; until the acceptance contract "
-    "is frozen before the build, a pass here is self-issued and may not be "
-    "reported COMMISSIONED or VERIFIED")
+# sentence.
+#
+# `CUSTOM` no longer has one. Its cap said the lane re-read its acceptance
+# criteria out of the model file it was judging; stage 2 moved those criteria
+# into `design_proposal.json`, froze them into `acceptance_contract.json` before
+# the builder runs, and removed the fields from `AuthoredModel` so nothing can
+# read them back. A cap whose stated reason is gone is a caveat nobody can act
+# on, and leaving it would train its readers to skip the next one.
 MODIFY_LANE_NOTE = (
-    "the MODIFY lane carries the same self-issued acceptance criteria as CUSTOM. "
-    "Its preservation audit no longer samples unseeded: the plan is derived from "
-    "the source and candidate hashes, so two runs of one unchanged pair produce "
-    "byte-identical evidence and a review answer stays bound across a rerun. What "
-    "is still owed is sensitivity, not repeatability -- the sample density is a "
-    "fixed count rather than one derived from a declared minimum detectable "
-    "defect size, so a small undeclared addition outside the edit region can "
-    "still be missed, and is now missed identically on every run. Until the "
-    "acceptance contract is frozen before the build and that density is derived, "
-    "this lane may not report a part COMMISSIONED or VERIFIED")
+    "the MODIFY lane's preservation audit no longer samples unseeded: the plan is "
+    "derived from the source and candidate hashes, so two runs of one unchanged "
+    "pair produce byte-identical evidence and a review answer stays bound across "
+    "a rerun. What is still owed is sensitivity, not repeatability -- the sample "
+    "density is a fixed count rather than one derived from a declared minimum "
+    "detectable defect size, so a small undeclared addition outside the edit "
+    "region can still be missed, and is now missed identically on every run. "
+    "Until that density is derived, this lane may not report a part COMMISSIONED "
+    "or VERIFIED")
 AUTHORED_METROLOGY_NOTE = (
     "this job owes a bounded metrology recovery, and recovery is defined only "
     "against a certified template's covers and bounds -- nothing in this build "
     "can recover an externally owned dimension into authored geometry, so the "
-    "specification this route requires cannot be produced")
+    "specification this route requires cannot be produced. This is a limit of "
+    "what the build can do and not a stage that is coming: name a certified "
+    "template to recover into, or drop the obligation by removing the external "
+    "interface or the evidence that made the route FITTED or FULL")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -154,15 +163,25 @@ class ExecutionPlan:
         the one authority over what runs, so a plan that states an obligation it
         also declines is not a job that needs a warning -- it is a plan that must
         not exist.
+
+        `UNSUPPORTED` and not merely "anything other than AVAILABLE": this
+        combination used to be covered by whichever cap `_lane` happened to
+        return first, so it was carried by the `CUSTOM` cap on most jobs and by
+        the `MODIFY` cap on the rest. Both of those are stage gates that a later
+        commit lifts, and lifting one would silently uncover this. Demanding the
+        one status that means "this build cannot execute this combination" makes
+        that impossible to do by accident.
         """
-        if (self.requires_specification and not self.dispatches_specification
-                and self.lane_status == "AVAILABLE"):
+        S.require_enum(self.lane_status, LANE_STATUS, what="plan.lane_status")
+        if self.requires_specification and not self.dispatches_specification \
+                and self.lane_status != "UNSUPPORTED":
             raise ValueError(
                 f"plan for {self.job_id!r} requires a specification, builds "
-                f"through {self.builder}, and claims an available lane: the "
+                f"through {self.builder}, and is capped {self.lane_status}: the "
                 "bounded recovery is defined only against a certified "
-                "template's bounds, so this plan owes a review nothing can run "
-                "and would still be allowed to claim success")
+                "template's bounds, so this plan owes a review nothing can run. "
+                "That is a capability limit and must be recorded as UNSUPPORTED, "
+                "not behind a stage gate somebody is waiting on")
 
     @property
     def requires_specification(self) -> bool:
@@ -299,7 +318,7 @@ def _dispatch(route: str, required_reviews: tuple[str, ...]) -> str:
     return "OPTIONAL" if route in ("FITTED", "FULL") else "NEVER"
 
 
-def _lane(*, route: str, edit_scope: bool, source_mode: str, builder: str,
+def _lane(*, edit_scope: bool, source_mode: str, builder: str,
           requires_specification: bool) -> tuple[str, str]:
     """Which cap this job runs under, keyed on what it declared.
 
@@ -313,16 +332,20 @@ def _lane(*, route: str, edit_scope: bool, source_mode: str, builder: str,
       at all. A declared edit scope is the obligation; the source mode is a
       label beside it;
     * `MODIFY_LANE_NOTE` names the preservation audit's own unsettled sampling
-      and `CUSTOM_LANE_NOTE` does not, so an edit job that also routed `CUSTOM`
+      and the `CUSTOM` note did not, so an edit job that also routed `CUSTOM`
       -- which is most of them -- got the note that omits the caveat closest to
       the work.
+
+    `CUSTOM` no longer appears here at all. Its cap existed because the lane read
+    its acceptance criteria out of the model file it was judging; the criteria
+    now come from a proposal frozen into `acceptance_contract.json` before the
+    builder runs, and `AuthoredModel` has no field they could be read back
+    through.
     """
     if requires_specification and builder != "CERTIFIED_TEMPLATE":
-        return "EXPERIMENTAL_UNAVAILABLE", AUTHORED_METROLOGY_NOTE
+        return "UNSUPPORTED", AUTHORED_METROLOGY_NOTE
     if edit_scope or source_mode == "MODIFY":
         return "EXPERIMENTAL_UNAVAILABLE", MODIFY_LANE_NOTE
-    if route == "CUSTOM":
-        return "EXPERIMENTAL_UNAVAILABLE", CUSTOM_LANE_NOTE
     return "AVAILABLE", ""
 
 
@@ -342,7 +365,7 @@ def compile_plan(project: P.Project,
     requires_preservation = (project.edit_scope is not None
                              or project.source_mode == "MODIFY")
     lane_status, lane_note = _lane(
-        route=decision.route, edit_scope=project.edit_scope is not None,
+        edit_scope=project.edit_scope is not None,
         source_mode=project.source_mode, builder=builder,
         requires_specification="specification" in reviews)
     return ExecutionPlan(
@@ -389,7 +412,7 @@ def from_job_request(*, job_id: str, template: str | None,
         builder, name, builder_rationale = _builder(
             route=match.route, matched=match.template, requested=template,
             model=None, requires_specification="specification" in required)
-    lane_status, lane_note = _lane(route=match.route, edit_scope=False,
+    lane_status, lane_note = _lane(edit_scope=False,
                                    source_mode="NEW", builder=builder,
                                    requires_specification="specification" in required)
     return ExecutionPlan(

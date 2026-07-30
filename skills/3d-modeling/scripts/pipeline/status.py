@@ -282,8 +282,16 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             # and NEEDS_MORE_EVIDENCE are findings this lane *is* entitled to
             # report, and overwriting them would hide a real defect behind an
             # architectural caveat.
-            final = "EXPERIMENTAL_UNAVAILABLE"
-            claim = (f"not claimable on this lane yet -- {lane_note}. What did "
+            #
+            # The cap's own name carries through rather than collapsing to one
+            # value: `UNSUPPORTED` means no stage is coming and
+            # `EXPERIMENTAL_UNAVAILABLE` means one is, and a caller that cannot
+            # tell them apart either waits forever or gives up too early.
+            final = lane_status
+            # "yet" only where a stage is actually coming. On `UNSUPPORTED` it
+            # would be the same false promise the shared status name used to make.
+            when = "yet" if lane_status == "EXPERIMENTAL_UNAVAILABLE" else "at all"
+            claim = (f"not claimable on this lane {when} -- {lane_note}. What did "
                      f"run is on disk: {claim}.")
 
     S.require_enum(final, S.FINAL_STATUS, what="final_status")

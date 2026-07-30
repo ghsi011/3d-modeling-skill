@@ -28,6 +28,30 @@ class ContractError(ValueError):
     """The contract cannot be used as written."""
 
 
+# --------------------------------------------------------------------------
+# System-owned acceptance bands
+# --------------------------------------------------------------------------
+#
+# Here rather than in `commission.py` because a tolerance is a statement about
+# what the contract requires, not about how a mesh is measured -- and because
+# `acceptance.py` has to compute one while importing no analysis module and no
+# backend. Nothing about the numbers moved.
+
+
+def area_tolerance(expected: float) -> dict[str, Any]:
+    """The default band for an area expectation.
+
+    A floor of 1 mm2 and a fraction of 0.5%: tessellation noise on a section is
+    about 0.04 mm2, and the smallest defect worth catching moved 67. Anything
+    between those two numbers is the whole design.
+    """
+    return {"abs": max(1.0, 0.005 * abs(float(expected)))}
+
+
+def diameter_tolerance(expected: float) -> dict[str, Any]:
+    return {"abs": max(0.12, 0.01 * abs(float(expected)))}
+
+
 @dataclasses.dataclass(frozen=True)
 class Feature:
     """One thing the solid must have, and how anyone would know.

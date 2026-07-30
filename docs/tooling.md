@@ -34,7 +34,7 @@ uv run design-tool status <project> [--json]
 | exit | meaning |
 | --- | --- |
 | 0 | the job finished; there is nothing outstanding |
-| 1 | a gate failed — the geometry does not match its contract, a review rejected it, or the lane may not claim success (`EXPERIMENTAL_UNAVAILABLE`) |
+| 1 | a gate failed — the geometry does not match its contract, a review rejected it, or the lane may not claim success (`EXPERIMENTAL_UNAVAILABLE`, `UNSUPPORTED`) |
 | 2 | `project.json` is malformed or incomplete; every missing field is named |
 | 3 | something has to be answered or built before this can continue — read `next_action.json` |
 
@@ -72,40 +72,70 @@ finishes:
 A commission carries no expectation of what the specialist should conclude. That
 is not politeness: a verifier told what to conclude has stopped being a verifier.
 
-### The authored model source API (the `AUTHORED` builder)
+### The authored lane: two artifacts, one commission
 
 A job whose plan names the `AUTHORED` builder -- every `CUSTOM` job, and any
-other route for which no certified template covers the shape -- builds a Python
-module the designer wrote. It is loaded and
-validated by
+other route for which no certified template covers the shape -- is produced by
+one designer commission that returns **two** files.
+
+`design_proposal.json` says what the part must measure. `model.py` says how it is
+built. They are separate because the designer used to write one file that did
+both, and a party that owns its own acceptance criteria can widen one after
+seeing it missed: a model declaring a 24x18 pad, building a 10x8 one, with a
+self-declared 500 mm2 band on that row, was commissioned `PASS` on a 352 mm2
+miss.
+
+`design_proposal.json`, validated by
+[`pipeline/acceptance.py`](../skills/3d-modeling/scripts/pipeline/acceptance.py):
+
+```json
+{
+  "schema_version": 1,
+  "job_id": "riser-01",
+  "design_id": "two-tier-riser",
+  "rationale": "a 40x30 base carrying a 24x18 pad",
+  "params": {"base_w": 40.0, "pad_w": 24.0},
+  "bbox_mm": {"x": 40.0, "y": 30.0, "z": 14.0},
+  "bodies": 1,
+  "profile_marks": {"z": [6.0]},
+  "features": [{"feature_id": "pad-section", "kind": "section_area",
+                "at": {"z": 10.0}, "value_mm2": 432.0}]
+}
+```
+
+`params` is the same dict `model.py` declares as `PARAMS`, and the run refuses
+the pair when they disagree. `profile_marks` are the heights the shape
+legitimately steps at: they explain a step, and they cannot clear the part.
+
+`model.py`, loaded by
 [`pipeline/authored.py`](../skills/3d-modeling/scripts/pipeline/authored.py)
-before anything is built:
+after the freeze:
 
 ```python
-PARAMS        = {...}                          # the numbers the shape is built from
-BBOX_MM       = {"x": .., "y": .., "z": ..}    # required
-BODIES        = 1
-EXPECTED      = [ {feature rows} ]             # required, non-empty
-PROFILE_MARKS = {"z": [6.0]}                   # where the shape legitimately steps
-VOLUME_MM3    = ...                            # the closed form
-COMPONENTS    = [...]                          # optional
-INTERFACES    = [...]                          # optional
-PROVENANCE    = {...}                          # optional
+PARAMS     = {...}                             # the numbers the shape is built from
+COMPONENTS = [...]                             # optional
+INTERFACES = [...]                             # optional
+PROVENANCE = {...}                             # optional
 
 def build(): ...                               # or a module-level `part`
 ```
 
-`EXPECTED` rows use the same `kind` vocabulary as the certified templates —
-`section_area`, `bed_contact`, `through_hole`, `bore_by_displacement`,
-`void_region`, `overhang` and the rest of `commission.KNOWN_CHECKS`. An unknown
-kind is refused rather than reported as an unrunnable check.
+`EXPECTED`, `BBOX_MM`, `BODIES`, `PROFILE_MARKS`, `VOLUME_MM3` and any acceptance
+tolerance are refused in `model.py`, and the loaded module has no field they
+could be read back through.
 
-**Every declaration must be derived from `PARAMS` by arithmetic that does not go
-through the builder.** Writing `BBOX_MM` by running the build and copying what
+Proposable `kind`s are `section_area`, `bed_contact`, `through_hole`,
+`bore_by_displacement` and `void_region`. `overhang`, `preservation` and
+`fit_acceptance` are not proposable: the support ceiling comes from the print
+plan, the preservation row from the declared edit scope and the fit row from the
+bounded external measurement. A row may not carry a `tolerance` — the band is
+computed by the pipeline from the row's own magnitude. A proposal may not declare
+`volume_mm3` at all; see `acceptance_contract.json` below.
+
+**Every declaration must be derived from `params` by arithmetic that does not go
+through the builder.** Writing `bbox_mm` by running the build and copying what
 came out is a threshold authored by the party being measured, after measuring;
-that is a receipt, not a gate. `PROFILE_MARKS` and `VOLUME_MM3` are optional, and
-their absence is reported as an uncalibrated screen rather than treated as a
-clean one.
+that is a receipt, not a gate.
 
 The contract binds the module's path and hash under `source`, and the artifact
 manifest records which kernel actually ran. An authored mesh model's
@@ -115,6 +145,40 @@ observed doing so.
 
 There is no validity domain, because nobody has certified one. An authored model
 never routes `DIRECT`.
+
+### `acceptance_contract.json` (the `AUTHORED` builder)
+
+Generated by `design-tool run` from the frozen proposal and the system-owned
+inputs, and written to disk **before `model.py` is imported**. It carries the
+proposal hash, the user requirement hash, the source artifact hashes, the
+system-owned tolerances, the print-plan constraints, the required feature checks,
+the route-specific gates, the expected artifact identities, and its own revision
+number and hash. Every receipt binds that hash.
+
+The ordering is what makes one-agent `CUSTOM` safe, and it is structural rather
+than checked: `acceptance.generate` takes a proposal, a project and a plan and
+has no parameter a mesh could arrive through, `acceptance.py` imports no analysis
+module and no backend, and `runner.py` — the module that runs the builder —
+contains no function that writes an acceptance contract.
+
+A run that regenerates the same contract leaves the file byte-identical. A run
+that generates a different one cuts a **new revision**: it records in
+`acceptance_history.json` which fields moved and what the superseded revision had
+claimed, and deletes the receipts issued against it — the artifact manifest, the
+commissioning report, the manufacturing report, both review reports and the final
+status. A designer may still change their mind about what the part should be.
+They cannot do it invisibly, and they cannot keep the receipt issued against the
+old expectation.
+
+Editing `model.py` does **not** move the contract. Iterating a build against a
+fixed expectation is the point.
+
+`expected_volume_basis` names where an expected solid volume came from, and is
+`NOT_INDEPENDENTLY_SPECIFIED` for novel authored geometry. The measured volume
+still appears on the receipt; what it may not do is clear an anomaly detector by
+comparing against itself. On the authored lanes the volume and profile detectors
+therefore report `NOT_APPLICABLE` rather than `CLEAR`, and still report `ANOMALY`
+when a step the proposal does not explain shows up.
 
 ### `print_plan_checks.json` (the `AUTHORED` builder)
 
@@ -388,13 +452,16 @@ second opinion.
 `model_contract.json`, `intent_manifest.json`, `candidate.stl` (and
 `candidate.step` when the contract asks), `commission_report.json`,
 `manufacturing_report.json`, `witness/`, `artifact_manifest.json`,
-`timings.json`, and `final_status.json`.
+`timings.json`, and `final_status.json`. On the `AUTHORED` builder,
+`acceptance_contract.json` and `acceptance_history.json` as well.
 
 **Read `final_status.json`, and read `allowed_claim` before repeating anything
 about the part.** `COMMISSIONED` is not `VERIFIED`, and neither one is "safe".
-`EXPERIMENTAL_UNAVAILABLE` is none of them: the work ran and the receipts are on
-disk, and the lane is not yet allowed to certify its own result. `lane_status`
-and the `reasons` list say which lane and why.
+`EXPERIMENTAL_UNAVAILABLE` and `UNSUPPORTED` are none of them: the work ran and
+the receipts are on disk, and the lane is not allowed to certify its own result.
+The two are different — a named stage of ADR 0002 lifts the first and nothing
+lifts the second, so a reader who cannot tell them apart either waits forever or
+gives up too early. `lane_status` and the `reasons` list say which lane and why.
 
 ## `design-tool selftest` — does this installation build what it certifies?
 
