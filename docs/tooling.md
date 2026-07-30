@@ -151,6 +151,34 @@ and the 3MF scene — objects, components, build items with their transforms, an
 materials — rather than one merged solid, because that structure *is* the
 functional information in a multi-part or multi-colour job.
 
+### The 3MF scene, and the geometry in it
+
+A 3MF is reported at both levels. The scene keeps its shape: `objects` (each with
+its part, its components and its own mesh facts), `build_items`, `materials`, the
+declared `unit`, and `root_part` / `model_parts` naming what was actually read.
+Alongside it, every object is measured with the same questions the STL branch
+asks — `bbox_mm`, `watertight`, `winding_consistent`, `triangles`,
+`boundary_edges`, `bodies` and `volume_mm3` — so a 3MF diagnosis can answer the
+questions its classification rests on. A 3MF mesh is indexed rather than a
+triangle soup, so nothing is merged on the way in; merging would change the
+author's topology and hide a genuinely split seam.
+
+**The production extension is followed.** Bambu Studio, OrcaSlicer and
+PrusaSlicer keep the scene in `3D/3dmodel.model` and every mesh in its own
+`3D/Objects/object_NN.model`, reached through a `p:path` on the component. The
+root part is the one the package relationship names, not whichever `.model` the
+zip happens to list first, and an object id counts as dangling only when it
+resolves in neither the referencing part nor the part its `p:path` names. Reading
+one part and resolving ids against it alone reported intact, watertight,
+winding-consistent files as `REPAIR_REQUIRED` for components that were never
+broken.
+
+`placed` reports each mesh instance with its build-item and component transforms
+applied, and the top-level `bbox_mm` is the assembled scene (`bbox_note` says
+which frame it is in). The transform is not decoration: a build item carrying a
+`1.07` scale makes its part 7% larger than the numbers in its mesh part, and a
+reader that skips it measures every scaled part undersize.
+
 Units are answered as honestly as the format allows. STL carries none, so the
 bbox is reported as authored with a *suspicion* beside it (`/25.4` and `x1000`
 arithmetic shown) and nothing is converted. 3MF and STEP carry them and they are

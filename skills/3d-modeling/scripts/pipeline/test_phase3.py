@@ -116,6 +116,75 @@ def build():
 '''
 
 
+# --- 3MF fixtures -----------------------------------------------------------
+# Written here rather than read from a real slicer export: the real files are
+# licensed third-party content living outside the repo, and a test that reads
+# them is neither portable nor reproducible.
+CORE_NS = 'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"'
+PROD_NS = ('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/'
+           'production/2015/06"')
+ROOT_RELS = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+    'relationships"><Relationship Target="/3D/3dmodel.model" Id="rel-1" '
+    'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+    '</Relationships>')
+
+
+def _mesh_xml(mesh: trimesh.Trimesh) -> str:
+    vertices = "".join(f'<vertex x="{x:.6g}" y="{y:.6g}" z="{z:.6g}"/>'
+                       for x, y, z in mesh.vertices)
+    triangles = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>'
+                        for a, b, c in mesh.faces)
+    return (f"<mesh><vertices>{vertices}</vertices>"
+            f"<triangles>{triangles}</triangles></mesh>")
+
+
+def _model_part(resources: str, build: str = "<build/>") -> str:
+    return (f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<model unit="millimeter" {CORE_NS} {PROD_NS} '
+            f'requiredextensions="p"><resources>{resources}</resources>'
+            f'{build}</model>')
+
+
+def _production_3mf(path: Path, *, button_transform: str = "1 0 0 0 1 0 0 0 1 0 0 0",
+                    parts: dict[str, str] | None = None) -> Path:
+    """A 3MF in the shape Bambu Studio writes it.
+
+    The root part carries nothing but the scene; every mesh lives in its own
+    `3D/Objects/object_NN.model` and is reached through a component's `p:path`.
+    The mesh parts are written into the archive *first*, so a reader that takes
+    whichever `.model` the zip lists first lands on a mesh part rather than the
+    scene.
+    """
+    if parts is None:
+        case = trimesh.creation.box(extents=(60.0, 10.0, 120.0))
+        button = trimesh.creation.box(extents=(3.0, 4.0, 9.0))
+        parts = {
+            "3D/Objects/object_1.model": _model_part(
+                f'<object id="1" type="model">{_mesh_xml(case)}</object>'),
+            "3D/Objects/object_2.model": _model_part(
+                f'<object id="2" type="model">{_mesh_xml(button)}</object>'
+                f'<object id="3" type="model">{_mesh_xml(button)}</object>'),
+            "3D/3dmodel.model": _model_part(
+                '<object id="10" type="model" name="case"><components>'
+                '<component p:path="/3D/Objects/object_1.model" objectid="1" '
+                'transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>'
+                '<object id="20" type="model" name="buttons"><components>'
+                '<component p:path="/3D/Objects/object_2.model" objectid="2"/>'
+                '<component p:path="/3D/Objects/object_2.model" objectid="3" '
+                'transform="1 0 0 0 1 0 0 0 1 0 8 0"/>'
+                '</components></object>',
+                '<build><item objectid="10"/>'
+                f'<item objectid="20" transform="{button_transform}"/></build>'),
+        }
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, text in parts.items():
+            archive.writestr(name, text)
+        archive.writestr("_rels/.rels", ROOT_RELS)
+    return path
+
+
 def _edit_scope() -> P.EditScope:
     """The socket region, declared before the edit."""
     return P.EditScope(
@@ -215,6 +284,8 @@ class DiagnoseTest(unittest.TestCase):
     def test_a_multi_component_3mf_reports_the_scene_not_a_merged_solid(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "two_up.3mf"
+            body = _mesh_xml(trimesh.creation.box(extents=(20.0, 20.0, 10.0)))
+            lid = _mesh_xml(trimesh.creation.box(extents=(20.0, 20.0, 3.0)))
             model = (
                 '<?xml version="1.0" encoding="UTF-8"?>'
                 '<model unit="millimeter" '
@@ -224,10 +295,8 @@ class DiagnoseTest(unittest.TestCase):
                 '<base name="PETG Black" displaycolor="#101010FF"/>'
                 '<base name="PETG Red" displaycolor="#C01010FF"/>'
                 '</basematerials>'
-                '<object id="1" name="body" type="model" pid="9">'
-                '<mesh><vertices/><triangles/></mesh></object>'
-                '<object id="2" name="lid" type="model" pid="9">'
-                '<mesh><vertices/><triangles/></mesh></object>'
+                f'<object id="1" name="body" type="model" pid="9">{body}</object>'
+                f'<object id="2" name="lid" type="model" pid="9">{lid}</object>'
                 '</resources>'
                 '<build>'
                 '<item objectid="1"/>'
@@ -244,6 +313,138 @@ class DiagnoseTest(unittest.TestCase):
             self.assertEqual(2, len(report["materials"]))
             self.assertTrue(report["scene_is_functional"])
             self.assertEqual("USABLE_MESH", report["classification"])
+            self.assertEqual([], report["findings"])
+
+    def test_a_production_extension_3mf_is_not_reported_as_broken(self) -> None:
+        """The defect this branch exists to answer.
+
+        Bambu Studio keeps every mesh in its own part and reaches it through a
+        component's `p:path`. A reader that opens one part and resolves ids
+        against it alone sees three components pointing at ids it cannot find,
+        and tells the user an intact, watertight, winding-consistent file needs
+        repair -- which is worse than saying nothing.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = _production_3mf(Path(raw) / "production.3mf")
+            before = path.read_bytes()
+
+            report = D.diagnose(path)
+            self.assertEqual("USABLE_MESH", report["classification"])
+            self.assertEqual([], report["findings"])
+            self.assertEqual("3d/3dmodel.model", report["root_part"],
+                             "the scene is named by the package relationship, "
+                             "not by whichever part the zip lists first")
+            self.assertEqual(3, report["bodies"],
+                             "one case and two buttons, each in a mesh part the "
+                             "root only points at")
+            self.assertEqual(3, len(report["model_parts"]),
+                             "the scene part and both mesh parts were all read")
+            self.assertTrue(report["watertight"])
+            self.assertTrue(report["winding_consistent"])
+            self.assertEqual(before, path.read_bytes(),
+                             "diagnosis must never write to the only "
+                             "authoritative copy")
+
+    def test_a_component_that_resolves_nowhere_is_still_dangling(self) -> None:
+        """The check is narrowed, not removed: a genuinely broken file still fails."""
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "dangling.3mf"
+            box = _mesh_xml(trimesh.creation.box(extents=(10.0, 10.0, 10.0)))
+            _production_3mf(path, parts={
+                "3D/Objects/object_1.model": _model_part(
+                    f'<object id="1" type="model">{box}</object>'),
+                # id 2 is here; id 3 is in neither this part nor the root.
+                "3D/Objects/object_2.model": _model_part(
+                    f'<object id="2" type="model">{box}</object>'),
+                "3D/3dmodel.model": _model_part(
+                    '<object id="10" type="model" name="case"><components>'
+                    '<component p:path="/3D/Objects/object_1.model" objectid="1"/>'
+                    '</components></object>'
+                    '<object id="20" type="model" name="buttons"><components>'
+                    '<component p:path="/3D/Objects/object_2.model" objectid="2"/>'
+                    '<component p:path="/3D/Objects/object_2.model" objectid="3"/>'
+                    '</components></object>',
+                    '<build><item objectid="10"/><item objectid="20"/></build>'),
+            })
+
+            report = D.diagnose(path)
+            self.assertEqual("REPAIR_REQUIRED", report["classification"])
+            finding = next(f for f in report["findings"] if "not in the file" in f)
+            self.assertIn("'3'", finding)
+            self.assertNotIn("'2'", finding,
+                             "an id that resolves through p:path is not dangling")
+
+    def test_a_build_transform_is_applied_to_the_placed_geometry(self) -> None:
+        """A 1.07 on the build item makes the part 7% bigger than its mesh part.
+
+        Reporting the authored numbers as if they were the placed ones measures
+        every scaled part undersize, which is the sort of error that only shows
+        up after the print.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = _production_3mf(Path(raw) / "scaled.3mf",
+                                   button_transform="1.07 0 0 0 1.07 0 0 0 1 0 0 0")
+            report = D.diagnose(path)
+
+            authored = {o["id"]: o["geometry"]["bbox_mm"]
+                        for o in report["objects"] if o["geometry"]}
+            self.assertEqual([3.0, 4.0, 9.0], authored["2"],
+                             "the object's own mesh is reported as authored")
+
+            buttons = [p for p in report["placed"] if p["via_item"] == "20"]
+            self.assertEqual(2, len(buttons))
+            for placement in buttons:
+                self.assertEqual([round(3.0 * 1.07, 4), round(4.0 * 1.07, 4), 9.0],
+                                 placement["bbox_mm"])
+            # The unscaled item is untouched, so the transform is being read
+            # rather than applied to everything.
+            case = next(p for p in report["placed"] if p["via_item"] == "10")
+            self.assertEqual([60.0, 10.0, 120.0], case["bbox_mm"])
+
+    def test_a_3mf_answers_the_same_geometry_questions_a_mesh_does(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = _production_3mf(Path(raw) / "geometry.3mf")
+            report = D.diagnose(path)
+
+            case = next(o for o in report["objects"] if o["id"] == "1")
+            self.assertEqual(12, case["geometry"]["triangles"])
+            self.assertEqual(1, case["geometry"]["bodies"])
+            self.assertTrue(case["geometry"]["watertight"])
+            self.assertTrue(case["geometry"]["winding_consistent"])
+            self.assertAlmostEqual(60.0 * 10.0 * 120.0,
+                                   case["geometry"]["volume_mm3"], places=3)
+            self.assertEqual(0, case["geometry"]["boundary_edges"])
+            self.assertEqual(36, report["triangles"])
+            self.assertIn("build transform", report["bbox_note"])
+            # The case is 10 mm deep and centred; the second button's component
+            # transform pushes it out to y=+10, so the assembled scene is 15 mm
+            # deep. A report that only looked at the case would say 10.
+            self.assertEqual([60.0, 15.0, 120.0], report["bbox_mm"])
+
+    def test_an_open_mesh_inside_a_3mf_needs_repair_and_says_which_object(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            holed = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+            holed.update_faces(np.arange(len(holed.faces)) > 1)
+            path = Path(raw) / "open.3mf"
+            _production_3mf(path, parts={
+                "3D/Objects/object_1.model": _model_part(
+                    f'<object id="1" type="model">{_mesh_xml(holed)}</object>'),
+                "3D/3dmodel.model": _model_part(
+                    '<object id="10" type="model" name="case"><components>'
+                    '<component p:path="/3D/Objects/object_1.model" objectid="1"/>'
+                    '</components></object>',
+                    '<build><item objectid="10"/></build>'),
+            })
+
+            report = D.diagnose(path)
+            self.assertEqual("REPAIR_REQUIRED", report["classification"])
+            self.assertFalse(report["watertight"])
+            self.assertTrue(any("object '1'" in f and "not watertight" in f
+                                for f in report["findings"]), report["findings"])
+            self.assertIsNone(report["volume_mm3"])
+            self.assertFalse(any("not in the file" in f
+                                 for f in report["findings"]),
+                             "an open mesh is an open mesh, not a dangling id")
 
     def test_a_3mf_in_the_wrong_unit_is_a_repair_finding_not_a_conversion(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -257,6 +458,29 @@ class DiagnoseTest(unittest.TestCase):
             report = D.diagnose(path)
             self.assertEqual("inch", report["units"])
             self.assertEqual("REPAIR_REQUIRED", report["classification"])
+
+    def test_a_scene_of_component_wrappers_carries_no_geometry_to_build_on(self) -> None:
+        """Resolving is not the same as containing something.
+
+        Two objects whose components point at each other parse cleanly and leave
+        no dangling id -- and there is still no mesh anywhere in the archive.
+        Fail closed rather than call an empty scene usable.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "wrappers.3mf"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("3D/3dmodel.model", _model_part(
+                    '<object id="1" type="model"><components>'
+                    '<component objectid="2"/></components></object>'
+                    '<object id="2" type="model"><components>'
+                    '<component objectid="1"/></components></object>',
+                    '<build><item objectid="1"/></build>'))
+
+            report = D.diagnose(path)
+            self.assertEqual("RECONSTRUCTION_REQUIRED", report["classification"])
+            self.assertEqual(0, report["bodies"])
+            self.assertTrue(any("no mesh anywhere" in f
+                                for f in report["findings"]), report["findings"])
 
     def test_the_cli_exits_nonzero_only_when_nothing_can_be_built_on_it(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
