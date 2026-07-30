@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
-"""`design-tool` — one fused production command.
+"""`design-tool` — the one agent-facing command surface.
 
-    uv run design-tool run-job job_dir/
+    uv run design-tool init <project> --job-id J --source-mode NEW ...
+    uv run design-tool route <project>
+    uv run design-tool run <project>
+    uv run design-tool status <project>
+    uv run design-tool doctor
+    uv run design-tool selftest
 
-Lower-level verbs exist for debugging and are not the production path. A job is
-one invocation because every extra one pays interpreter startup to do work
-measured in milliseconds.
+`run` is resumable on every route. It validates the project, executes every
+deterministic stage it can, and when agent judgement is genuinely required it
+writes `next_action.json`, stops cleanly, and continues from that state the next
+time the identical command is invoked. A finished run deletes the file, because
+a stale instruction left on disk says the opposite of the truth to the reader
+with the least context.
+
+`run-job` is the deprecated predecessor: it reads `job.json` directly, skips the
+canonical project, and is kept so existing job directories keep working.
+
+A job is one invocation because every extra one pays interpreter startup to do
+work measured in milliseconds.
 
 **Reviews are answered by re-running, not by this program.** A `CONSEQUENTIAL`
 job needs a bounded safety call, a `FITTED` job needs a spec call, and `VERIFIED`
@@ -29,7 +43,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import project as P
 from . import review as R
+from . import route as RT
 from . import runner, schemas as S
 
 JOB_FILE = "job.json"
@@ -37,6 +53,14 @@ JOB_FILE = "job.json"
 
 REVIEW_DIR = "reviews"
 NEEDS_REVIEW = 3
+
+# One exit code for "a person or an agent has to do something before this can
+# continue", whether that something is a review response or a whole commission.
+# A caller scripting the loop needs one condition to test, not two.
+NEEDS_ACTION = NEEDS_REVIEW
+NEXT_ACTION_FILE = "next_action.json"
+NEXT_ACTION_SCHEMA = 1
+ROUTE_DECISION_FILE = "route_decision.json"
 
 
 ReviewNeeded = runner.ReviewNeeded
@@ -235,6 +259,25 @@ def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.Job
     )
 
 
+def _review_needed_message(need: ReviewNeeded, job_dir: Path) -> None:
+    rel = need.path.relative_to(job_dir)
+    packet = rel.with_name(need.kind + "_packet.json")
+    sys.stderr.write(
+        f"\ndesign-tool: this job needs a {need.kind} review before it can finish.\n"
+        f"  the evidence is written to  {packet}\n"
+        f"  write the answer to         {rel}\n"
+        "  then run the same command again.\n\n"
+        "  This program cannot answer it. A review is a judgement about a part,\n"
+        "  and a deterministic tool that returned one would be inventing it.\n")
+
+
+def _report_artifacts(result: runner.JobResult) -> None:
+    for name, path in sorted(result.artifacts.items()):
+        sys.stderr.write(f"  {name:28s} {path.name}\n")
+    timings = "  ".join(f"{k} {v:.2f}s" for k, v in result.timings.items())
+    sys.stderr.write(f"\n  {timings}\n  llm calls: {result.llm_calls}\n")
+
+
 def run_job(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="design-tool run-job")
     parser.add_argument("job_dir", type=Path)
@@ -257,26 +300,358 @@ def run_job(argv: list[str]) -> int:
     try:
         result = runner.run(request)
     except ReviewNeeded as need:
-        rel = need.path.relative_to(job_dir)
-        packet = rel.with_name(need.kind + "_packet.json")
-        sys.stderr.write(
-            f"\ndesign-tool: this job needs a {need.kind} review before it can finish.\n"
-            f"  the evidence is written to  {packet}\n"
-            f"  write the answer to         {rel}\n"
-            "  then run the same command again.\n\n"
-            "  This program cannot answer it. A review is a judgement about a part,\n"
-            "  and a deterministic tool that returned one would be inventing it.\n")
+        _review_needed_message(need, job_dir)
         return NEEDS_REVIEW
 
-    for name, path in sorted(result.artifacts.items()):
-        sys.stderr.write(f"  {name:28s} {path.name}\n")
-    timings = "  ".join(f"{k} {v:.2f}s" for k, v in result.timings.items())
-    sys.stderr.write(f"\n  {timings}\n  llm calls: {result.llm_calls}\n")
+    _report_artifacts(result)
 
     if not result.ok:
         sys.stderr.write(f"\ndesign-tool: {result.stage}: {result.message}\n")
         return 1
     sys.stderr.write(f"\n  {result.final_status['final_status']}: {result.message}\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# The canonical project surface
+# ---------------------------------------------------------------------------
+
+def _write_next_action(project_dir: Path, payload: dict[str, Any]) -> Path:
+    path = project_dir / NEXT_ACTION_FILE
+    path.write_text(S.canonical_json(payload), encoding="utf-8")
+    return path
+
+
+def _clear_next_action(project_dir: Path) -> None:
+    """A finished run must not leave a stale instruction behind.
+
+    `next_action.json` is read as "this is what the job is waiting for". Left on
+    disk after the thing was done, it says the opposite of the truth, and the
+    reader with the least context is the one most likely to believe it.
+    """
+    path = project_dir / NEXT_ACTION_FILE
+    if path.is_file():
+        path.unlink()
+
+
+def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
+    """The project, adapting a legacy `job.json` in place when that is all there is."""
+    try:
+        return P.load(project_dir)
+    except FileNotFoundError:
+        pass
+    if not adapt:
+        raise SystemExit(
+            f"design-tool: no {P.PROJECT_FILE} in {project_dir}. "
+            f"Run `design-tool init {project_dir}` to write one.")
+    job = project_dir / JOB_FILE
+    if not job.is_file():
+        raise SystemExit(
+            f"design-tool: no {P.PROJECT_FILE} and no {JOB_FILE} in {project_dir}. "
+            f"Run `design-tool init {project_dir}` to write one.")
+    project = P.from_job_json(_load_job(project_dir))
+    project.save(project_dir)
+    sys.stderr.write(
+        f"design-tool: adapted {JOB_FILE} into {P.PROJECT_FILE} "
+        "(compat: job.json@1 -- it keeps routing under the legacy rules)\n")
+    return project
+
+
+def _report_problems(project_dir: Path, project: P.Project,
+                     problems: list[str], *, stage: str) -> int:
+    _write_next_action(project_dir, {
+        "schema_version": NEXT_ACTION_SCHEMA,
+        "job_id": project.job_id,
+        "kind": "FIX_PROJECT",
+        "stage": stage,
+        "reason": "the project does not describe a job that can be routed",
+        "unresolved": list(problems),
+        "completion_command": f"design-tool run {project_dir.as_posix()}",
+        "updated_utc": project.updated_utc,
+    })
+    sys.stderr.write(f"design-tool: {P.PROJECT_FILE} is not complete enough to "
+                     f"{stage}:\n")
+    for problem in problems:
+        sys.stderr.write(f"  - {problem}\n")
+    return 2
+
+
+def init(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="design-tool init",
+        description="Write a project.json skeleton. Nothing is invented: every "
+                    "field you must supply is present and empty, and the command "
+                    "prints them as a to-do list.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--source-mode", required=True, choices=P.SOURCE_MODE,
+                        help="NEW creates geometry from requirements; MODIFY starts "
+                             "from a supplied artifact; RECONSTRUCT recovers it from "
+                             "evidence")
+    parser.add_argument("--consequence", required=True, choices=S.CONSEQUENCE)
+    parser.add_argument("--updated-utc", required=True,
+                        help="ISO-8601, passed in and never wall-clock, so a rerun "
+                             "on unchanged inputs is byte-identical")
+    parser.add_argument("--from-job-json", action="store_true",
+                        help="derive the project from an existing job.json in the "
+                             "same directory")
+    parser.add_argument("--force", action="store_true",
+                        help="overwrite an existing project.json")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project_dir.mkdir(parents=True, exist_ok=True)
+    existing = project_dir / P.PROJECT_FILE
+    if existing.is_file() and not args.force:
+        sys.stderr.write(f"design-tool: {existing} already exists; pass --force to "
+                         "overwrite it\n")
+        return 2
+
+    if args.from_job_json:
+        project = P.from_job_json(_load_job(project_dir))
+        project.job_id = args.job_id
+        project.updated_utc = args.updated_utc
+    else:
+        project = P.skeleton(job_id=args.job_id, source_mode=args.source_mode,
+                             consequence=args.consequence,
+                             updated_utc=args.updated_utc)
+    path = project.save(project_dir)
+    problems = project.validate(project_dir, require_buildable=False)
+    sys.stderr.write(f"  wrote {path.name}\n")
+    if problems:
+        sys.stderr.write("\n  still to supply:\n")
+        for problem in problems:
+            sys.stderr.write(f"  - {problem}\n")
+    return 0
+
+
+def route(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="design-tool route",
+        description="Decide the route, record it and the rationale, and say which "
+                    "routes were not taken and why.")
+    parser.add_argument("project_dir", type=Path)
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir)
+    problems = project.validate(project_dir, require_buildable=False)
+    if problems:
+        return _report_problems(project_dir, project, problems, stage="route")
+
+    decision = RT.decide(project)
+    RT.apply(project, decision)
+    project.save(project_dir)
+    (project_dir / ROUTE_DECISION_FILE).write_text(
+        S.canonical_json(decision.as_dict()), encoding="utf-8")
+
+    sys.stderr.write(f"\n  route      {decision.route}\n"
+                     f"  because    {decision.condition}\n"
+                     f"  source     {decision.source_mode}\n")
+    if project.required_reviews:
+        sys.stderr.write(f"  reviews    {', '.join(project.required_reviews)}\n")
+    for reason in decision.escalations:
+        sys.stderr.write(f"    - {reason}\n")
+    return 0
+
+
+def _run_project(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
+                 *, render: bool) -> int:
+    """Every deterministic stage this route can execute right now."""
+    if project.template is None:
+        # The certified-template runner is the only build lane wired today; the
+        # authored-geometry lane arrives in Phase 2. Stopping here with a written
+        # commission is the honest state: the job is routed, its reviews are
+        # known, and what it is waiting for is a designer.
+        _write_next_action(project_dir, {
+            "schema_version": NEXT_ACTION_SCHEMA,
+            "job_id": project.job_id,
+            "kind": "AGENT_COMMISSION",
+            "role": "designer",
+            "stage": "candidate_build",
+            "route": decision.route,
+            "reason": decision.condition,
+            "authorized_inputs": [project.brief, P.PROJECT_FILE, ROUTE_DECISION_FILE]
+            + [a.path for a in project.source_artifacts],
+            "required_outputs": ["model.py"],
+            "bound": {"project_sha256": project.project_hash(),
+                      "source_artifacts": {a.artifact_id: a.sha256
+                                           for a in project.source_artifacts}},
+            "unresolved": list(project.blocking_questions),
+            "required_reviews": list(project.required_reviews),
+            "completion_command": f"design-tool run {project_dir.as_posix()}",
+            "updated_utc": project.updated_utc,
+        })
+        sys.stderr.write(
+            f"\ndesign-tool: this job routes {decision.route} and has no model yet.\n"
+            f"  the commission is written to  {NEXT_ACTION_FILE}\n"
+            f"  write the model to            model.py\n"
+            "  then run the same command again.\n\n"
+            "  This program cannot author geometry, and a deterministic tool that\n"
+            "  returned some would be inventing it.\n")
+        return NEEDS_ACTION
+
+    fields = P.to_job_request_fields(project)
+    request = runner.JobRequest(
+        brief_path=project_dir / project.brief,
+        out_dir=project_dir,
+        render=render,
+        safety_call=_answer(project_dir, "safety"),
+        spec_call=_answer(project_dir, "spec"),
+        verify_call=_answer(project_dir, "verification"),
+        cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
+        **fields)
+    try:
+        result = runner.run(request)
+    except ReviewNeeded as need:
+        rel = need.path.relative_to(project_dir)
+        _write_next_action(project_dir, {
+            "schema_version": NEXT_ACTION_SCHEMA,
+            "job_id": project.job_id,
+            "kind": "REVIEW",
+            "review_kind": need.kind,
+            "stage": f"review:{need.kind}",
+            "route": decision.route,
+            "reason": f"this job needs a {need.kind} review before it can finish",
+            "evidence": str(rel.with_name(need.kind + "_packet.json")).replace("\\", "/"),
+            "respond_with": str(rel).replace("\\", "/"),
+            "completion_command": f"design-tool run {project_dir.as_posix()}",
+            "updated_utc": project.updated_utc,
+        })
+        _review_needed_message(need, project_dir)
+        return NEEDS_ACTION
+
+    _report_artifacts(result)
+    project.status = {**project.status,
+                      "stage": result.stage,
+                      "final_status": (result.final_status or {}).get("final_status"),
+                      "allowed_claim": (result.final_status or {}).get("allowed_claim")}
+    project.bindings = {**project.bindings,
+                        **(result.final_status or {}).get("artifact_hashes", {})}
+    project.save(project_dir)
+    final = (result.final_status or {}).get("final_status")
+    if not result.ok:
+        # Rewrite rather than leave: the previous instruction may have been
+        # "answer the safety review", and it has been answered. Left on disk
+        # after the answer was refused, it points the next reader at work already
+        # done instead of at the reason it was refused.
+        #
+        # `NEEDS_MORE_EVIDENCE` is separated from `FAILED` deliberately. One says
+        # the part does not match its contract; the other says a question went
+        # unasked. They call for different work, and collapsing both into exit 1
+        # made the second read as a rejection of the geometry.
+        needs_evidence = final == "NEEDS_MORE_EVIDENCE"
+        _write_next_action(project_dir, {
+            "schema_version": NEXT_ACTION_SCHEMA,
+            "job_id": project.job_id,
+            "kind": "NEEDS_EVIDENCE" if needs_evidence else "BLOCKED",
+            "stage": result.stage,
+            "route": decision.route,
+            "reason": result.message,
+            "unresolved": list((result.final_status or {}).get("reasons")
+                               or [result.message]),
+            "completion_command": f"design-tool run {project_dir.as_posix()}",
+            "updated_utc": project.updated_utc,
+        })
+        sys.stderr.write(f"\ndesign-tool: {result.stage}: {result.message}\n")
+        return NEEDS_ACTION if needs_evidence else 1
+    _clear_next_action(project_dir)
+    sys.stderr.write(f"\n  {final}: {result.message}\n")
+    return 0
+
+
+def run(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="design-tool run",
+        description="Validate, route, execute every deterministic stage available, "
+                    "and stop cleanly with next_action.json when agent judgement is "
+                    "required. Re-run the identical command to continue.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--no-render", action="store_true",
+                        help="skip the witness images -- and with them the only "
+                             "evidence that is not conditioned on a declaration")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir)
+    problems = project.validate(project_dir, require_buildable=False)
+    if problems:
+        return _report_problems(project_dir, project, problems, stage="run")
+
+    decision = RT.decide(project)
+    previous = project.route
+    RT.apply(project, decision)
+    if previous is not None and previous != decision.route:
+        project.status = {**project.status, "route_changed_from": previous}
+        sys.stderr.write(f"design-tool: the route moved {previous} -> "
+                         f"{decision.route}: {decision.condition}\n")
+    project.save(project_dir)
+    (project_dir / ROUTE_DECISION_FILE).write_text(
+        S.canonical_json(decision.as_dict()), encoding="utf-8")
+
+    return _run_project(project_dir, project, decision, render=not args.no_render)
+
+
+def status(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="design-tool status",
+        description="Route, bindings, what the job is waiting for, and the claim it "
+                    "is currently allowed to make.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir, adapt=False)
+    pending = project_dir / NEXT_ACTION_FILE
+    next_action = None
+    if pending.is_file():
+        try:
+            next_action = json.loads(pending.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"design-tool: {NEXT_ACTION_FILE} is not valid JSON: {exc}")
+
+    final = project_dir / "final_status.json"
+    final_payload = (json.loads(final.read_text(encoding="utf-8"))
+                     if final.is_file() else None)
+    report = {
+        "job_id": project.job_id,
+        "source_mode": project.source_mode,
+        "consequence": project.consequence,
+        "route": project.route,
+        "route_rationale": project.route_rationale,
+        "required_reviews": list(project.required_reviews),
+        "problems": project.validate(project_dir, require_buildable=False),
+        "waiting_for": next_action,
+        "final_status": (final_payload or {}).get("final_status"),
+        "allowed_claim": (final_payload or {}).get("allowed_claim"),
+        "bindings": project.bindings,
+    }
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"  job          {report['job_id']}")
+        print(f"  source mode  {report['source_mode']}")
+        print(f"  consequence  {report['consequence']}")
+        print(f"  route        {report['route'] or '(not decided)'}")
+        if report["route_rationale"]:
+            print(f"  because      {report['route_rationale']}")
+        if report["required_reviews"]:
+            print(f"  reviews      {', '.join(report['required_reviews'])}")
+        if report["final_status"]:
+            print(f"  status       {report['final_status']}")
+            print(f"  claim        {report['allowed_claim']}")
+        if next_action:
+            print(f"  waiting for  {next_action.get('kind')} "
+                  f"({next_action.get('stage')})")
+            print(f"               {next_action.get('reason', '')}")
+        for problem in report["problems"]:
+            print(f"  problem      {problem}")
+
+    if report["final_status"] == "FAILED":
+        return 1
+    if next_action is not None:
+        return NEEDS_ACTION
     return 0
 
 
@@ -299,7 +674,23 @@ def selftest(argv: list[str]) -> int:
     return _selftest.main(argv)
 
 
-COMMANDS = ("run-job", "doctor", "selftest")
+# The single documented interface. `run-job` is kept as a deprecated alias so
+# existing job directories keep working; everything else routes through the
+# canonical project.
+COMMANDS = {
+    "doctor": doctor,
+    "selftest": selftest,
+    "init": init,
+    "route": route,
+    "run": run,
+    "status": status,
+    "run-job": run_job,
+}
+
+DEPRECATED = {
+    "run-job": "design-tool run <project> (run-job still works; it reads job.json "
+               "directly and skips the canonical project)",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -309,15 +700,15 @@ def main(argv: list[str] | None = None) -> int:
         print("commands: " + ", ".join(COMMANDS))
         return 0
     command, rest = argv[0], argv[1:]
-    if command == "run-job":
-        return run_job(rest)
-    if command == "doctor":
-        return doctor(rest)
-    if command == "selftest":
-        return selftest(rest)
-    sys.stderr.write(
-        f"design-tool: unknown command {command!r}; have {', '.join(COMMANDS)}\n")
-    return 2
+    handler = COMMANDS.get(command)
+    if handler is None:
+        sys.stderr.write(
+            f"design-tool: unknown command {command!r}; have {', '.join(COMMANDS)}\n")
+        return 2
+    if command in DEPRECATED:
+        sys.stderr.write(f"design-tool: {command} is deprecated -- use "
+                         f"{DEPRECATED[command]}\n")
+    return handler(rest)
 
 
 if __name__ == "__main__":

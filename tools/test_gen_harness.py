@@ -127,15 +127,23 @@ def test_generated_skill_roles_have_exactly_one_h1() -> None:
 
 
 def test_generated_router_qualifies_zero_dispatch_claim() -> None:
-    """Only the certified inconsequential DIRECT route is dispatch-free."""
+    """Only DIRECT is dispatch-free, and the router says what each route costs.
+
+    The wording moved when the four-route table replaced the `run-job` walkthrough
+    (ADR 0001). What the guard is for has not: a router that advertises a cheap
+    route without saying which one it is, and what the others buy, is how a job
+    ends up on the wrong one.
+    """
     router = next(file.content for file in gen_harness.generate(gen_harness.load_roles())
                   if file.path == gen_harness.SKILL_DIR / "SKILL.md")
-    assert "certified `INCONSEQUENTIAL` `DIRECT`" in router
-    assert "zero model calls" in router
-    assert "`CONSEQUENTIAL` `DIRECT`" in router
-    assert "bounded safety review" in router
-    assert "`FITTED` or `FULL`" in router
-    assert "required reviews" in router
+    for route in ("`DIRECT`", "`CUSTOM`", "`FITTED`", "`FULL`"):
+        assert route in router, route
+    assert "zero design-agent calls" in router
+    assert "one designer commission" in router
+    assert "fresh verifier" in router
+    assert "the complete workflow" in router
+    assert "adds the mandatory safety pass" in router
+    assert "`VERIFIED` requires an independent context on every route" in router
 
 
 def test_check_reports_mismatch_when_generated_file_differs(tmp_path: Path) -> None:

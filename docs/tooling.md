@@ -18,12 +18,73 @@ Exit code convention across these tools:
 
 Individual tools narrow or extend this table below.
 
-## `design-tool run-job` — the deterministic route
+## `design-tool` — the canonical project surface
 
-The production entry point for a job the pipeline can build itself. One
-invocation runs contract, build, commission, screening, witness and status;
-every extra invocation would pay interpreter startup to do work measured in
-milliseconds.
+One command surface over one machine-authoritative project file. See
+[ADR 0001](adr/0001-one-project-one-cli.md) for why there used to be two.
+
+```bash
+uv run design-tool init <project> --job-id J --source-mode NEW|MODIFY|RECONSTRUCT \
+    --consequence INCONSEQUENTIAL|CONSEQUENTIAL --updated-utc <iso8601> [--from-job-json]
+uv run design-tool route  <project>
+uv run design-tool run    <project> [--no-render]
+uv run design-tool status <project> [--json]
+```
+
+| exit | meaning |
+| --- | --- |
+| 0 | the job finished; there is nothing outstanding |
+| 1 | a gate failed — the geometry does not match its contract, or a review rejected it |
+| 2 | `project.json` is malformed or incomplete; every missing field is named |
+| 3 | something has to be answered or built before this can continue — read `next_action.json` |
+
+### `project.json`
+
+The one authoritative description of a job, validated by
+[`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py). It carries the
+job id, source mode, consequence and rationale, the manufacturing inputs, every
+requirement with its provenance (`STATED` / `INHERITED` / `MEASURED` / `CHOSEN`),
+source artifacts with hashes and classification, interfaces and who owns the other
+side of each, declared motion, edit scope, expected components, open questions,
+required reviews, bindings and status.
+
+Nothing is invented. `init` writes a skeleton in which every field you must supply
+is present and empty, and prints them as a to-do list; `run` refuses with exit 2
+until they are filled, naming all of them at once rather than one per round trip.
+
+A directory holding only a legacy `job.json` is adapted on first `run` and marked
+`compat: "job.json@1"`, which keeps it routing under the pre-consolidation rules.
+Old completed projects need no migration.
+
+### `next_action.json`
+
+What the job is waiting for, written when `run` stops and deleted when it
+finishes. Four kinds:
+
+| kind | meaning |
+| --- | --- |
+| `FIX_PROJECT` | `project.json` is not complete enough to route; `unresolved` names every problem |
+| `AGENT_COMMISSION` | a specialist has to produce something — `role`, `authorized_inputs`, `required_outputs`, `bound` hashes, `completion_command` |
+| `REVIEW` | a bounded review is needed — `evidence` is the packet, `respond_with` is where the answer goes |
+| `NEEDS_EVIDENCE` / `BLOCKED` | the run completed but could not reach a claim, or a gate failed; `unresolved` carries the status reasons |
+
+A commission carries no expectation of what the specialist should conclude. That
+is not politeness: a verifier told what to conclude has stopped being a verifier.
+
+### `route_decision.json`
+
+The route, the deciding condition, the source mode, the escalation triggers that
+turned an independent verification on, **and every route that was not taken with
+the reason**. Routing used to leave no trace, so it could be neither audited nor
+regression-tested.
+
+## `design-tool run-job` — the deprecated predecessor
+
+Reads `job.json` directly, skipping the canonical project. Kept so existing job
+directories keep working; `design-tool run` is the supported entry point and
+adapts a bare `job.json` on first use. One invocation runs contract, build,
+commission, screening, witness and status; every extra invocation would pay
+interpreter startup to do work measured in milliseconds.
 
 ```bash
 uv run design-tool run-job job_dir/ [--no-render]
