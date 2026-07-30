@@ -233,9 +233,13 @@ external object. One designer commission, and `design-tool run` writes it: the r
 project path, the authorized inputs, the required outputs, the bound hashes and the
 completion command. The print plan is created before the candidate is measured.
 
-An uncomplicated `INCONSEQUENTIAL` `CUSTOM` part with no external interface may finish
-`COMMISSIONED` after the deterministic gates and an explicit witness inspection. It never
-finishes `VERIFIED` — that requires an independent context, on every route.
+`CUSTOM` and `MODIFY` cannot reach a successful final status yet. Every deterministic stage
+still runs and every receipt is still written — build, gates, screen, preservation audit,
+witnesses — so a designer can iterate against real measurements. What the run reports is
+`EXPERIMENTAL_UNAVAILABLE`, with `lane_status` and the reason in `final_status.json`: the
+candidate still supplies its own acceptance criteria, and a receipt issued by the party being
+judged is not a receipt. A real `FAILED` is still `FAILED`. `docs/adr/0002-route-and-contract-authority.md`
+in the repository records why, and what lifts it.
 
 It requires an independent verification when any of these holds, and the route decision names
 which: the job is `CONSEQUENTIAL`; there is an external mating interface; motion is declared;
@@ -373,7 +377,9 @@ interface type", and only a fresh context catches that.
    one bounded safety review is the second context and no normal geometric verifier is added.
    Compare the brief's features against what the images show, one by one.
 
-5. `CUSTOM` only: `design-tool run` writes the designer commission to `next_action.json` —
+5. Authored geometry — `CUSTOM`, or any route whose `execution_plan.json` gives
+   `builder: AUTHORED` because no certified template covers the shape:
+   `design-tool run` writes the designer commission to `next_action.json` —
    the role, the authorized inputs, the required outputs, the bound hashes and the completion
    command. Dispatch it as written, without adding your expectation of what it should build.
    The print plan is created before the candidate is measured, never by whoever builds the

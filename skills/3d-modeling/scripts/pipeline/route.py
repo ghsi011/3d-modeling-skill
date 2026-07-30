@@ -103,17 +103,24 @@ def _verification_reasons(project: P.Project, route: str) -> list[str]:
     """Why a `CUSTOM` job cannot finish on deterministic gates alone.
 
     `FITTED` and `FULL` carry their own required reviews and only need to say so.
-    `DIRECT` is deliberately absent: its whole route trade is deterministic
+    `DIRECT` gets almost none of this: its whole route trade is deterministic
     commissioning of a certified template without an independent look, and a
     `CONSEQUENTIAL` `DIRECT` job gets exactly one bounded safety review rather
     than a geometric verifier on top. Consequence does not add a geometric review
     merely because the job is consequential.
 
+    The one thing `DIRECT` does not get to discard is an explicit ask. Returning
+    early for the whole route dropped `verification_requested` on the floor: the
+    user turned a verifier on, the project recorded it, and nothing downstream
+    ever read it -- a request that vanishes without a receipt is worse than one
+    that is refused, because nobody can tell which happened.
+
     The list is additive by construction: nothing here can remove a review, only
     turn one on.
     """
     if route == "DIRECT":
-        return []
+        return (["independent verification was explicitly requested"]
+                if project.verification_requested else [])
     reasons: list[str] = []
     if project.consequence == "CONSEQUENTIAL":
         reasons.append("the job is CONSEQUENTIAL")

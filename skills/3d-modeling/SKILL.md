@@ -55,10 +55,17 @@ Source mode never selects one either — `MODIFY` is not automatically `FITTED`.
 | `FULL` | several interacting parts, more than one external interface, declared motion, mechanisms, parallel candidates | the complete workflow |
 
 `CUSTOM` covers both from-scratch authoring and modification of an existing
-design. An uncomplicated `INCONSEQUENTIAL` `CUSTOM` part with no external
-interface may finish `COMMISSIONED`; it requires an independent verification when
-the job is `CONSEQUENTIAL`, has an external mating interface, declares motion,
-needs imported-geometry repair, has open questions, or when one is asked for.
+design. It requires an independent verification when the job is
+`CONSEQUENTIAL`, has an external mating interface, declares motion, needs
+imported-geometry repair, has open questions, or when one is asked for.
+
+**`CUSTOM` and `MODIFY` cannot claim success right now.** They build, screen,
+gate and write every receipt, and a designer can iterate against real
+measurements — but the run reports `EXPERIMENTAL_UNAVAILABLE` instead of
+`COMMISSIONED` or `VERIFIED`, because the candidate still supplies its own
+acceptance criteria. `final_status.json` carries `lane_status` and the reason,
+and a genuine `FAILED` is still reported as `FAILED`. The repository's
+`docs/adr/0002-route-and-contract-authority.md` records why, and what lifts it.
 
 `VERIFIED` requires an independent context on every route. Nothing else reaches
 it.

@@ -36,6 +36,23 @@ screening are 0.13 s.
 `design-tool selftest` builds all five certified templates in ~4.6 s, dominated
 by the same cold import.
 
+## Re-measured after repair stage 1 (route authority)
+
+Same machine, same method, five runs after one warm-up, median. The stage moved
+routing out of the runner and into a compiled `execution_plan.json`; reading a
+plan is cheaper than re-deriving a route, and the measurement says so.
+
+| route | before | after | llm calls |
+|---|---|---|---|
+| `DIRECT` `c_clip` | 0.197 s | 0.193 s | 0 -> 0 |
+| `DIRECT` `trim_ring` (warm) | 0.252 s | 0.237 s | 0 -> 0 |
+| `FITTED` `c_clip` | 0.183 s | 0.189 s | 2 -> 2 |
+| `FULL` `c_clip`, `bore_d=60` | 0.184 s | 0.186 s | 2 -> 2 |
+
+The `trim_ring` figures here are warm: the 3.69 s build123d cold import above is
+paid once per interpreter and is untouched. Differences are inside the run-to-run
+spread; no route gained or lost a dispatch.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

@@ -125,6 +125,8 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
            safety: dict[str, Any] | None, artifact: dict[str, Any],
            verification: dict[str, Any] | None, updated_utc: str,
            route: str = "DIRECT",
+           execution_plan_sha256: str | None = None,
+           lane_status: str = "AVAILABLE", lane_note: str = "",
            safety_envelope: R.ReviewEnvelope | None = None,
            verification_envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
     reasons: list[str] = []
@@ -268,6 +270,22 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
                         reasons.append("verification saw no images; undeclared geometry "
                                        "is not covered by a numeric check")
 
+    if lane_status != "AVAILABLE":
+        # Recorded on every run of an experimental lane, whatever the verdict, so
+        # the limitation is legible on a FAILED receipt too -- a reader who only
+        # sees it when the job would otherwise have succeeded learns it at the
+        # worst possible moment.
+        reasons.append(lane_note)
+        if final in ("COMMISSIONED", "VERIFIED"):
+            # The deterministic work is done and on disk; what is withheld is the
+            # claim. Downgrading only a successful verdict is deliberate: FAILED
+            # and NEEDS_MORE_EVIDENCE are findings this lane *is* entitled to
+            # report, and overwriting them would hide a real defect behind an
+            # architectural caveat.
+            final = "EXPERIMENTAL_UNAVAILABLE"
+            claim = (f"not claimable on this lane yet -- {lane_note}. What did "
+                     f"run is on disk: {claim}.")
+
     S.require_enum(final, S.FINAL_STATUS, what="final_status")
     return {
         "schema_version": S.STATUS_SCHEMA,
@@ -278,6 +296,12 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         # said it had cost no dispatches. Nothing read the field, which is how it
         # survived -- a receipt nobody reads is still a receipt somebody may.
         "route": route,
+        # Which plan produced this receipt. The route above is only trustworthy
+        # if it is the one that was compiled: the runner used to re-derive its
+        # own and write that instead, so a FITTED job's status said "DIRECT"
+        # while `route_decision.json` beside it said FITTED.
+        "execution_plan_sha256": execution_plan_sha256,
+        "lane_status": lane_status,
         "backend": contract.backend,
         "template": f"{contract.template}@{contract.template_version}",
         "domain_id": contract.domain_id,

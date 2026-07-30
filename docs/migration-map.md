@@ -44,6 +44,20 @@ The repair runs in five stages: route authority -> acceptance contract -> state
 lifecycle -> gate consolidation -> preservation. No stage after 2 begins until a
 built artifact is structurally unable to influence its own acceptance criteria.
 
+| stage | state |
+|---|---|
+| 1 — route authority | **done**: `pipeline/execution.py` compiles `execution_plan.json`; the runner consumes it and no longer selects a route; `final_status.json` carries the plan's route, the plan hash and the lane status |
+| 2 — acceptance contract | not started |
+| 3 — state lifecycle | not started |
+| 4 — gate consolidation | not started |
+| 5 — preservation | not started |
+
+Stage 1 also marks `CUSTOM` and `MODIFY` as `EXPERIMENTAL_UNAVAILABLE`: they
+build, screen, gate and write every receipt, and a passing run reports
+`EXPERIMENTAL_UNAVAILABLE` rather than `COMMISSIONED` or `VERIFIED`. A real
+`FAILED` or `NEEDS_MORE_EVIDENCE` is still reported as itself -- withholding a
+claim must not bury a finding.
+
 Phase 2 rows that were planned and never built are unchanged by this and still
 owed: `pipeline/commissions.py`, a `design-tool commission` verb, and a
 `certified` flag on the starting templates. `dt.py commission` therefore does NOT

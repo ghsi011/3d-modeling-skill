@@ -44,6 +44,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import execution as EX
 from . import project as P
 from . import review as R
 from . import route as RT
@@ -62,6 +63,12 @@ NEEDS_ACTION = NEEDS_REVIEW
 NEXT_ACTION_FILE = "next_action.json"
 NEXT_ACTION_SCHEMA = 1
 ROUTE_DECISION_FILE = "route_decision.json"
+# The compiled plan, written beside the decision it was compiled from. Nobody
+# authors this file: `route` and `run` produce it from `project.json` in the same
+# invocation, deterministically and without a dispatch. It is here to be read --
+# by the next run, by a reviewer, and by anyone checking that the receipt names
+# the plan that was actually executed.
+EXECUTION_PLAN_FILE = EX.EXECUTION_PLAN_FILE
 
 
 ReviewNeeded = runner.ReviewNeeded
@@ -426,6 +433,22 @@ def init(argv: list[str]) -> int:
     return 0
 
 
+def _compile(project_dir: Path, project: P.Project,
+             decision: RT.RouteDecision) -> EX.ExecutionPlan:
+    """Compile the plan and write both receipts.
+
+    Two files, one authority. `route_decision.json` is why this route and not the
+    others -- the audit trail of a decision. `execution_plan.json` is what will
+    be executed under it, and it is the only one the runner reads.
+    """
+    plan = EX.compile_plan(project, decision)
+    (project_dir / ROUTE_DECISION_FILE).write_text(
+        S.canonical_json(decision.as_dict()), encoding="utf-8")
+    (project_dir / EXECUTION_PLAN_FILE).write_text(
+        S.canonical_json(plan.as_payload()), encoding="utf-8")
+    return plan
+
+
 def route(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="design-tool route",
@@ -442,32 +465,40 @@ def route(argv: list[str]) -> int:
 
     decision = RT.decide(project)
     RT.apply(project, decision)
+    plan = _compile(project_dir, project, decision)
     project.save(project_dir)
-    (project_dir / ROUTE_DECISION_FILE).write_text(
-        S.canonical_json(decision.as_dict()), encoding="utf-8")
 
     sys.stderr.write(f"\n  route      {decision.route}\n"
                      f"  because    {decision.condition}\n"
-                     f"  source     {decision.source_mode}\n")
+                     f"  source     {decision.source_mode}\n"
+                     f"  builder    {plan.builder}"
+                     f"{f' ({plan.template})' if plan.template else ''}\n")
     if project.required_reviews:
         sys.stderr.write(f"  reviews    {', '.join(project.required_reviews)}\n")
     for reason in decision.escalations:
         sys.stderr.write(f"    - {reason}\n")
+    if plan.lane_status != "AVAILABLE":
+        sys.stderr.write(f"  lane       {plan.lane_status}: {plan.lane_note}\n")
     return 0
 
 
 PLAN_FILE = "print_plan_checks.json"
 
-def _review_calls(project_dir: Path, project: P.Project) -> dict[str, Any]:
-    """Only the reviews the route decision actually named.
+def _review_calls(project_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
+    """Only the reviews the plan actually named.
 
     Supplying a callback the route did not ask for is not harmless: the runner
     dispatches an independent verification whenever one is available and the
     screen is clear, so an unconditional verifier turned every `CUSTOM` job into
     one that requires a fresh context -- which is exactly the escalation the
     route decision exists to make deliberately.
+
+    Read off the same plan the runner reads. When this list and the runner's
+    expectation came from two different derivations, a `FULL` job could be handed
+    no spec reviewer by one and refused for the missing spec reviewer by the
+    other, with nothing the agent could supply to break the tie.
     """
-    required = set(project.required_reviews)
+    required = set(plan.required_reviews)
     return {
         "safety_call": _answer(project_dir, "safety") if "safety" in required else None,
         "spec_call": (_answer(project_dir, "spec")
@@ -620,20 +651,27 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     },)
 
 
-def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
-                *, render: bool) -> int:
-    """The `CUSTOM` lane: a print plan, then the authored model, then the gate."""
+def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
+                  *, render: bool) -> int:
+    """The authored builder: a print plan, then the model, then the same gate.
+
+    Selected by the plan's builder and not by its route. Reaching this lane only
+    from `CUSTOM` is what stranded a `FITTED` or `FULL` job whose geometry a
+    designer had already written: the run rewrote the same commission every time,
+    never looked to see whether the model it had asked for was sitting next to
+    the project file, and could not progress by any action the designer took.
+    """
     from . import authored as A
     from . import commission as CM
 
     if project.envelope_mm is None:
         return _report_problems(project_dir, project, [
-            "envelope_mm is required on a CUSTOM job: the print plan is written "
-            "before the geometry, and it cannot be written without the envelope "
-            "the part is allowed to occupy. Declare it as a stated or chosen "
-            "requirement."], stage="run")
+            "envelope_mm is required when the geometry is authored: the print "
+            "plan is written before the geometry, and it cannot be written "
+            "without the envelope the part is allowed to occupy. Declare it as a "
+            "stated or chosen requirement."], stage="run")
 
-    plan, plan_problems = _print_plan(project_dir, project)
+    print_plan, plan_problems = _print_plan(project_dir, project)
     if plan_problems:
         return _report_problems(project_dir, project, plan_problems, stage="plan")
 
@@ -645,10 +683,11 @@ def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecisio
             "kind": "AGENT_COMMISSION",
             "role": "designer",
             "stage": "candidate_build",
-            "route": decision.route,
-            "reason": decision.condition,
+            "route": plan.route,
+            "reason": plan.route_rationale,
             "authorized_inputs": [project.brief, P.PROJECT_FILE,
-                                  ROUTE_DECISION_FILE, PLAN_FILE]
+                                  ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
+                                  PLAN_FILE]
             + [a.path for a in project.source_artifacts],
             "required_outputs": [model_path.name],
             "source_api": {
@@ -661,16 +700,17 @@ def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecisio
                 "build()": "returns the solid, or a module-level `part`",
             },
             "bound": {"project_sha256": project.project_hash(),
-                      "print_plan_sha256": S.payload_hash(plan),
+                      "execution_plan_sha256": plan.plan_hash(),
+                      "print_plan_sha256": S.payload_hash(print_plan),
                       "source_artifacts": {a.artifact_id: a.sha256
                                            for a in project.source_artifacts}},
             "unresolved": list(project.blocking_questions),
-            "required_reviews": list(project.required_reviews),
+            "required_reviews": list(plan.required_reviews),
             "completion_command": f"design-tool run {project_dir.as_posix()}",
             "updated_utc": project.updated_utc,
         })
         sys.stderr.write(
-            f"\ndesign-tool: this job routes {decision.route} and has no model yet.\n"
+            f"\ndesign-tool: this job routes {plan.route} and has no model yet.\n"
             f"  the commission is written to  {NEXT_ACTION_FILE}\n"
             f"  the print plan it builds against is  {PLAN_FILE}\n"
             f"  write the model to            {model_path.name}\n"
@@ -692,71 +732,41 @@ def _run_custom(project_dir: Path, project: P.Project, decision: RT.RouteDecisio
         render=render,
         authored=model,
         authored_builder=builder,
-        route=decision.route,
-        route_condition=decision.condition,
-        require_verification=decision.requires_verification,
-        plan_features=(_plan_features(plan, project_dir=project_dir,
+        plan=plan,
+        plan_features=(_plan_features(print_plan, project_dir=project_dir,
                                       project=project)
                        + _preservation_feature(project)),
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
-        **_review_calls(project_dir, project),
+        **_review_calls(project_dir, plan),
         **fields)
-    return _finish(project_dir, project, decision, request)
+    return _finish(project_dir, project, plan, request)
 
 
-def _run_project(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
+def _run_project(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
                  *, render: bool) -> int:
-    """Every deterministic stage this route can execute right now."""
-    if decision.route == "CUSTOM":
-        return _run_custom(project_dir, project, decision, render=render)
-    if project.template is None:
-        # The certified-template runner is the only build lane wired today; the
-        # authored-geometry lane arrives in Phase 2. Stopping here with a written
-        # commission is the honest state: the job is routed, its reviews are
-        # known, and what it is waiting for is a designer.
-        _write_next_action(project_dir, {
-            "schema_version": NEXT_ACTION_SCHEMA,
-            "job_id": project.job_id,
-            "kind": "AGENT_COMMISSION",
-            "role": "designer",
-            "stage": "candidate_build",
-            "route": decision.route,
-            "reason": decision.condition,
-            "authorized_inputs": [project.brief, P.PROJECT_FILE, ROUTE_DECISION_FILE]
-            + [a.path for a in project.source_artifacts],
-            "required_outputs": ["model.py"],
-            "bound": {"project_sha256": project.project_hash(),
-                      "source_artifacts": {a.artifact_id: a.sha256
-                                           for a in project.source_artifacts}},
-            "unresolved": list(project.blocking_questions),
-            "required_reviews": list(project.required_reviews),
-            "completion_command": f"design-tool run {project_dir.as_posix()}",
-            "updated_utc": project.updated_utc,
-        })
-        sys.stderr.write(
-            f"\ndesign-tool: this job routes {decision.route} and has no model yet.\n"
-            f"  the commission is written to  {NEXT_ACTION_FILE}\n"
-            f"  write the model to            model.py\n"
-            "  then run the same command again.\n\n"
-            "  This program cannot author geometry, and a deterministic tool that\n"
-            "  returned some would be inventing it.\n")
-        return NEEDS_ACTION
+    """Every deterministic stage this plan can execute right now.
+
+    Dispatched on the builder, never on the route. Which lane builds the geometry
+    and which reviews the job owes are two different questions, and answering the
+    first with the second is what left a `RECONSTRUCT` job with a certified
+    template running as though nothing had to be recovered.
+    """
+    if plan.builder == "AUTHORED":
+        return _run_authored(project_dir, project, plan, render=render)
 
     fields = P.to_job_request_fields(project)
     request = runner.JobRequest(
         brief_path=project_dir / project.brief,
         out_dir=project_dir,
         render=render,
-        route=decision.route,
-        route_condition=decision.condition,
-        require_verification=decision.requires_verification,
+        plan=plan,
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
-        **_review_calls(project_dir, project),
+        **_review_calls(project_dir, plan),
         **fields)
-    return _finish(project_dir, project, decision, request)
+    return _finish(project_dir, project, plan, request)
 
 
-def _finish(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
+def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
             request: runner.JobRequest) -> int:
     """Run, then turn whatever came back into a state the next run can resume."""
     try:
@@ -769,7 +779,7 @@ def _finish(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
             "kind": "REVIEW",
             "review_kind": need.kind,
             "stage": f"review:{need.kind}",
-            "route": decision.route,
+            "route": plan.route,
             "reason": f"this job needs a {need.kind} review before it can finish",
             "evidence": str(rel.with_name(need.kind + "_packet.json")).replace("\\", "/"),
             "respond_with": str(rel).replace("\\", "/"),
@@ -798,13 +808,21 @@ def _finish(project_dir: Path, project: P.Project, decision: RT.RouteDecision,
         # the part does not match its contract; the other says a question went
         # unasked. They call for different work, and collapsing both into exit 1
         # made the second read as a rejection of the geometry.
+        #
+        # `EXPERIMENTAL_UNAVAILABLE` is a third thing again, and it is not
+        # `NEEDS_ACTION`: no answer the agent writes lifts it, so a job parked
+        # there waiting for a response nobody can give is the livelock this stage
+        # exists to remove. The deterministic work ran and its receipts are on
+        # disk to iterate against.
         needs_evidence = final == "NEEDS_MORE_EVIDENCE"
+        unavailable = final == "EXPERIMENTAL_UNAVAILABLE"
         _write_next_action(project_dir, {
             "schema_version": NEXT_ACTION_SCHEMA,
             "job_id": project.job_id,
-            "kind": "NEEDS_EVIDENCE" if needs_evidence else "BLOCKED",
+            "kind": ("LANE_UNAVAILABLE" if unavailable
+                     else "NEEDS_EVIDENCE" if needs_evidence else "BLOCKED"),
             "stage": result.stage,
-            "route": decision.route,
+            "route": plan.route,
             "reason": result.message,
             "unresolved": list((result.final_status or {}).get("reasons")
                                or [result.message]),
@@ -843,11 +861,13 @@ def run(argv: list[str]) -> int:
         project.status = {**project.status, "route_changed_from": previous}
         sys.stderr.write(f"design-tool: the route moved {previous} -> "
                          f"{decision.route}: {decision.condition}\n")
+    # Compiled here, in the same invocation, from state that is already on disk.
+    # No round trip and no hand-written file: `design-tool run` is still the one
+    # command for a whole job.
+    plan = _compile(project_dir, project, decision)
     project.save(project_dir)
-    (project_dir / ROUTE_DECISION_FILE).write_text(
-        S.canonical_json(decision.as_dict()), encoding="utf-8")
 
-    return _run_project(project_dir, project, decision, render=not args.no_render)
+    return _run_project(project_dir, project, plan, render=not args.no_render)
 
 
 def status(argv: list[str]) -> int:
@@ -883,6 +903,8 @@ def status(argv: list[str]) -> int:
         "waiting_for": next_action,
         "final_status": (final_payload or {}).get("final_status"),
         "allowed_claim": (final_payload or {}).get("allowed_claim"),
+        "lane_status": (final_payload or {}).get("lane_status"),
+        "execution_plan_sha256": (final_payload or {}).get("execution_plan_sha256"),
         "bindings": project.bindings,
     }
     if args.json:
@@ -899,6 +921,8 @@ def status(argv: list[str]) -> int:
         if report["final_status"]:
             print(f"  status       {report['final_status']}")
             print(f"  claim        {report['allowed_claim']}")
+        if report["lane_status"] and report["lane_status"] != "AVAILABLE":
+            print(f"  lane         {report['lane_status']}")
         if next_action:
             print(f"  waiting for  {next_action.get('kind')} "
                   f"({next_action.get('stage')})")
@@ -906,7 +930,10 @@ def status(argv: list[str]) -> int:
         for problem in report["problems"]:
             print(f"  problem      {problem}")
 
-    if report["final_status"] == "FAILED":
+    if report["final_status"] in ("FAILED", "EXPERIMENTAL_UNAVAILABLE"):
+        # Not NEEDS_ACTION: there is no answer an agent can write that lifts
+        # either of these, and an exit code that says "waiting" would send a
+        # caller round a loop that cannot terminate.
         return 1
     if next_action is not None:
         return NEEDS_ACTION

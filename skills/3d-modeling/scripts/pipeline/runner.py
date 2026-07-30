@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, cache as K, commission, contract as C, fitted, intent, review as R
+from . import analysis, cache as K, commission, contract as C, execution as EX
+from . import fitted, intent, review as R
 from . import safety
 from . import schemas as S
 from . import screening, status, templates as T, verification, witness as W
@@ -51,14 +52,13 @@ class JobRequest:
     render: bool = True
     safety_call: Callable[[safety.Packet], dict[str, Any]] | None = None
     reviewer: dict[str, Any] | None = None
-    # FITTED only: the one bounded call that recovers externally owned geometry,
-    # and the evidence it is given. Absent on a DIRECT job, which owns everything
-    # it needs by definition.
+    # The one bounded call that recovers externally owned geometry, and the
+    # evidence it is given. Required exactly when the plan lists `specification`,
+    # and absent on a job that owns everything it needs by definition.
     spec_call: Callable[[dict[str, Any]], dict[str, Any]] | None = None
-    # The independent verifier. DIRECT deliberately ignores this callback: its
-    # route trade is deterministic commissioning without an independent look.
-    # It is optional on FITTED and required for FULL, and is the only way any
-    # route reaches VERIFIED.
+    # The independent verifier, and the only way any route reaches VERIFIED.
+    # Whether it is dispatched is `plan.verification_dispatch`: never on DIRECT,
+    # whose route trade is that nobody independent looks.
     verify_call: Callable[[verification.Packet], dict[str, Any]] | None = None
     evidence: tuple[str, ...] = ()
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -66,18 +66,18 @@ class JobRequest:
     # which is the right default for a test: a cache that is on by default makes
     # every test depend on what a previous one left behind.
     cache_dir: Path | None = None
-    # The CUSTOM lane. When set, the geometry is an authored module rather than a
-    # certified template, so template selection does not run: the route was
-    # already decided over the canonical project, and re-deriving it from a
-    # parameter dict here would answer a different question.
+    # The authored builder: geometry is a module the designer wrote rather than a
+    # certified template. Which builder to use is the plan's answer, not a
+    # property of the route.
     authored: Any = None
     authored_builder: Any = None
-    route: str = "CUSTOM"
-    route_condition: str = "geometry authored for this job"
-    # Route policy computed upstream. On the certified lane it is `route ==
-    # FULL`; on CUSTOM it is whatever the escalation triggers found, and it has
-    # to survive a screen that could not clear the part.
-    require_verification: bool = False
+    # The compiled plan: the route, the builder, the reviews this job owes and
+    # what it is allowed to claim. Supplied by `design-tool run`, which compiles
+    # it from `project.json`. A request without one -- `run-job`, the frozen
+    # fixtures -- is compiled by the same module from the request itself, so
+    # there is still exactly one place a route is decided. This runner must never
+    # decide one; two authorities is one authority and one bug.
+    plan: EX.ExecutionPlan | None = None
     # Contract features generated from the print plan -- written before the
     # geometry existed, which is the only reason they are a gate rather than a
     # receipt.
@@ -136,24 +136,20 @@ def run(request: JobRequest) -> JobResult:
     brief_text = request.brief_path.read_text(encoding="utf-8") if request.brief_path.is_file() else ""
     brief_hash = S.sha256_text(brief_text)
 
-    # ---- intent + routing -------------------------------------------------
+    # ---- the compiled plan, consumed verbatim -----------------------------
     mark = time.perf_counter()
-    if request.authored is not None:
-        # The route was decided over the canonical project by `route.decide`.
-        # Template selection is the wrong question for authored geometry -- it
-        # can only answer "does a certified template cover this", and the answer
-        # is no by construction.
-        decision = intent.RouteDecision(
-            route=request.route, template=None, backend="authored",
-            condition=request.route_condition, candidates=())
-    else:
-        decision = intent.select(requested_template=request.template,
-                                 parameters=request.parameters,
-                                 external_geometry=request.external_geometry,
-                                 ambiguities=request.ambiguities)
-    selected_route = decision.route
-    route_requires_verification = (selected_route == "FULL"
-                                   or request.require_verification)
+    # Compiled upstream over the canonical project, or -- for `run-job` and the
+    # frozen fixtures, which hand over a job description and no project -- by the
+    # same compiler over this request. Either way the route is decided once and
+    # read here. The runner re-deriving it from `intent.select` is what let a
+    # FITTED job execute as DIRECT: no metrologist, no verifier, and "DIRECT" on
+    # its own final status.
+    plan = request.plan or EX.from_job_request(
+        job_id=request.job_id, template=request.template,
+        parameters=request.parameters, external_geometry=request.external_geometry,
+        ambiguities=request.ambiguities, consequence=request.consequence,
+        authored=request.authored is not None)
+    decision = plan.as_intent_decision()
     manifest = intent.manifest(
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
         parameters=request.parameters, stated=request.stated,
@@ -163,31 +159,47 @@ def run(request: JobRequest) -> JobResult:
     written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
     timings["intent"] = time.perf_counter() - mark
 
-    if request.authored is None and decision.route == "FULL" and request.verify_call is None:
+    if plan.requires_verification and request.verify_call is None:
         return JobResult(False, "routing",
-                         f"route is FULL: {decision.condition}. FULL requires independent "
-                         "verification and no verifier was supplied.",
+                         f"route is {plan.route}: {plan.route_rationale}. This job "
+                         "requires independent verification and no verifier was "
+                         "supplied.",
                          written, timings, llm_calls, None)
 
-    if request.authored is None and decision.route in ("FITTED", "FULL"):
-        # Both routes recover geometry the job does not own, so both need the
-        # spec call. Guarding only FITTED meant a FULL job with a verifier but no
-        # spec reviewer called `None` and raised out of `run` -- no receipt, no
-        # final status, a half-written directory, and a traceback out of the CLI.
-        # That is the one thing this function is not allowed to do.
+    if plan.builder == "AUTHORED" and request.authored is None:
+        return JobResult(False, "routing",
+                         f"route is {plan.route}: {plan.route_rationale}. The plan "
+                         "builds this job from authored geometry and no model was "
+                         "supplied, so there is nothing to build.",
+                         written, timings, llm_calls, None)
+
+    # Which certified template the contract is built from, when the plan names
+    # one. `request.template` is the fallback for a job that named a template the
+    # matcher could not confirm -- an out-of-domain FULL job whose parameters the
+    # metrologist is about to recover into that template's bounds.
+    built_from = plan.template or request.template
+
+    # The bounded recovery of geometry this job does not own. Gated on the plan's
+    # own review list rather than on a route table repeated here: the runner
+    # demanding a spec call the compiler had not asked for is what deadlocked a
+    # FULL job with two components, no evidence and no external interface --
+    # unresolvable, because no reviewer the agent supplied was ever going to be
+    # the one the runner wanted.
+    if plan.requires_specification and plan.builder == "CERTIFIED_TEMPLATE":
         if request.spec_call is None:
             return JobResult(False, "routing",
-                             f"route is {decision.route}: {decision.condition}. This job "
+                             f"route is {plan.route}: {plan.route_rationale}. This job "
                              "needs one bounded call to recover geometry it does not own, "
                              "and no spec reviewer was supplied.",
                              written, timings, llm_calls, None)
-        if decision.route == "FULL" and (decision.template or request.template) is None:
+        if built_from is None:
             return JobResult(False, "routing",
-                             f"route is FULL: {decision.condition}. No certified template "
-                             "was named, so there is nothing to recover parameters into.",
+                             f"route is {plan.route}: {plan.route_rationale}. No certified "
+                             "template was named, so there is nothing to recover "
+                             "parameters into.",
                              written, timings, llm_calls, None)
         mark = time.perf_counter()
-        template = T.get(decision.template or request.template)
+        template = T.get(built_from)
         # The contract that would be built from the current parameters, before the
         # spec reviewer recovers anything. The spec envelope binds this hash so a
         # response cannot be replayed against a different starting contract.
@@ -243,21 +255,23 @@ def run(request: JobRequest) -> JobResult:
             request, parameters={**request.parameters, **derived},
             external_geometry=False)
 
-        recovered = decision.route
-        decision = intent.select(requested_template=request.template,
-                                 parameters=request.parameters,
-                                 external_geometry=False, ambiguities=())
-        if decision.route != "DIRECT":
+        # A domain check on the recovered parameters, and nothing else. It asks
+        # whether the certified template still covers the job now that the
+        # metrologist has supplied the dimensions it does not own -- a question
+        # about the builder. It may not touch the route: a FITTED or FULL job is
+        # still that route even when the recovered parameters happen to sit
+        # inside a certified domain and build through the same code DIRECT does.
+        covered = intent.select(requested_template=request.template,
+                                parameters=request.parameters,
+                                external_geometry=False, ambiguities=())
+        if covered.route != "DIRECT":
             return JobResult(False, "routing",
                              "after recovering the specification the derived parameters "
-                             f"still do not route DIRECT: {decision.condition}",
+                             f"are outside every certified domain: {covered.condition}",
                              written, timings, llm_calls, None)
-        # The second selection is an internal template check after recovery. It
-        # must not replace the authoritative route selected for this job: a
-        # FITTED or FULL job is still that route even when recovered parameters
-        # happen to fit a certified template and build through the DIRECT path.
+        built_from = covered.template or plan.template
         manifest["route_decision"] = {
-            **manifest["route_decision"], "recovered_via": recovered,
+            **manifest["route_decision"], "recovered_via": plan.route,
         }
         # Rebuilt from the full parameter set, not patched over the old one: a
         # recovered dimension is new, so a comprehension that only updates
@@ -274,7 +288,16 @@ def run(request: JobRequest) -> JobResult:
             "measurements": spec["measurements"], "interfaces": spec["interfaces"]}
         written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
 
-    template = request.authored if request.authored is not None else T.get(decision.template)
+    if plan.builder == "AUTHORED":
+        template = request.authored
+    elif built_from is None:
+        return JobResult(False, "routing",
+                         f"route is {plan.route}: {plan.route_rationale}. The plan "
+                         "names a certified builder and no certified template covers "
+                         "this geometry, so there is nothing to build.",
+                         written, timings, llm_calls, None)
+    else:
+        template = T.get(built_from)
 
     # ---- contract ---------------------------------------------------------
     mark = time.perf_counter()
@@ -386,6 +409,13 @@ def run(request: JobRequest) -> JobResult:
         written["manufacturing_report"] = _write(out / "manufacturing_report.json", manufacturing)
 
     # ---- the one bounded safety call, when required ------------------------
+    # Keyed off the immutable contract rather than off the plan, and deliberately
+    # so. Everything else here reads the plan, because the plan is the single
+    # route authority; this one review is mandatory on a CONSEQUENTIAL job and
+    # must not be droppable by a plan that failed to list it. The compiler cannot
+    # disagree -- `route.required_reviews` adds `safety` for exactly this
+    # consequence class -- so the two agree, and the one that cannot be edited by
+    # a routing change is the one that gates.
     safety_report = None
     if model_contract.consequence == "CONSEQUENTIAL":
         if request.safety_call is None:
@@ -439,11 +469,13 @@ def run(request: JobRequest) -> JobResult:
             out / "safety_verification_report.json", safety_report)
 
     verification_report = None
-    # DIRECT deliberately has no normal verification dispatch. FITTED may take
-    # its optional independent look only after a clear screen, while FULL
-    # retains its required verifier even when screening cannot clear the job.
-    if request.verify_call is not None and selected_route != "DIRECT" and \
-            (screen["overall"] == "CLEAR" or route_requires_verification):
+    # Whether an independent look happens at all is the plan's answer: NEVER on
+    # DIRECT, whose route trade is exactly that nobody independent looks;
+    # OPTIONAL, which is worth taking only when the broad screen came back clear;
+    # REQUIRED, which survives a screen that could not clear the part.
+    if request.verify_call is not None and plan.verification_dispatch != "NEVER" and \
+            (screen["overall"] == "CLEAR"
+             or plan.verification_dispatch == "REQUIRED"):
         mark = time.perf_counter()
         packet = verification.build_packet(
             brief=brief_text, intent=manifest, contract=model_contract.as_payload(),
@@ -491,7 +523,9 @@ def run(request: JobRequest) -> JobResult:
                           safety=safety_report, artifact=artifact,
                           verification=verification_report,
                           updated_utc=request.updated_utc,
-                          route=selected_route,
+                          route=plan.route,
+                          execution_plan_sha256=plan.plan_hash(),
+                          lane_status=plan.lane_status, lane_note=plan.lane_note,
                           safety_envelope=safety_envelope if model_contract.consequence == "CONSEQUENTIAL" else None,
                           verification_envelope=verification_envelope if request.verify_call is not None else None)
     written["final_status"] = _write(out / "final_status.json", final)
