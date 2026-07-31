@@ -65,7 +65,7 @@ The immediate unresolved blockers are:
 1. unchanged modification jobs cannot reliably complete review resumption while preservation evidence varies between runs;
 2. custom candidate code can still influence the criteria used to judge its own output;
 3. project history and state are still effectively linear and do not cleanly support divergent design alternatives;
-4. modification and combination do not yet have a complete multi-source design model;
+4. Multi-artifact edit intent is now declarable: `edit_scopes` supports several source artifacts, coordinated scopes may share existing interfaces through `interface_ids`, and the plan and gate preserve one obligation per scope. Multi-source candidate production and preservation measurement remain unavailable.
 5. preservation is not yet strong enough to support successful modification claims;
 6. fitted authored designs and moving assemblies are not yet complete end-to-end capabilities;
 7. physical outcomes and alternative comparisons are not yet part of a systematic learning loop.
@@ -187,14 +187,15 @@ A job that declares none of these things must cost exactly what it cost before t
 
 After each release, classify discoveries as follows.
 
+Classification determines whether the code, roadmap, or architecture must change. It does not determine whether dependent work may continue. Any defect that violates an authority invariant, defeats a release gate, or can produce a false successful claim fails closed until repaired and regression-tested. Work that does not depend on the violated boundary may continue with its claims explicitly limited.
+
 **Implementation defect**
 
 The design is adequate; the implementation is wrong.
 
 Action:
 
-* fix the code;
-* add a regression fixture.
+Fix the code and add a regression fixture. If the defect violates an authority or claim-strength invariant, stop the dependent success-claim path until the fixture proves the repair.
 
 **Missing roadmap capability**
 
@@ -416,6 +417,22 @@ It may not be re-read from mutable model code after evaluation.
 
 Proposal changes remain allowed, but create a visible new design revision and invalidate dependent results.
 
+*Isolated build boundary*
+
+Execute authored candidate code through an isolated one-shot build boundary. The authoritative process freezes and retains acceptance state, sends only required build inputs to the candidate process, then independently reimports and assesses the produced artifacts.
+
+The ruled design shape is:
+
+1. the parent validates and freezes the proposal;
+2. the parent constructs and retains the authoritative acceptance object;
+3. a one-shot child process executes the candidate code;
+4. the child receives only the build inputs it needs;
+5. the child writes geometry and a small build manifest to a temporary build directory;
+6. the parent reimports and hashes the produced artifacts;
+7. the parent performs commissioning, screening, review binding, and final status in its clean interpreter.
+
+The protocol is JSON and files, not pickle or shared Python objects. The child must not write authoritative receipts. The parent retains the frozen contract in memory and verifies its on-disk hash after the child exits. `DIRECT` does not need a subprocess; the cost applies only to authored candidate execution.
+
 *Minimum common tolerance foundation*
 
 The acceptance specification stops carrying bare numbers with an implied band.
@@ -473,7 +490,14 @@ Adversarial tests include:
 * candidate-measured volume is reused as expected volume;
 * candidate profile data attempts to clear its own anomaly screen;
 * a proposal supplies its own tolerance band and the pipeline's band still governs;
-* a compensated dimension is measured against the compensated value rather than against the requirement.
+* a compensated dimension is measured against the compensated value rather than against the requirement;
+* candidate code monkeypatches `AcceptanceSource.expectations`;
+* candidate code monkeypatches commissioning tolerance functions;
+* candidate code monkeypatches final-status logic;
+* candidate code modifies its local copy of the acceptance object;
+* none changes the parent's frozen contract, assessment behavior, or final result;
+* unexpected child-written receipts are ignored or rejected;
+* `DIRECT` dispatch count and runtime remain unchanged.
 
 The release passes only when candidate-controlled acceptance is structurally impossible, not merely rejected by one validator.
 
@@ -886,6 +910,8 @@ Select one as preferred while retaining the other as fallback.
 **Outcome**
 
 The skill can represent and execute genuine modification and combination jobs involving multiple source artifacts and alternative source strategies.
+
+Delivered early slice: Multi-artifact edit declaration, validation, shared-interface references, planning, and preservation-row gating landed in response to the OnePlus case-and-drawer job. The remaining Release 5 work includes source-role generalization, selected assembly components, inheritance semantics, and candidate production suitable for per-artifact preservation assessment.
 
 **Scope**
 

@@ -11,7 +11,9 @@
 * After every real job, write a compact learning record. Keep project-specific lessons with the project; promote only repeatable, evidence-supported lessons into skill code, fixtures, patterns, calibration data, or documentation.
 * Never generalize fit allowances, tolerances, shrinkage, material behavior, or printer calibration beyond the conditions actually tested.
 * When a real job exposes a skill defect, add a failing regression fixture, implement the smallest architecture-consistent fix, run the affected replay, and update the roadmap only when the missing capability is broader than the defect.
+* If a defect can produce a false successful claim or violates an authority invariant, fail the affected claim path closed immediately and stop dependent work until a regression test proves the repair. Unaffected work may continue only with its limitations explicit.
 * Follow `ARCHITECTURE.md` and `ROADMAP.md`; preserve proportional effort, candidate-independent acceptance, explicit uncertainty, branch isolation, and minimal context and AI dispatch.
+* Treat authored or generated model code as untrusted implementation input. Never import it into the process that owns planning, acceptance, assessment, reviews, or final status; execute it only through the approved isolated build boundary.
 * Inspect existing code and conventions before changing the skill. Avoid unrelated refactors, duplicate authorities, speculative abstractions, and unnecessary agents.
 * Keep design-project commits and skill-repository commits separate. Do not modify the skill repository during an ordinary commission unless reusable learning or a confirmed defect justifies it.
 * Run all relevant formatting, lint, type, unit, integration, replay, packaging, and link checks. Independently review consequential skill changes.

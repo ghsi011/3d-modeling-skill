@@ -817,7 +817,7 @@ Observations from one alternative must not be reused as observations of another 
 
 ### 8.1 Acceptance specification
 
-Before a candidate is assessed, the system establishes the criteria against which it will be evaluated.
+Before candidate implementation code executes, the system freezes the criteria against which the resulting artifact will be evaluated.
 
 The acceptance specification is derived from:
 
@@ -854,6 +854,8 @@ Shared requirements may generate equivalent acceptance obligations for several a
 ### 8.2 Authority boundary
 
 The candidate implementation must not silently redefine the criteria used to accept its output.
+
+Candidate implementation executes within a boundary that cannot mutate the authoritative job model, execution plan, acceptance specification, assessment implementation, or final-status authority. The boundary may be a separate process, a restricted declarative runtime, or another mechanism that establishes the same property.
 
 A designer may propose dimensions and features before evaluation.
 
@@ -1184,6 +1186,8 @@ Substitution must not silently change:
 Geometry execution must operate under resource limits and fail in a controlled, diagnosable manner.
 
 Alternative candidates must execute in isolated artifact namespaces so that one candidate cannot overwrite another.
+
+An authored implementation receives only the inputs required to build its artifact. It does not execute inside the mutable authority context that performs acceptance or assessment.
 
 ## 13. State, revision, branching, and invalidation
 
@@ -1630,7 +1634,7 @@ Every implementation must preserve the following.
 12. Runtime components do not silently re-plan the job.
 13. Intent, proposal, implementation, and observation remain distinct.
 14. Candidate output cannot silently redefine its acceptance criteria.
-15. Acceptance criteria are established before candidate assessment.
+15. Acceptance criteria are frozen before candidate implementation code executes and remain outside the candidate's mutable authority.
 16. Modification and combination support multiple source artifacts.
 17. Preservation obligations are source-specific.
 18. Imported material, process, and sequence intent is preserved rather than silently discarded.
@@ -1655,6 +1659,7 @@ Every implementation must preserve the following.
 37. Unsupported and uncertain conclusions remain explicit.
 38. Optional semantics stay dormant for jobs that do not declare them.
 39. Simple jobs remain fast.
+40. Candidate implementation cannot mutate or replace planning, acceptance, assessment, or final-status authority.
 
 ## 19. Non-goals
 
