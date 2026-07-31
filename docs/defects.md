@@ -121,3 +121,55 @@ is read by the supported one.
 project declares an edit scope. `run-job` must refuse rather than proceed, and
 `status` must not present a `final_status.json` whose bindings do not match the
 project's.
+
+## D5 — `EditScope.alignment_transform` is declared, validated, and read by nothing
+
+**Where.** [`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py):274
+declares it; :348-354 validates it; it is serialised into `project.json`. No
+reader exists.
+
+**What is wrong.** The field states where a source artifact sits in the job's
+shared frame — the single value a coordinated multi-artifact edit most depends
+on. It reaches neither `preservation._seed_material`, nor the contract row built
+by `cli._preservation_feature`, nor `cli._requirement_hash`, nor the review
+envelope. `Project.project_hash()` covers it, and that hash appears in no
+receipt.
+
+**Evidence.** A finished MODIFY job was given a 5 mm x-translation on its edit
+scope, saved, and rerun. Every evidence digest was unchanged, the stored review
+response was accepted, and the run wrote a final status. Changing where the
+source sits changed nothing anyone downstream could see.
+
+**What it can cause.** A reviewer's answer stays bound to a job whose geometry
+has moved underneath it. This is `ROADMAP.md` Release 1's proof "changed
+transform rejects the old response", and it is the one proof of the nine that
+has neither mechanism nor test.
+
+**Fixture that must fail first.** Run a MODIFY job to its review pause, store the
+answer, change `alignment_transform`, rerun, assert `ReviewError` and that no
+`final_status.json` is written. A fixture asserting only that `project_hash()`
+moves passes today.
+
+## D6 — four declared edit-intent fields bind to nothing
+
+**Where.** `EditScope.preserve`, `.may_remove`, `.add`, `.expected_body_delta`,
+and `.interface_ids`, consumed nowhere outside
+[`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py).
+
+**What is wrong.** `cli._preservation_feature` carries only `region_box`, the
+region name and `preservation_tolerance_mm` into the acceptance contract, and
+only the first and last into the sampling seed. The remaining fields are what the
+job *promised about the edit* — what must survive, what may go, what is being
+added, how many bodies should result — and changing any of them moves no hash.
+
+**Evidence.** Editing each of the four on a finished job left the contract hash
+and every evidence digest unmoved, and the stale `PASS` was accepted on rerun.
+`region_box`, the region name and `preservation_tolerance_mm` were each
+demonstrated to reject correctly, so the mechanism is sound and the coverage is
+partial.
+
+**What it can cause.** A job can change what it claims to be doing without
+invalidating the evidence that it did the previous thing.
+
+**Fixture that must fail first.** One parameterised rerun-rejection test over all
+seven intent fields. Three pass today; four fail.
