@@ -76,7 +76,11 @@ Several narrower gaps are carried forward from the completed consolidation work.
 * designer commissions are not yet generated from canonical project state, and the template registry does not yet distinguish a certified template from a starting one.
 * a job that declares motion routes `FULL`, and its motion modifier is reported `DEFERRED` rather than measured. The sweep engine does not exist. Naming it unmeasured is deliberate and is not a substitute for Release 8.
 * there is no resource governor, and the 3MF writers are not versioned adapters.
-* preservation sampling is deterministic but its density is not derived from a declared minimum detectable defect size, and exact STEP comparison is undecided. Every job that declares an edit scope therefore reports `EXPERIMENTAL_UNAVAILABLE` rather than a successful status.
+* preservation sampling is deterministic but its density is not derived from a declared minimum detectable defect size, and exact STEP comparison is undecided. A real modification job put a number on what that costs: the entire defect the audit had to find was 85 faces of a 93,530-face part, under a tenth of a percent of its surface. Every job that declares an edit scope therefore reports `EXPERIMENTAL_UNAVAILABLE` rather than a successful status.
+* preservation also has one verdict for one box. The same job needed three dispositions over named regions — geometry that must not move, geometry permitted to change, and geometry the edit deliberately consumed — because the deviation its audit reported, an unfiltered global maximum of 1.797 mm, *was* the requested change: material consumed where the two parts now interpenetrate, in a band opened to 2.88 mm by design. One box and one band cannot tell that apart from a defect, so the checker fails a correct part.
+* there is no repair path at all. `design-tool diagnose` classifies an artifact `REPAIR_REQUIRED` and stops, so a supplied file with non-manifold or open geometry cannot be modified through this skill even though `MISSION.md` names repair as a required capability and `ARCHITECTURE.md` §11.4 specifies it.
+* nothing certifies what an export writer wrote. A clean float64 solid became 429 zero-area faces and 367 non-manifold edges when written as binary STL, and two halves of one job independently hand-wrote the same float32-weld and file-versus-memory checks. Preservation and commissioning measure a file, and no tool currently proves the file carries what the geometry in memory did.
+* datums carry no provenance and are not dependency bindings. [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) records the case: a hand-authored shared datum, one of whose fields described a part before that part was modified, was given blanket precedence by an agent brief, and the compliant action was to build three features that must not exist.
 * a `FITTED` or `FULL` job built from authored geometry reports `UNSUPPORTED`. That is a limit of what this build can do, not a stage that is pending.
 
 Tolerances today are single numeric bands owned by the pipeline. There is no tolerance profile, no datum model beyond what a dimension names, no per-body material assignment, and no operation model. Those are introduced by the releases below, at the point where a real job needs them.
@@ -925,7 +929,11 @@ Generalize the authoritative job model to support:
 * source-specific removable regions;
 * source-specific editable regions;
 * added geometry;
-* output-component inheritance.
+* output-component inheritance;
+* named regions, each carrying exactly one declared disposition — must-preserve, permitted-change, or consumed-by-intent;
+* shared datums carrying provenance, the artifact revision they were derived from, and their validity scope.
+
+The last two are declaration obligations, not measurement ones; Release 6 measures against them. A region with no disposition and a datum with no provenance are the two ways a job can arrive at Release 6 with nothing to judge it by. The datum requirement is [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md): coordinated scopes name one datum identity rather than each holding a copy of the number, and a datum derived from an artifact before that artifact was edited is valid against the revision it was measured on and no later one.
 
 Imported intent survives the edit. Multi-source edit intent preserves:
 
@@ -996,7 +1004,9 @@ Fixtures cover:
 * a source declaring an embedded insert, whose sequence obligation survives import;
 * two alternatives using different donors;
 * branch-local source change that does not invalidate the sibling;
-* shared base-source change that invalidates both.
+* shared base-source change that invalidates both;
+* two coordinated scopes referencing one shared datum, where changing that datum invalidates both and neither holds a private copy;
+* a datum derived from a source revision the job then edits, which is refused against the later revision rather than silently reused.
 
 No schema, acceptance compiler, or runtime API may assume exactly one source.
 
@@ -1028,6 +1038,8 @@ Supported modification and combination jobs can reach honest successful outcomes
 
 **Scope**
 
+Three of the parts below — bounded repair, certified export, and per-region preservation — are separable slices with their own tests, their own replay, and their own authentic exercise. They are in one release because one real job needed all three at once, not because any of them has to wait for the others. Take them in the order real jobs need them, and do not hold the comparison core hostage to the slowest.
+
 Build one shared deterministic comparison capability for:
 
 * preservation;
@@ -1048,7 +1060,12 @@ The comparison core supports:
 * component correspondence;
 * percentile and maximum deviations;
 * cached source indices;
-* stable serialization.
+* stable serialization;
+* surface-to-surface distance between two parts placed in their assembled transforms, filtered by region, reporting an interference count as well as a distance;
+* residual material between geometry an edit added or removed and the nearest surface that edit must not break through;
+* a declared resource bound on every query above, with a controlled failure instead of an allocation attempt.
+
+The last three are one primitive applied to different inputs, not three capabilities. "How far is part A's surface from part B's, in this region" and "how much wall is left above this pocket" are the same query, and one real job needed both: the 0.300 mm residual left above its magnet pockets was the most consequential number it produced and nothing in the pipeline would have surfaced it, while the cross-part clearance it also needed sent trimesh's proximity path into a 20.5 GiB allocation attempt for 100k points against a 96k-face mesh. The job finished because an agent hand-rolled cropping and batching. The resource bound is therefore scope rather than optimization: an unbounded query is a check that fails as an out-of-memory kill rather than as a result.
 
 It also gains the primitives needed to assess, where those things are declared:
 
@@ -1068,17 +1085,45 @@ Preservation uses a staged method:
 4. distinguish allowed changes from unexpected changes;
 5. report the method and detection limit.
 
-Report separately:
+Every verdict is reported per named region, against that region's declared disposition, in both directions:
 
-* retained source geometry;
-* intentionally removed geometry;
-* added geometry;
-* permitted changes;
-* unintended changes outside the edit region.
+* **must-preserve** regions, where movement in either direction is a failure;
+* **permitted-change** regions, judged against the band declared for them;
+* **consumed-by-intent** regions, where the material's disappearance is the requested result and its absence is evidence that the edit happened;
+* geometry added or removed outside every declared region, which fails whichever direction finds it.
+
+A single whole-part verdict is issued only where a single whole-part obligation was declared. An unfiltered global maximum over a part carrying three dispositions measures the largest legitimate change, and reporting it as a preservation verdict fails correct parts: one real modification job's unfiltered global maximum was 1.797 mm, and it was a legitimate change — the job deliberately consumed material where its two parts now interpenetrate, in a band that opened to 2.88 mm by design. A two-verdict checker fails that part outright. It would be right about the number and wrong about the part.
+
+Sampling density is derived from a declared minimum detectable defect size rather than a fixed count, and the verdict is named for what the method established — stage 5 of [ADR 0002](docs/adr/0002-route-and-contract-authority.md). The size to design against is small: the entire defect that same job's audit had to find was 85 faces of 93,530.
+
+A datum a comparison rests on is one of its bindings. Changing a shared datum invalidates the comparisons that used it, in every coordinated scope that referenced it, per [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md).
 
 Exact B-rep claims are available only when an actual exact comparison backend exists.
 
 Alternative comparisons may reuse common source indices and shared external-object analysis.
+
+*Bounded repair*
+
+A supplied artifact classified `REPAIR_REQUIRED` currently ends the job: diagnosis names the condition and nothing acts on it. `MISSION.md` requires repair and architecture section 11.4 specifies it, so this is the slice that implements it, bounded on purpose:
+
+* repair is attempted only where diagnosis names a specific defect class, and only where the declared edit needs the geometry that defect affects;
+* the repaired artifact is a new artifact with its own identity and an explicit relationship to the file it came from. The supplied file is never rewritten, for the reason `diagnose` already refuses to rewrite it — it is frequently the only authoritative copy;
+* every repair is recorded: what was wrong, the method, the named region it changed, the geometry before and after, and whether that region was already permitted to change;
+* an assessment resting on repaired geometry says so and says which region, per architecture sections 6.2 and 8.4;
+* a defect the available methods cannot fix is reported as a limitation, never narrowed until it passes.
+
+Repair also depends on diagnosis naming the right defect class, which is not free: a report that calls nine three-face edges and one four-face edge "boundary edges" points a repairer at hole-filling, which cannot work on any of them ([`docs/defects.md`](docs/defects.md) D1).
+
+*Certified export*
+
+A preservation audit, a commissioning measurement and a final claim are all statements about an artifact, and an artifact is a file. The writer that produces it is a backend, and architecture section 12 already forbids a backend from silently changing topology interpretation or artifact identity. Nothing currently checks that it did not.
+
+* every production write is re-read and re-measured before anything claims anything about it;
+* the re-read compares classification, body count, per-part volumes and topology counts against the geometry that was written, and fails when they move;
+* coordinate precision is part of the contract. A writer that formats coordinates loses geometry, and how much it lost is reported rather than assumed negligible;
+* the check runs in the shipped frozen runtime. A self-check whose dependency is absent from that runtime has never run, and it must report that it was skipped rather than imply that it passed.
+
+The evidence threshold in section 3.1 is met by two sibling jobs, not by one: both halves of the case-and-drawer commission independently hand-wrote the same float32-weld and file-versus-memory comparison, after a clean float64 solid came back from a binary STL write carrying 429 zero-area faces and 367 non-manifold edges.
 
 **Explicit exclusions**
 
@@ -1090,7 +1135,11 @@ Do not:
 * treat geometric closeness as proof of equal function;
 * claim conformance to a formal construct the engine cannot evaluate;
 * compare a requirement against compensated manufacturing geometry;
-* assume a sibling alternative's assessment applies to another.
+* assume a sibling alternative's assessment applies to another;
+* repair geometry the declared edit does not need, or present a repaired artifact as the supplied one;
+* issue a preservation verdict for a region whose disposition was never declared;
+* run an unbounded proximity query and let the process die in place of failing the check;
+* compare an in-memory mesh when the claim is about the file that was written.
 
 **User-visible improvement**
 
@@ -1113,7 +1162,12 @@ Fixtures include:
 * multi-source preservation;
 * two alternatives sharing unchanged source geometry;
 * one branch-specific edit that leaves sibling evidence valid;
-* merged geometry requiring reassessment.
+* merged geometry requiring reassessment;
+* a part whose largest legitimate change is larger than its largest illegitimate one;
+* a consumed-by-intent region whose material is *not* gone, which fails;
+* a source carrying three-face and four-face edges, repaired inside a declared region and refused outside it;
+* an export whose write welds vertices, caught by re-reading the file rather than the memory it came from;
+* a two-part clearance query whose unbounded form would exhaust memory, which fails as a check.
 
 The result must state:
 
@@ -1122,6 +1176,8 @@ The result must state:
 * detection limit;
 * unsupported conditions;
 * source-specific verdicts;
+* per-region verdicts and the disposition each was judged against;
+* any repair the result rests on, and the region it changed;
 * alternative identity.
 
 **Authentic exercise**
@@ -1137,6 +1193,8 @@ Compare each against:
 * the physically proven historical result where informative.
 
 Historical physical proof remains separate from proof of a new candidate.
+
+Run the case-and-drawer magnetic-retention modification as the second authentic exercise, because it is the job that produced most of this release's scope and it exercises what the vent mount does not: two coordinated edit scopes, a shared datum, three region dispositions in one part, a repair-blocked source, a cross-part clearance query large enough to matter, and a residual wall — 0.300 mm above the magnet pockets — that decides whether the part is usable at all.
 
 ## Release 7 — Real-object fitting
 
@@ -1539,6 +1597,8 @@ Produce consistent:
 
 Generated structured files must be independently re-imported and checked, and a re-import must recover the material assignments the writer put in.
 
+`design-tool package` is the verb ADR 0001 promised and nothing implements. It lays parts out, emits spec-clean OPC, writes vertices at round-trip precision, and applies the certified-export rule from Release 6 to its own output: it feeds what it wrote back through `diagnose` and fails when the classification, the body count or any per-part volume has moved. A packager that cannot verify its own output is a writer with a claim attached, and the current one is worse than that — it formats vertices with `%.6g`, moving them by up to 0.0005 mm and changing a part's volume in the second decimal, and its round-trip self-check has never executed in the shipped runtime ([`docs/defects.md`](docs/defects.md) D2, D3).
+
 *Physical outcome model*
 
 Record outcomes such as:
@@ -1905,6 +1965,10 @@ The roadmap may change, but these dependencies are mandatory:
 * the revision graph precedes broad alternative-dependent capability expansion;
 * branch isolation precedes persistent A/B exploration;
 * multi-source representation precedes multi-source preservation;
+* a declared region disposition precedes any preservation verdict over that region;
+* recorded datum provenance precedes any claim that rests on the datum;
+* bounded repair precedes modification of an artifact diagnosis classified `REPAIR_REQUIRED`;
+* a certified export precedes any claim about the artifact that export produced;
 * deterministic comparison precedes strong preservation, interface scoring, comparative geometry scoring, and motion-contact claims;
 * explicit component and interface semantics precede motion;
 * lightweight explicit tolerancing precedes any formal tolerance profile;
@@ -1932,10 +1996,11 @@ At each checkpoint:
 4. review benchmark gaps;
 5. identify recurring manual work;
 6. identify abstractions introduced for only one fixture;
-7. identify branches that added no useful learning;
-8. evaluate whether comparison criteria reflect actual user decisions;
-9. decide whether the next release remains the highest-value step;
-10. revise later roadmap sections as needed.
+7. identify concepts a single real job had to hand-build because the model could not express them, and check whether a second job has since needed the same one — a hand-built workaround is evidence of a gap only after it recurs, and until then it belongs in that project's record;
+8. identify branches that added no useful learning;
+9. evaluate whether comparison criteria reflect actual user decisions;
+10. decide whether the next release remains the highest-value step;
+11. revise later roadmap sections as needed.
 
 Once a release has introduced tolerance, material, or sequencing semantics, the checkpoint also asks:
 
@@ -1992,7 +2057,9 @@ The roadmap is complete when the skill can, through one coherent user experience
 * select a preferred alternative without deleting useful fallbacks;
 * merge successful elements while preserving provenance and invalidating affected evidence;
 * diagnose STEP, STL, and 3MF without false repair claims;
-* modify supplied geometry while preserving declared regions;
+* repair a supplied artifact where an edit needs it, and record what the repair changed and which claims rest on it;
+* modify supplied geometry while preserving declared regions, with a verdict per region and its declared disposition;
+* certify that an exported artifact carries what was claimed about the geometry it came from;
 * combine multiple source artifacts with source-specific obligations;
 * design parts that fit real objects using appropriate evidence;
 * express ordinary tolerances explicitly without industrial GD&T ceremony;

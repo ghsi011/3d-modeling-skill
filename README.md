@@ -40,6 +40,9 @@ This README describes what the skill does today. The intended end-state design i
 [`ARCHITECTURE.md`](ARCHITECTURE.md), the incremental path to it is
 [`ROADMAP.md`](ROADMAP.md), and accepted technical decisions are recorded in
 [`docs/adr/`](docs/adr/). Neither of the first two describes current behaviour.
+Confirmed defects that are not yet fixed are in
+[`docs/defects.md`](docs/defects.md) — they describe current behaviour that is
+wrong, which is neither a plan nor a decision.
 
 ## Quickstart
 

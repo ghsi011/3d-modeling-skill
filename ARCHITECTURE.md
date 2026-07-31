@@ -248,9 +248,12 @@ An artifact record includes, as applicable:
 * authority level;
 * license and redistribution restrictions;
 * relationship to other artifacts;
-* revision or alternative that produced it.
+* revision or alternative that produced it;
+* repairs applied to it, and the region each one changed.
 
 Artifact identity is content-based. A filename or path alone is not sufficient identity.
+
+**A repair is recorded, not absorbed.** Section 11.4 requires that a repair which changes source geometry be recorded; the record lives here. Each entry names what was wrong, the method applied, the named region it changed, what the geometry measured before and after, and whether the change was inside a region the edit intent already permitted. A repaired artifact is a distinct artifact with its own identity and its own relationship to the file it was derived from. It never replaces the supplied file, and the supplied file remains the authoritative statement of what the user handed over.
 
 Typical artifact roles include:
 
@@ -308,6 +311,20 @@ Transforms between the following spaces must be explicit when relevant:
 No geometry-dependent conclusion may silently assume two coordinate systems are identical.
 
 An ordinary datum is a named reference a dimension is measured from. That is sufficient for most work.
+
+**A datum is evidence, and carries what evidence carries.**
+
+A datum records its provenance, using the same classes section 6.5 defines for dimensions. Where it is derived from geometry, it names the artifact *and the revision of that artifact* it was taken on. A datum measured before an edit is valid against the revision it was measured on; it is not silently valid against the result of that edit.
+
+A datum records the scope it is valid in: which artifacts, components, and interfaces it may be used to place, and — where an operation changes the geometry it refers to — up to which operation.
+
+A datum with no recorded provenance is an assumption. It may still be used, and it is named as an assumption, with an owner and with the check that would settle it. It does not acquire authority over measured evidence by being written down first. A conflict between a datum and a measurement remains a conflict until it is deliberately resolved, exactly as section 6.5 requires for dimensions.
+
+Coordinated edits that must agree on a reference name one datum identity rather than each holding a copy. Two copies of one number are two authorities over one declaration.
+
+A datum is a dependency binding (section 13.4). Changing it produces a new revision and invalidates the results that depended on it. It is never a silent rewrite.
+
+The demonstrated case, the rejected alternatives, and the reasoning are in [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md).
 
 When a job uses the formal tolerance profile described in section 6.5, a datum may additionally be a datum feature, and several datum features may be combined into a datum reference frame with a declared precedence. The formal construction is an elaboration of the same concept, not a second one, and it is present only when the job declares it.
 
@@ -504,6 +521,18 @@ For every relevant source, the model may describe:
 * the source transform in the shared design space;
 * material, process, and component roles inherited from the source;
 * output components that inherit from the source.
+
+**Obligations attach to named regions, and a region carries one disposition.**
+
+Each of the obligations above is stated over a named region of a named source, and every region carries exactly one of:
+
+* **must-preserve** — nothing here may move, in either direction;
+* **permitted-change** — the edit may alter this, within a declared band;
+* **consumed-by-intent** — this material is deliberately removed, displaced, or interpenetrated by another part, and its disappearance is the requested result rather than a violation.
+
+The third is not a convenience. A magnet pocket cut into a wall consumes material that a two-verdict comparison reports as a preservation failure, and a job whose largest legitimate change exceeds its largest illegitimate one cannot be judged by one global number at all. An unfiltered maximum deviation over a whole part is a measurement, not a verdict.
+
+A region's disposition is declared before the edit and is part of the acceptance specification. Assessment reports a verdict per region and states which region each deviation fell in; a single whole-part verdict is reported only where a single whole-part obligation was declared.
 
 Imported intent that the current job does not use is preserved rather than discarded. A donor assembly that names two materials still names them after the edit, even when the target job prints in one.
 
@@ -838,7 +867,7 @@ It may contain:
 * component structure;
 * interface obligations, including inter-material obligations;
 * material and process assignments;
-* preservation obligations;
+* preservation obligations, stated per named region with that region's disposition;
 * motion obligations;
 * required operations and their sequence obligations;
 * manufacturing constraints;
@@ -904,9 +933,13 @@ Examples:
 * a supported tolerance construct may be reported as satisfied only by a method that implements its semantics;
 * a successful print may establish printability for the tested conditions;
 * a printed coupon may establish a clearance for the material, printer, orientation, and settings it was printed under, and for no others;
-* a physical fit test may establish fit for the tested object and part.
+* a physical fit test may establish fit for the tested object and part;
+* a comparison over one named region may establish that region's obligation and no other's;
+* a measurement taken on repaired geometry establishes something about the repaired artifact, and states the repair it rests on.
 
 A weaker method must never produce a stronger claim.
+
+A claim also inherits the scope of what it was measured over. Preservation established for one named region says nothing about a region with a different obligation, and a claim resting on geometry that was repaired inside region R is a claim about a part that was repaired inside region R.
 
 A declared formal construct that the comparison engine cannot evaluate produces an explicit limitation, never a conformance claim. A part that was never printed has no compensation evidence, whatever allowance its manufacturing geometry carries.
 
@@ -1239,6 +1272,7 @@ These may include:
 * parent revision;
 * source hashes;
 * transforms;
+* datums and the shared references coordinated work agrees on;
 * design proposal;
 * acceptance specification;
 * tolerance profile and edition;
@@ -1311,7 +1345,8 @@ The result model should expose separate facets.
 * tolerance constructs declared but not evaluable;
 * features assessed;
 * interfaces assessed, including inter-material obligations;
-* preservation assessed;
+* preservation assessed, per named region and its disposition;
+* repairs applied, and which assessments rest on repaired geometry;
 * motion assessed;
 * operations and sequence assessed;
 * manufacturing constraints assessed.

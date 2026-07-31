@@ -138,6 +138,20 @@ one overlay iteration took a photo recreation from layout-IoU 0.59 to 0.70 vs gr
 truth; the loop also exposed pocket-mouth chamfers and a raised-end architecture that
 side-by-side viewing had missed.
 
+## Do not assert on an absolute topology invariant
+
+Genus, Euler characteristic and hole count are stable only on a mesh that is
+actually a manifold. Where a part carries pinch vertices, they are a function of
+how the reader welded the file as much as of the shape. Measured on one part:
+the float64 read reported genus 9 before the edit and 12 after; the float32 read
+of the same pair reported 10 and 13. The absolute number moved with the read.
+The **delta was +3 in both**, which is the quantity the edit actually determined.
+
+So: a check that asserts "this part has genus N" is asserting something about the
+importer. A check that asserts "this edit added exactly three through-holes"
+compares two reads taken the same way, and that one holds. Same rule as every
+other measurement here — compare like with like, and say which read you took.
+
 ## Printability audit helpers (trimesh, on the exported STL)
 
 ```python

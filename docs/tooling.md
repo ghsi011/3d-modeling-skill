@@ -213,8 +213,11 @@ silently fixed what it found would destroy the evidence that it needed fixing.
 | `RECONSTRUCTION_REQUIRED` | nothing here can be built on (exit 1) |
 
 Reported per format: body/component count, bbox, watertightness and winding for
-meshes, faces with no usable area for B-reps, degenerate faces, boundary edges,
-and the 3MF scene — objects, components, build items with their transforms, and
+meshes, faces with no usable area for B-reps, degenerate faces, boundary edges
+(**read that field with [`docs/defects.md`](defects.md) D1 in hand: it currently
+counts every edge that is not shared by exactly two faces, so a non-manifold edge
+is reported as a boundary edge and a repairer is pointed at hole-filling that
+cannot work**), and the 3MF scene — objects, components, build items with their transforms, and
 materials — rather than one merged solid, because that structure *is* the
 functional information in a multi-part or multi-colour job.
 
@@ -322,10 +325,21 @@ trip at all.
 That is reproducibility, and it is not sensitivity. The density is still a fixed
 count rather than one derived from a declared minimum detectable defect size, so
 a small undeclared addition outside the edit region can still be missed — now
-identically on every run. Deriving the density, comparing B-reps properly and
-renaming the verdict to `PRESERVED_WITHIN_SAMPLED_TOLERANCE` are stage 5 of
+identically on every run. A real modification job sized the target: the whole
+defect its audit had to find was 85 faces of a 93,530-face part. Deriving the
+density, comparing B-reps properly and renaming the verdict to
+`PRESERVED_WITHIN_SAMPLED_TOLERANCE` are stage 5 of
 [ADR 0002](adr/0002-route-and-contract-authority.md), and the `MODIFY` lane stays
 capped until they land.
+
+The other half of the same cap is that there is one verdict for one box. A job
+whose edit deliberately consumes material — a magnet pocket, or a band where two
+parts now interpenetrate — has geometry that must not move, geometry permitted to
+change, and geometry whose disappearance is the requested result, and one band
+over one region cannot say which is which. The same job's unfiltered global
+maximum was 1.797 mm and all of it was requested. Per-region dispositions are
+Release 6 in [`ROADMAP.md`](../ROADMAP.md); until they land, an edit of that shape
+is declarable and not judgeable.
 
 The support ceiling is inherited on a `MODIFY` job: a generated zero fails a
 supplied part for overhangs that were in the file before anybody touched it, and
@@ -396,6 +410,12 @@ directories keep working; `design-tool run` is the supported entry point and
 adapts a bare `job.json` on first use. One invocation runs contract, build,
 commission, screening, witness and status; every extra invocation would pay
 interpreter startup to do work measured in milliseconds.
+
+**Do not run it in a directory that holds a `project.json`.** It does not look
+for one, so a project declaring edit scopes gets a scope-free run with no
+preservation obligation, and the `final_status.json` that run leaves behind is
+what `design-tool status` then reports as the project's status. See
+[`docs/defects.md`](defects.md) D4.
 
 ```bash
 uv run design-tool run-job job_dir/ [--no-render]
@@ -804,6 +824,13 @@ Exit codes:
 * `1`, usage is invalid, an STL cannot be loaded, or another uncaught runtime
   error occurs. Non-watertight inputs print warnings but do not fail by
   themselves.
+
+Two open defects apply to anything this writes. Vertices are formatted `%.6g`,
+so a written coordinate is not the coordinate that was measured, and the
+round-trip reload has never executed in the frozen runtime — it needs `lxml`,
+which is not there, and the skip is reported on stdout rather than in the exit
+code. See [`docs/defects.md`](defects.md) D2 and D3. This is a draft-packaging
+script, not the production writer ADR 0001 named; that verb does not exist yet.
 
 ## `make_bambu_3mf.py`
 
