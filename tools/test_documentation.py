@@ -76,6 +76,18 @@ def test_obsolete_redesign_documents_are_not_part_of_the_release() -> None:
     assert not (ROOT / "docs" / "redesign-plan.md").exists()
 
 
+def test_one_planning_authority() -> None:
+    """`ROADMAP.md` owns sequencing; the phase-by-phase migration map is gone.
+
+    Two documents describing what to build next is how a repository ends up
+    executing the older one. The map's remaining live facts moved into the
+    roadmap's current-position section before it was deleted.
+    """
+    assert (ROOT / "ARCHITECTURE.md").exists()
+    assert (ROOT / "ROADMAP.md").exists()
+    assert not (ROOT / "docs" / "migration-map.md").exists()
+
+
 def test_static_fit_guidance_uses_the_declared_plan_band() -> None:
     patterns = (ROOT / "skills" / "3d-modeling" / "references" / "verification-patterns.md").read_text(
         encoding="utf-8"

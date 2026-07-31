@@ -2,7 +2,10 @@
 
 Status: accepted, 2026-07-30
 Amends: [ADR 0001](0001-one-project-one-cli.md) §1 (routing) and §3 (one canonical
-project). Supersedes Phases 2 and 3 of [the migration map](../migration-map.md).
+project). Superseded Phases 2 and 3 of the phase-by-phase migration map that
+accompanied ADR 0001. That map has since been deleted and its planning role
+belongs to [`ROADMAP.md`](../../ROADMAP.md); the decision recorded below is
+unaffected.
 
 ## The sentence this whole design serves
 
@@ -315,7 +318,9 @@ it is the rule that governs when the two conflict.
 ## Consequences
 
 * Phases 2 and 3 are substantially reworked, not extended. The migration map's
-  "done" markers on those phases are withdrawn.
+  "done" markers on those phases were withdrawn; the map itself was later deleted
+  once `ROADMAP.md` took over the planning role, and the staged sequence below is
+  the record of what this ADR decided rather than the current plan of record.
 * The Phase 3 headline result — 27,000 samples moving 0.00 mm — was a true
   measurement of a test that could not reliably fail. It is not evidence of
   preservation and is not carried forward as such.

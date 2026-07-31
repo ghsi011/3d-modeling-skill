@@ -4,6 +4,12 @@ Measured at `f7082e5` on the reference workstation (Windows 11, Python 3.11,
 trimesh 4.12.2, `uv run --frozen`), before any consolidation work. These are
 measurements of one environment, not timing guarantees.
 
+The phase and stage names below are the sequence recorded in
+[ADR 0001](adr/0001-one-project-one-cli.md) and
+[ADR 0002](adr/0002-route-and-contract-authority.md). They label when a
+measurement was taken, not work that is currently queued; sequencing is owned by
+[`ROADMAP.md`](../ROADMAP.md).
+
 Regenerate the per-route numbers with `pipeline/test_frozen.py` and
 `design-tool selftest --json`; the fixtures that hold them to account are in
 [`pipeline/test_frozen.py`](../skills/3d-modeling/scripts/pipeline/test_frozen.py)

@@ -157,11 +157,13 @@ These include:
 * components;
 * source artifacts;
 * datums and transforms;
-* dimensions and provenance;
+* dimensions, tolerances, and provenance;
 * interfaces and fit;
+* materials and manufacturing processes;
 * permitted edits and preservation obligations;
 * motion;
 * manufacturing constraints;
+* manufacturing, assembly, and service operations where sequence matters;
 * uncertainty;
 * evidence;
 * design alternatives and their relationships.
@@ -305,7 +307,11 @@ Transforms between the following spaces must be explicit when relevant:
 
 No geometry-dependent conclusion may silently assume two coordinate systems are identical.
 
-### 6.5 Dimensions and provenance
+An ordinary datum is a named reference a dimension is measured from. That is sufficient for most work.
+
+When a job uses the formal tolerance profile described in section 6.5, a datum may additionally be a datum feature, and several datum features may be combined into a datum reference frame with a declared precedence. The formal construction is an elaboration of the same concept, not a second one, and it is present only when the job declares it.
+
+### 6.5 Dimensions, tolerances, and provenance
 
 Dimensions remain associated with where they came from.
 
@@ -329,7 +335,94 @@ A dimension may be:
 * overridden by a specific alternative;
 * intentionally varied across alternatives for comparison.
 
-### 6.6 Interfaces
+**Two levels of tolerance semantics**
+
+A dimension that constrains anything carries explicit tolerance semantics. The architecture supports two profiles for expressing them, and the lighter one is the normal path.
+
+*Lightweight explicit tolerancing*
+
+This profile is the ordinary path for FDM work and is sufficient for most jobs.
+
+It expresses:
+
+* the nominal value;
+* a unilateral, bilateral, or limit tolerance;
+* the datum or measurement reference the value is taken from;
+* the fit class or functional band the value serves;
+* the measurement method, where interpretation would otherwise be ambiguous;
+* provenance;
+* confidence, or the uncertainty that remains unresolved.
+
+The profile is mathematically explicit — a value, a band, and what the band is measured against — but it does not require complete industrial GD&T notation, a datum reference frame, a feature-control frame, or a material-condition modifier.
+
+*Formal standards-based tolerancing*
+
+A formal profile is used only when:
+
+* the user supplies formal tolerances;
+* the source engineering data requires them;
+* the consequence or manufacturing context justifies them;
+* interoperability with formal engineering documentation requires them.
+
+A formal tolerance declaration identifies:
+
+* the governing standards family or profile;
+* the applicable edition;
+* the specific semantic construct being used.
+
+Examples of such families include ASME Y14.5 and applicable ISO GPS profiles. The architecture does not reproduce those standards and does not claim to implement them completely. It records which profile governs a declaration and which constructs an implementation can actually evaluate.
+
+Where implemented, and only where implemented, the formal profile may cover:
+
+* datum features and datum reference frames;
+* features of size;
+* size limits;
+* tolerance zones;
+* form;
+* orientation;
+* location;
+* profile;
+* run-out;
+* material-condition modifiers.
+
+Support is incremental. Being able to record a construct is not the same as being able to evaluate it.
+
+*Rules that hold for both profiles*
+
+* ASME and ISO semantics are never mixed implicitly; a declaration belongs to one named profile and edition.
+* Proprietary meanings are never invented for standard symbols or terms.
+* An unsupported formal construct is never silently approximated by a lightweight band.
+* An unsupported construct is reported as an explicit limitation of the assessment, never as a pass.
+* The selected profile and edition are preserved in provenance and in every assessment result that depends on them.
+
+### 6.6 Requirement, compensation, and observed geometry
+
+Three geometric descriptions of the same part are distinct and must not collapse into one another.
+
+1. **Required finished-part geometry** — the tolerance-carrying description of what the finished part must be. This is authoritative.
+2. **Manufacturing geometry** — the geometry actually submitted for production, after any process compensation such as printer, material, orientation, or shrinkage allowance.
+3. **Observed geometry** — what a generated artifact, a print, or a measurement actually exhibits.
+
+Compensation is a recorded transformation between the first and the second. It never rewrites the first. A part whose bore was grown 0.15 mm to print correctly still requires the original bore, and is still accepted or rejected against it.
+
+A compensation record identifies:
+
+* what it compensates for;
+* the calibration or assumption it derives from;
+* the scope in which that calibration is valid;
+* the geometry, interface, or material pair it applies to;
+* whether it is measured, calibrated, or provisional.
+
+The system does not invent a compensation value. It does not assume a calibration transfers between printers, material brands or formulations, nozzles, orientations, slicer settings, or process conditions.
+
+When suitable calibration is absent, the system:
+
+* preserves the required finished geometry unchanged;
+* records any provisional allowance as an assumption rather than as a measured value;
+* exposes the resulting uncertainty;
+* requires a coupon or physical test where the affected interface matters.
+
+### 6.7 Interfaces
 
 An interface describes how two components, or a component and an external object, interact.
 
@@ -352,13 +445,52 @@ External real objects are represented independently from the candidate design wh
 
 This allows the candidate and any reference design to be assessed against the same external object without requiring whole-part similarity.
 
+**Intended relationship**
+
+An interface declares what the two sides are meant to do to each other, such as:
+
+* bonded;
+* mechanically interlocked;
+* compliant;
+* sliding;
+* separable;
+* sealed;
+* sacrificial;
+* soluble support;
+* breakaway support;
+* printed in place but intended to release;
+* inserted during a print pause;
+* assembled after printing.
+
+The last several are as much manufacturing statements as geometric ones, which is why an interface may reference the operation that creates it (section 6.11).
+
+**Interfaces that cross materials or processes**
+
+An interface may join regions made of different materials, produced by different processes, or produced at different times in a manufacturing sequence.
+
+Where the two sides differ, the interface may additionally record:
+
+* the material and manufacturing process on each side;
+* the required finished clearance or interference;
+* the required contact, separation, sealing, or adhesion behavior;
+* process- and orientation-dependent compensation;
+* differential shrinkage or thermal uncertainty;
+* the calibration source and its validity scope;
+* a required test coupon;
+* the physical validation the interface still needs.
+
+A same-material, same-process interface does not carry these fields, and nothing requires a job to populate them.
+
+The required finished clearance and any compensation applied to reach it remain separate, as section 6.6 requires. An interface whose compensation rests on no relevant calibration is not thereby relaxed; it is an interface with a recorded assumption and an outstanding physical test.
+
 Competing alternatives may satisfy the same functional interface through different formulations, such as:
 
 * snap-fit versus screws;
 * sliding retention versus magnetic retention;
-* one-piece compliant geometry versus a multi-part assembly.
+* one-piece compliant geometry versus a multi-part assembly;
+* a rigid part with a separate compliant gasket versus one multi-material part.
 
-### 6.7 Edit intent
+### 6.8 Edit intent
 
 Modification and combination use one multi-source edit model.
 
@@ -370,13 +502,16 @@ For every relevant source, the model may describe:
 * geometry that must be added;
 * regions where changes are permitted;
 * the source transform in the shared design space;
+* material, process, and component roles inherited from the source;
 * output components that inherit from the source.
+
+Imported intent that the current job does not use is preserved rather than discarded. A donor assembly that names two materials still names them after the edit, even when the target job prints in one.
 
 Combining two or more artifacts is therefore not a separate architectural mechanism. It is a multi-source edit with source-specific obligations.
 
 Different alternatives may use different source selections, donor components, alignments, or edit strategies while sharing the same original job and source registry.
 
-### 6.8 Motion
+### 6.9 Motion
 
 Motion is represented explicitly.
 
@@ -395,11 +530,19 @@ A motion definition may include:
 
 Multiple bodies do not imply motion unless motion is declared.
 
+Three kinds of movement are distinguished, because they are assessed against different requirements:
+
+* **operating motion** — how the finished product moves in normal use;
+* **assembly motion** — the path a component travels while the product is being built;
+* **disassembly or service motion** — the path a component travels while being accessed, adjusted, replaced, or removed.
+
+A drawer that slides in use and a lid that must clear a boss once during assembly are not the same obligation. Assembly and service motion belong to the operations described in section 6.11 and are evaluated in the assembly state those operations establish.
+
 Alternative mechanisms may define different motion models while satisfying the same user-level function.
 
-### 6.9 Manufacturing intent
+### 6.10 Manufacturing intent
 
-Manufacturing intent may apply to the whole job, a component, an interface, a feature, or one alternative.
+Manufacturing intent may apply to the whole job, a component, a body, a region, an interface, a feature, or one alternative.
 
 It includes, as applicable:
 
@@ -408,7 +551,7 @@ It includes, as applicable:
 * material;
 * nozzle or tool;
 * orientation constraints;
-* support policy;
+* support policy and support material;
 * strength direction;
 * minimum features;
 * fit compensation;
@@ -419,7 +562,60 @@ It includes, as applicable:
 
 FDM is the first-class target process. The model should allow additional manufacturing processes without redefining the core design concepts.
 
-### 6.10 Uncertainty and evidence
+**Assignment scope**
+
+Material and process assignment applies at the narrowest scope that is actually true. An assignment may be made for:
+
+* the job;
+* a design alternative;
+* a component;
+* a body;
+* a region within a body;
+* an interface;
+* a support structure.
+
+An assignment inherits from its enclosing scope until something overrides it. A job printed in one material on one printer states that once, and every body inherits it. A rigid housing with a TPU gasket overrides the assignment for one body.
+
+Where a job assigns more than one material or process, the interfaces between them carry the obligations described in section 6.7, and any compensation applied at those interfaces obeys section 6.6.
+
+**Print order, assembly order, and sequence**
+
+`print order` and `assembly order` remain adequate for jobs where nothing depends on the order beyond convenience. Where correctness depends on operations happening in a particular order, the explicit operation model in section 6.11 is used instead.
+
+### 6.11 Manufacturing, assembly, and service operations
+
+Some jobs are correct only if things happen in the right order, using the right tools, with the right things already in place. Where that is true, sequence is a first-class part of the design rather than a note in a report.
+
+Sequencing is optional. A one-piece print with a single meaningful operation does not get an operation model, and nothing about a simple job becomes more expensive because the concept exists.
+
+Three sequences are distinguished, along with one thing that is regularly confused with them.
+
+**Manufacturing sequence** — how the part is produced. Operations include print, pause, change material or tool, insert a magnet, nut, bearing, or reinforcement, resume printing, remove breakaway or soluble support, cure, machine, heat-set, bond, weld, finish, and inspect.
+
+**Assembly sequence** — how separately produced components are positioned and joined.
+
+**Disassembly or service sequence** — how components are accessed, replaced, adjusted, or removed, where that matters.
+
+**Operating motion** — how the finished product functions in normal use. Operating motion is described by section 6.9 and is not an operation. Confusing the two makes a one-time assembly path look like a function of the product.
+
+An operation may express:
+
+* stable identity;
+* operation type;
+* prerequisite operations;
+* affected components, regions, materials, or interfaces;
+* required pose or assembly state;
+* required clearance and accessibility;
+* tools and consumables;
+* whether it is reversible or irreversible;
+* the expected resulting state;
+* the inspection or validation it requires.
+
+Operations form a dependency graph rather than necessarily a single list. An irreversible operation constrains which later operations remain possible, and that constraint is part of the design, not a runtime surprise.
+
+Alternatives may legitimately differ in their manufacturing or assembly sequence. That difference is a comparable engineering trade-off, assessed in section 8.5 alongside the geometry.
+
+### 6.12 Uncertainty and evidence
 
 Requirements and decisions may carry:
 
@@ -439,11 +635,13 @@ Evidence may apply to:
 * a shared requirement;
 * one design alternative;
 * one candidate revision;
-* one manufacturing configuration.
+* one manufacturing configuration;
+* one material or process pairing;
+* one calibration and the scope in which it was taken.
 
-Evidence for one alternative must not automatically validate another.
+Evidence for one alternative must not automatically validate another. Evidence taken under one printer, material, nozzle, orientation, or process condition does not automatically transfer to another.
 
-### 6.11 Design alternatives and branching
+### 6.13 Design alternatives and branching
 
 The authoritative model supports divergent design alternatives as first-class entities.
 
@@ -484,7 +682,7 @@ Branching must not duplicate all shared job information. Alternatives inherit un
 
 The revision history is therefore logically a directed acyclic graph rather than a mandatory linear sequence.
 
-### 6.12 Alternative comparison and selection
+### 6.14 Alternative comparison and selection
 
 The system supports explicit comparison between alternatives.
 
@@ -493,17 +691,23 @@ Comparison may include:
 * requirement satisfaction;
 * interface performance;
 * manufacturing complexity;
+* material and process strategy;
 * material use;
 * print time;
 * support burden;
+* manufacturing and assembly sequence complexity;
+* reversibility of the operations it requires;
+* tooling and consumables;
 * assembly effort;
 * component count;
 * expected strength;
-* maintainability;
+* serviceability and maintainability;
 * adjustability;
 * uncertainty;
 * physical-test results;
 * user preferences.
+
+Criteria that a job does not exercise are absent from its comparison rather than scored as zero.
 
 Comparison criteria must be traceable to the job rather than invented solely to favor one alternative.
 
@@ -518,7 +722,7 @@ A rejected or paused alternative remains available for:
 * fallback if physical testing disproves the preferred option;
 * benchmark and learning value.
 
-### 6.13 Alternative merging and reuse
+### 6.15 Alternative merging and reuse
 
 A later alternative may reuse or merge validated elements from earlier alternatives.
 
@@ -592,7 +796,7 @@ Each implementation is bound to the alternative and proposal revision it realize
 
 ### 7.4 Observation
 
-Observation records what exists in the generated or imported artifact.
+Observation records what exists in the generated or imported artifact. It is the third of the three geometric descriptions in section 6.6, and it is never the first.
 
 Examples include:
 
@@ -602,6 +806,7 @@ Examples include:
 * surface condition;
 * fit distances;
 * detected collisions;
+* achieved assembly states;
 * manufacturing warnings.
 
 Observation must not become its own expectation.
@@ -627,15 +832,22 @@ The acceptance specification is derived from:
 
 It may contain:
 
-* required dimensions and bands;
+* required dimensions and their tolerance semantics;
+* the governing tolerance profile and edition, where a formal profile applies;
 * required features;
 * component structure;
-* interface obligations;
+* interface obligations, including inter-material obligations;
+* material and process assignments;
 * preservation obligations;
 * motion obligations;
+* required operations and their sequence obligations;
 * manufacturing constraints;
-* required evidence;
+* required evidence, including coupons and physical tests;
 * explicitly unavailable assessments.
+
+The acceptance specification describes the required finished part. Process compensation is not part of it; a candidate is judged against what the part must be, not against what was sent to the printer.
+
+Where a declared tolerance construct cannot be evaluated by any available comparison method, the specification records it as an explicitly unavailable assessment. It is never quietly downgraded to a band that happens to be checkable.
 
 Shared requirements may generate equivalent acceptance obligations for several alternatives. Alternative-specific decisions may produce different valid acceptance specifications.
 
@@ -657,11 +869,12 @@ Assessment compares observations against the acceptance specification.
 
 It should prefer direct evidence:
 
-* named dimensions;
+* named dimensions and their declared bands;
 * declared features;
 * explicit interfaces;
 * source-specific preservation;
 * defined motion;
+* declared operations and the states they produce;
 * manufacturing constraints.
 
 Broad heuristics may supplement direct checks but must not issue stronger conclusions than their calibration supports.
@@ -672,6 +885,8 @@ Assessments are bound to:
 * the alternative;
 * the proposal revision;
 * the acceptance specification;
+* the tolerance profile and edition in force;
+* the material, process, and compensation assumptions in force;
 * the relevant source and tool identities.
 
 ### 8.4 Claim strength
@@ -684,10 +899,14 @@ Examples:
 * a deterministic distance comparison may establish equivalence within a tolerance;
 * sampled comparison may establish preservation only down to a stated detection limit;
 * a visual review may identify plausibility or visible defects;
+* a supported tolerance construct may be reported as satisfied only by a method that implements its semantics;
 * a successful print may establish printability for the tested conditions;
+* a printed coupon may establish a clearance for the material, printer, orientation, and settings it was printed under, and for no others;
 * a physical fit test may establish fit for the tested object and part.
 
 A weaker method must never produce a stronger claim.
+
+A declared formal construct that the comparison engine cannot evaluate produces an explicit limitation, never a conformance claim. A part that was never printed has no compensation evidence, whatever allowance its manufacturing geometry carries.
 
 ### 8.5 Comparative assessment
 
@@ -698,9 +917,14 @@ An alternative may satisfy all mandatory requirements yet be less desirable beca
 * requires more hardware;
 * is harder to print;
 * uses more material;
+* needs a second material, tool change, or print pause;
 * is harder to assemble;
+* requires an irreversible operation that forecloses later repair;
+* is harder to service;
 * has greater uncertainty;
 * performs worse in physical testing.
+
+Comparison dimensions that a job does not exercise are not scoring categories for it. A single-material one-piece print is not penalized for having no assembly sequence.
 
 Comparative results must distinguish:
 
@@ -722,6 +946,8 @@ The plan determines:
 * reusable prior work;
 * required engineering judgment;
 * required deterministic analyses;
+* required manufacturing, assembly, and service operations;
+* required coupons, calibrations, and physical tests;
 * resource budgets;
 * stopping conditions;
 * deliverables;
@@ -781,7 +1007,10 @@ A context package may contain:
 * the relevant portion of the request;
 * unresolved design intent;
 * necessary source artifacts;
-* relevant dimensions and evidence;
+* relevant dimensions, tolerances, and evidence;
+* the governing tolerance profile and edition, when one is in force;
+* material and process assignments relevant to the decision;
+* the operations the decision depends on;
 * current failures and measurements;
 * manufacturing constraints;
 * required deliverables;
@@ -796,6 +1025,7 @@ It should exclude:
 * stale results;
 * large raw reports when a lossless structured summary is sufficient;
 * artifacts unrelated to the decision;
+* tolerance, material, or operation detail the decision does not depend on;
 * complete sibling-alternative histories when a comparison summary is sufficient.
 
 The context boundary must preserve identifiers and provenance so that compact context does not become ambiguous context.
@@ -862,17 +1092,23 @@ The architecture exposes composable capabilities rather than one monolithic work
 * define mating geometry;
 * establish fit classes and bands;
 * assess insertion, seating, and retention;
+* represent interfaces that cross materials or processes;
+* keep the required finished clearance separate from any compensation applied to reach it;
 * derive mating regions from the shared external object where practical;
 * avoid constraining unrelated styling or structure.
 
-### 11.8 Assembly and motion
+### 11.8 Assembly, motion, and sequence
 
 * manage multiple components;
 * define joints or permitted motion;
 * evaluate travel;
 * detect forbidden interference;
 * assess intended contact;
-* assess stops, retention, and assembly paths.
+* assess stops, retention, and assembly paths;
+* distinguish operating motion from assembly and service motion;
+* express manufacturing, assembly, and service operations where order matters;
+* assess accessibility, required intermediate poses, and prerequisite components;
+* identify irreversible operations and what they foreclose.
 
 ### 11.9 Manufacturing preparation
 
@@ -880,9 +1116,12 @@ The architecture exposes composable capabilities rather than one monolithic work
 * account for orientation and strength;
 * identify support implications;
 * assess minimum features;
+* assign materials and processes at the scope where they apply;
 * map components to materials and tools;
+* plan multi-material, insert, and post-processing operations;
+* apply compensation only from calibration valid for the actual conditions;
 * prepare production artifacts;
-* state physical tests still required.
+* state required coupons and the physical tests still required.
 
 ### 11.10 Alternative generation and comparison
 
@@ -920,9 +1159,15 @@ The geometry runtime provides replaceable backends for:
 * measurement;
 * rendering;
 * interface analysis;
+* tolerance and fit evaluation;
 * preservation analysis;
 * motion analysis;
+* assembly-state analysis;
 * manufacturing analysis.
+
+A backend reports which tolerance constructs it can evaluate. A construct no available backend implements is an explicit limitation of the job, not a silently relaxed requirement.
+
+Comparison must be able to distinguish required geometry from compensated manufacturing geometry, so that the two are never measured against each other by accident.
 
 Backend choice must be explicit when it can affect results.
 
@@ -992,15 +1237,23 @@ These may include:
 * transforms;
 * design proposal;
 * acceptance specification;
+* tolerance profile and edition;
+* material and process assignments;
+* compensation assumptions and the calibration behind them;
+* operation sequence;
 * manufacturing policy;
 * toolchain identity;
 * analysis parameters.
+
+A binding that a job does not use does not participate in its identity.
 
 ### 13.5 Invalidation
 
 When a binding changes, dependent results become stale.
 
 Unrelated valid results remain reusable.
+
+A change to a tolerance profile, a material assignment, a compensation assumption, or an operation sequence invalidates the results that depend on that change and nothing else. Reassigning one body's material does not invalidate an interface both of whose sides are unchanged.
 
 A change limited to one alternative must not invalidate sibling alternatives unless they depend on the changed shared input.
 
@@ -1050,10 +1303,13 @@ The result model should expose separate facets.
 ### 14.3 Requirement assessment
 
 * dimensions assessed;
+* tolerances assessed, naming the profile and the constructs actually evaluated;
+* tolerance constructs declared but not evaluable;
 * features assessed;
-* interfaces assessed;
+* interfaces assessed, including inter-material obligations;
 * preservation assessed;
 * motion assessed;
+* operations and sequence assessed;
 * manufacturing constraints assessed.
 
 ### 14.4 Judgment
@@ -1065,11 +1321,15 @@ The result model should expose separate facets.
 ### 14.5 Physical evidence
 
 * not printed;
+* coupon printed and measured;
 * printed;
 * physically fitted;
 * motion tested;
+* assembled through the planned sequence;
 * load tested;
 * user-confirmed working.
+
+A physical result names the printer, material, nozzle, orientation, process conditions, and operation history it was obtained under. Without those, it cannot be reused as calibration.
 
 ### 14.6 Alternative disposition
 
@@ -1118,6 +1378,8 @@ The intended common behavior is:
 * no AI call when deterministic reusable work completely covers the task;
 * one coherent design context for ordinary custom work;
 * additional AI calls only when they add material value.
+
+Optional semantics stay dormant. Formal tolerance profiles, multi-material assignment, compensation records, and operation sequencing cost nothing for a job that declares none of them — no extra dispatch, no extra analysis, no extra context. A capability that makes simple jobs more expensive because it exists has been implemented wrongly.
 
 Exact timing and dispatch targets belong in benchmark documentation.
 
@@ -1276,6 +1538,14 @@ Moving assemblies are scored on:
 * retention;
 * forbidden interference.
 
+Multi-material and sequenced work may additionally be scored on:
+
+* correct material and process assignment;
+* inter-material interface treatment;
+* honest handling of missing calibration;
+* feasibility and completeness of the declared operation sequence;
+* accessibility of insert and service operations.
+
 Alternative-exploration tasks may additionally be scored on:
 
 * meaningful conceptual diversity;
@@ -1325,6 +1595,7 @@ The architecture must allow replacement or addition of:
 * motion solvers;
 * slicers;
 * manufacturing processes;
+* tolerance profiles and the constructs supported within them;
 * storage backends;
 * benchmark scorers.
 
@@ -1349,33 +1620,41 @@ Every implementation must preserve the following.
 2. The original user request remains preserved and traceable.
 3. Artifact identity is content-based.
 4. Units, datums, coordinate systems, and transforms are explicit.
-5. Planning has one authority for a job state.
-6. Runtime components do not silently re-plan the job.
-7. Intent, proposal, implementation, and observation remain distinct.
-8. Candidate output cannot silently redefine its acceptance criteria.
-9. Acceptance criteria are established before candidate assessment.
-10. Modification and combination support multiple source artifacts.
-11. Preservation obligations are source-specific.
-12. Components, interfaces, and motion are first-class concepts.
-13. External mating objects remain independent from candidate geometry where practical.
-14. Divergent design alternatives are first-class and may coexist.
-15. Exploring one alternative does not overwrite or invalidate unrelated alternatives.
-16. Shared ancestry and alternative-specific differences remain traceable.
-17. Selecting a preferred alternative does not delete the others.
-18. Merging alternatives preserves provenance and triggers reassessment of affected interactions.
-19. Expensive capabilities and AI calls are triggered by job requirements.
-20. Alternative exploration is bounded and shares valid common work.
-21. Ordinary custom work does not require unnecessary context handoffs.
-22. Context is minimized without losing decisive evidence or provenance.
-23. Unchanged valid work can be reused.
-24. Changed bindings invalidate dependent results.
-25. Deterministic methods produce stable evidence for unchanged inputs.
-26. Review responses are bound to the evidence they reviewed.
-27. A weaker method cannot issue a stronger claim.
-28. Benchmark answers are inaccessible to the design context.
-29. Software assessment never silently implies physical validation.
-30. Unsupported and uncertain conclusions remain explicit.
-31. Simple jobs remain fast.
+5. Tolerance semantics are explicit, and a formal tolerance declaration names its profile and edition.
+6. Standards families are never mixed implicitly, and a tolerance construct that cannot be evaluated is reported as a limitation rather than approximated.
+7. Required finished-part geometry is never rewritten by manufacturing compensation.
+8. A calibration applies only within the scope in which it was obtained.
+9. Material and process assignments are explicit at the scope where they apply, and inherited elsewhere.
+10. Sequenced operations are explicit wherever correctness depends on order, and are not required otherwise.
+11. Planning has one authority for a job state.
+12. Runtime components do not silently re-plan the job.
+13. Intent, proposal, implementation, and observation remain distinct.
+14. Candidate output cannot silently redefine its acceptance criteria.
+15. Acceptance criteria are established before candidate assessment.
+16. Modification and combination support multiple source artifacts.
+17. Preservation obligations are source-specific.
+18. Imported material, process, and sequence intent is preserved rather than silently discarded.
+19. Components, interfaces, motion, and declared operations are first-class concepts.
+20. External mating objects remain independent from candidate geometry where practical.
+21. Divergent design alternatives are first-class and may coexist.
+22. Exploring one alternative does not overwrite or invalidate unrelated alternatives.
+23. Shared ancestry and alternative-specific differences remain traceable.
+24. Selecting a preferred alternative does not delete the others.
+25. Merging alternatives preserves provenance and triggers reassessment of affected interactions.
+26. Expensive capabilities and AI calls are triggered by job requirements.
+27. Alternative exploration is bounded and shares valid common work.
+28. Ordinary custom work does not require unnecessary context handoffs.
+29. Context is minimized without losing decisive evidence or provenance.
+30. Unchanged valid work can be reused.
+31. Changed bindings invalidate dependent results, and unused bindings do not participate in identity.
+32. Deterministic methods produce stable evidence for unchanged inputs.
+33. Review responses are bound to the evidence they reviewed.
+34. A weaker method cannot issue a stronger claim.
+35. Benchmark answers are inaccessible to the design context.
+36. Software assessment never silently implies physical validation.
+37. Unsupported and uncertain conclusions remain explicit.
+38. Optional semantics stay dormant for jobs that do not declare them.
+39. Simple jobs remain fast.
 
 ## 19. Non-goals
 
@@ -1383,6 +1662,12 @@ The architecture does not aim to:
 
 * formally prove arbitrary physical designs correct;
 * replace physical testing where physical behavior matters;
+* require complete GD&T representation for every ordinary part;
+* reproduce or redistribute the content of a copyrighted standard;
+* implement every construct of every tolerancing standard;
+* invent shrinkage or compensation coefficients where no relevant calibration exists;
+* simulate the manufacturing process;
+* require an operation model for a one-step print;
 * force every job through one workflow;
 * require multiple agents;
 * require one persistent agent;
@@ -1411,6 +1696,10 @@ The architecture is successful when:
 * multiple source artifacts can be combined with explicit ownership and preservation;
 * a part can be designed to fit a real object using appropriate evidence;
 * a multi-part assembly can be evaluated across its declared motion;
+* ordinary dimensions carry explicit tolerances without industrial GD&T ceremony;
+* a supplied formal tolerance is either evaluated under its declared profile or reported as unsupported;
+* a part combining rigid and compliant materials records what each interface requires and what still needs a coupon;
+* a part that must be printed, paused, insert-loaded, and resumed can express that sequence and be assessed against it;
 * ordinary FDM constraints are addressed without overwhelming simple jobs;
 * editable source and production exports remain traceable;
 * uncertainty and required physical testing are communicated honestly;

@@ -70,6 +70,17 @@ The immediate unresolved blockers are:
 6. fitted authored designs and moving assemblies are not yet complete end-to-end capabilities;
 7. physical outcomes and alternative comparisons are not yet part of a systematic learning loop.
 
+Several narrower gaps are carried forward from the completed consolidation work. They are not blockers in the same sense, but they are owed and are easy to mistake for finished work:
+
+* the command surface described by ADR 0001 is only partly built. `doctor`, `selftest`, `init`, `route`, `run`, `status`, `diagnose`, and the deprecated `run-job` exist; `commission`, `audit`, `motion`, `coupon`, and `package` do not. Until they do, the older `dt.py` verbs stay in agent instructions.
+* designer commissions are not yet generated from canonical project state, and the template registry does not yet distinguish a certified template from a starting one.
+* a job that declares motion routes `FULL`, and its motion modifier is reported `DEFERRED` rather than measured. The sweep engine does not exist. Naming it unmeasured is deliberate and is not a substitute for Release 8.
+* there is no resource governor, and the 3MF writers are not versioned adapters.
+* preservation sampling is deterministic but its density is not derived from a declared minimum detectable defect size, and exact STEP comparison is undecided. Every job that declares an edit scope therefore reports `EXPERIMENTAL_UNAVAILABLE` rather than a successful status.
+* a `FITTED` or `FULL` job built from authored geometry reports `UNSUPPORTED`. That is a limit of what this build can do, not a stage that is pending.
+
+Tolerances today are single numeric bands owned by the pipeline. There is no tolerance profile, no datum model beyond what a dimension names, no per-body material assignment, and no operation model. Those are introduced by the releases below, at the point where a real job needs them.
+
 ## 3. Roadmap operating rules
 
 ### 3.1 Deliver vertical slices
@@ -150,7 +161,29 @@ Each release increment must be exercised on at least one authentic project.
 
 Synthetic fixtures prove mechanisms. Real jobs reveal missing concepts, bad assumptions, and unusable workflows.
 
-### 3.7 Separate architectural learning from project peculiarities
+### 3.7 Add engineering semantics only where they earn their cost
+
+Tolerance profiles, multi-material assignment, compensation, and operation sequencing are added the same way every other capability is: as narrow vertical slices, driven by a real job.
+
+There is no "implement GD&T" release and no "implement multi-material" release. The foundations appear when something needs them, and they deepen only where use demonstrates they are insufficient.
+
+For all such work:
+
+* begin with a narrow vertical slice, not an ontology;
+* add L0 deterministic tests for the new semantics;
+* add at least one L1 replay that exercises them end to end;
+* use an authentic project before generalizing;
+* measure runtime, context, and dispatch cost before and after;
+* preserve the zero-call and one-call common paths;
+* do not implement a complete ASME or ISO ontology speculatively;
+* do not generalize a compensation value from one print;
+* do not add operation sequencing to jobs with only one meaningful operation;
+* keep required final geometry separate from manufacturing compensation in every release that touches either;
+* revise later roadmap scope based on what the slice actually showed.
+
+A job that declares none of these things must cost exactly what it cost before the capability existed. That is a measurable claim, and the performance gate measures it.
+
+### 3.8 Separate architectural learning from project peculiarities
 
 After each release, classify discoveries as follows.
 
@@ -235,6 +268,7 @@ A test that only confirms a nominal verdict is insufficient when the underlying 
 * Certified deterministic paths show no meaningful regression outside measurement noise.
 * Dispatch counts do not increase accidentally.
 * New expensive checks are capability-triggered.
+* A job that declares no tolerance profile, no per-body material, and no operation plan shows no measured cost change.
 * Cold and warm costs are measured separately where imports dominate.
 * Cache behavior is measured rather than assumed.
 * Shared work is reused across alternatives.
@@ -382,6 +416,22 @@ It may not be re-read from mutable model code after evaluation.
 
 Proposal changes remain allowed, but create a visible new design revision and invalidate dependent results.
 
+*Minimum common tolerance foundation*
+
+The acceptance specification stops carrying bare numbers with an implied band.
+
+Add, and no more than this:
+
+* a lightweight explicit tolerance representation — nominal value with a unilateral, bilateral, or limit tolerance;
+* the datum or measurement reference a value is taken from, where the value would otherwise be ambiguous;
+* the measurement method, where interpretation would otherwise be ambiguous;
+* provenance on the tolerance as well as on the value;
+* a recorded separation between required finished-part geometry and any process compensation, so that compensation has somewhere to go later without rewriting a requirement.
+
+The system continues to own the band. A designer states what the part must measure; the pipeline decides what band that magnitude is judged in. That property is the point of this release and the tolerance representation must not weaken it.
+
+Compensation is separated in this release but not yet computed. A job with no compensation records none, and nothing about it changes.
+
 **Explicit exclusions**
 
 Do not yet attempt:
@@ -392,7 +442,10 @@ Do not yet attempt:
 * universal anomaly screening for novel custom designs;
 * divergent branch storage;
 * automatic A/B concept generation;
-* a second AI confirmation of the proposal.
+* a second AI confirmation of the proposal;
+* formal GD&T support of any kind — no profiles, no editions, no feature-control frames, no datum reference frames;
+* material compensation values;
+* per-body material assignment.
 
 Proposal freezing is deterministic continuation of one design commission, not another dispatch.
 
@@ -418,7 +471,9 @@ Adversarial tests include:
 * model changes while an old proposal remains;
 * proposal changes and correctly invalidates prior artifacts;
 * candidate-measured volume is reused as expected volume;
-* candidate profile data attempts to clear its own anomaly screen.
+* candidate profile data attempts to clear its own anomaly screen;
+* a proposal supplies its own tolerance band and the pipeline's band still governs;
+* a compensated dimension is measured against the compensated value rather than against the requirement.
 
 The release passes only when candidate-controlled acceptance is structurally impossible, not merely rejected by one validator.
 
@@ -426,11 +481,13 @@ The release passes only when candidate-controlled acceptance is structurally imp
 
 Use an open-ended FDM bracket request with:
 
-* mounting requirements;
+* mounting requirements expressed as lightweight explicit tolerances;
 * a keep-out;
 * a build envelope;
 * material and nozzle constraints;
 * freedom over ribs, walls, and styling.
+
+The bracket's fastener holes and mounting pitch are the test of whether the lightweight profile is expressive enough. If it is not, that is a finding for Release 7, not a reason to add formal tolerancing here.
 
 Produce at least two geometrically different valid outputs in separate jobs to confirm that the system rewards requirements rather than resemblance. First-class shared branching arrives in the next release.
 
@@ -510,6 +567,30 @@ Allow decisions to apply to:
 * one manufacturing configuration.
 
 An alternative-specific choice must not silently become a job-wide requirement.
+
+*Dormant optional intent*
+
+The authoritative model and its bindings must be able to carry, without any of it being required:
+
+* tolerance-profile identity and edition;
+* per-body and per-interface material identity;
+* operation identities and their dependencies;
+* alternative-specific manufacturing intent.
+
+Nothing in this release populates these fields. Later releases do. Adding the capacity now is cheap; retrofitting it into artifact identity, invalidation, and review binding afterwards is not, which is the same argument that puts the revision graph here.
+
+An absent field is absent, not defaulted. A job that names no tolerance profile is not silently assigned one, and its bindings do not include a profile identity.
+
+*Scoped invalidation*
+
+A change to any of the following invalidates its dependent results and nothing else:
+
+* tolerance profile;
+* material assignment;
+* compensation assumptions;
+* operation sequence.
+
+Reassigning one body's material must not invalidate an assessment of an interface whose two sides are unchanged.
 
 *Capability-based execution*
 
@@ -616,7 +697,9 @@ Fixtures include:
 * no artifact overwrite between siblings;
 * review response bound to one branch only;
 * explicit merge record with multiple parents;
-* clean-clone reconstruction of the revision graph.
+* clean-clone reconstruction of the revision graph;
+* a project declaring no tolerance profile, no per-body material, and no operations produces bindings identical to today's;
+* a changed material assignment on one body invalidates only what depended on it.
 
 **Authentic exercise**
 
@@ -649,7 +732,13 @@ Allow the planner or user to request alternatives that differ in meaningful engi
 * magnetic versus mechanical retention;
 * one-piece compliant versus multi-part pinned construction;
 * rigid mount versus articulated mount;
-* top-loading versus sliding enclosure.
+* top-loading versus sliding enclosure;
+* a single rigid part with a separate gasket versus one multi-material part;
+* a part assembled from printed pieces versus one printed with an embedded insert.
+
+Alternatives may therefore differ in tolerance strategy where the difference is legitimate, in materials, in inter-material interface strategy, in manufacturing sequence, in assembly sequence, and in serviceability — as well as in geometry.
+
+An alternative may not differ in a mandatory requirement. A looser tolerance is a different alternative only when the requirement genuinely permits it; it is never a way to make a failing concept pass.
 
 Each alternative records:
 
@@ -696,6 +785,18 @@ Compare alternatives across:
 * uncertainty;
 * physical evidence;
 * user preference.
+
+Where the alternatives differ in them, comparison also covers:
+
+* tolerance strategy;
+* materials and material count;
+* inter-material interface strategy;
+* manufacturing sequence complexity;
+* assembly sequence complexity and required tooling;
+* irreversible operations and what they foreclose;
+* serviceability.
+
+These are comparison dimensions when present, not mandatory scoring categories for every job. A single-material one-piece print is compared on the criteria it actually exercises.
 
 Mandatory failures remain visible and cannot be hidden by weighted totals.
 
@@ -755,6 +856,8 @@ Required tests include:
 * materially different alternatives inherit the same mandatory intent;
 * cosmetic-only variants are not automatically treated as concept branches;
 * alternative-specific requirements remain scoped;
+* an alternative cannot loosen a shared mandatory tolerance to pass;
+* a comparison over single-material alternatives reports no material or sequence dimensions;
 * mandatory failure cannot be outweighed by preference scoring;
 * comparison reports unequal evidence;
 * paused alternative incurs no ongoing execution cost;
@@ -797,6 +900,15 @@ Generalize the authoritative job model to support:
 * source-specific editable regions;
 * added geometry;
 * output-component inheritance.
+
+Imported intent survives the edit. Multi-source edit intent preserves:
+
+* per-source material identity;
+* material assignments carried by an imported assembly;
+* the donor's material role, where the donor contributes a distinct material;
+* sequence obligations attached to inserts or embedded components in a source.
+
+A job that prints in one material does not thereby erase the two materials its donor declared. Discarding imported multi-material intent is a defect, not a simplification — the intent is recorded even when this release cannot act on it.
 
 Typical roles include:
 
@@ -854,6 +966,8 @@ Fixtures cover:
 * missing source;
 * role mismatch;
 * one preserved source and one intentionally consumed donor;
+* a donor carrying two material assignments, both still readable after the edit;
+* a source declaring an embedded insert, whose sequence obligation survives import;
 * two alternatives using different donors;
 * branch-local source change that does not invalidate the sibling;
 * shared base-source change that invalidates both.
@@ -910,6 +1024,16 @@ The comparison core supports:
 * cached source indices;
 * stable serialization.
 
+It also gains the primitives needed to assess, where those things are declared:
+
+* the tolerance zones the engine actually supports;
+* lightweight limit tolerances;
+* clearances between regions of different materials;
+* the same geometry before and after compensation, without measuring one against the other;
+* geometry in a specific operation-dependent assembly state.
+
+The engine reports which tolerance constructs it can evaluate. A declared construct outside that set is reported as an unevaluated limitation, never as conformance, and never as an approximate band that happens to be checkable.
+
 Preservation uses a staged method:
 
 1. compare cheap structural facts;
@@ -938,6 +1062,8 @@ Do not:
 * increase sample density uniformly over every model;
 * let sampled evidence claim exact preservation;
 * treat geometric closeness as proof of equal function;
+* claim conformance to a formal construct the engine cannot evaluate;
+* compare a requirement against compensated manufacturing geometry;
 * assume a sibling alternative's assessment applies to another.
 
 **User-visible improvement**
@@ -1038,6 +1164,18 @@ An interface may define:
 * retention;
 * critical dimensions.
 
+*Tolerance and fit semantics*
+
+The lightweight tolerance and fit profile from Release 2 becomes the default for fitted work, and gains what fitting actually needs:
+
+* explicit datums, so a measurement and the dimension it feeds name the same reference;
+* measurement semantics — what was measured, how, and against which face or feature;
+* interface-specific tolerance bands, so a press fit and a clearance hole on the same part are not judged in one band.
+
+Formal tolerance-profile support is added here only for jobs that supply or require it: a declared profile family, a declared edition, and the specific constructs the implementation can evaluate. A supplied formal tolerance is either evaluated under its own profile or reported as unsupported. It is never reinterpreted as a lightweight band, and ASME and ISO semantics are never mixed in one declaration.
+
+The fitted fixtures are the evidence for how far this needs to go. Determine whether the lightweight model was sufficient for the Pixel case, the Berlingo knob, and the lighter fitted cases before expanding formal support. Recurring real ambiguity that the lightweight profile cannot express is the only justification for adding a construct.
+
 *Evidence reconciliation*
 
 Support:
@@ -1083,6 +1221,8 @@ Do not:
 * require a dedicated metrology agent for every fitted job;
 * treat a third-party reference design as the only valid shape;
 * hide unresolved measurement conflicts by averaging them silently;
+* require a formal tolerance profile for a job that supplied none;
+* implement formal constructs no fixture has needed;
 * generate many fitted alternatives without user or planning justification.
 
 **Primary fixtures**
@@ -1149,6 +1289,27 @@ Support:
 
 Component identity remains stable across alternatives where the same physical concept remains.
 
+*Three kinds of movement*
+
+Separate what has until now been one concept:
+
+* **operating motion** — how the finished product moves in use;
+* **assembly motion** — the path a component travels while the product is built;
+* **disassembly or service motion** — the path a component travels while being accessed, adjusted, replaced, or removed.
+
+They are assessed against different requirements. A drawer that must slide through 40 mm of travel forever and a lid that must clear a boss once during assembly are not the same obligation, and a part can satisfy one while failing the other.
+
+Assembly and service motion are evaluated in the assembly state the operation model establishes. This is where the operation identities carried dormant since Release 3 first do work.
+
+Support:
+
+* sequence-aware collision checks, evaluated in the state the sequence produces rather than only in the finished state;
+* insertion accessibility for tools, hands, and the component itself;
+* required intermediate poses;
+* prerequisite components that must already be present;
+* the resulting assembly state of each operation;
+* irreversible operations, and which later assembly options they remove.
+
 *Motion representation*
 
 Initially support:
@@ -1214,6 +1375,8 @@ Do not:
 * build a general rigid-body physics simulator;
 * infer mechanism intent merely from separate bodies;
 * claim friction performance from geometry alone;
+* require an operation sequence for an assembly whose parts go together in any order;
+* treat an assembly path as evidence about operating motion, or the reverse;
 * reuse motion results across geometrically different alternatives without reassessment.
 
 **Primary fixture**
@@ -1267,14 +1430,15 @@ This release unifies and hardens the behavior rather than postponing manufacturi
 
 *Manufacturing model*
 
-Support per-job, per-alternative, per-component, per-interface, and per-feature intent for:
+Support per-job, per-alternative, per-component, per-body, per-region, per-interface, and per-feature intent for:
 
 * printer;
 * material;
+* process;
 * nozzle;
 * build envelope;
 * orientation;
-* support;
+* support, including soluble and breakaway support material;
 * strength direction;
 * minimum features;
 * fit compensation;
@@ -1282,6 +1446,38 @@ Support per-job, per-alternative, per-component, per-interface, and per-feature 
 * print order;
 * assembly order;
 * coupons.
+
+An assignment inherits from its enclosing scope. A single-material job still states its material once.
+
+*Vertical slices*
+
+The multi-material and sequencing work lands here, as slices rather than as a subsystem:
+
+* per-body and per-region material assignment;
+* inter-material interface intent;
+* multi-material print preparation;
+* rigid plus flexible components in one product;
+* soluble and breakaway support interfaces;
+* print pauses and embedded inserts;
+* separately printed materials joined after printing;
+* post-processing operations;
+* operation-plan execution and resumption;
+* calibrated differential compensation;
+* calibration-scope tracking;
+* coupons where calibration is unavailable;
+* physical outcomes bound to material, orientation, process, and operation history.
+
+Take them in the order real jobs need them. Each is a slice with its own L0 tests, its own replay, and its own authentic exercise; none of them is a prerequisite for a single-material job to run exactly as it does today.
+
+*Compensation and calibration*
+
+Compensation becomes computable, and stays bounded by what was actually measured.
+
+* a compensation value derives from a calibration or is recorded as provisional;
+* a calibration records the printer, material brand and formulation, nozzle, orientation, slicer settings, and process conditions it was taken under;
+* applying it outside that scope is refused, not extrapolated;
+* required finished geometry is never rewritten — compensation produces manufacturing geometry beside it;
+* where no relevant calibration exists, the interface keeps its requirement, the allowance is recorded as an assumption, and a coupon or physical test is required before the fit can be claimed.
 
 *Manufacturing assessment*
 
@@ -1296,6 +1492,8 @@ Evaluate, where supported:
 * orientation-sensitive strength;
 * material and nozzle mapping;
 * component separation;
+* inter-material interface clearances and their compensation basis;
+* feasibility and accessibility of each declared operation;
 * assembly sequence.
 
 *Packaging*
@@ -1306,12 +1504,14 @@ Produce consistent:
 * neutral CAD where supported;
 * production meshes;
 * generic 3MF;
+* multi-material packages carrying per-body material identity;
 * selected slicer-specific packages;
 * print notes;
+* the operation plan, where one exists;
 * assembly notes;
-* required physical tests.
+* required coupons and physical tests.
 
-Generated structured files must be independently re-imported and checked.
+Generated structured files must be independently re-imported and checked, and a re-import must recover the material assignments the writer put in.
 
 *Physical outcome model*
 
@@ -1326,6 +1526,10 @@ Record outcomes such as:
 * motion jammed;
 * motion passed;
 * retention failed;
+* coupon printed and measured;
+* insert seated or failed to seat;
+* support released cleanly or damaged the part;
+* bond or weld held or failed;
 * load tested;
 * user-confirmed working.
 
@@ -1336,9 +1540,14 @@ Bind the outcome to:
 * alternative identity;
 * printer;
 * material;
+* process;
 * nozzle;
+* orientation;
 * relevant slicing conditions;
+* the operation history that produced the tested object;
 * tested external object.
+
+An outcome missing any of these cannot later be reused as calibration.
 
 *Feedback-driven branching*
 
@@ -1367,6 +1576,8 @@ Examples:
 Do not:
 
 * infer universal printer compensation from one successful part;
+* transfer a calibration across printers, material formulations, nozzles, orientations, or slicer settings;
+* invent a shrinkage coefficient to fill a gap in the data;
 * collapse physical outcomes into software status;
 * automatically declare one alternative universally superior;
 * require large private project files in the main repository;
@@ -1380,6 +1591,8 @@ The skill can respond coherently to:
 * "the hole is too tight";
 * "the drawer jams halfway";
 * "the clip broke along the layers";
+* "the TPU gasket does not seal";
+* "the magnet dropped out of its pocket";
 * "go back to the screw version";
 * "combine the snap geometry from option A with the reinforced body from option B."
 
@@ -1394,6 +1607,15 @@ Prepare and, where practical, test packages for:
 * at least one pair of retained alternatives.
 
 Record the physically proven vent mount and Berlingo failure without flattening their different evidence classes.
+
+For the multi-material and sequencing slices, cover a small representative set rather than every combination:
+
+* a rigid body with a TPU gasket or other compliant component;
+* a soluble or breakaway support interface;
+* an embedded magnet, nut, or heat-set insert loaded during a print pause;
+* two separately printed materials joined with a controlled fit.
+
+Do not run all four if a later one teaches nothing the earlier ones did not. Choose the smallest set that covers the distinct semantics — a compliant interface, a sacrificial interface, a paused-insert operation, and a cross-material clearance — and record which semantics each one actually exercised.
 
 ## Release 10 — Simplification, interchangeability, and stable product
 
@@ -1440,10 +1662,12 @@ Each implementation reports:
 * version identity;
 * determinism;
 * unit and tolerance behavior;
+* which tolerance profiles and constructs it can evaluate;
+* which manufacturing processes and materials it can prepare;
 * resource expectations;
 * limitations.
 
-Fallback must be explicit and may not silently weaken claim strength.
+Fallback must be explicit and may not silently weaken claim strength. There is no silent fallback for a material, a process, a compensation value, a standards profile, or a tolerance construct.
 
 *Revision-storage conformance*
 
@@ -1485,6 +1709,16 @@ Run:
 * performance baselines;
 * selected real physical workflows.
 
+Qualify, and publish the result:
+
+* the documented list of supported tolerance profiles and editions;
+* a conformance fixture for every supported formal tolerance construct;
+* explicit limitation or rejection of every unsupported construct, demonstrated by a fixture that declares one;
+* validated operation-plan serialization and resumption;
+* independent re-import of multi-material packages by something other than the writer;
+* no silent material, process, compensation, standard, or tolerance fallback anywhere in the product;
+* backend conformance for the tolerance and operation semantics each backend claims.
+
 **User-visible improvement**
 
 The skill has:
@@ -1523,6 +1757,10 @@ Protect:
 * alternative inheritance;
 * context isolation;
 * deterministic comparison;
+* tolerance semantics and unsupported-construct reporting;
+* separation of requirement from compensation;
+* material assignment inheritance and scoped invalidation;
+* operation dependencies and resulting states;
 * serialization.
 
 **L1 — replay**
@@ -1539,6 +1777,8 @@ Cover:
 * fitting;
 * multi-part assemblies;
 * motion;
+* multi-material assignment and inter-material interfaces;
+* operation plans and their resumption;
 * manufacturing packaging;
 * physical feedback transitions.
 
@@ -1626,7 +1866,9 @@ At every release:
 * document current limits;
 * remove invalidated claims;
 * distinguish generated, assessed, reviewed, printed, and physically proven results;
-* distinguish supported branch storage from supported automatic alternative generation.
+* distinguish supported branch storage from supported automatic alternative generation;
+* distinguish tolerance constructs that can be declared from those that can be evaluated;
+* distinguish a calibrated compensation from a provisional allowance.
 
 ## 6. Dependency rules
 
@@ -1639,6 +1881,11 @@ The roadmap may change, but these dependencies are mandatory:
 * multi-source representation precedes multi-source preservation;
 * deterministic comparison precedes strong preservation, interface scoring, comparative geometry scoring, and motion-contact claims;
 * explicit component and interface semantics precede motion;
+* lightweight explicit tolerancing precedes any formal tolerance profile;
+* a supported comparison method precedes any conformance claim about a tolerance construct;
+* per-body material identity precedes inter-material interface obligations;
+* an operation model precedes sequence-aware assembly assessment;
+* measured calibration precedes any applied compensation value;
 * physical outcomes precede generalized calibration;
 * stable capability semantics precede backend interchangeability;
 * transitional paths are removed only after their replacement has been exercised on real jobs.
@@ -1663,6 +1910,17 @@ At each checkpoint:
 8. evaluate whether comparison criteria reflect actual user decisions;
 9. decide whether the next release remains the highest-value step;
 10. revise later roadmap sections as needed.
+
+Once a release has introduced tolerance, material, or sequencing semantics, the checkpoint also asks:
+
+* Did formal tolerancing prevent a real ambiguity, or only add notation?
+* Was the lightweight profile sufficient for the jobs that were actually run?
+* Did the operation model improve manufacturability, or only add bookkeeping?
+* Did multi-material compensation use a calibration relevant to the conditions it was applied under?
+* Did any of these capabilities increase cost for jobs that did not use them?
+* Does a recurring real requirement justify expanding the supported formal semantics — and is there a fixture that would fail without it?
+
+An answer of "no material difference" is a reason to stop expanding that capability, not a reason to try harder.
 
 Release order after Release 6 is deliberately flexible:
 
@@ -1711,7 +1969,11 @@ The roadmap is complete when the skill can, through one coherent user experience
 * modify supplied geometry while preserving declared regions;
 * combine multiple source artifacts with source-specific obligations;
 * design parts that fit real objects using appropriate evidence;
+* express ordinary tolerances explicitly without industrial GD&T ceremony;
+* accept a supplied formal tolerance under its declared profile, or say plainly that it cannot;
 * create and assess multi-part moving assemblies;
+* assign materials and processes where they belong and state what each inter-material interface still owes;
+* express and resume a manufacturing sequence with pauses, inserts, and post-processing;
 * prepare consistent FDM deliverables;
 * incorporate real print and fit feedback into later revisions;
 * restore or revise alternatives after physical failure;

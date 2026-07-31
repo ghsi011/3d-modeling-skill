@@ -2,6 +2,10 @@
 
 Status: accepted, 2026-07-30
 Supersedes: nothing. Consolidates the two execution surfaces described below.
+Execution plan: the phase-by-phase migration map that accompanied this ADR has
+been deleted, and sequencing is now owned by [`ROADMAP.md`](../../ROADMAP.md).
+The phase numbers below are the record of what was decided at the time; the
+decision and its rationale stand as written.
 
 ## The sentence this whole design serves
 

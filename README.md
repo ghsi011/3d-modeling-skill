@@ -36,6 +36,11 @@ Python CLI.
   [`team-contracts-v4.md`](skills/3d-modeling/references/team-contracts-v4.md)
 - **Tool reference:** [`docs/tooling.md`](docs/tooling.md)
 
+This README describes what the skill does today. The intended end-state design is
+[`ARCHITECTURE.md`](ARCHITECTURE.md), the incremental path to it is
+[`ROADMAP.md`](ROADMAP.md), and accepted technical decisions are recorded in
+[`docs/adr/`](docs/adr/). Neither of the first two describes current behaviour.
+
 ## Quickstart
 
 ### Certified INCONSEQUENTIAL DIRECT: one command, no specialist calls
