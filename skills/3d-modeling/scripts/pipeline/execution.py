@@ -141,13 +141,20 @@ class ExecutionPlan:
     model: str | None
     required_reviews: tuple[str, ...]
     verification_dispatch: str
-    # Whether this job must prove that everything outside its declared edit
-    # region survived. Carried on the plan rather than left for whichever CLI
-    # path happens to assemble the contract: the audit reached the contract from
-    # `_run_authored` only, so an edit scope declared over any other builder was
-    # never measured and never mentioned. The runner refuses to build a contract
-    # that does not carry the row this names.
-    requires_preservation: bool
+    # Which supplied artifacts this job must prove survived outside their
+    # declared edit regions. Carried on the plan rather than left for whichever
+    # CLI path happens to assemble the contract: the audit reached the contract
+    # from `_run_authored` only, so an edit scope declared over any other builder
+    # was never measured and never mentioned. The runner refuses to build a
+    # contract that does not carry a row for each artifact this names.
+    #
+    # The ids and not a flag. A job may edit two artifacts, and "the contract
+    # carries a preservation row" was the same statement as "every declared scope
+    # is measured" only while there could be one scope. With two, a contract
+    # carrying one row would satisfy a flag and leave the second artifact
+    # unmeasured -- which is the defect this obligation was added to stop, one
+    # artifact later.
+    preserved_artifact_ids: tuple[str, ...]
     lane_status: str
     lane_note: str
     # Audit detail, not identity: the rejected certified templates are recorded
@@ -210,6 +217,17 @@ class ExecutionPlan:
     # nothing.
 
     @property
+    def requires_preservation(self) -> bool:
+        """Whether this job owes a preservation audit at all.
+
+        Derived from the artifacts rather than stored beside them. A declared
+        edit scope is the obligation, and `MODIFY` is read too so that a project
+        which somehow carried the mode without a scope fails closed rather than
+        building against nothing.
+        """
+        return bool(self.preserved_artifact_ids) or self.source_mode == "MODIFY"
+
+    @property
     def requires_verification(self) -> bool:
         return "verification" in self.required_reviews
 
@@ -228,6 +246,7 @@ class ExecutionPlan:
             "required_reviews": list(self.required_reviews),
             "verification_dispatch": self.verification_dispatch,
             "requires_preservation": self.requires_preservation,
+            "preserved_artifact_ids": list(self.preserved_artifact_ids),
             "lane_status": self.lane_status,
             "lane_note": self.lane_note,
         }
@@ -318,12 +337,12 @@ def _dispatch(route: str, required_reviews: tuple[str, ...]) -> str:
     return "OPTIONAL" if route in ("FITTED", "FULL") else "NEVER"
 
 
-def _lane(*, edit_scope: bool, source_mode: str, builder: str,
+def _lane(*, edit_scopes: int, source_mode: str, builder: str,
           requires_specification: bool) -> tuple[str, str]:
     """Which cap this job runs under, keyed on what it declared.
 
     The modification cap is checked before the `CUSTOM` one, and on the *edit
-    scope* rather than on the literal source mode. Both were defects:
+    scopes* rather than on the literal source mode. Both were defects:
 
     * keyed on `source_mode == "MODIFY"`, a project that declared an edit scope
       over a source artifact and called itself `RECONSTRUCT` compiled
@@ -341,10 +360,15 @@ def _lane(*, edit_scope: bool, source_mode: str, builder: str,
     now come from a proposal frozen into `acceptance_contract.json` before the
     builder runs, and `AuthoredModel` has no field they could be read back
     through.
+
+    `edit_scopes` is a count and not a flag because a job may declare several --
+    a case body and its drawer, edited together. Any one of them carries the
+    obligation, so the cap is on the count being non-zero; a cap keyed on the
+    first scope would let a second one go unmeasured.
     """
     if requires_specification and builder != "CERTIFIED_TEMPLATE":
         return "UNSUPPORTED", AUTHORED_METROLOGY_NOTE
-    if edit_scope or source_mode == "MODIFY":
+    if edit_scopes or source_mode == "MODIFY":
         return "EXPERIMENTAL_UNAVAILABLE", MODIFY_LANE_NOTE
     return "AVAILABLE", ""
 
@@ -358,14 +382,13 @@ def compile_plan(project: P.Project,
         route=decision.route, matched=decision.template,
         requested=project.template, model=project.model,
         requires_specification="specification" in reviews)
-    # A declared edit scope is the obligation, and `MODIFY` with none is refused
-    # by `Project.validate` before this is reached. Both are read here so that a
-    # project which somehow carried the mode without the scope fails closed
-    # rather than building against nothing.
-    requires_preservation = (project.edit_scope is not None
-                             or project.source_mode == "MODIFY")
+    # Declaration order, not sorted: the scopes are what the author wrote, and a
+    # plan that reordered them would stop matching the project it was compiled
+    # from. `Project.validate` refuses a duplicate artifact_id, so these are
+    # distinct.
+    preserved = tuple(scope.artifact_id for scope in project.edit_scopes)
     lane_status, lane_note = _lane(
-        edit_scope=project.edit_scope is not None,
+        edit_scopes=len(preserved),
         source_mode=project.source_mode, builder=builder,
         requires_specification="specification" in reviews)
     return ExecutionPlan(
@@ -375,7 +398,7 @@ def compile_plan(project: P.Project,
         backend=_backend(builder, template),
         model=project.model, required_reviews=reviews,
         verification_dispatch=_dispatch(decision.route, reviews),
-        requires_preservation=requires_preservation,
+        preserved_artifact_ids=preserved,
         lane_status=lane_status, lane_note=lane_note,
         candidates=decision.candidates)
 
@@ -412,7 +435,7 @@ def from_job_request(*, job_id: str, template: str | None,
         builder, name, builder_rationale = _builder(
             route=match.route, matched=match.template, requested=template,
             model=None, requires_specification="specification" in required)
-    lane_status, lane_note = _lane(edit_scope=False,
+    lane_status, lane_note = _lane(edit_scopes=0,
                                    source_mode="NEW", builder=builder,
                                    requires_specification="specification" in required)
     return ExecutionPlan(
@@ -425,5 +448,5 @@ def from_job_request(*, job_id: str, template: str | None,
         backend="authored" if authored else match.backend,
         model=None, required_reviews=required,
         verification_dispatch=_dispatch(match.route, required),
-        requires_preservation=False,
+        preserved_artifact_ids=(),
         lane_status=lane_status, lane_note=lane_note, candidates=match.candidates)

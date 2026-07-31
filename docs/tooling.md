@@ -265,11 +265,30 @@ read. A mesh is reported twice — as parsed and after merging coincident vertic
 
 ## Modification: the edit scope and the preservation audit
 
-A `MODIFY` project declares an `edit_scope` before the edit: the artifact, the
-named region, **a `region_box`**, what must be preserved, what may be removed,
-what is being added, the expected body delta, and whether a mesh fallback is
-allowed. A name alone cannot be compared against, so the box is what the audit
-measures; the name is what a person argues with.
+A `MODIFY` project declares `edit_scopes` before the edit — one entry per
+artifact it modifies, each naming the artifact, the named region, **a
+`region_box`**, what must be preserved, what may be removed, what is being
+added, the expected body delta, and whether a mesh fallback is allowed. A name
+alone cannot be compared against, so the box is what the audit measures; the
+name is what a person argues with.
+
+A job that modifies two artifacts at once — a case body and its drawer, with
+magnet pockets that have to line up — declares two scopes, and both name the
+same `Interface` in their `interface_ids`. That interface is the datum the two
+edits have to agree on; nothing else declares an alignment, and `alignment_transform`
+on each scope is what places that artifact's coordinates in the job's frame. Two
+scopes over one artifact are refused, and every scope is owed its own
+preservation row: `execution_plan.json` names the artifacts in
+`preserved_artifact_ids` and the runner refuses a contract that carries fewer
+rows than that.
+
+The audit itself is not there yet for that job. `preservation.audit` compares one
+source against one candidate in both directions, and the second direction samples
+the whole candidate — so where the candidate carries a second edited artifact, that
+artifact's surface reads as movement against the first artifact's source. The
+coordinated multi-artifact edit is declarable, validated and planned; measuring it
+needs a per-artifact candidate, which this build does not produce. The row says so
+in its own note.
 
 [`pipeline/preservation.py`](../skills/3d-modeling/scripts/pipeline/preservation.py)
 compares everything outside that box, bidirectionally — sampling only the source
@@ -340,11 +359,13 @@ CERTIFIED_TEMPLATE, model: model.py` — and then built the template, so a job
 declaring both reached `VERIFIED` without the designer's file being named on any
 receipt. `builder_rationale` says which declaration won and which was set aside.
 
-`requires_preservation` is set by the **edit scope**, not by the source mode, and
-the runner refuses a contract that does not carry the row it names. Keyed on
-`source_mode == "MODIFY"` instead, a project that declared an edit scope over a
-supplied artifact and wrote `RECONSTRUCT` beside it built a certified template,
-never opened the artifact, and finished `VERIFIED`.
+`preserved_artifact_ids` is set by the **edit scopes**, not by the source mode,
+and the runner refuses a contract carrying fewer preservation rows than there are
+artifacts named there. Keyed on `source_mode == "MODIFY"` instead, a project that
+declared an edit scope over a supplied artifact and wrote `RECONSTRUCT` beside it
+built a certified template, never opened the artifact, and finished `VERIFIED`.
+The ids rather than a flag: with two scopes, "the contract carries a preservation
+row" stops being the same statement as "every declared scope is measured".
 
 `OPTIONAL` is compiled only for `FITTED` and `FULL`, and `design-tool run`
 supplies a verifier for it. It used to be compiled exactly when no verifier would

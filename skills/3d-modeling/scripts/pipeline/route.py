@@ -221,7 +221,7 @@ def decide(project: P.Project) -> RouteDecision:
             {"route": "FULL", "taken": False,
              "why": "one external object, one candidate, nothing moving"},
         ])
-    elif (template_covers and project.model is None and project.edit_scope is None
+    elif (template_covers and project.model is None and not project.edit_scopes
             and not project.blocking_questions):
         route = "DIRECT"
         condition = match.condition
@@ -236,9 +236,18 @@ def decide(project: P.Project) -> RouteDecision:
         ])
     else:
         route = "CUSTOM"
-        if project.edit_scope is not None:
+        if len(project.edit_scopes) == 1:
             condition = (f"an existing artifact is being modified inside "
-                         f"{project.edit_scope.region!r}")
+                         f"{project.edit_scopes[0].region!r}")
+        elif project.edit_scopes:
+            # Named per artifact rather than collapsed into a count: two edits
+            # that have to agree are the reason this route was taken, and a
+            # rationale that says only "2 artifacts" cannot be checked against
+            # the scopes it came from.
+            named = "; ".join(f"{s.artifact_id} inside {s.region!r}"
+                              for s in project.edit_scopes)
+            condition = (f"{len(project.edit_scopes)} existing artifacts are being "
+                         f"modified together -- {named}")
         elif not template_covers:
             condition = ("no certified template covers this geometry inside its "
                          "domain, and nothing has to be recovered from evidence")

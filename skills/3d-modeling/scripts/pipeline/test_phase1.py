@@ -110,7 +110,8 @@ class ProjectSchemaTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             project = _complete(
                 source_mode="MODIFY",
-                edit_scope=P.EditScope(artifact_id="src", region="the boss face"),
+                edit_scopes=(P.EditScope(artifact_id="src",
+                                         region="the boss face"),),
                 source_artifacts=(P.SourceArtifact(artifact_id="src",
                                                    path="../../secrets.step"),))
             problems = project.validate(Path(raw))
@@ -135,8 +136,8 @@ class ProjectSchemaTest(unittest.TestCase):
             source_artifacts=(P.SourceArtifact(artifact_id="src", path="s.step",
                                                format="STEP", units="mm",
                                                classification="USABLE_EXACT"),),
-            edit_scope=P.EditScope(artifact_id="src", region="the mount boss",
-                                   preserve=("everything else",)),
+            edit_scopes=(P.EditScope(artifact_id="src", region="the mount boss",
+                                     preserve=("everything else",)),),
             motion=(P.Motion(motion_id="hinge", kind="ROTARY", static=("body",),
                              moving=("lid",)),),
             interfaces=(P.Interface(interface_id="ball", kind="socket",
@@ -147,6 +148,163 @@ class ProjectSchemaTest(unittest.TestCase):
         self.assertEqual(S.canonical_json(original.as_payload()),
                          S.canonical_json(again.as_payload()))
         self.assertEqual(original.project_hash(), again.project_hash())
+
+
+def _box(x: float) -> dict[str, list[float]]:
+    return {"min": [x, 0.0, 0.0], "max": [x + 10.0, 10.0, 10.0]}
+
+
+class TwoArtifactsEditedTogetherTest(unittest.TestCase):
+    """The job the schema could not express: two artifacts, one datum.
+
+    `Project.edit_scope` was a single `EditScope | None` and `EditScope` named a
+    single `artifact_id`, so cutting matching magnet pockets into a case body and
+    its drawer -- two source artifacts, two coordinated edits, one position they
+    have to agree on -- had nowhere to be declared. `docs/adr/0002` recorded it as
+    a capability gap and asked that whatever replaced `edit_scope` not assume a
+    single source.
+    """
+
+    POCKETS = P.Interface(interface_id="magnet-pockets", kind="magnet pocket",
+                          external=False, owner="this job",
+                          note="the body pocket and the drawer pocket are one "
+                               "feature cut in two places and must agree on where")
+
+    def _pair(self, **over) -> P.Project:
+        base = dict(
+            source_mode="MODIFY", template=None, parameters={}, model="model.py",
+            interfaces=(self.POCKETS,),
+            source_artifacts=(
+                P.SourceArtifact(artifact_id="body", path="body.step",
+                                 format="STEP", classification="USABLE_EXACT"),
+                P.SourceArtifact(artifact_id="drawer", path="drawer.step",
+                                 format="STEP", classification="USABLE_EXACT")),
+            edit_scopes=(
+                P.EditScope(artifact_id="body", region="the body magnet pocket",
+                            region_box=_box(0.0),
+                            interface_ids=("magnet-pockets",)),
+                P.EditScope(artifact_id="drawer", region="the drawer magnet pocket",
+                            region_box=_box(40.0),
+                            interface_ids=("magnet-pockets",))))
+        base.update(over)
+        return _complete(**base)
+
+    def test_two_coordinated_edits_over_two_artifacts_validate(self) -> None:
+        self.assertEqual([], self._pair().validate())
+
+    def test_the_shared_datum_survives_a_save_and_a_load(self) -> None:
+        """Reused rather than invented: the datum is an `Interface` row.
+
+        Nothing new declares "these two features must align". An interface
+        already is a mating surface with an owner, and both scopes reference it
+        by id -- the same way an interface already references a motion. What the
+        schema gained is the reference, and a reference that did not survive the
+        file would be a datum the next run could not read.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _project_dir(Path(raw), self._pair())
+            loaded = P.load(directory)
+        self.assertEqual(["body", "drawer"],
+                         [scope.artifact_id for scope in loaded.edit_scopes
+                          if "magnet-pockets" in scope.interface_ids])
+        self.assertEqual([], loaded.validate())
+
+    def test_two_scopes_naming_one_interface_route_custom_together(self) -> None:
+        """The rationale names both edits, because both are why the route moved."""
+        decision = RT.decide(self._pair())
+        self.assertEqual("CUSTOM", decision.route)
+        self.assertIn("2 existing artifacts are being modified together",
+                      decision.condition)
+        for scope in self._pair().edit_scopes:
+            self.assertIn(scope.artifact_id, decision.condition)
+            self.assertIn(scope.region, decision.condition)
+
+    def test_a_scope_cannot_name_an_interface_nobody_declared(self) -> None:
+        project = self._pair(interfaces=())
+        self.assertTrue(any("names no declared interface" in p
+                            for p in project.validate()), project.validate())
+
+    def test_a_bare_string_of_interface_ids_names_the_field_not_its_letters(
+            self) -> None:
+        """`tuple("magnet-pockets")` is fourteen ids, and fourteen problems.
+
+        Refused at the reader, because by the time the tuple exists the mistake
+        is unrecoverable: every element is a non-empty string and each one is
+        separately reported as an interface nobody declared, which names the
+        wrong thing fourteen times.
+        """
+        payload = self._pair().as_payload()
+        payload["edit_scopes"][0]["interface_ids"] = "magnet-pockets"
+        with self.assertRaises(S.SchemaError) as caught:
+            P.from_payload(payload)
+        self.assertIn("interface_ids must be a list of ids",
+                      str(caught.exception))
+
+    def test_an_empty_interface_id_is_refused_by_the_validator(self) -> None:
+        project = self._pair(edit_scopes=(
+            P.EditScope(artifact_id="body", region="the body magnet pocket",
+                        region_box=_box(0.0), interface_ids=("",)),))
+        self.assertEqual(
+            ["edit_scope 'body': interface_ids must be a list of non-empty "
+             "interface ids"],
+            [p for p in project.validate() if "interface_ids" in p])
+
+    def test_two_scopes_over_one_artifact_are_refused(self) -> None:
+        """Two answers to 'what may this edit touch' is no answer."""
+        project = self._pair(edit_scopes=(
+            P.EditScope(artifact_id="body", region="the magnet pocket",
+                        region_box=_box(0.0)),
+            P.EditScope(artifact_id="body", region="the hinge relief",
+                        region_box=_box(40.0))))
+        self.assertEqual(
+            ["edit_scope 'body': this artifact_id is declared twice"],
+            [p.split(" --")[0] for p in project.validate()
+             if "declared twice" in p])
+
+    def test_every_scope_must_name_a_declared_source_artifact(self) -> None:
+        """Checked on each scope, not only on the first one.
+
+        The rule itself is not new -- the singular field was validated the same
+        way. What is new is that a second scope cannot slip past it.
+        """
+        project = self._pair(edit_scopes=(
+            P.EditScope(artifact_id="body", region="the body pocket",
+                        region_box=_box(0.0)),
+            P.EditScope(artifact_id="ghost", region="the drawer pocket",
+                        region_box=_box(40.0))))
+        problems = project.validate()
+        self.assertEqual(["edit_scope 'ghost': artifact_id names no source artifact"],
+                         [p for p in problems if "names no source" in p])
+
+    def test_a_problem_names_the_scope_it_came_from(self) -> None:
+        """With two scopes, 'edit_scope: ...' names neither of them."""
+        project = self._pair(edit_scopes=(
+            P.EditScope(artifact_id="body", region="the body pocket",
+                        region_box=_box(0.0)),
+            P.EditScope(artifact_id="drawer", region="the drawer pocket")))
+        problems = [p for p in project.validate() if "region_box is required" in p]
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("edit_scope 'drawer'", problems[0])
+
+    def test_two_scopes_round_trip_through_the_payload(self) -> None:
+        original = self._pair()
+        again = P.from_payload(original.as_payload())
+        self.assertEqual(S.canonical_json(original.as_payload()),
+                         S.canonical_json(again.as_payload()))
+        self.assertEqual(("magnet-pockets",), again.edit_scopes[1].interface_ids)
+
+    def test_the_singular_key_is_refused_by_name_rather_than_dropped(self) -> None:
+        """A payload written against the old field said what must be preserved.
+
+        Ignoring the key would drop that declaration in silence and build the
+        modification with nothing measuring it; reading it would restore the two
+        authorities the plural field exists to remove.
+        """
+        payload = self._pair().as_payload()
+        payload["edit_scope"] = payload["edit_scopes"][0]
+        with self.assertRaises(S.SchemaError) as caught:
+            P.from_payload(payload)
+        self.assertIn("edit_scopes", str(caught.exception))
 
 
 class RouteTest(unittest.TestCase):
@@ -175,7 +333,8 @@ class RouteTest(unittest.TestCase):
             source_artifacts=(P.SourceArtifact(artifact_id="src", path="s.step",
                                                format="STEP",
                                                classification="USABLE_EXACT"),),
-            edit_scope=P.EditScope(artifact_id="src", region="the boss face")))
+            edit_scopes=(P.EditScope(artifact_id="src",
+                                     region="the boss face"),)))
         self.assertEqual("CUSTOM", decision.route)
 
     def test_reconstruct_routes_fitted(self) -> None:
@@ -257,7 +416,8 @@ class RouteTest(unittest.TestCase):
                 source_artifacts=(P.SourceArtifact(
                     artifact_id="src", path="s.stl", format="STL",
                     classification="REPAIR_REQUIRED"),),
-                edit_scope=P.EditScope(artifact_id="src", region="the cracked rib")),
+                edit_scopes=(P.EditScope(artifact_id="src",
+                                         region="the cracked rib"),)),
             "explicit request": dict(verification_requested=True),
             "open question": dict(open_questions=(
                 P.OpenQuestion("is that radius or diameter?"),)),

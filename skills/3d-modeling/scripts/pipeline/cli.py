@@ -576,28 +576,47 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
     was fixed before the job started, and any overhang the *edit* adds still
     fails. Where it cannot be measured, the generated zero stands, because
     widening a limit on a guess is the failure this whole arrangement avoids.
+
+    A job may modify more than one artifact, and then the ceiling is the sum of
+    what each of them already had -- the candidate carries all of them, so the
+    downward-facing area it inherits is all of theirs. One unmeasurable artifact
+    drops the whole allowance back to the generated zero rather than crediting
+    the part with only the artifacts that happened to read: a partial sum is a
+    ceiling nobody measured.
     """
-    scope = project.edit_scope
-    if scope is None or project.source_mode != "MODIFY":
+    if not project.edit_scopes or project.source_mode != "MODIFY":
         return None
-    artifact = project.artifact(scope.artifact_id)
-    if artifact is None:
-        return None
-    try:
-        source = S.resolve_within(project_dir, artifact.path, what="edit source")
-        if not source.is_file():
+
+    measured: list[tuple[str, float]] = []
+    for scope in project.edit_scopes:
+        artifact = project.artifact(scope.artifact_id)
+        if artifact is None:
             return None
-        from designer_toolkit import metrics as M
-        area = float(M.overhang_area(
-            str(source),
-            threshold=float(rule.get("downward_normal_z_max", -0.73)),
-            bed_z=float(rule.get("bed_z_mm", 0.0))))
-    except Exception:                                 # noqa: BLE001 - an
-        return None                                   # unmeasurable source keeps
+        try:
+            source = S.resolve_within(project_dir, artifact.path,
+                                      what="edit source")
+            if not source.is_file():
+                return None
+            from designer_toolkit import metrics as M
+            area = float(M.overhang_area(
+                str(source),
+                threshold=float(rule.get("downward_normal_z_max", -0.73)),
+                bed_z=float(rule.get("bed_z_mm", 0.0))))
+        except Exception:                             # noqa: BLE001 - an
+            return None                               # unmeasurable source keeps
                                                       # the generated zero
-    return area, (f"inherited from {artifact.path}, measured before the edit: "
-                  f"{area:.3f} mm2 of the supplied artifact already faces "
-                  "downward. The edit may not add to it.")
+        measured.append((artifact.path, area))
+
+    total = sum(area for _, area in measured)
+    if len(measured) == 1:
+        path, area = measured[0]
+        return area, (f"inherited from {path}, measured before the edit: "
+                      f"{area:.3f} mm2 of the supplied artifact already faces "
+                      "downward. The edit may not add to it.")
+    detail = ", ".join(f"{path} {area:.3f} mm2" for path, area in measured)
+    return total, (f"inherited from {len(measured)} supplied artifacts, measured "
+                   f"before the edit: {total:.3f} mm2 already faces downward "
+                   f"({detail}). The edit may not add to it.")
 
 
 def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
@@ -642,7 +661,7 @@ def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
 
 
 def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
-    """The contract row that measures everything outside the declared edit region.
+    """One contract row per declared edit scope, measuring outside its region.
 
     A contract feature rather than a report written afterwards, so it reaches the
     same commissioning verdict and the same status decision as every other
@@ -653,29 +672,49 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     from `_run_authored` alone, so a project that declared an edit scope over a
     source artifact and matched a certified template built the template, never
     opened the artifact, named neither on any receipt, and finished `VERIFIED`.
-    The plan carries the obligation now and `runner.run` refuses a contract that
-    does not carry this row, so a builder added later cannot drop it by omission.
+    The plan names the artifacts that owe a row now, and `runner.run` refuses a
+    contract carrying fewer rows than that, so a builder added later cannot drop
+    one by omission.
+
+    Every row names its artifact -- `preservation-<artifact_id>` -- rather than
+    the first one taking the bare id. A job may modify two artifacts, the
+    preflight refuses a duplicate feature id, and an id whose spelling depended
+    on how many scopes there happened to be is one no receipt reader could
+    predict.
     """
-    scope = project.edit_scope
-    if scope is None:
-        return ()
-    artifact = project.artifact(scope.artifact_id)
-    if artifact is None:
-        return ()
-    exact = (artifact.classification == "USABLE_EXACT"
-             and not scope.mesh_fallback_allowed)
-    return ({
-        "feature_id": "preservation",
-        "kind": "preservation",
-        "source": artifact.path,
-        "region": scope.region_box,
-        "tolerance_mm": scope.preservation_tolerance_mm,
-        "exact": exact,
-        # `abs: 0.0` on top of the row's own tolerance_mm: the band lives in the
-        # comparison, and a second one here would widen it.
-        "tolerance": {"abs": 0.0},
-        "note": f"everything outside {scope.region!r} must survive the edit",
-    },)
+    rows: list[dict[str, Any]] = []
+    for scope in project.edit_scopes:
+        artifact = project.artifact(scope.artifact_id)
+        if artifact is None:
+            continue
+        exact = (artifact.classification == "USABLE_EXACT"
+                 and not scope.mesh_fallback_allowed)
+        note = f"everything outside {scope.region!r} must survive the edit"
+        if len(project.edit_scopes) > 1:
+            # Said on the row rather than left for the reader to discover from a
+            # CHANGED verdict. `preservation.audit` compares one source against
+            # one candidate in both directions, and the second direction samples
+            # the whole candidate: where the candidate carries the other edited
+            # artifact too, that artifact's surface is far from this row's source
+            # and the comparison reports it as movement. The declaration is
+            # right; the instrument is not yet built for it.
+            note += (f" ({len(project.edit_scopes)} artifacts are edited together "
+                     "and the audit compares one source against the whole "
+                     "candidate, so a coordinated multi-artifact edit is declared "
+                     "here but not yet measurable by it)")
+        rows.append({
+            "feature_id": f"preservation-{scope.artifact_id}",
+            "kind": "preservation",
+            "source": artifact.path,
+            "region": scope.region_box,
+            "tolerance_mm": scope.preservation_tolerance_mm,
+            "exact": exact,
+            # `abs: 0.0` on top of the row's own tolerance_mm: the band lives in
+            # the comparison, and a second one here would widen it.
+            "tolerance": {"abs": 0.0},
+            "note": note,
+        })
+    return tuple(rows)
 
 
 def _requirement_hash(project: P.Project, brief_hash: str) -> str:

@@ -342,13 +342,21 @@ def run(request: JobRequest) -> JobResult:
     # still finish VERIFIED. Refusing here rather than warning: an audit that is
     # absent from the contract cannot reach the commissioning verdict, so there
     # is no later place this could be caught.
-    if plan.requires_preservation and not any(
-            feature.kind == "preservation" for feature in model_contract.features):
-        problems = problems + [
-            "this job declares an edit scope over a supplied artifact, so the "
-            "contract must carry the preservation row that measures everything "
-            "outside the edit region. It carries none, and a modification whose "
-            "preservation is unmeasured cannot be commissioned."]
+    if plan.requires_preservation:
+        rows = [feature for feature in model_contract.features
+                if feature.kind == "preservation"]
+        # One row per declared scope, and at least one either way. Counted rather
+        # than matched by id so the runner does not have to know how the CLI
+        # spells a feature id -- the preflight already refuses duplicates, so a
+        # shortfall is the only way a declared scope can go unmeasured.
+        owed = max(1, len(plan.preserved_artifact_ids))
+        if len(rows) < owed:
+            problems = problems + [
+                f"this job declares {owed} edit scope(s) over supplied artifacts, "
+                f"so the contract must carry {owed} preservation row(s) measuring "
+                f"everything outside each edit region. It carries {len(rows)}, and "
+                "a modification whose preservation is unmeasured cannot be "
+                "commissioned."]
     timings["contract"] = time.perf_counter() - mark
     if problems:
         return JobResult(False, "preflight",

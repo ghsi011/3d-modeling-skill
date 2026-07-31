@@ -68,11 +68,13 @@ judged against. Acceptance bands are the pipeline's, not the designer's. Changin
 the proposal cuts a new contract revision, invalidates the receipts issued
 against the old one, and says so in `acceptance_history.json`.
 
-**Any job that declares an `edit_scope` cannot claim success right now.** The
-modification cap follows the declared edit scope, not the `source_mode` label
-beside it — an edit scope over a supplied artifact carries the preservation
-obligation on every builder and every route. These jobs build, screen, gate and
-write every receipt, and a designer can iterate against real measurements — but
+**Any job that declares an edit scope cannot claim success right now.** A
+`MODIFY` job declares one `edit_scopes` entry per artifact it modifies, and the
+modification cap follows those scopes, not the `source_mode` label beside them —
+an edit scope over a supplied artifact carries the preservation obligation on
+every builder and every route, and every declared scope is owed its own audit
+row. These jobs build, screen, gate and write every receipt, and a designer can
+iterate against real measurements — but
 the run reports `EXPERIMENTAL_UNAVAILABLE` instead of `COMMISSIONED` or
 `VERIFIED`, because the preservation audit's sample density is not yet derived
 from a declared minimum detectable defect size. `final_status.json` carries

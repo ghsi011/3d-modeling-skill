@@ -526,7 +526,7 @@ class TheCustomLaneMayNowClaimTest(unittest.TestCase):
         declared minimum detectable defect size."""
         plan = EX.compile_plan(_project(
             source_mode="MODIFY", source_artifacts=(SOURCE_ARTIFACT,),
-            edit_scope=EDIT_SCOPE))
+            edit_scopes=(EDIT_SCOPE,)))
         self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
         self.assertIn("minimum detectable defect size", plan.lane_note)
         self.assertNotIn("acceptance criteria", plan.lane_note,
@@ -562,7 +562,8 @@ class EditScopeIsTheObligationTest(unittest.TestCase):
 
     def _edit(self, **over) -> P.Project:
         return _project(source_mode="RECONSTRUCT", interface_map={"channel": "bore_d"},
-                        source_artifacts=(SOURCE_ARTIFACT,), edit_scope=EDIT_SCOPE,
+                        source_artifacts=(SOURCE_ARTIFACT,),
+                        edit_scopes=(EDIT_SCOPE,),
                         **over)
 
     def test_the_cap_follows_the_edit_scope_and_not_the_source_mode(self) -> None:
@@ -591,7 +592,7 @@ class EditScopeIsTheObligationTest(unittest.TestCase):
                 with self.subTest(source_mode=source_mode, builder=label):
                     plan = EX.compile_plan(_project(
                         source_mode=source_mode, source_artifacts=(SOURCE_ARTIFACT,),
-                        edit_scope=EDIT_SCOPE,
+                        edit_scopes=(EDIT_SCOPE,),
                         envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0}, **over))
                     # Which cap, not merely that there is one: a `RECONSTRUCT`
                     # job on an authored model is `UNSUPPORTED` for a reason that
@@ -630,7 +631,7 @@ class EditScopeIsTheObligationTest(unittest.TestCase):
 
             report = json.loads(
                 (directory / "commission_report.json").read_text(encoding="utf-8"))
-            self.assertIn("feature-preservation",
+            self.assertIn("feature-preservation-src",
                           [c["check_id"] for c in report["checks"]])
 
             self.assertEqual("EXPERIMENTAL_UNAVAILABLE",
@@ -651,13 +652,182 @@ class EditScopeIsTheObligationTest(unittest.TestCase):
             project = _project()
             directory = _laid_out(Path(raw), project)
             plan = dataclasses.replace(EX.compile_plan(project),
-                                       requires_preservation=True)
+                                       preserved_artifact_ids=("src",))
             result = runner.run(runner.JobRequest(
                 brief_path=directory / "brief.md", out_dir=directory,
                 render=False, plan=plan, **P.to_job_request_fields(project)))
             self.assertFalse(result.ok)
             self.assertEqual("preflight", result.stage)
             self.assertIn("preservation row", result.message)
+
+    def test_the_mode_alone_still_refuses_a_contract_with_no_row(self) -> None:
+        """The fail-closed path, kept covered now that the obligation is a list.
+
+        A project that carried `MODIFY` without a scope is refused by
+        `Project.validate` before this is reached, so the plan should never name
+        zero artifacts and still owe an audit. It is checked anyway: a plan that
+        owed nothing measurable would let the one shape nobody validated build
+        against nothing at all.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            project = _project()
+            directory = _laid_out(Path(raw), project)
+            plan = dataclasses.replace(EX.compile_plan(project),
+                                       source_mode="MODIFY",
+                                       preserved_artifact_ids=())
+            self.assertTrue(plan.requires_preservation)
+            result = runner.run(runner.JobRequest(
+                brief_path=directory / "brief.md", out_dir=directory,
+                render=False, plan=plan, **P.to_job_request_fields(project)))
+            self.assertFalse(result.ok)
+            self.assertEqual("preflight", result.stage)
+            self.assertIn("It carries 0", result.message)
+
+
+SECOND_ARTIFACT = P.SourceArtifact(artifact_id="drawer", path="drawer.stl",
+                                   format="STL", classification="USABLE_MESH")
+SECOND_SCOPE = P.EditScope(
+    artifact_id="drawer", region="the drawer magnet pocket",
+    region_box={"min": [25.0, 5.0, 0.0], "max": [35.0, 15.0, 10.0]},
+    interface_ids=("magnet-pockets",))
+POCKETS = P.Interface(interface_id="magnet-pockets", kind="magnet pocket",
+                      external=False, owner="this job",
+                      note="both pockets are one feature cut in two places")
+
+
+class TwoEditScopesAreTwoObligationsTest(unittest.TestCase):
+    """A job may modify two artifacts, and both of them are owed an audit.
+
+    The obligation used to be a flag, because there could only be one scope:
+    "the contract carries a preservation row" and "every declared scope is
+    measured" were the same sentence. With two scopes they are not, and a
+    contract carrying one row would satisfy the flag while leaving the second
+    artifact unmeasured -- the same defect the flag was added to stop, one
+    artifact later.
+    """
+
+    def _pair(self, **over) -> P.Project:
+        base = dict(
+            source_mode="MODIFY", model="model.py",
+            envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0},
+            interfaces=(POCKETS,),
+            source_artifacts=(SOURCE_ARTIFACT, SECOND_ARTIFACT),
+            edit_scopes=(
+                dataclasses.replace(EDIT_SCOPE,
+                                    interface_ids=("magnet-pockets",)),
+                SECOND_SCOPE))
+        base.update(over)
+        return _project(**base)
+
+    def test_the_plan_names_every_artifact_that_owes_an_audit(self) -> None:
+        plan = EX.compile_plan(self._pair())
+        self.assertEqual(("src", "drawer"), plan.preserved_artifact_ids)
+        self.assertTrue(plan.requires_preservation)
+
+    def test_the_cap_follows_the_scopes_however_many_there_are(self) -> None:
+        """Asserted where `source_mode` cannot supply the answer by itself.
+
+        `_lane` caps on `edit_scopes or source_mode == "MODIFY"`, so a `MODIFY`
+        project would return `EXPERIMENTAL_UNAVAILABLE` even if the scopes were
+        read by nothing -- which is the shape of the defect this cap exists to
+        stop. `RECONSTRUCT` over a certified builder leaves the scopes as the
+        only thing that can produce the cap.
+        """
+        plan = EX.compile_plan(self._pair(
+            source_mode="RECONSTRUCT", model=None,
+            interface_map={"channel": "bore_d"}))
+        self.assertEqual("CERTIFIED_TEMPLATE", plan.builder)
+        self.assertEqual("EXPERIMENTAL_UNAVAILABLE", plan.lane_status)
+        self.assertEqual(EX.MODIFY_LANE_NOTE, plan.lane_note)
+        self.assertEqual(("src", "drawer"), plan.preserved_artifact_ids)
+
+    def test_each_scope_gets_its_own_row_naming_its_own_artifact(self) -> None:
+        rows = cli._preservation_feature(self._pair())
+        self.assertEqual(["preservation-src", "preservation-drawer"],
+                         [row["feature_id"] for row in rows])
+        self.assertEqual(["source.stl", "drawer.stl"],
+                         [row["source"] for row in rows])
+
+    def test_a_multi_artifact_row_says_what_the_audit_cannot_yet_do(self) -> None:
+        """The declaration is ahead of the instrument, and the row admits it.
+
+        `preservation.audit` compares one source against one candidate in both
+        directions, and the candidate-to-source direction samples the whole
+        candidate. Where the candidate carries the other edited artifact too,
+        that artifact's surface reads as movement against this row's source. A
+        row that stated the obligation without stating that would be read as a
+        measurement it is not.
+        """
+        for row in cli._preservation_feature(self._pair()):
+            self.assertIn("not yet measurable", row["note"], row)
+        one = cli._preservation_feature(_project(
+            source_mode="MODIFY", source_artifacts=(SOURCE_ARTIFACT,),
+            edit_scopes=(EDIT_SCOPE,)))
+        self.assertNotIn("not yet measurable", one[0]["note"],
+                         "a single-artifact edit is measured exactly as before "
+                         "and must not carry a caveat that does not apply to it")
+
+    def test_the_inherited_overhang_ceiling_is_the_sum_of_the_artifacts(self) -> None:
+        """The candidate carries both bodies, so it inherits both their overhangs.
+
+        And one unmeasurable artifact drops the whole allowance back to the
+        generated zero: a partial sum is a ceiling nobody measured, and widening
+        a limit on a guess is what this arrangement exists to avoid.
+        """
+        import trimesh
+
+        rule = {"downward_normal_z_max": -0.73, "bed_z_mm": 0.0}
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            for name, extents in (("source.stl", (40.0, 30.0, 10.0)),
+                                  ("drawer.stl", (20.0, 10.0, 10.0))):
+                block = trimesh.creation.box(extents=extents)
+                block.apply_translation([e / 2 for e in extents])
+                block.export(directory / name)
+
+            both = cli._inherited_overhang(directory, self._pair(), rule)
+            self.assertIsNotNone(both)
+            each = [cli._inherited_overhang(
+                directory,
+                _project(source_mode="MODIFY", source_artifacts=(artifact,),
+                         edit_scopes=(scope,)), rule)
+                for artifact, scope in ((SOURCE_ARTIFACT, EDIT_SCOPE),
+                                        (SECOND_ARTIFACT, SECOND_SCOPE))]
+            self.assertAlmostEqual(sum(area for area, _ in each), both[0], places=6)
+            self.assertIn("2 supplied artifacts", both[1])
+
+            (directory / "drawer.stl").unlink()
+            self.assertIsNone(cli._inherited_overhang(directory, self._pair(), rule),
+                              "one unreadable artifact must not leave a ceiling "
+                              "credited with only the ones that happened to read")
+
+    def test_a_contract_that_carries_one_row_for_two_scopes_is_refused(self) -> None:
+        """The shortfall, not merely the absence.
+
+        A flag could only ask whether any row was present. Two scopes and one row
+        is a job that measured half of what it declared, and it has to stop for
+        the same reason zero rows does: there is no later place a missing audit
+        can be caught.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            project = _project()
+            directory = _laid_out(Path(raw), project)
+            plan = dataclasses.replace(
+                EX.compile_plan(project),
+                preserved_artifact_ids=("src", "drawer"))
+            one_row = ({"feature_id": "preservation-src", "kind": "preservation",
+                        "source": "source.stl",
+                        "region": EDIT_SCOPE.region_box,
+                        "tolerance_mm": 0.05, "exact": False,
+                        "tolerance": {"abs": 0.0},
+                        "note": "only one of the two declared scopes"},)
+            result = runner.run(runner.JobRequest(
+                brief_path=directory / "brief.md", out_dir=directory,
+                render=False, plan=plan, plan_features=one_row,
+                **P.to_job_request_fields(project)))
+            self.assertFalse(result.ok)
+            self.assertEqual("preflight", result.stage)
+            self.assertIn("carries 1", result.message)
 
 
 class ADeclaredModelIsNeverDiscardedTest(unittest.TestCase):

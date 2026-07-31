@@ -139,11 +139,17 @@ did not take and why. You do not have to reproduce the table by hand; you have t
 `NEW` creates geometry from requirements. `MODIFY` starts from one or more supplied artifacts
 that are authoritative starting geometry. `RECONSTRUCT` recovers geometry from evidence.
 
-A `MODIFY` job declares an `edit_scope`: which artifact, which named region the edit lives in,
-what must be preserved, what may be removed, what is being added. Written before the edit —
-one written afterwards is a description of what happened, not a gate. Never silently repair
-or normalise the only authoritative copy, and do not redraw a supplied part merely to make it
-parametric unless the user authorises reconstruction.
+A `MODIFY` job declares one entry in `edit_scopes` for every artifact it modifies: which
+artifact, which named region the edit lives in, what must be preserved, what may be removed,
+what is being added. Written before the edit — one written afterwards is a description of what
+happened, not a gate. Never silently repair or normalise the only authoritative copy, and do
+not redraw a supplied part merely to make it parametric unless the user authorises
+reconstruction.
+
+Two artifacts edited together — a case body and its drawer, with magnet pockets that have to
+line up — declare two scopes, and both name the same `Interface` in their `interface_ids`.
+That interface is the datum the two edits have to agree on; there is no separate constraint
+object, and no second scope may be declared over an artifact that already has one.
 
 Every design-driving value carries its provenance, and the four are never collapsed:
 
@@ -233,11 +239,12 @@ external object. One designer commission, and `design-tool run` writes it: the r
 project path, the authorized inputs, the required outputs, the bound hashes and the
 completion command. The print plan is created before the candidate is measured.
 
-`CUSTOM`, and any job that declares an `edit_scope`, cannot reach a successful final status
-yet. The modification cap follows the declared edit scope and not the `source_mode` label
+`CUSTOM`, and any job that declares an edit scope, cannot reach a successful final status
+yet. The modification cap follows the declared edit scopes and not the `source_mode` label
 beside it, so an edit scope over a supplied artifact carries the preservation obligation on
-every builder and every route. Every deterministic stage still runs and every receipt is
-still written — build, gates, screen, preservation audit, witnesses — so a designer can
+every builder and every route, and every declared scope is owed its own audit row. Every
+deterministic stage still runs and every receipt is still written — build, gates, screen,
+preservation audit, witnesses — so a designer can
 iterate against real measurements. What the run reports is
 `EXPERIMENTAL_UNAVAILABLE`, with `lane_status` and the reason in `final_status.json`: the
 candidate still supplies its own acceptance criteria, and a receipt issued by the party being

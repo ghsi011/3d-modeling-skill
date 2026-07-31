@@ -43,6 +43,25 @@ This ADR does not solve it. It is recorded as owed work so that the repair stage
 are not designed in a way that makes it harder to add: whatever replaces
 `edit_scope` should not assume a single source.
 
+**Half-closed since.** `Project.edit_scope` is now `Project.edit_scopes`, a tuple,
+with no singular field beside it — a payload carrying the old key is refused by
+name rather than read, because two authorities over one declaration is one
+authority and one bug. Two source artifacts and two preservation scopes are
+declarable, validated (no duplicate `artifact_id`, every `artifact_id` naming a
+declared source artifact), planned (`ExecutionPlan.preserved_artifact_ids`) and
+gated (the runner refuses a contract carrying fewer preservation rows than there
+are scopes). The datum two coordinated edits must agree on is an `Interface`
+that both scopes name in `interface_ids`; no new constraint object was added,
+because an interface already is a mating surface with an owner and a `Motion` was
+already referenced the same way.
+
+What is still owed is the measurement, not the declaration. `preservation.audit`
+compares one source against one candidate bidirectionally, and the
+candidate-to-source direction samples the whole candidate — so a candidate
+carrying both edited artifacts reads the second artifact's surface as movement
+against the first artifact's source. Closing the rest of this gap needs a
+per-artifact candidate, which no builder in this build produces.
+
 ## Context: two reviews, twenty-one defects, three that invalidate the receipts
 
 Two independent code reviews of the Phase 0-3 consolidation found 21 defects.

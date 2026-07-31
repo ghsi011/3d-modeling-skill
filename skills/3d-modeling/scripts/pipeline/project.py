@@ -66,6 +66,20 @@ def _rows(value: Any, what: str) -> list[dict[str, Any]]:
     return list(value)
 
 
+def _ids(value: Any, what: str) -> tuple[str, ...]:
+    """A list of ids, refusing the bare string that looks like one.
+
+    `tuple("magnet-pockets")` is fourteen ids, so a caller who wrote a string
+    where a list belongs would otherwise be told about fourteen interfaces
+    nobody declared instead of about the field they got wrong.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise S.SchemaError(f"{what} must be a list of ids, not a bare string")
+    return tuple(value)
+
+
 def _text(value: Any, what: str, *, required: bool = True) -> str | None:
     if value is None and not required:
         return None
@@ -231,11 +245,15 @@ class Motion:
 
 @dataclasses.dataclass(frozen=True)
 class EditScope:
-    """What a `MODIFY` job may touch, and what it must leave exactly alone.
+    """What a `MODIFY` job may touch in one artifact, and what it must leave alone.
 
     Written before the edit, like everything else here. The preservation audit in
     Phase 3 measures against this declaration; an edit scope written afterwards
     would be a description of what happened, not a gate.
+
+    One scope is one artifact. A job that modifies two artifacts declares two
+    scopes -- see `Project.edit_scopes` -- and the two are tied together by the
+    `Interface` rows they name, not by a second kind of declaration.
     """
 
     artifact_id: str
@@ -250,7 +268,23 @@ class EditScope:
     expected_body_delta: int = 0
     mesh_fallback_allowed: bool = False
     preserve_metadata: bool = True
+    # Where this artifact's own coordinates sit in the job's frame. Two scopes
+    # whose region boxes are written in one frame are already talking about one
+    # datum; this is the field that makes that true rather than assumed.
     alignment_transform: Any = "identity"
+    # Which declared `Interface` rows this edit realizes -- the shared datum
+    # between two scopes. A magnet pocket cut into a case body and the matching
+    # pocket cut into its drawer are two edits of one interface, and the
+    # interface is what says they have to agree on where it is.
+    #
+    # Nothing new was invented for this. An `Interface` already carries a mating
+    # surface and who owns the geometry on the other side of it, and a `Motion`
+    # is already referenced the same way -- by id, from the row that takes part
+    # in it. What was missing was only the reference itself: two scopes could sit
+    # beside an interface with nothing saying they were its two sides, so the
+    # agreement lived in a `note` a reader had to believe rather than in a field
+    # a validator could check.
+    interface_ids: tuple[str, ...] = ()
     # The band a sampled comparison may call unchanged. Two tessellations of one
     # surface disagree by the chord error of whichever is coarser, so this is not
     # zero -- and it is declared before the edit, like everything else here.
@@ -258,52 +292,70 @@ class EditScope:
 
     def as_dict(self) -> dict[str, Any]:
         payload = dataclasses.asdict(self)
-        for key in ("preserve", "may_remove", "add"):
+        for key in ("preserve", "may_remove", "add", "interface_ids"):
             payload[key] = list(getattr(self, key))
         return payload
 
+    @property
+    def where(self) -> str:
+        """How a problem names this scope.
+
+        By artifact id, because `Project.validate` refuses two scopes over one
+        artifact. With the duplicate refused the id names exactly one scope, and
+        a problem nobody can attribute to a scope is a problem nobody can act on
+        once there is more than one of them.
+        """
+        return f"edit_scope {self.artifact_id!r}"
+
     def problems(self) -> list[str]:
+        where = self.where
         out: list[str] = []
         if not self.artifact_id.strip():
-            out.append("edit_scope: artifact_id must name the source artifact being "
+            out.append(f"{where}: artifact_id must name the source artifact being "
                        "modified")
         if not self.region.strip():
-            out.append("edit_scope: region must name the edit region; the preservation "
+            out.append(f"{where}: region must name the edit region; the preservation "
                        "audit measures everything outside it")
         box = self.region_box
         if box is None:
-            out.append("edit_scope: region_box is required -- 'outside the edit "
+            out.append(f"{where}: region_box is required -- 'outside the edit "
                        "region' has no geometric meaning without one, and the "
                        "preservation audit would have nothing to compare")
         elif (not isinstance(box, dict)
               or not isinstance(box.get("min"), (list, tuple))
               or not isinstance(box.get("max"), (list, tuple))
               or len(box["min"]) != 3 or len(box["max"]) != 3):
-            out.append("edit_scope: region_box must be {'min': [x, y, z], "
+            out.append(f"{where}: region_box must be {{'min': [x, y, z], "
                        "'max': [x, y, z]}")
         else:
             for axis, (low, high) in enumerate(zip(box["min"], box["max"])):
                 try:
-                    if S.require_finite_number(
-                            high, what="edit_scope.region_box.max") <=                             S.require_finite_number(
-                                low, what="edit_scope.region_box.min"):
-                        out.append(f"edit_scope: region_box is empty on axis "
+                    high_mm = S.require_finite_number(
+                        high, what=f"{where}.region_box.max")
+                    low_mm = S.require_finite_number(
+                        low, what=f"{where}.region_box.min")
+                    if high_mm <= low_mm:
+                        out.append(f"{where}: region_box is empty on axis "
                                    f"{'xyz'[axis]}")
                 except S.SchemaError as exc:
                     out.append(str(exc))
         if self.preservation_tolerance_mm <= 0:
-            out.append("edit_scope: preservation_tolerance_mm must be positive; a "
+            out.append(f"{where}: preservation_tolerance_mm must be positive; a "
                        "zero band cannot be met by two tessellations of one surface")
         if isinstance(self.expected_body_delta, bool) or \
                 not isinstance(self.expected_body_delta, int):
-            out.append("edit_scope: expected_body_delta must be an integer")
+            out.append(f"{where}: expected_body_delta must be an integer")
         if self.alignment_transform != "identity":
             matrix = self.alignment_transform
             ok = (isinstance(matrix, list) and len(matrix) == 4
                   and all(isinstance(row, list) and len(row) == 4 for row in matrix))
             if not ok:
-                out.append("edit_scope: alignment_transform must be 'identity' or a "
-                           "4x4 matrix")
+                out.append(f"{where}: alignment_transform must be 'identity' or "
+                           "a 4x4 matrix")
+        if any(not isinstance(name, str) or not name.strip()
+               for name in self.interface_ids):
+            out.append(f"{where}: interface_ids must be a list of non-empty "
+                       "interface ids")
         return out
 
 
@@ -372,7 +424,14 @@ class Project:
     motion: tuple[Motion, ...] = ()
     components: tuple[Component, ...] = ()
     open_questions: tuple[OpenQuestion, ...] = ()
-    edit_scope: EditScope | None = None
+    # One scope per artifact being modified, and never a singular field beside
+    # this one. Modifying a case body and its drawer together -- two artifacts,
+    # two coordinated edits, one shared magnet-pocket datum -- had nowhere to be
+    # declared while this was a single `EditScope | None`, which is the capability
+    # gap `docs/adr/0002` records. Two authorities over the same declaration is
+    # one authority and one bug, so there is no `edit_scope` alias: a payload
+    # carrying the old key is refused by name rather than silently dropped.
+    edit_scopes: tuple[EditScope, ...] = ()
 
     # The certified template, when one covers the shape, and the parameters it
     # takes. A `CUSTOM` job names a model source instead.
@@ -432,7 +491,7 @@ class Project:
             "motion": [m.as_dict() for m in self.motion],
             "components": [c.as_dict() for c in self.components],
             "open_questions": [q.as_dict() for q in self.open_questions],
-            "edit_scope": self.edit_scope.as_dict() if self.edit_scope else None,
+            "edit_scopes": [s.as_dict() for s in self.edit_scopes],
             "expected_artifacts": list(self.expected_artifacts),
             "required_reviews": list(self.required_reviews),
             "evidence": list(self.evidence),
@@ -562,15 +621,29 @@ class Project:
             if not self.source_artifacts:
                 problems.append("source_mode is MODIFY and no source artifact is "
                                 "declared; there is nothing authoritative to modify")
-            if self.edit_scope is None:
-                problems.append("source_mode is MODIFY and no edit_scope is declared; "
-                                "without one nothing can say what must be preserved")
-        if self.edit_scope is not None:
-            problems.extend(self.edit_scope.problems())
-            if self.artifact(self.edit_scope.artifact_id) is None:
-                problems.append(f"edit_scope: artifact_id "
-                                f"{self.edit_scope.artifact_id!r} names no source "
+            if not self.edit_scopes:
+                problems.append("source_mode is MODIFY and edit_scopes is empty; "
+                                "without at least one edit_scope nothing can say "
+                                "what must be preserved")
+        scoped: set[str] = set()
+        declared_interfaces = {i.interface_id for i in self.interfaces}
+        for scope in self.edit_scopes:
+            problems.extend(scope.problems())
+            if self.artifact(scope.artifact_id) is None:
+                problems.append(f"{scope.where}: artifact_id names no source "
                                 "artifact")
+            if scope.artifact_id in scoped:
+                problems.append(f"{scope.where}: this artifact_id is declared "
+                                "twice -- two scopes over one artifact are two "
+                                "answers to 'what may this edit touch', and the "
+                                "preservation audit would measure the artifact "
+                                "against whichever region it read last")
+            scoped.add(scope.artifact_id)
+            for interface_id in scope.interface_ids:
+                if interface_id not in declared_interfaces:
+                    problems.append(f"{scope.where}: interface_id {interface_id!r} "
+                                    "names no declared interface; a datum two edits "
+                                    "have to agree on cannot be one nothing declares")
         if self.source_mode == "NEW" and self.source_artifacts:
             problems.append("source_mode is NEW but source artifacts are declared; "
                             "geometry inherited from a supplied file is MODIFY")
@@ -639,12 +712,18 @@ def from_payload(payload: dict[str, Any]) -> Project:
             "that guesses at an unknown version is indistinguishable from one that "
             "read it correctly")
 
-    edit = payload.get("edit_scope")
-    edit_scope = None
-    if edit is not None:
-        if not isinstance(edit, dict):
-            raise S.SchemaError("edit_scope must be an object or null")
-        edit_scope = EditScope(
+    # Refused by name rather than read. A payload written against the singular
+    # field describes a job this schema still supports, so dropping the key in
+    # silence would lose the one declaration that says what must be preserved --
+    # and reading it would restore the second authority the plural field exists
+    # to remove.
+    if "edit_scope" in payload:
+        raise S.SchemaError(
+            "edit_scope is not a field of this schema: a project declares "
+            "edit_scopes, a list, so that a job modifying two artifacts has "
+            "somewhere to say so. Move the object into a one-element list.")
+    edit_scopes = tuple(
+        EditScope(
             artifact_id=str(edit.get("artifact_id", "")),
             region=str(edit.get("region", "")),
             region_box=edit.get("region_box"),
@@ -656,7 +735,11 @@ def from_payload(payload: dict[str, Any]) -> Project:
             expected_body_delta=edit.get("expected_body_delta", 0),
             mesh_fallback_allowed=bool(edit.get("mesh_fallback_allowed", False)),
             preserve_metadata=bool(edit.get("preserve_metadata", True)),
-            alignment_transform=edit.get("alignment_transform", "identity"))
+            alignment_transform=edit.get("alignment_transform", "identity"),
+            interface_ids=_ids(edit.get("interface_ids"),
+                               f"edit_scopes[{index}].interface_ids"))
+        for index, edit in enumerate(
+            _rows(payload.get("edit_scopes"), "edit_scopes")))
 
     return Project(
         job_id=str(payload.get("job_id", "")),
@@ -718,7 +801,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
                          blocking=bool(row.get("blocking", True)),
                          owner=str(row.get("owner", "user")))
             for row in _rows(payload.get("open_questions"), "open_questions")),
-        edit_scope=edit_scope,
+        edit_scopes=edit_scopes,
         expected_artifacts=tuple(payload.get("expected_artifacts") or ()),
         required_reviews=tuple(payload.get("required_reviews") or ()),
         evidence=tuple(payload.get("evidence") or ()),

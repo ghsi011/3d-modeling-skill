@@ -227,7 +227,7 @@ def _modify_project(**over) -> P.Project:
         source_artifacts=(P.SourceArtifact(
             artifact_id="bracket", path="bracket.stl", format="STL",
             classification="USABLE_MESH"),),
-        edit_scope=_edit_scope(),
+        edit_scopes=(_edit_scope(),),
     )
     base.update(over)
     return P.Project(**base)
@@ -733,8 +733,8 @@ class ModifyRouteTest(unittest.TestCase):
 
     def test_an_edit_scope_without_a_region_box_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            project = _modify_project(edit_scope=P.EditScope(
-                artifact_id="bracket", region="the boss face"))
+            project = _modify_project(edit_scopes=(P.EditScope(
+                artifact_id="bracket", region="the boss face"),))
             directory = _laid_out(Path(raw), None, project)
             problems = P.load(directory).validate(directory)
             self.assertTrue(any("region_box" in p for p in problems), problems)
@@ -751,9 +751,9 @@ class ModifyLaneTest(unittest.TestCase):
             directory = _laid_out(Path(raw), MODIFIER, _modify_project())
             cli.run([str(directory), "--no-render"])
             checks = self._checks(directory)
-            self.assertIn("feature-preservation", checks,
+            self.assertIn("feature-preservation-bracket", checks,
                           "a MODIFY job with an edit scope must carry the row")
-            check = checks["feature-preservation"]
+            check = checks["feature-preservation-bracket"]
             self.assertEqual("PASS", check["result"], check)
             self.assertEqual("PRESERVED_WITHIN_TOLERANCE",
                              check["measured"]["verdict"])
@@ -790,9 +790,9 @@ class ModifyLaneTest(unittest.TestCase):
                 REDRAWN_PROPOSAL)
             code = cli.run([str(directory), "--no-render"])
             checks = self._checks(directory)
-            self.assertEqual("FAIL", checks["feature-preservation"]["result"])
+            self.assertEqual("FAIL", checks["feature-preservation-bracket"]["result"])
             self.assertEqual("CHANGED",
-                             checks["feature-preservation"]["measured"]["verdict"])
+                             checks["feature-preservation-bracket"]["measured"]["verdict"])
             self.assertEqual("FAIL", checks["_report"]["verdict"])
             self.assertEqual(1, code)
             final = json.loads(
@@ -915,15 +915,15 @@ class ModifyReviewRoundTripTest(unittest.TestCase):
                                 .read_text(encoding="utf-8"))
             digests = packet["review_envelope"]["evidence_digests"]
             self.assertEqual(
-                {"feature-preservation.sample_plan_sha256",
-                 "feature-preservation.evidence_sha256"}, set(digests))
+                {"feature-preservation-bracket.sample_plan_sha256",
+                 "feature-preservation-bracket.evidence_sha256"}, set(digests))
 
             measured = next(c for c in packet["commission_report"]["checks"]
-                            if c["check_id"] == "feature-preservation")["measured"]
+                            if c["check_id"] == "feature-preservation-bracket")["measured"]
             self.assertEqual(measured["sample_plan_sha256"],
-                             digests["feature-preservation.sample_plan_sha256"])
+                             digests["feature-preservation-bracket.sample_plan_sha256"])
             self.assertEqual(measured["evidence_sha256"],
-                             digests["feature-preservation.evidence_sha256"])
+                             digests["feature-preservation-bracket.evidence_sha256"])
 
     def test_an_answer_to_a_different_audit_is_refused(self) -> None:
         """The binding has to fail closed when the evidence really did move.
@@ -942,8 +942,8 @@ class ModifyReviewRoundTripTest(unittest.TestCase):
             stale["review_envelope"] = {
                 **packet["review_envelope"],
                 "evidence_digests": {
-                    "feature-preservation.sample_plan_sha256": "0" * 64,
-                    "feature-preservation.evidence_sha256": "0" * 64,
+                    "feature-preservation-bracket.sample_plan_sha256": "0" * 64,
+                    "feature-preservation-bracket.evidence_sha256": "0" * 64,
                 },
             }
             response.write_text(json.dumps(stale, indent=2), encoding="utf-8")
