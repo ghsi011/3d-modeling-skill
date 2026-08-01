@@ -173,3 +173,71 @@ invalidating the evidence that it did the previous thing.
 
 **Fixture that must fail first.** One parameterised rerun-rejection test over all
 seven intent fields. Three pass today; four fail.
+
+## D7 — the build boundary separates namespaces, not privileges
+
+**Where.** [`pipeline/isolation.py`](../skills/3d-modeling/scripts/pipeline/isolation.py)
+and the design it implements, landed in `0a8e464`.
+
+**What is wrong.** The child is a peer process: same user, same filesystem, no
+lifetime bound. ADR 0002 asks the boundary to carry a *privilege* claim and it
+is built as a *namespace* one. Three consequences, each reproduced.
+
+1. **Same-run, no persistence needed.** `pipeline/backends/authored.py` is first
+   imported by the parent *after* `ISO.build` returns
+   (`runner.py:369` → `backends/__init__.py:57`), and it is on the path of every
+   authored job. The candidate rewrites that file while it builds; the parent
+   executes its module-level code seconds later in the interpreter holding the
+   frozen contract and `status.decide`. Result on `0a8e464`, first run, clean
+   tree: exit 0, `final_status VERIFIED`, `feature-pad-section PASS expected
+   432.0 measured 80.002`, contract untouched at revision 1, history
+   `changed: []`. That is the pre-change reproduction, verbatim, on the
+   post-change code. A stealth variant writes a poisoned
+   `__pycache__/*.pyc` stamped with the real file's mtime and size, leaving the
+   `.py` byte-identical, so hashing the source would not catch it. Other
+   post-build first-imports exist on other job shapes: `analysis.py:219`,
+   `commission.py:130/225/247`, `screening.py:201/266`, `witness.py:103-104`.
+2. **A detached grandchild outlives the run.** `subprocess.run(timeout=)` kills
+   the direct child only. A `DETACHED_PROCESS` grandchild sleeps past `_restore`,
+   past commissioning, past the parent's exit, then rewrites `final_status.json`
+   and deletes `next_action.json`. Measured: the run reported exit 1 FAILED, and
+   25 s later `design-tool status` reported VERIFIED with nothing outstanding.
+3. **Cross-run.** The candidate rewrites the pipeline source or drops a `.pth` /
+   `sitecustomize` into the writable venv, and owns run N+1 before any candidate
+   code exists in that run.
+
+**What it can cause.** Every claim ADR 0002 gates. The gate is not met.
+
+**What the boundary does hold**, verified by attack: nothing about acceptance
+crosses in through `build_input.json`; all seven Windows artifact-name variants
+are refused by exact byte compare; `pipeline.authored` and `pipeline.build_child`
+are absent from the parent's import graph; and DIRECT creates zero processes,
+proven with `sys.addaudithook` rather than by monkeypatching.
+
+**Fixture that must fail first.** A candidate that rewrites
+`pipeline/backends/authored.py` at import time, asserted to leave the parent's
+final status unchanged. And a second asserting no process survives the run.
+
+## D8 — ten plausible weakenings leave all sixteen isolation tests green
+
+**Where.** [`pipeline/test_isolation.py`](../skills/3d-modeling/scripts/pipeline/test_isolation.py).
+
+**What is wrong.** Mutation testing against a clean copy killed 5 of 15
+mutations. The survivors include: matching an artifact by basename instead of
+exact name; launching the child with `shell=True`; removing `model.py` from
+`_guarded`, so a candidate can rewrite its own source mid-build while both
+`module_sha256` and `artifact.source_sha256` are taken post-build; taking
+`module_sha256` from the child's own manifest, which the `BuiltCandidate`
+docstring explicitly forbids; and deleting the PARAMS-versus-proposal divergence
+check, which no test anywhere references.
+
+`test_the_boundary_never_builds_a_shell_string` inspects the argv that
+`child_command()` returns and never the call site, so **it cannot fail for the
+thing it is named after**.
+
+`_accept_artifact`, `_child_env`, `BUILD_TIMEOUT_S`, `_restore`, `_guarded`,
+`_json_object`, `BuiltCandidate` and `boundary_seconds` have zero test
+references each. `pipeline/build_child.py`, the only module that executes
+candidate code, has no test at all.
+
+**Fixture that must fail first.** One mutation-survivor test per row above.
