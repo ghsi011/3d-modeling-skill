@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """The `CUSTOM` lane's source API: a model module the pipeline can build.
 
+**Where this runs.** In the child process, and only there. `load` calls
+`spec.loader.exec_module`, which runs the designer's module-level code; the
+parent -- which freezes the acceptance contract, commissions the artifact and
+decides the final status -- never imports this module.
+`pipeline/build_child.py` is its only caller and is itself reached through
+`sys.executable`, so there is no ordering of the parent's code that executes a
+model file. Freezing the contract first was necessary and was not sufficient: an
+import *is* an execution, and `status.decide`, `commission._tol`,
+`contract.area_tolerance` and `AcceptanceSource.expectations` were all one
+assignment away from the first line of `model.py`.
+
 A model module declares the numbers its shape is built from, and returns the
 solid:
 
@@ -96,10 +107,14 @@ def _finite(value: Any, what: str) -> float:
 def load(module_path: Path) -> tuple[AuthoredModel, Any]:
     """Import a model module and return its identity and its builder.
 
-    Returns them separately from anything the contract is written out of, which
-    is the whole arrangement: the acceptance contract is frozen from
-    `design_proposal.json` before this runs, and nothing this function returns
-    can reach it.
+    Executes the designer's code. Call it from the child process and from nowhere
+    else: what it returns crosses back to the parent as JSON, and what the import
+    did to *this* interpreter dies with the process.
+
+    Returns identity separately from anything the contract is written out of,
+    which is the other half of the arrangement: the acceptance contract is frozen
+    from `design_proposal.json` before this runs, and nothing this function
+    returns can reach it.
     """
     module_path = Path(module_path)
     if not module_path.is_file():

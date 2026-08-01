@@ -35,13 +35,17 @@ class GeometryBackend(Protocol):
     def build(self, contract, output_dir: Path) -> BuildArtifacts: ...
 
 
-def get(name: str, builder=None) -> GeometryBackend:
+def get(name: str, built=None) -> GeometryBackend:
     """Resolve a backend by name, importing only the one asked for.
 
     The lazy import is not tidiness. `import build123d` costs 10.7 s measured on
     this machine, against 1.5 s for trimesh and manifold3d together -- so a
     trimesh-only job that imported both would spend seven times its own build
     time loading a kernel it never calls.
+
+    `built` is an `isolation.BuiltCandidate` and belongs to the authored backend
+    alone: geometry a one-shot child process already produced. The certified
+    backends ignore it, which is why `DIRECT` pays nothing for the boundary.
     """
     if name == "trimesh-manifold":
         from .trimesh_manifold import TrimeshManifoldBackend
@@ -51,6 +55,6 @@ def get(name: str, builder=None) -> GeometryBackend:
         return Build123dBackend()
     if name == "authored":
         from .authored import AuthoredBackend
-        return AuthoredBackend(builder)
+        return AuthoredBackend(built)
     raise KeyError(f"no backend named {name!r}; have 'trimesh-manifold', "
                    "'build123d', 'authored'")

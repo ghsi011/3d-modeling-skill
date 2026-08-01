@@ -330,20 +330,46 @@ class AcceptanceIsUpstreamTest(unittest.TestCase):
 
     ADR 0002's gate for this stage is not "does a check fire". It is "is there
     any ordering of operations in which the built artifact can influence its own
-    acceptance criteria". These are the three facts that answer it.
+    acceptance criteria". These are the facts about the *code* that answer it.
+
+    Ordering is not the whole answer and these are not the whole proof. An
+    import is an execution, so freezing first bought nothing while the candidate
+    was imported into this interpreter; `test_isolation.py` is where that half
+    lives, and the first test below is this walker's own fixture because these
+    guards were passing on the absolute imports alone.
     """
 
     def _imports(self, relative: str) -> set[str]:
+        """Every name one module imports, `from . import x` included.
+
+        The `and node.module` this used to carry made the guard blind to the
+        dominant idiom in this package: `from . import analysis` parses as an
+        `ImportFrom` with `module=None`, so the branch never ran and *nothing*
+        was recorded -- not the module, not the alias. Every sibling import in
+        the forbidden lists below was therefore invisible to the check that
+        forbade it, and the two tests were passing on the absolute imports alone.
+        `test_the_walker_sees_a_relative_import` is this walker's own fixture.
+        """
         root = Path(__file__).resolve().parent
         tree = ast.parse((root / relative).read_text(encoding="utf-8"))
         names: set[str] = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                names.add(node.module)
+            if isinstance(node, ast.ImportFrom):
+                if node.module:
+                    names.add(node.module)
                 names |= {alias.name for alias in node.names}
             elif isinstance(node, ast.Import):
                 names |= {alias.name for alias in node.names}
         return names
+
+    def test_the_walker_sees_a_relative_import(self) -> None:
+        """A guard that cannot see the import it forbids is a comment."""
+        names = self._imports("runner.py")
+        for expected in ("analysis", "commission", "screening", "status"):
+            self.assertIn(expected, names,
+                          f"runner.py imports {expected} with `from . import` and "
+                          "this walker cannot see it, so neither can the two tests "
+                          "below")
 
     def test_the_contract_generator_cannot_see_a_mesh(self) -> None:
         names = self._imports("acceptance.py")
@@ -367,6 +393,11 @@ class AcceptanceIsUpstreamTest(unittest.TestCase):
         `runner.py`'s docstrings name the acceptance contract while explaining
         that the runner is not a source of one, so a substring rule would fail on
         the comment that documents the rule.
+
+        "Runs the builder" is now weaker than it was: the runner invokes a
+        backend that adopts geometry a child process already produced, and it
+        executes no candidate code at all. What it must still not be able to do
+        is write the document the geometry is judged against.
         """
         self.assertNotIn("acceptance", self._imports("runner.py"),
                          "runner.py imports the freezer, which is one line away "

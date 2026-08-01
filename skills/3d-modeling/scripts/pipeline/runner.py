@@ -73,15 +73,16 @@ class JobRequest:
     # Two objects, and the split is the point of stage 2. `acceptance` is the
     # frozen `acceptance_contract.json`, generated from the design proposal and
     # written to disk *before* this runner was called; it is what the contract is
-    # built from. `authored_builder` is the callable that produces the geometry.
-    # They used to be one object -- the loaded `model.py` supplied both the
-    # expectations and the solid -- which is how a designer could widen an
-    # expectation after seeing it missed. There is nothing in this module that
-    # writes an acceptance contract, so no ordering of the code below can put the
-    # built artifact upstream of what it is judged against.
+    # built from. `authored_build` is an `isolation.BuiltCandidate`: geometry that
+    # a one-shot child process already produced, that this process re-read and
+    # re-hashed, and that carries no callable at all. It used to be the loaded
+    # model -- one object supplying both the expectations and the solid, which is
+    # how a designer could widen an expectation after seeing it missed, and then
+    # a live module in this interpreter, which is how import-time code could
+    # replace `status.decide`. Neither the criteria nor any executable candidate
+    # code reaches this module now.
     acceptance: Any = None
-    authored_model: Any = None
-    authored_builder: Any = None
+    authored_build: Any = None
     # The compiled plan: the route, the builder, the reviews this job owes and
     # what it is allowed to claim. Supplied by `design-tool run`, which compiles
     # it from `project.json`. A request without one -- `run-job`, the frozen
@@ -365,7 +366,7 @@ def run(request: JobRequest) -> JobResult:
 
     # ---- build, or the same bytes from a previous one ---------------------
     mark = time.perf_counter()
-    backend = get_backend(model_contract.backend, request.authored_builder)
+    backend = get_backend(model_contract.backend, request.authored_build)
     cache_status, cache_key = "disabled", None
     try:
         built = backend.build(model_contract, out)
@@ -596,6 +597,14 @@ def run(request: JobRequest) -> JobResult:
 
     timings["build"] = round(built.build_seconds, 4)
     timings["total"] = time.perf_counter() - started
+    if request.authored_build is not None:
+        # The candidate was built by a process that ran before this function was
+        # called, so none of its cost is inside `started`. Recorded and added
+        # rather than left out: it is the dominant term on this lane, and a total
+        # that omits it reports a 1.7 s job as a 0.05 s one.
+        boundary = float(request.authored_build.boundary_seconds)
+        timings["build_boundary"] = round(boundary, 4)
+        timings["total"] += boundary
     _write(out / "timings.json", {"job_id": request.job_id,
                                   "seconds": {k: round(v, 4) for k, v in timings.items()},
                                   "note": "not hashed: durations are not part of any "

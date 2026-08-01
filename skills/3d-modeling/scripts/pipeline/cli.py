@@ -46,6 +46,7 @@ from typing import Any
 
 from . import acceptance as ACC
 from . import execution as EX
+from . import isolation as ISO
 from . import project as P
 from . import review as R
 from . import route as RT
@@ -828,15 +829,23 @@ def _commission_authored(project_dir: Path, project: P.Project,
 
 def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
                   *, render: bool) -> int:
-    """The authored builder: freeze the acceptance contract, then build.
+    """The authored builder: freeze the acceptance contract, then build elsewhere.
 
     The ordering is the whole of stage 2. The proposal is validated and frozen,
     the acceptance contract is generated from it and the system-owned inputs and
-    written to disk, and only then is `model.py` imported and executed. Nothing
-    downstream of the freeze can reach back into it: `acceptance.freeze` takes a
-    proposal, a project and a plan and has no parameter a mesh could arrive
-    through, and `runner.py` contains no function that writes an acceptance
-    contract at all.
+    written to disk, and only then is `model.py` executed. Nothing downstream of
+    the freeze can reach back into it: `acceptance.freeze` takes a proposal, a
+    project and a plan and has no parameter a mesh could arrive through, and
+    `runner.py` contains no function that writes an acceptance contract at all.
+
+    Ordering was not enough on its own. This function used to import the model
+    *here*, which runs its module-level code in the interpreter that holds the
+    frozen contract, the commissioning bands and `status.decide` -- and all three
+    were reachable and were demonstrably rewritten, to a `VERIFIED` receipt on a
+    352 mm2 miss with the on-disk contract still at revision 1. The build now
+    happens in a one-shot child process (`isolation.build`), which is handed a
+    model path and a scratch directory and nothing about acceptance; this
+    interpreter re-reads and re-hashes what came back and does the assessing.
 
     Selected by the plan's builder and not by its route. Reaching this lane only
     from `CUSTOM` is what stranded a `FITTED` or `FULL` job whose geometry a
@@ -844,8 +853,6 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     never looked to see whether the model it had asked for was sitting next to
     the project file, and could not progress by any action the designer took.
     """
-    from . import authored as A
-
     if project.envelope_mm is None:
         return _report_problems(project_dir, project, [
             "envelope_mm is required when the geometry is authored: the print "
@@ -928,15 +935,22 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
               f"{frozen.revision - 1} were invalidated and removed;\n"
               f"  {ACC.HISTORY_FILE} records their digests.\n")
 
-    # ---- only now is the model executed ------------------------------------
+    # ---- only now is the model executed, and not in this process ------------
+    # One shot: the child imports the model, validates it, calls the builder,
+    # exports the geometry into a scratch directory and exits. `built` is what
+    # the parent re-read and re-hashed afterwards, and `isolation.build` has
+    # already verified that nothing in this directory moved while it ran.
     try:
-        model, builder = A.load(model_path)
-    except A.ModelError as exc:
+        built = ISO.build(model_path, dest_dir=project_dir, step=project.step)
+    except ISO.BuildRefused as exc:
         return _report_problems(project_dir, project, [str(exc)], stage="build")
 
+    # After the build rather than before it, and unavoidably so: the parameters a
+    # model declares are read by importing it, and importing it is the thing that
+    # now happens in another process exactly once.
     divergent = sorted(
-        key for key in set(model.params) | set(proposal.params)
-        if model.params.get(key) != proposal.params.get(key))
+        key for key in set(built.params) | set(proposal.params)
+        if built.params.get(key) != proposal.params.get(key))
     if divergent:
         return _report_problems(project_dir, project, [
             f"{model_path.name} and {ACC.PROPOSAL_FILE} disagree about "
@@ -952,9 +966,8 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         render=render,
         acceptance=ACC.AcceptanceSource(
             frozen=frozen, module=model_path.name,
-            module_sha256=model.module_sha256, provenance=model.provenance),
-        authored_model=model,
-        authored_builder=builder,
+            module_sha256=built.module_sha256, provenance=built.provenance),
+        authored_build=built,
         plan=plan,
         # No `plan_features` here: the print plan's support rows and the
         # preservation row are inside the frozen contract, where they are subject

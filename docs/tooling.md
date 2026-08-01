@@ -109,7 +109,8 @@ legitimately steps at: they explain a step, and they cannot clear the part.
 
 `model.py`, loaded by
 [`pipeline/authored.py`](../skills/3d-modeling/scripts/pipeline/authored.py)
-after the freeze:
+after the freeze, in a separate process — see *The isolated build boundary*
+below:
 
 ```python
 PARAMS     = {...}                             # the numbers the shape is built from
@@ -145,6 +146,52 @@ observed doing so.
 
 There is no validity domain, because nobody has certified one. An authored model
 never routes `DIRECT`.
+
+### The isolated build boundary
+
+`model.py` runs in a **one-shot child process**, not in the process that freezes
+the contract and decides the status. Freezing first was necessary and was not
+sufficient: importing a module runs its module-level code, and from that code
+`status.decide`, `commission._tol`, `contract.area_tolerance` and
+`AcceptanceSource.expectations` were all one assignment away. The result was
+demonstrated, not argued — a `VERIFIED` receipt on the same 352 mm2 miss, with
+the on-disk contract still at revision 1 and an empty `changed` list.
+
+[`pipeline/isolation.py`](../skills/3d-modeling/scripts/pipeline/isolation.py) is
+the parent half and
+[`pipeline/build_child.py`](../skills/3d-modeling/scripts/pipeline/build_child.py)
+is the child. What crosses, and nothing else:
+
+| direction | contents |
+|---|---|
+| in | the model's path, a scratch build directory, the two output file names, whether a STEP is wanted |
+| out | `build_manifest.json` — `PARAMS`, `PROVENANCE`, the kernel and its version, the tessellation note, the boolean-engine note, the build duration — plus `candidate.stl` and optionally `candidate.step` |
+
+JSON and files. Never a pickle, never a shared Python object, never a callable.
+Nothing about acceptance goes in, so there is nothing in that process for
+candidate code to rewrite; anything it patches dies with the process.
+
+Three consequences a designer will notice:
+
+* **`PARAMS` and `PROVENANCE` must be JSON.** They cross a process boundary as a
+  document. A parameter the parent cannot read is a parameter the frozen proposal
+  cannot be compared against.
+* **The model's own directory is on `sys.path`**, so `import a_helper_beside_me`
+  resolves the same way every time rather than depending on the directory the
+  command was run from. Third-party packages resolve because the child is the
+  same interpreter and the same environment.
+* **The project directory is not the model's to write in.** Every file the
+  pipeline owns there — the acceptance contract, its history, the proposal, the
+  project, every receipt, and `model.py` itself — is hashed before the child
+  starts and verified after it exits. One that moved is restored and the run is
+  refused. The child's working directory is its scratch build directory, which
+  is deleted afterwards along with anything in it the parent did not ask for by
+  name.
+
+The parent recomputes the model hash and every artifact digest itself, from the
+files on disk, after the child has exited. `DIRECT` executes no candidate code
+and does not come here at all: `runner.py` does not import the boundary, and the
+route's dispatch count and runtime are unchanged.
 
 ### `acceptance_contract.json` (the `AUTHORED` builder)
 

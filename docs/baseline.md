@@ -84,6 +84,37 @@ precedes.
 required outputs of the same commission, and freezing is a pipeline step between
 them rather than a second dispatch.
 
+## Re-measured after the isolated build boundary
+
+Same machine, same method. The change moves authored candidate execution into a
+one-shot child process; `DIRECT` executes no candidate code and does not go
+through it. `runner.py` does not import the boundary at all.
+
+| route | stage 2 | isolated | llm calls |
+|---|---|---|---|
+| `DIRECT` `c_clip` | 0.192 s | 0.191 s | 0 -> 0 |
+| `DIRECT` `trim_ring` (warm) | 0.245 s | 0.243 s | 0 -> 0 |
+| `CUSTOM` riser, whole `design-tool run` | 0.054 s | 1.674 s | 1 -> 1 |
+
+`DIRECT` is inside the run-to-run spread on both templates and gained no
+dispatch. What `CUSTOM` pays is one cold interpreter, decomposed on this machine:
+
+| | |
+|---|---|
+| bare interpreter start | 0.06 s |
+| `python -m pipeline.build_child` (the boundary's own imports) | 0.16 s |
+| the same interpreter reaching `import trimesh` | 1.58 s |
+
+So the boundary itself costs about **0.16 s**, and the remaining ~1.5 s is the
+geometry kernel the *candidate* imports, paid cold because the process is fresh.
+It used to be free because the parent had already imported trimesh for its own
+mesh analysis — which is another way of saying the candidate was running inside
+the interpreter that measures it. A build123d model pays its own cold import the
+same way, and one authored build pays this once.
+
+The test suite's wall time moves 567 s -> 673 s for the same reason: every
+authored-lane fixture now starts a process.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

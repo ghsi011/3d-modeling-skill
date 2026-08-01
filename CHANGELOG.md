@@ -6,6 +6,49 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the candidate is built in a process that cannot reach its own gate
+
+Freezing the acceptance contract before the builder was necessary and was not
+sufficient. `cli._run_authored` froze the contract and then imported the
+candidate's `model.py` with `spec.loader.exec_module` **in the CLI's own
+interpreter**, and an import is an execution: `runner.status is pipeline.status`,
+`status.decide` resolves at call time, `commission._tol` and
+`contract.area_tolerance` are module globals, `AcceptanceSource.expectations` is
+one assignment, and the live frozen contract sat in the calling frame one
+`sys._getframe()` away. Reproduced to a `VERIFIED` final status on the same
+352 mm2 miss, with the on-disk contract still at revision 1 and an empty
+`changed` list.
+
+`model.py` now runs in a **one-shot child process** — `sys.executable -m
+pipeline.build_child`, an argument vector and never a shell string, so it works
+on Windows without `fork` and a path with a space in it survives.
+`pipeline/isolation.py` is the parent half: it hands the child a model path, a
+scratch directory, two output names and whether a STEP is wanted, and *nothing*
+about acceptance. Results come back as JSON and files. The parent re-reads and
+re-hashes the geometry itself, copies only the two artifacts it asked for by
+name, and verifies that every pipeline-owned file in the project directory — the
+frozen contract, its history, the proposal, the project, every receipt, and
+`model.py` — is byte-identical to what it was before the child started. One that
+moved is restored and the run is refused.
+
+Consequences a designer will notice: `PARAMS` and `PROVENANCE` must be JSON, the
+model's own directory is deterministically on `sys.path` rather than depending on
+where the command was invoked from, and the candidate cannot write a receipt.
+
+`DIRECT` executes no candidate code and does not enter the boundary; `runner.py`
+does not import it. Measured unchanged at 0.191 s (`c_clip`) and 0.243 s
+(`trim_ring`, warm).
+A certified INCONSEQUENTIAL `DIRECT` job still makes zero dispatches: the
+boundary is a process, not a round trip. An authored build pays one cold
+interpreter, of which 0.16 s is the boundary and the rest is the geometry kernel
+the candidate itself imports.
+
+Deleted as redundant rather than left beside it: the builder callable no longer
+crosses into the parent at all (`JobRequest.authored_builder` and
+`.authored_model` are gone, `backends/authored.py` no longer imports a geometry
+kernel or calls anything), and `cli.py` no longer imports the module that
+executes model files.
+
 ### Added — a deterministic pipeline with certified INCONSEQUENTIAL DIRECT zero dispatches
 
 Six iterations of the approved redesign. The entry below describing `DIRECT` as
