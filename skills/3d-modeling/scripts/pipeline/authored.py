@@ -20,6 +20,14 @@ solid:
 
 and optionally `COMPONENTS`, `INTERFACES` and `PROVENANCE`.
 
+**Where `PROVENANCE` goes**, since D10: into `candidate_declaration.json`, which
+the parent writes and nothing reads. It used to be copied onto the model
+contract, which is handed verbatim to the safety reviewer and the verification
+reviewer -- so a designer could address the party whose PASS decides the run, and
+a designer who had also read the frozen contract could do it in the gate's own
+vocabulary. It is still recorded, because a declaration nothing keeps is a
+declaration nobody should write. It is no longer forwarded.
+
 **What is deliberately not here.** `EXPECTED`, `BBOX_MM`, `BODIES`,
 `VOLUME_MM3`, `PROFILE_MARKS` and any acceptance tolerance used to be read out of
 this file on every run, and the contract was overwritten with what was found. A

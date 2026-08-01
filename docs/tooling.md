@@ -139,10 +139,14 @@ came out is a threshold authored by the party being measured, after measuring;
 that is a receipt, not a gate.
 
 The contract binds the module's path and hash under `source`, and the artifact
-manifest records which kernel actually ran. An authored mesh model's
+manifest records which kernel actually ran — as a token the child returns and the
+parent looks up, never as a sentence the child composed. An authored mesh model's
 `boolean_engine` is recorded as `unrecorded` — the certified backends select
 manifold3d at every call site and can name it, and an authored model was not
 observed doing so.
+
+`PROVENANCE` is recorded in `candidate_declaration.json` and reaches no reviewer;
+see *The confined build boundary* below.
 
 There is no validity domain, because nobody has certified one. An authored model
 never routes `DIRECT`.
@@ -177,12 +181,19 @@ is the child.
 
 | mechanism | what it is | what it buys, measured |
 |---|---|---|
-| restricted token | `CreateRestrictedToken`, restricting SIDs without `Authenticated Users`, all groups but `Everyone`/`Users`/the logon SID deny-only | no write to the repository, `site-packages` or this package's source; no outbound socket |
+| restricted token | `CreateRestrictedToken`, restricting SIDs without `Authenticated Users`, all groups but `Everyone`/`Users`/the logon SID deny-only | no write to the repository, `site-packages` or this package's source |
 | low integrity | token integrity level `S-1-16-4096` | no write to the project directory, the parent's `%TEMP%`, the Startup folder or the sandbox's own inputs; no `OpenProcess(PROCESS_VM_WRITE)` on the parent |
 | job object | `KILL_ON_JOB_CLOSE`, neither kind of breakaway permitted, UI restrictions, 8-process cap | nothing the candidate spawns survives, `DETACHED_PROCESS` and `CREATE_BREAKAWAY_FROM_JOB` included |
+| child-process policy | `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` / `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` | the candidate creates no process at all: `WinError 367` out of `CreateProcess`, before the job object has anything to catch |
 | handle list | `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` | exactly two handles inherited: a `NUL` and one pipe for the transcript |
 | constructed environment | not `os.environ` | the candidate is not handed the project path, the user, or the machine's `PATH` |
-| the confinement together | | `mklink /J` inside the one writable directory comes back `Access is denied.`, so the candidate cannot create a reparse point at all |
+| the confinement together | | a directory junction aimed straight at `FSCTL_SET_REPARSE_POINT` — no `cmd.exe`, no privilege, inside the one writable directory — comes back `ERROR_ACCESS_DENIED`, so the candidate cannot create a reparse point at all. `isolation._sweep` refuses to read a build directory holding one either way |
+
+The restricted token does **not** deny sockets. This table said it did; the
+evidence was a probe against a port a third-party firewall filters. The network
+is open — [`docs/defects.md` D9](defects.md) row 1, and
+`test_isolation.test_the_boundary_denies_outbound_tcp` is the expectation, kept
+failing on purpose.
 
 Every privilege is deleted except `SeChangeNotifyPrivilege`, which is
 bypass-traverse-checking: `Everyone` holds it by default and it grants access to
@@ -201,10 +212,28 @@ What crosses, and nothing else:
 | direction | contents |
 |---|---|
 | in | the sandbox input directory, the model's *file name* within it, the build directory, the two output file names, whether a STEP is wanted |
-| out | `build_manifest.json` — `PARAMS`, `PROVENANCE`, the kernel and its version, the tessellation note, the boolean-engine note, the build duration — plus `candidate.stl` and optionally `candidate.step` |
+| out | `build_manifest.json` — `PARAMS`, `PROVENANCE`, a *kernel token*, the build duration — plus `candidate.stl` and optionally `candidate.step` |
 
 JSON and files. Never a pickle, never a shared Python object, never a callable.
 Nothing about acceptance goes in, and neither does the project's path.
+
+**No string the candidate wrote comes out.** The manifest is written by a process
+the candidate's own module-level code runs in, so every field of it is
+candidate-authored whatever `build_child` intends — and four of those fields used
+to be copied onto `model_contract.json` and `artifact_manifest.json`, both of
+which the safety and verification packets embed whole. The reviewer's PASS
+decides the run, so that was a candidate writing to its own grader
+([`docs/defects.md` D10](defects.md), closed). Now:
+
+* the kernel crosses as a **token**, matched against `isolation.KERNELS`. Every
+  engine word on a receipt is the parent's, the version comes from the parent's
+  own `importlib.metadata`, and a token the table does not hold selects
+  `unrecorded` rather than being passed through;
+* `PARAMS` and `PROVENANCE` cross into an `isolation.CandidateDeclaration`.
+  `PARAMS` is compared against the frozen proposal and forwarded to nothing;
+  `PROVENANCE` is written to `candidate_declaration.json` and read by nothing.
+  Neither `Contract`, `artifact_manifest.json`, the safety packet nor the
+  verification packet has a field or a parameter one could arrive through.
 
 Four consequences a designer will notice:
 
@@ -215,15 +244,18 @@ Four consequences a designer will notice:
   project directory is copied into the sandbox and that directory is on
   `sys.path`. A helper in a *subdirectory* is not, and neither is anything the
   model expects to find by walking up from `__file__`. Third-party packages
-  resolve because the child is the same interpreter and the same environment,
-  read-only.
+  resolve because `PYTHONPATH` names the environment's `site-packages`,
+  read-only. The child is the *base* interpreter rather than the environment's
+  `python.exe`, which is a launcher that would itself have to spawn a child.
 * **The model cannot write anywhere except its own build directory** — not the
   project, not the repository, not the virtual environment, not its own source.
   A model that tries gets `PermissionError` from the operating system and the run
   is refused with that message.
-* **A model that spawns anything is refused.** Nothing on this path needs a
-  subprocess, and a build that starts one has started something the run cannot
-  account for.
+* **A model cannot spawn anything.** Not "is refused for having": the kernel
+  refuses `CreateProcess` itself, with `WinError 367`. Nothing on this path needs
+  a subprocess, and a build that starts one has started something the run cannot
+  account for. The job object still bounds whatever would exist if this ever
+  failed.
 
 `model_contract.json`'s `source` block now carries `sources_sha256`, a digest
 per staged file, beside the single `module_sha256` it always had: a part built

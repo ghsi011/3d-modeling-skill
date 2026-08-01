@@ -976,9 +976,10 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     # After the build rather than before it, and unavoidably so: the parameters a
     # model declares are read by importing it, and importing it is the thing that
     # now happens in another process exactly once.
+    declared = built.declared.params
     divergent = sorted(
-        key for key in set(built.params) | set(proposal.params)
-        if built.params.get(key) != proposal.params.get(key))
+        key for key in set(declared) | set(proposal.params)
+        if declared.get(key) != proposal.params.get(key))
     if divergent:
         return _report_problems(project_dir, project, [
             f"{model_path.name} and {ACC.PROPOSAL_FILE} disagree about "
@@ -992,10 +993,15 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         brief_path=brief_path,
         out_dir=project_dir,
         render=render,
+        # No `provenance` argument, because `AcceptanceSource` no longer has the
+        # field: `as_source()` is handed verbatim to both reviewers, and the
+        # candidate's own paragraph was reaching the party whose PASS or REJECT
+        # decides the run. `built.declared` holds it, `candidate_declaration.json`
+        # records it, and neither is a parameter of anything below (D10).
         acceptance=ACC.AcceptanceSource(
             frozen=frozen, module=model_path.name,
             module_sha256=built.module_sha256,
-            sources_sha256=built.input_sha256, provenance=built.provenance),
+            sources_sha256=built.input_sha256),
         authored_build=built,
         plan=plan,
         # No `plan_features` here: the print plan's support rows and the

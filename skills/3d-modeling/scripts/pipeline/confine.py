@@ -30,8 +30,14 @@ every row):
    and by nothing else the token carries, so the second check caps them at
    `BUILTIN\\Users: Read & Execute`. Measured: writes to the repo, to
    `site-packages` and to `pipeline/` are refused at *medium* integrity with no
-   deny-only SIDs, which is to say by this mechanism alone. It also, on this box,
-   refuses `socket.connect` with `WSAEACCES`.
+   deny-only SIDs, which is to say by this mechanism alone.
+
+   It does **not** refuse `socket.connect`. This module said it did, on the
+   strength of a probe against `1.1.1.1:53` -- a port NordVPN Threat Protection
+   filters on this machine, identically with no confinement at all. Re-measured
+   under the real token: `1.1.1.1:443` connects, `1.1.1.1:80` connects,
+   `93.184.215.14:80` connects. The network is open, not closed-except-DNS, and
+   `docs/defects.md` D11 is where that is written down.
 2. **Low integrity.** Every object with no explicit label is implicitly Medium,
    and a Low subject cannot write up. Measured: this is what refuses the project
    directory, the parent's `%TEMP%`, the Startup folder, the sandbox's own input
@@ -44,6 +50,13 @@ every row):
    byte until the job reports zero live processes, and it counts them by process
    id rather than by the job's own count, because a job keeps counting a process
    until its last handle closes.
+4. **No child processes at all**, `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY`
+   with `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED`. The job bounds what a
+   candidate spawns; this is why it now spawns nothing. Measured before it was
+   added: a candidate under the full boundary launched `cmd.exe`. Measured after:
+   `WinError 367` out of `CreateProcess`, at zero geometry cost. Mechanisms 3 and
+   4 are not redundant -- 3 is what makes a *failure* of 4 survivable, and it is
+   the one that has already been walked through.
 
 **A caution about the third**, because it cost a false positive on the first
 honest build. `DETACHED_PROCESS` makes Windows start a `conhost.exe` *inside the
@@ -65,15 +78,22 @@ of a path. Keeping it is what lets the sandbox live under the parent's `%TEMP%`
 instead of somewhere world-traversable.
 
 **What this does not do**, and why not, is `docs/defects.md` D9. In one line
-each: DNS still resolves through the DNS Client service, which is a socketless
-outbound channel; `AppData\\LocalLow` and `%TEMP%\\Low` carry an explicit *Low*
-label from Windows and are therefore writable by a Low subject; and the candidate
-can still *read* whatever `BUILTIN\\Users` can read. `AppContainer` is the
-mechanism that closes the first and the third and it needs the whole runtime
-ACL'd for a package SID. Untrusted integrity closes the second and does not
-start: a process created with an Untrusted primary token dies at
-`STATUS_DLL_INIT_FAILED`, measured, as does one whose restricting SIDs omit the
-user's own.
+each: **the network is open** -- an outbound TCP connect to any port other than
+the one a third-party firewall happens to filter succeeds, and DNS resolves as
+well, through the DNS Client service; `AppData\\LocalLow` and `%TEMP%\\Low` carry
+an explicit *Low* label from Windows and are therefore writable by a Low subject;
+and the candidate can still *read* whatever `BUILTIN\\Users` can read.
+`AppContainer` is the mechanism that closes the first and the third -- network is
+a capability (`internetClient`) enforced by the Windows Filtering Platform rather
+than by an ACL -- and it needs the whole runtime ACL'd for a package SID.
+Untrusted integrity closes the second and does not start: a process created with
+an Untrusted primary token dies at `STATUS_DLL_INIT_FAILED`, measured, as does
+one whose restricting SIDs omit the user's own.
+
+`test_isolation.WhatTheConfinementEnforcesTest` carries the open network as an
+`expectedFailure` rather than as a comment: the expectation that this boundary
+denies outbound TCP is written down and *fails*, so the day it starts passing is
+a reported event and not a line nobody updated.
 """
 from __future__ import annotations
 
@@ -160,6 +180,23 @@ EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 STARTF_USESTDHANDLES = 0x00000100
 
 PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
+
+# D12. The job object bounds what the candidate spawns; this stops it spawning.
+# Until it was added, a candidate under the full boundary could launch `cmd.exe`
+# -- measured -- and every counter-measure was downstream of the process already
+# existing: the job caught it, the survivor sweep counted it, the drain killed
+# it. `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` moves the refusal to
+# `CreateProcess` itself, where it comes back as `OSError: [WinError 367] The
+# process creation has been blocked` -- measured, from a candidate calling
+# `subprocess.run(["cmd", "/c", "exit"])` -- at zero measured geometry cost.
+#
+# It has one prerequisite and it is not optional: the process this policy applies
+# to may not itself be a launcher. A virtual environment's `python.exe` is one --
+# it spawns the base interpreter as a child -- so the boundary starts the base
+# interpreter directly, with `PYTHONPATH` naming the environment's
+# `site-packages`. See `isolation.base_executable`.
+PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY = 0x0002000E
+PROCESS_CREATION_CHILD_PROCESS_RESTRICTED = 0x00000001
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION = 0x00000400
@@ -886,10 +923,11 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
     if devnull in (None, INVALID_HANDLE_VALUE):
         _fail("CreateFileW(NUL)")
 
+    # Two attributes: the handle list, and the child-process policy.
     size = ctypes.c_size_t(0)
-    _kernel32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
+    _kernel32.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
     attribute_list = ctypes.create_string_buffer(size.value)
-    if not _kernel32.InitializeProcThreadAttributeList(attribute_list, 1, 0,
+    if not _kernel32.InitializeProcThreadAttributeList(attribute_list, 2, 0,
                                                        ctypes.byref(size)):
         _fail("InitializeProcThreadAttributeList")
 
@@ -909,6 +947,18 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
             attribute_list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
             ctypes.sizeof(inherited), None, None):
         _fail("UpdateProcThreadAttribute(HANDLE_LIST)")
+
+    # D12. The candidate creates no processes at all. Everything downstream of
+    # this -- the job object, the survivor count, the drain to zero -- bounds a
+    # process that already exists; this is the refusal that happens instead of
+    # one existing. It is inherited by nothing, because there is nothing to
+    # inherit it: the policy is on the one process the boundary starts, and that
+    # process may not start another.
+    policy = wintypes.DWORD(PROCESS_CREATION_CHILD_PROCESS_RESTRICTED)
+    if not _kernel32.UpdateProcThreadAttribute(
+            attribute_list, 0, PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
+            ctypes.byref(policy), ctypes.sizeof(policy), None, None):
+        _fail("UpdateProcThreadAttribute(CHILD_PROCESS_POLICY)")
 
     startup = _STARTUPINFOEXW()
     startup.StartupInfo.cb = ctypes.sizeof(_STARTUPINFOEXW)

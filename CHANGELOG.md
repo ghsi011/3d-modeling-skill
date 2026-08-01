@@ -6,6 +6,102 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the candidate was writing to the party that decides the run (D10)
+
+`model.py` declares `PROVENANCE`. The child returned it in
+`build_manifest.json`, `isolation.py` adopted it verbatim, `acceptance.py` put it
+in `contract.source`, and `runner.py` handed that contract to the safety reviewer
+and the verification reviewer, whose PASS or REJECT decides acceptance. Free text
+the candidate composed reached the grader. No process confinement closes this,
+because the data is supposed to cross — and read access to the frozen contract
+(D9 row 3) does not create the channel, it aims it: a candidate that knows the
+tolerance bands and the design id can write in the gate's own vocabulary.
+
+Three more channels were found beside it, all in `artifact_manifest.json`, which
+both packets embed whole: `backend_version`, `tessellation` and `boolean_engine`
+were candidate-supplied strings copied straight onto the receipt. And the
+manifest is written by a process the candidate's module-level code already runs
+in, so *every* field of it is candidate-authored whatever `build_child` intends.
+
+The repair is a type, not a filter — a sanitiser that stripped suspicious words
+would be one more removable check, and this branch has had two of those fail:
+
+* the engine strings are a **closed vocabulary the parent owns**. The child
+  returns a `kernel` token; `isolation.KERNELS` maps it to the words on the
+  receipt, and the version comes from the parent's own `importlib.metadata`. A
+  token the table does not hold selects `unrecorded` — it is never passed
+  through. Nothing about the receipt's wording changed;
+* `PARAMS` and `PROVENANCE` are quarantined in an
+  `isolation.CandidateDeclaration`. `BuiltCandidate` — the only object that
+  leaves the boundary — otherwise holds paths, digests, numbers and that one
+  token. `AcceptanceSource` has no `provenance` field at all now, so
+  `as_source()` cannot carry one;
+* `PROVENANCE` is written to `candidate_declaration.json` and read by nothing.
+  That is the cost, stated plainly: a reviewer that was using the designer's
+  account of how the part was made no longer gets it. It was never evidence — it
+  is the assertion of the party being judged — and the reviewer keeps the brief,
+  the frozen contract, the measurements and the witnesses, all of which are
+  written by someone else.
+
+`test_isolation.NoCandidateProseReachesAReviewerTest` is permanent and attacks it
+twice: a `PROVENANCE` addressed to the reviewer, and a model that replaces
+`schemas.canonical_json` in its own process and rewrites the entire manifest on
+its way out. Both assert one marker absent from every receipt, from the real
+`reviews/safety_packet.json` the run produced, and from a verification packet
+built from the same evidence. Two more assert the shape rather than a run: the
+field set of `BuiltCandidate`, and that not one of the fourteen modules on the
+path to a reviewer packet imports the boundary or reads `.declared`.
+
+`CHILD_SCHEMA` is 3. `model.name` and `BuiltCandidate.kernel` were read by
+nothing and are gone with the strings.
+
+### Fixed — the network probe was measuring NordVPN, not the boundary (D11)
+
+`test_isolation`'s network row asserted refusal by connecting to `1.1.1.1:53`.
+That port is filtered on this machine by NordVPN Threat Protection, identically
+with no confinement at all, so the row was green everywhere and had never
+measured the confinement. Re-measured under the real restricted low-integrity
+token: `1.1.1.1:443` connects, `1.1.1.1:80` connects, `93.184.215.14:80`
+connects. All three firewall profiles are `DefaultOutboundAction=NotConfigured`.
+
+The probe aims at 443 now and the row is `ALLOWED`, because it is. The
+expectation that this boundary denies outbound TCP is kept as a *failing* test,
+`test_the_boundary_denies_outbound_tcp`, marked `expectedFailure`: the suite
+stays green while the gap is open, and closing it produces an unexpected success,
+which unittest reports as a failure. A limitation that goes off is worth more
+than a paragraph that does not. `confine.py`'s docstring said the restricted
+token refused `socket.connect`; it does not, and it now says so, as does
+`docs/defects.md` D9 row 1 — the network is open, not closed-except-DNS.
+
+### Fixed — the confined child could still create processes (D12)
+
+Measured: a candidate under the full boundary launched `cmd.exe`. Every
+counter-measure was downstream of the process already existing — the job object
+caught it, the survivor sweep counted it, the drain killed it before anything was
+read. `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` with
+`PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` moves the refusal to `CreateProcess`:
+measured `WinError 367`, at zero geometry cost (1.77 s trimesh, 5.86 s build123d
+including its cold import).
+
+It has one prerequisite. A virtual environment's `python.exe` is a launcher that
+spawns the base interpreter as a child, so under this policy the boundary could
+not start its own child. `isolation.base_executable()` launches
+`sys._base_executable` directly and `PYTHONPATH` gains the environment's
+`site-packages`; both paths are read-only to the restricted token, and outside a
+virtual environment the two answers coincide.
+
+Two attacks had to be rewritten to keep measuring what they were written for:
+`mklink /J` is `cmd.exe`, so the junction attack and the probe's reparse-point
+row now go straight at `FSCTL_SET_REPARSE_POINT` with no subprocess at all —
+strictly stronger, since it needs no privilege and no helper program, and it
+turns a row that used to be denied because `cmd.exe` said `Access is denied.`
+into one denied by the kernel: `ERROR_ACCESS_DENIED` on the control itself,
+measured, from inside the one directory the candidate can write. The
+`DETACHED_PROCESS` and `CREATE_BREAKAWAY_FROM_JOB` grandchild attacks now fail at
+process creation instead of inside the job; both are kept, because the job object
+is what makes a failure of this policy survivable and it is the mechanism that
+has already been walked through once.
+
 ### Fixed — seven declared fields that a reviewer's answer did not depend on (D5, D6)
 
 An edit scope declared twelve things about a modification. Five of them reached

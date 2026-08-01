@@ -50,9 +50,30 @@ narrow canary over the frozen contract, and it is a finding, not the gate.
 
 **What this module deliberately does not import.** `authored`, which calls
 `spec.loader.exec_module`, and `build_child`, which calls `authored`. The
-executor is reached through `sys.executable` and by no other route --
+executor is reached through the base interpreter and by no other route --
 `test_isolation.TheParentNeverImportsTheExecutorTest` asserts it over the import
 graph rather than over one run.
+
+**No string the candidate wrote leaves this module.** D10: the boundary stops
+code, and the manifest is *data*, so nothing about process confinement closed
+it. Four strings out of `build_manifest.json` -- `provenance`,
+`backend_version`, `tessellation` and `boolean_engine` -- were copied verbatim
+onto `model_contract.json` and `artifact_manifest.json`, both of which the safety
+reviewer and the verification reviewer read, and a PASS or REJECT there decides
+the run. A candidate that can also read the frozen contract knows the tolerance
+bands and the design id, so the text it composes can be written in the gate's own
+vocabulary.
+
+The repair is a type, not a scan. `BuiltCandidate` -- the only object that leaves
+this module -- carries digests, paths, numbers, and *tokens the parent validated
+against a closed vocabulary it owns*. Every engine word on a receipt now comes
+out of `KERNELS` in this file; the child chooses between two entries and writes
+none of them. The two declarations that must survive verbatim, `PARAMS` and
+`PROVENANCE`, are held in a `CandidateDeclaration`, which exists so that no
+function that builds a reviewer packet has a parameter one could arrive through
+-- the same argument `acceptance.generate` makes about meshes. A sanitiser that
+stripped suspicious words would be another removable check; this is the absence
+of a field.
 
 **`DIRECT` does not come here.** A certified template is geometry the pipeline
 wrote; there is no untrusted code to isolate, and the route's dispatch count and
@@ -62,6 +83,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import os
 import shutil
 import sys
@@ -74,12 +96,22 @@ from . import confine
 from . import schemas as S
 
 CHILD_MODULE = "pipeline.build_child"
-CHILD_SCHEMA = 2
+# 3: the child reports a `kernel` token and no engine prose, and no `model.name`.
+# The three engine strings it used to supply were three of D10's four channels
+# and the name was read by nothing. A manifest from the old protocol is refused
+# by version rather than silently read for keys that are no longer there.
+CHILD_SCHEMA = 3
 
 INPUT_FILE = "build_input.json"
 MANIFEST_FILE = "build_manifest.json"
 STL_NAME = "candidate.stl"
 STEP_NAME = "candidate.step"
+# Where the candidate's own declarations are written down. Not a receipt and not
+# an input to anything: it is the record that `PROVENANCE` was said, kept because
+# a declaration nothing reads is a declaration a designer iterates against for
+# nothing, and kept *here* rather than on the contract because the contract is
+# handed to the party who decides the run.
+DECLARATION_FILE = "candidate_declaration.json"
 
 INPUT_DIR = "in"
 OUTPUT_DIR = "out"
@@ -103,15 +135,141 @@ class BuildRefused(S.SchemaError):
     """The candidate could not be built, or was not allowed to have been."""
 
 
+# ---------------------------------------------------------------------------
+# The closed vocabulary the child is allowed to speak
+# ---------------------------------------------------------------------------
+#
+# Two entries, and every string in them belongs to this file. The child returns a
+# key; `_engine` looks it up. A key this table does not hold is not an error and
+# is never passed through -- it selects `UNRECORDED_KERNEL`, which says less than
+# the candidate claimed and nothing the candidate wrote.
+#
+# The words are the ones `build_child._export` used to send across, moved to the
+# side of the boundary that is entitled to assert them. "unrecorded" for the mesh
+# path is deliberate and is not "manifold3d": the certified backends select the
+# engine at every call site and can name it, an authored mesh model was never
+# asked to declare its booleans, and asserting an engine nobody observed is the
+# kind of receipt this pipeline exists to not write.
+KERNELS: dict[str, dict[str, Any]] = {
+    "trimesh": {
+        "distribution": "trimesh",
+        "tessellation": {"kernel": "trimesh",
+                         "note": "the model returned a mesh; nothing was "
+                                 "tessellated here"},
+        "boolean_engine": "unrecorded: an authored mesh model selects its own "
+                          "engine and this build did not observe the call",
+    },
+    "build123d": {
+        "distribution": "build123d",
+        "tessellation": {"kernel": "build123d",
+                         "note": "exported through build123d's own tessellator"},
+        "boolean_engine": "n/a (B-rep)",
+    },
+}
+
+UNRECORDED_KERNEL = "unrecorded"
+UNRECORDED_ENGINE = ("unrecorded: the build did not name a kernel this boundary "
+                     "knows, so nothing is asserted about how it was made")
+
+
+@dataclasses.dataclass(frozen=True)
+class Engine:
+    """What the receipt says about how the geometry was made, in parent words."""
+
+    kernel: str
+    backend_version: str
+    tessellation: dict[str, Any]
+    boolean_engine: str
+
+
+def _distribution_version(name: str) -> str:
+    """The installed version of a package, read by the parent from its own env.
+
+    Not from the child. The child ran against the same sealed, read-only
+    `site-packages` this process imports from -- it could not have changed it --
+    so the parent can answer this question itself, and a receipt whose version
+    string came from the party being judged answers a different question.
+    """
+    try:
+        from importlib.metadata import version   # noqa: PLC0415 - cheap, local
+        return f"{name} {version(name)}"
+    except Exception:                            # noqa: BLE001 - pragma: no cover
+        return f"{name} (version unavailable)"
+
+
+def _seconds(value: Any) -> float:
+    """A duration the candidate reported, or zero.
+
+    `float("what the model would like the receipt to say")` is a `ValueError`
+    out of `build`, and `float(10 ** 400)` -- which JSON round-trips exactly --
+    is an `OverflowError`. Neither is a `BuildRefused`, so neither is a finding
+    anybody writes down; they are tracebacks out of the boundary. Everything in
+    the manifest is candidate-authored, so every read of it either validates or
+    defaults.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    try:
+        seconds = float(value)
+    except (OverflowError, ValueError):           # pragma: no cover - see above
+        return 0.0
+    return seconds if math.isfinite(seconds) else 0.0
+
+
+def _engine(token: Any) -> Engine:
+    """One token in, four parent-owned values out."""
+    if not isinstance(token, str) or token not in KERNELS:
+        return Engine(kernel=UNRECORDED_KERNEL, backend_version=UNRECORDED_KERNEL,
+                      tessellation={"kernel": UNRECORDED_KERNEL},
+                      boolean_engine=UNRECORDED_ENGINE)
+    entry = KERNELS[token]
+    return Engine(kernel=token,
+                  backend_version=_distribution_version(str(entry["distribution"])),
+                  tessellation=dict(entry["tessellation"]),
+                  boolean_engine=str(entry["boolean_engine"]))
+
+
+@dataclasses.dataclass(frozen=True)
+class CandidateDeclaration:
+    """What the candidate said about itself, in the candidate's own words.
+
+    A separate type for one reason: it is the only object leaving this module
+    that holds text the party being judged composed, and giving it a name means
+    every function that must never receive one can be checked for a parameter of
+    this type rather than trusted not to forward a dict.
+
+    `params` is compared against the frozen proposal by the caller and the run is
+    refused if they differ; `provenance` is written to `candidate_declaration.json`
+    and read by nothing. Neither reaches `Contract`, `artifact_manifest.json`, a
+    safety packet or a verification packet -- none of which has a field or a
+    parameter it could arrive through, which is D10's fix and is a shape rather
+    than a check.
+    """
+
+    params: dict[str, Any]
+    provenance: dict[str, Any]
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": CHILD_SCHEMA,
+            "what_this_is": (
+                "PARAMS and PROVENANCE exactly as the candidate declared them. "
+                "Recorded, not relied on: no reviewer packet, no contract and no "
+                "artifact manifest carries any of it, because the party that "
+                "writes this file is the party the reviewers decide about."),
+            "params": dict(self.params),
+            "provenance": dict(self.provenance),
+        }
+
+
 @dataclasses.dataclass(frozen=True)
 class BuiltCandidate:
     """What came back across the boundary, after the parent re-checked it.
 
-    Identity and geometry, and nothing the gate reads. `params` is the
-    candidate's own declaration and is compared against the frozen proposal by
-    the caller; `provenance` is the only candidate-supplied value that reaches
-    the contract, and it reaches it as recorded provenance rather than as an
-    expectation.
+    Digests, paths, numbers, and one enum token. No free text: every string on
+    this object is either a path the parent chose, a digest the parent computed,
+    or a value out of `KERNELS`, and that is what makes "no candidate prose
+    reaches a reviewer" a property of the type rather than of a filter.
 
     `module_sha256` and the artifact digests are computed by the parent. The
     module digest is taken from the authoritative file **before the child is
@@ -120,21 +278,19 @@ class BuiltCandidate:
     afterwards is a digest of whatever survived the build.
     """
 
-    name: str
     module_path: Path
     module_sha256: str
     # Every file staged into the sandbox, digested before the copy, by name.
     # The receipt says what the candidate was allowed to import as well as what
     # it declared.
     input_sha256: dict[str, str]
-    params: dict[str, Any]
-    provenance: dict[str, Any]
+    # Quarantined, and deliberately not spread across this dataclass as loose
+    # fields: `built.declared.params` is a sentence a reader can check, and
+    # `built.params` was one nobody did.
+    declared: CandidateDeclaration
     stl_path: Path
     step_path: Path | None
-    kernel: str
-    backend_version: str
-    tessellation: dict[str, Any]
-    boolean_engine: str
+    engine: Engine
     # What the child measured of itself: importing the model and building it,
     # which in a fresh process are one cost.
     build_seconds: float
@@ -143,6 +299,18 @@ class BuiltCandidate:
     # because a receipt whose total excludes the dominant term is a receipt that
     # says a 1.7 s job took 0.05 s.
     boundary_seconds: float
+
+    @property
+    def backend_version(self) -> str:
+        return self.engine.backend_version
+
+    @property
+    def tessellation(self) -> dict[str, Any]:
+        return dict(self.engine.tessellation)
+
+    @property
+    def boolean_engine(self) -> str:
+        return self.engine.boolean_engine
 
 
 def child_input(*, model_name: str, build_dir: Path, input_dir: Path,
@@ -169,6 +337,23 @@ def child_input(*, model_name: str, build_dir: Path, input_dir: Path,
     }
 
 
+def base_executable() -> str:
+    """The real interpreter, never the virtual environment's launcher.
+
+    D12. `sys.executable` inside a `uv` (or `venv`) environment is a trampoline:
+    running it *spawns the base interpreter as a child process*. That is fine
+    until the child is forbidden to create processes at all, at which point the
+    boundary's own launcher is the first thing the kernel refuses -- so the
+    prerequisite for `PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` is to start the
+    interpreter the trampoline would have started.
+
+    `sys._base_executable` is what CPython records for exactly this purpose and
+    equals `sys.executable` outside a virtual environment, so the fallback is the
+    same answer rather than a guess.
+    """
+    return str(getattr(sys, "_base_executable", None) or sys.executable)
+
+
 def child_command(input_path: Path) -> list[str]:
     """The child, as an argument vector.
 
@@ -177,7 +362,7 @@ def child_command(input_path: Path) -> list[str]:
     command line, so the executable is never found by parsing a string and no
     shell is involved at any point.
     """
-    return [sys.executable, "-m", CHILD_MODULE, str(input_path)]
+    return [base_executable(), "-m", CHILD_MODULE, str(input_path)]
 
 
 HOME_DIR = "home"
@@ -199,11 +384,17 @@ def child_environment(build_dir: Path) -> dict[str, str]:
     giving them a home inside the sandbox is giving them the real one.
 
     `PYTHONPATH` still has to name this package, because the child is
-    `-m pipeline.build_child`. It is a read-only path now: the restricted token
-    cannot write anything under it.
+    `-m pipeline.build_child`. It also has to name the virtual environment's
+    `site-packages`, because `base_executable()` starts the *base* interpreter
+    and the base interpreter's own `sys.path` does not include it -- see D12:
+    the venv's `python.exe` is a launcher that spawns a child, and a child that
+    may not create processes cannot be started through one. Both are read-only
+    paths: the restricted token cannot write anything under either.
     """
     scripts_root = str(Path(__file__).resolve().parents[1])
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    import sysconfig                              # noqa: PLC0415 - cheap, local
+    site_packages = sysconfig.get_paths()["purelib"]
     home = build_dir / HOME_DIR
     return {
         "SystemRoot": system_root,
@@ -220,7 +411,7 @@ def child_environment(build_dir: Path) -> dict[str, str]:
         "LOCALAPPDATA": str(home),
         "HOMEDRIVE": home.drive,
         "HOMEPATH": str(home)[len(home.drive):],
-        "PYTHONPATH": scripts_root,
+        "PYTHONPATH": os.pathsep.join((scripts_root, site_packages)),
         # The candidate's module would otherwise leave a `__pycache__` beside
         # itself. It could not write one into the sealed input directory anyway;
         # this makes the failure not happen rather than not matter.
@@ -530,22 +721,29 @@ def build(model_path: Path, *, dest_dir: Path, step: bool,
             raise BuildRefused(f"{MANIFEST_FILE} does not describe the model's "
                                "declared parameters")
 
+        # The one place candidate text lands, and it lands in a file rather than
+        # on an object anything downstream carries. `dest_dir` is the project
+        # directory and the parent writes this with the parent's own rights: the
+        # child could not have written it and cannot change it afterwards.
+        declaration = CandidateDeclaration(params=dict(params),
+                                           provenance=dict(provenance))
+        (dest_dir / DECLARATION_FILE).write_text(
+            S.canonical_json(declaration.as_payload()), encoding="utf-8")
+
         return BuiltCandidate(
-            name=str(model.get("name") or model_path.stem),
             module_path=model_path,
             # Taken from the authoritative file before the child existed, and
             # never from the manifest.
             module_sha256=module_sha256,
             input_sha256=dict(input_sha256),
-            params=dict(params),
-            provenance=dict(provenance),
+            declared=declaration,
             stl_path=stl_path,
             step_path=step_path,
-            kernel=str(built.get("kernel") or "unrecorded"),
-            backend_version=str(built.get("backend_version") or "unrecorded"),
-            tessellation=dict(built.get("tessellation") or {}),
-            boolean_engine=str(built.get("boolean_engine") or "unrecorded"),
-            build_seconds=float(built.get("build_seconds") or 0.0),
+            # A token in, this module's own words out. The manifest's three
+            # engine strings used to be copied straight onto the artifact
+            # manifest, which both reviewers read.
+            engine=_engine(built.get("kernel")),
+            build_seconds=_seconds(built.get("build_seconds")),
             boundary_seconds=time.perf_counter() - started)
     finally:
         # The input directory was sealed against its own creator, so write access

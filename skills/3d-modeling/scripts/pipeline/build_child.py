@@ -31,9 +31,19 @@ with the process, and the process dies inside the job.
 **It reports, it does not assert.** The parent hashed the model before this
 process existed, hashes every artifact itself, copies out only the two files it
 asked for by name, and reads none of it until the job object reports no live
-processes. The manifest is a description of a build, not a receipt about a part;
-the only candidate-declared values that cross are `PARAMS`, which the parent
-compares against the frozen proposal, and `PROVENANCE`, which the parent records.
+processes. The manifest is a description of a build, not a receipt about a part.
+
+**Nothing written here is trusted to be written by this file.** `authored.load`
+runs the model's module-level code in *this* interpreter, so a candidate can
+rewrite this module, `schemas`, or anything else in this process before `main`
+serialises anything. Every field of `build_manifest.json` is therefore
+candidate-authored text, whatever the code above it intends, and the parent
+treats it that way: it reads a `kernel` *token* out of a closed vocabulary it
+owns (`isolation.KERNELS`) rather than the engine strings this file used to
+supply, and it quarantines `PARAMS` and `PROVENANCE` in an
+`isolation.CandidateDeclaration` that no reviewer packet has a parameter to
+receive. That is D10, and the manifest is why it could not be fixed on this side
+of the boundary.
 """
 from __future__ import annotations
 
@@ -46,51 +56,37 @@ from typing import Any
 from . import authored as A
 from . import schemas as S
 
-SCHEMA = 2
+# 3: the manifest reports a `kernel` *token* and no engine prose. It used to
+# carry `backend_version`, `tessellation` and `boolean_engine` as strings the
+# parent copied verbatim onto `artifact_manifest.json`, which the safety and
+# verification reviewers both read -- three of D10's four channels. The parent
+# owns those words now (`isolation.KERNELS`); this side says only which of two
+# kernels exported the geometry. `model.name` went with them: nothing read it.
+SCHEMA = 3
 
 
-def _export(part: Any, stl_path: Path, step_path: Path | None) -> dict[str, Any]:
-    """Export whatever the model returned, naming the kernel that produced it.
+def _export(part: Any, stl_path: Path, step_path: Path | None) -> str:
+    """Export whatever the model returned, and name the kernel that did it.
 
     The certified backends know their kernel because they *are* the kernel. An
-    authored model calls whichever one it wants, so this detects what came back
-    and records it rather than asserting it. A receipt that names the wrong engine
-    is worse than one that names none.
+    authored model calls whichever one it wants, so this detects what came back.
+    What it returns is a token out of `isolation.KERNELS` and not a sentence: the
+    parent looks the token up and writes its own words, so a candidate that lies
+    here can pick between two answers rather than compose one.
     """
     # A trimesh mesh, or something that quacks like one.
     if hasattr(part, "export") and hasattr(part, "faces"):
-        import trimesh                           # noqa: PLC0415 - kernel is lazy
-
         part.export(stl_path)
-        return {
-            "kernel": "trimesh",
-            "backend_version": f"trimesh {trimesh.__version__}",
-            "tessellation": {"kernel": "trimesh", "faces": int(len(part.faces)),
-                             "note": "the model returned a mesh; nothing was "
-                                     "tessellated here"},
-            # Not "manifold3d". The certified backends select the engine at every
-            # call site and can therefore name it; an authored model was not asked
-            # to declare its booleans, and asserting an engine nobody observed is
-            # the kind of receipt this pipeline exists to not write.
-            "boolean_engine": "unrecorded: an authored mesh model selects its own "
-                              "engine and this build did not observe the call",
-        }
+        return "trimesh"
 
     # A build123d / OCCT solid.
     from build123d import export_step, export_stl   # noqa: PLC0415 - kernel is lazy
-    import build123d                                # noqa: PLC0415
 
     shape = getattr(part, "part", part)
     export_stl(shape, str(stl_path))
     if step_path is not None:
         export_step(shape, str(step_path))
-    return {
-        "kernel": "build123d",
-        "backend_version": f"build123d {build123d.__version__}",
-        "tessellation": {"kernel": "build123d",
-                         "note": "exported through build123d's own tessellator"},
-        "boolean_engine": "n/a (B-rep)",
-    }
+    return "build123d"
 
 
 def _serialisable(value: Any, what: str) -> Any:
@@ -130,15 +126,17 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
     model, builder = A.load(model_path)
     part = builder() if callable(builder) else builder
-    exported = _export(part, stl_path, step_path)
+    kernel = _export(part, stl_path, step_path)
     build_seconds = time.perf_counter() - started
 
     return {
         "schema_version": SCHEMA,
         "ok": True,
         "error": None,
+        # The two declarations the parent quarantines. `params` it compares
+        # against the frozen proposal and forwards to nothing; `provenance` it
+        # records in `candidate_declaration.json` and forwards to nothing.
         "model": {
-            "name": model.name,
             "params": _serialisable(dict(model.params), "PARAMS"),
             "provenance": _serialisable(dict(model.provenance), "PROVENANCE"),
         },
@@ -146,7 +144,7 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
             "stl": stl_path.name,
             "step": step_path.name if step_path is not None else None,
         },
-        "build": {**exported, "build_seconds": round(build_seconds, 6)},
+        "build": {"kernel": kernel, "build_seconds": round(build_seconds, 6)},
         "python": sys.version.split()[0],
     }
 

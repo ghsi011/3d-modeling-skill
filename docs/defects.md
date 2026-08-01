@@ -122,7 +122,7 @@ project declares an edit scope. `run-job` must refuse rather than proceed, and
 `status` must not present a `final_status.json` whose bindings do not match the
 project's.
 
-## D9 — the confined build boundary denies writes, not reads, DNS or Low-labelled paths
+## D9 — the confined build boundary denies writes, not reads, the network or Low-labelled paths
 
 Numbered past the two it replaces on purpose: D7 and D8 were the boundary that
 did not meet the gate and the tests that did not guard it, and both are closed.
@@ -133,20 +133,28 @@ this file the same way and are in `CHANGELOG.md`.
 **Where.** [`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py),
 `RESTRICTING_SIDS` and `LOW_INTEGRITY_SID`, and the mechanism they add up to.
 
-**What is wrong.** Three of the confinement's ruled properties are met in part
-rather than in full. None of them is a bug in the code; each is the ceiling of
-the mechanism the boundary was ruled to use, and the entry exists so that "no
-network capability" is not read as more than it is.
+**What is wrong.** Three of the confinement's ruled properties are unmet — two in
+part, and one, since D11, not at all. None of them is a bug in the code; each is
+the ceiling of the mechanism the boundary was ruled to use, and the entry exists
+so that "no network capability" is not read as more than it is. Which for a while
+it was: rows 2 and 3 have always said what they mean, and row 1 did not.
 
-1. **Network.** The property asked for is *no network capability*. What is
-   achieved is: an outbound TCP `connect` is refused with `WSAEACCES`
-   (WinError 10013), measured at both Medium and Low integrity, with and without
-   the deny-only SIDs — the restricted token is what refuses it, not the
-   integrity level. **DNS resolution still succeeds.** `gethostbyname` does not
-   open a socket in the calling process; it goes through the DNS Client service
-   over RPC, and the service resolves on the candidate's behalf. That is a
-   low-bandwidth outbound channel — a few bytes per query, encoded in a
-   hostname — and it is not closed.
+1. **Network. The property asked for is *no network capability*, and none of it
+   is achieved: the network is open.** This row read "refused with `WSAEACCES`,
+   DNS excepted" until D11 was investigated, and that was wrong. The evidence
+   for it was one probe against `1.1.1.1:53`, a port NordVPN Threat Protection
+   filters on this machine — identically with no confinement at all. Re-measured
+   under the real restricted low-integrity token: `1.1.1.1:443` connects,
+   `1.1.1.1:80` connects, `93.184.215.14:80` connects. All three firewall
+   profiles are `DefaultOutboundAction=NotConfigured` and none of 741 enumerable
+   rules blocks outbound 53. DNS resolves too, and by a second route:
+   `gethostbyname` opens no socket in the calling process, it goes through the
+   DNS Client service over RPC.
+
+   So the candidate can read the repository, the project directory and
+   `acceptance_contract.json`, and post all three. Nothing in this boundary
+   contests it: process-thread attributes do not gate sockets, Low integrity does
+   not gate sockets, and neither does the restricting-SID set.
 2. **The Low-labelled corners of the user profile.**
    `%USERPROFILE%\AppData\LocalLow` and `%USERPROFILE%\AppData\Local\Temp\Low`
    carry an explicit *Low* mandatory label from Windows, so a Low-integrity
@@ -163,16 +171,24 @@ network capability" is not read as more than it is.
    and not of the filesystem.
 
 **Evidence.** `test_isolation.WhatTheConfinementEnforcesTest` runs one probe
-model under the real boundary and reports fourteen rows. Eleven are asserted
+model under the real boundary and reports sixteen rows. Eleven are asserted
 closed, one — writing the build directory — is the capability the candidate is
-supposed to have, and the three above are asserted *open*. A change that closes
-one turns that test red, which is the point: a limitation that quietly stops
-being one is a limitation nobody updates the documentation for.
+supposed to have, and four are asserted *open*: the three limitations above, with
+row 1 measured twice because an outbound socket and a DNS query are two different
+mechanisms and both work. A change that closes one turns that test red, which is
+the point: a limitation that quietly stops being one is a limitation nobody
+updates the documentation for.
+
+The table records what is true; it does not record what is owed, and for the
+network those are different. So `test_the_boundary_denies_outbound_tcp` states
+the property this boundary is *supposed* to have and is marked
+`expectedFailure`. The suite stays green while the gap is open, and the day the
+gap closes unittest reports an unexpected success — a red suite whose message is
+"the boundary improved and this file did not".
 
 **What blocks each.** Network and reads both want a mechanism the ruling did not
-authorise. Low integrity does not gate sockets at all; the refusal observed here
-is a side effect of the restricting-SID set and is not a capability model. Read
-denial and a real network capability model are the same mechanism:
+authorise. Read denial and a real network capability model are the same
+mechanism:
 
 * **`AppContainer`** — `CreateAppContainerProfile` plus
   `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` with an empty capability set.
@@ -195,79 +211,24 @@ denial and a real network capability model are the same mechanism:
   floor for a process that has to start.
 
 **What it can cause.** Row 1 is an exfiltration channel, not a route back into
-the gate. Row 2 is a drop-box outside anything this pipeline reads. Row 3 lets a
-candidate tailor geometry to the contract it will be measured against — which is
-a weaker version of the defect this whole boundary exists to close, and the one
-of the three worth closing first.
+the gate — but it is a full-bandwidth one, not the few-bytes-per-hostname channel
+this entry used to describe. Row 2 is a drop-box outside anything this pipeline
+reads. Row 3 lets a candidate tailor geometry to the contract it will be measured
+against — which is a weaker version of the defect this whole boundary exists to
+close, and the one of the three worth closing first.
+
+Row 3 also *aimed* D10, which is now closed: a candidate that can read the
+contract knows the bands and the design id, and could once write a paragraph in
+that vocabulary straight into the reviewer's packet. It can still read. It can no
+longer write anything a reviewer sees.
 
 **Fixture that must fail first.** For row 3, a model that reads
 `acceptance_contract.json` from the project directory and reports its contents
 through `PROVENANCE`, asserted to fail. It passes today, deliberately, in
-`test_the_named_limitations_are_still_the_named_limitations`.
+`test_the_named_limitations_are_still_the_named_limitations`. For row 1,
+`test_the_boundary_denies_outbound_tcp` is already on disk and already failing.
 
-## D10 — candidate-authored prose reaches the reviewer that decides the run
-
-**Where.** `isolation.py` adopts `model["provenance"]` from the child's
-`build_manifest.json`; `acceptance.py` places it into `contract.as_payload()`;
-`runner.py` hands that payload to the safety and verification reviewers.
-
-**What is wrong.** The candidate writes free text and that text reaches the party
-whose PASS or REJECT decides acceptance. This is a write channel and it exists
-independently of any process confinement — no boundary closes it, because the
-data is *supposed* to cross.
-
-**Evidence.** The path is four hops in current code and was traced end to end.
-Read access to the frozen contract does not create the channel; it supplies aim.
-A candidate that can read `acceptance_contract.json` knows the tolerance bands,
-the design id, the expected bbox and the profile marks, and can compose
-provenance text in the contract's own vocabulary — turning a blind
-prompt-injection surface into a targeted one.
-
-**What it can cause.** Everything ADR 0002 gates. The acceptance *criteria* are
-safe: every gated measurement is recomputed by the parent from the STL it copied
-out itself, the contract never leaves parent memory after `cli.py:924`, and it is
-canary-hashed across the build. The *evidence packet* is not safe. Reading the
-spec is fine; reading the grader's rubric and then writing a paragraph the grader
-will read is a different act.
-
-**Fixture that must fail first.** A candidate whose `PROVENANCE` contains text
-addressed to a reviewer, asserted absent from every payload any reviewer
-receives.
-
-## D11 — the network test measures a third-party firewall, not the boundary
-
-**Where.** `pipeline/test_isolation.py`, the `network_tcp_connect` probe.
-
-**What is wrong.** It asserts refusal by connecting to `1.1.1.1:53`. On this
-machine that port is blocked by NordVPN Threat Protection's WFP filter, and it is
-blocked **identically with no confinement at all**. The test has never measured
-the confinement.
-
-**Evidence.** Running the exact `confine.py` at `7e9802e` under the real
-restricted low-integrity token: `1.1.1.1:443` connects, `1.1.1.1:80` connects,
-`93.184.215.14:80` connects. Only port 53 refuses, and it refuses the same way
-unconfined. All three firewall profiles are `DefaultOutboundAction=NotConfigured`
-and none of 741 enumerable rules blocks outbound 53.
-
-**What it can cause.** D9's network row is documented as closed-except-DNS and is
-in fact wide open: a candidate can open TCP/443 and post the repository, the
-project directory and `acceptance_contract.json`. The claim in `confine.py`'s
-docstring is unfounded, and the green row is a false one that would also go green
-on a machine with no confinement.
-
-**Fixture that must fail first.** The same probe against port 443. It goes red
-today.
-
-## D12 — the confined child can still spawn processes
-
-**Where.** `pipeline/confine.py`, process-thread attribute list.
-
-**What is wrong.** Measured: a candidate under the current boundary can launch
-`cmd.exe`. `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` with
-`PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` refuses it at the kernel with
-`WinError 367`, at zero measured geometry cost. Prerequisite, also measured:
-launch the base interpreter directly rather than the venv `python.exe` shim,
-which itself spawns a child.
-
-**Fixture that must fail first.** A candidate that spawns any process, asserted
-refused.
+D10, D11 and D12 were here and are closed; `CHANGELOG.md` has them. D11's
+correction is folded into row 1 above rather than carried as its own entry,
+because what it found was not a second defect — it was that this row was
+describing a property the boundary does not have.

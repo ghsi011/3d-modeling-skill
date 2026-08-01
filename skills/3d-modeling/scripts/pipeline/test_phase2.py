@@ -445,7 +445,13 @@ class AcceptanceIsUpstreamTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), witness, _project())
             cli.run([str(directory), "--no-render"])
-            visible = _read(directory, "model_contract.json")["source"]["provenance"]
+            # Out of `candidate_declaration.json` and not out of the contract:
+            # `source` no longer carries `provenance` at all, because the
+            # contract is handed verbatim to the reviewers who decide the run
+            # (D10). This probe still reports through `PROVENANCE` -- that is the
+            # only channel a model has -- and the parent still records it. It
+            # simply does not forward it.
+            visible = _read(directory, cli.ISO.DECLARATION_FILE)["provenance"]
 
         self.assertTrue(observed["present"],
                         "the candidate was launched before the acceptance contract "

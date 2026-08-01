@@ -893,6 +893,12 @@ A separate namespace is not by itself such a boundary. The property required is 
 * assessment inputs must be re-read, validated and hashed by the authoritative process after the boundary is closed, and receipts, status and authoritative project state must be created only there;
 * integrity checking of the authoritative process's own code may be kept as a canary and must not be counted toward this property. It reports a compromise that has already had its effect.
 
+A confinement bounds what the candidate can *do*. It does not bound what the candidate can *say*, because the boundary exists in order for build results to cross it. So the evidence a reviewer is given is a separate obligation:
+
+* no text the candidate authored may appear in any payload a reviewer receives. A reviewer's decision is an authority over the run, and a party that can address the decider is a party that can argue its own case — which is the acceptance-authority defect in a different medium. Read access to the acceptance specification does not create this channel; it aims it, because a candidate that knows the bands can argue in their vocabulary.
+* the property must hold by construction rather than by inspection. A value the candidate composed must have no field, parameter or attribute on the path to a reviewer payload; where a candidate-supplied value is genuinely needed, it crosses as a token validated against a vocabulary the authoritative side owns, and the authoritative side supplies the words. Filtering candidate text for suspicious content is not this property: it is a check, and a check can be removed, mis-ordered or skipped on one path.
+* what the candidate declared is still recorded, in an artifact no assessment and no review consumes. Suppressing it would make a designer iterate against a declaration nothing reads.
+
 Where a required property cannot be established by the available mechanism, it is recorded as a named limitation of the boundary with the mechanism that would close it. It is not quietly dropped, and the boundary is not weakened elsewhere to compensate.
 
 A designer may propose dimensions and features before evaluation.

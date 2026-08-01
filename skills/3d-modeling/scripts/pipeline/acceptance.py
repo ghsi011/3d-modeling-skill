@@ -552,7 +552,6 @@ class AcceptanceSource:
     # part was built from two files and a receipt naming one of them names less
     # than what ran.
     sources_sha256: dict[str, str] = dataclasses.field(default_factory=dict)
-    provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     backend: str = "authored"
     domain_id: str | None = None
@@ -588,13 +587,22 @@ class AcceptanceSource:
         return dict(self.frozen.payload["expected_bbox_mm"])
 
     def as_source(self) -> dict[str, Any]:
+        """What `model_contract.json` says about where the geometry came from.
+
+        Every value here is the parent's: a file name off `project.json`, digests
+        this process computed before the child was launched, and fields of the
+        contract it froze itself. There is deliberately no `provenance` key --
+        that was the candidate's own paragraph, and this payload is handed
+        verbatim to the safety reviewer and the verification reviewer, whose
+        PASS or REJECT decides the run (D10). What the candidate declared is in
+        `candidate_declaration.json` and reaches nobody who decides anything.
+        """
         payload = self.frozen.payload
         return {
             "kind": "authored",
             "module": self.module,
             "module_sha256": self.module_sha256,
             "sources_sha256": dict(self.sources_sha256),
-            "provenance": dict(self.provenance),
             "acceptance_contract_sha256": self.frozen.contract_sha256,
             "acceptance_revision": self.frozen.revision,
             "proposal_sha256": payload["proposal_sha256"],
