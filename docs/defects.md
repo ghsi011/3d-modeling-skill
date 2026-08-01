@@ -122,64 +122,13 @@ project declares an edit scope. `run-job` must refuse rather than proceed, and
 `status` must not present a `final_status.json` whose bindings do not match the
 project's.
 
-## D5 — `EditScope.alignment_transform` is declared, validated, and read by nothing
-
-**Where.** [`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py):274
-declares it; :348-354 validates it; it is serialised into `project.json`. No
-reader exists.
-
-**What is wrong.** The field states where a source artifact sits in the job's
-shared frame — the single value a coordinated multi-artifact edit most depends
-on. It reaches neither `preservation._seed_material`, nor the contract row built
-by `cli._preservation_feature`, nor `cli._requirement_hash`, nor the review
-envelope. `Project.project_hash()` covers it, and that hash appears in no
-receipt.
-
-**Evidence.** A finished MODIFY job was given a 5 mm x-translation on its edit
-scope, saved, and rerun. Every evidence digest was unchanged, the stored review
-response was accepted, and the run wrote a final status. Changing where the
-source sits changed nothing anyone downstream could see.
-
-**What it can cause.** A reviewer's answer stays bound to a job whose geometry
-has moved underneath it. This is `ROADMAP.md` Release 1's proof "changed
-transform rejects the old response", and it is the one proof of the nine that
-has neither mechanism nor test.
-
-**Fixture that must fail first.** Run a MODIFY job to its review pause, store the
-answer, change `alignment_transform`, rerun, assert `ReviewError` and that no
-`final_status.json` is written. A fixture asserting only that `project_hash()`
-moves passes today.
-
-## D6 — four declared edit-intent fields bind to nothing
-
-**Where.** `EditScope.preserve`, `.may_remove`, `.add`, `.expected_body_delta`,
-and `.interface_ids`, consumed nowhere outside
-[`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py).
-
-**What is wrong.** `cli._preservation_feature` carries only `region_box`, the
-region name and `preservation_tolerance_mm` into the acceptance contract, and
-only the first and last into the sampling seed. The remaining fields are what the
-job *promised about the edit* — what must survive, what may go, what is being
-added, how many bodies should result — and changing any of them moves no hash.
-
-**Evidence.** Editing each of the four on a finished job left the contract hash
-and every evidence digest unmoved, and the stale `PASS` was accepted on rerun.
-`region_box`, the region name and `preservation_tolerance_mm` were each
-demonstrated to reject correctly, so the mechanism is sound and the coverage is
-partial.
-
-**What it can cause.** A job can change what it claims to be doing without
-invalidating the evidence that it did the previous thing.
-
-**Fixture that must fail first.** One parameterised rerun-rejection test over all
-seven intent fields. Three pass today; four fail.
-
-
 ## D9 — the confined build boundary denies writes, not reads, DNS or Low-labelled paths
 
 Numbered past the two it replaces on purpose: D7 and D8 were the boundary that
 did not meet the gate and the tests that did not guard it, and both are closed.
-Reusing their numbers would make every reference to them ambiguous.
+Reusing their numbers would make every reference to them ambiguous. D5 and D6 —
+the edit-intent fields that were declared, validated, and read by nothing — left
+this file the same way and are in `CHANGELOG.md`.
 
 **Where.** [`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py),
 `RESTRICTING_SIDS` and `LOW_INTEGRITY_SID`, and the mechanism they add up to.
@@ -255,3 +204,70 @@ of the three worth closing first.
 `acceptance_contract.json` from the project directory and reports its contents
 through `PROVENANCE`, asserted to fail. It passes today, deliberately, in
 `test_the_named_limitations_are_still_the_named_limitations`.
+
+## D10 — candidate-authored prose reaches the reviewer that decides the run
+
+**Where.** `isolation.py` adopts `model["provenance"]` from the child's
+`build_manifest.json`; `acceptance.py` places it into `contract.as_payload()`;
+`runner.py` hands that payload to the safety and verification reviewers.
+
+**What is wrong.** The candidate writes free text and that text reaches the party
+whose PASS or REJECT decides acceptance. This is a write channel and it exists
+independently of any process confinement — no boundary closes it, because the
+data is *supposed* to cross.
+
+**Evidence.** The path is four hops in current code and was traced end to end.
+Read access to the frozen contract does not create the channel; it supplies aim.
+A candidate that can read `acceptance_contract.json` knows the tolerance bands,
+the design id, the expected bbox and the profile marks, and can compose
+provenance text in the contract's own vocabulary — turning a blind
+prompt-injection surface into a targeted one.
+
+**What it can cause.** Everything ADR 0002 gates. The acceptance *criteria* are
+safe: every gated measurement is recomputed by the parent from the STL it copied
+out itself, the contract never leaves parent memory after `cli.py:924`, and it is
+canary-hashed across the build. The *evidence packet* is not safe. Reading the
+spec is fine; reading the grader's rubric and then writing a paragraph the grader
+will read is a different act.
+
+**Fixture that must fail first.** A candidate whose `PROVENANCE` contains text
+addressed to a reviewer, asserted absent from every payload any reviewer
+receives.
+
+## D11 — the network test measures a third-party firewall, not the boundary
+
+**Where.** `pipeline/test_isolation.py`, the `network_tcp_connect` probe.
+
+**What is wrong.** It asserts refusal by connecting to `1.1.1.1:53`. On this
+machine that port is blocked by NordVPN Threat Protection's WFP filter, and it is
+blocked **identically with no confinement at all**. The test has never measured
+the confinement.
+
+**Evidence.** Running the exact `confine.py` at `7e9802e` under the real
+restricted low-integrity token: `1.1.1.1:443` connects, `1.1.1.1:80` connects,
+`93.184.215.14:80` connects. Only port 53 refuses, and it refuses the same way
+unconfined. All three firewall profiles are `DefaultOutboundAction=NotConfigured`
+and none of 741 enumerable rules blocks outbound 53.
+
+**What it can cause.** D9's network row is documented as closed-except-DNS and is
+in fact wide open: a candidate can open TCP/443 and post the repository, the
+project directory and `acceptance_contract.json`. The claim in `confine.py`'s
+docstring is unfounded, and the green row is a false one that would also go green
+on a machine with no confinement.
+
+**Fixture that must fail first.** The same probe against port 443. It goes red
+today.
+
+## D12 — the confined child can still spawn processes
+
+**Where.** `pipeline/confine.py`, process-thread attribute list.
+
+**What is wrong.** Measured: a candidate under the current boundary can launch
+`cmd.exe`. `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` with
+`PROCESS_CREATION_CHILD_PROCESS_RESTRICTED` refuses it at the kernel with
+`WinError 367`, at zero measured geometry cost. Prerequisite, also measured:
+launch the base interpreter directly rather than the venv `python.exe` shim,
+which itself spawns a child.
+
+**Fixture that must fail first.** A candidate that spawns any process, asserted
+refused.
