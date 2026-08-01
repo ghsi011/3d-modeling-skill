@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Adopt the geometry the isolated build boundary already produced.
+"""Adopt the geometry the confined build boundary already produced.
 
 This module used to import the candidate's builder and call it here, inside the
 process that then commissioned the result. It no longer executes anything:
-`isolation.build` ran the model in a one-shot child process, re-hashed what came
-back and copied the two files it asked for by name into the job directory. What
+`isolation.build` ran the model in a one-shot confined process -- a restricted,
+low-integrity token inside a job object -- re-hashed what came back and copied the
+two files it asked for by name into the job directory. What
 is left is the part of a backend that was always a receipt -- which kernel made
 this, which engine resolved the booleans, how long it took -- and the checks that
 the files it names are on disk.

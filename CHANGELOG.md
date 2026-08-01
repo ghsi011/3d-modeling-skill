@@ -6,6 +6,146 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the candidate is built with less authority, not just in another interpreter
+
+The previous entry moved the builder into its own process. An adversarial review
+then walked through it three ways, and none of them needed an import, a race, or
+anything to persist:
+
+* `pipeline/backends/authored.py` is first imported by the parent **after**
+  `isolation.build` returns, on the path of every authored job. The candidate
+  rewrote it while building and the parent executed its module-level code
+  seconds later, in the interpreter holding the frozen contract. Exit 0,
+  `final_status VERIFIED`, `feature-pad-section PASS expected 432.0 measured
+  80.002`, contract untouched at revision 1, history `changed: []` — the
+  pre-change reproduction, verbatim, on the post-change code;
+* a stealth variant compiled the same patch into
+  `__pycache__/authored.cpython-313.pyc`, stamped with the real file's mtime and
+  size, leaving the `.py` byte-identical. Hashing the source finds nothing;
+* a `DETACHED_PROCESS` grandchild outlived `subprocess.run`'s timeout: the run
+  reported exit 1 `FAILED`, and 25 s later `design-tool status` reported
+  `VERIFIED` with nothing outstanding.
+
+The root cause is one sentence. Separation was implemented as a different
+*interpreter* and the claim ADR 0002 needs is about *privilege*. Same user, same
+filesystem, no lifetime bound.
+
+`pipeline/confine.py` replaces it with an OS-enforced confinement, built with
+`ctypes` against `advapi32`/`kernel32` rather than by adding `pywin32` to a
+security boundary:
+
+* a **restricted token** whose restricting-SID list omits
+  `NT AUTHORITY\Authenticated Users`, with every other group deny-only. On this
+  machine `C:\` grants `Authenticated Users: Modify` by inheritance and nothing
+  else the token carries grants write, so the repository, the virtual
+  environment and this package's source cap at `BUILTIN\Users: Read & Execute`.
+  Measured: it also refuses `socket.connect` with `WSAEACCES`;
+* **low integrity**, which is what refuses the project directory, the parent's
+  `%TEMP%`, the Startup folder, the sandbox's own inputs, and
+  `OpenProcess(PROCESS_VM_WRITE)` against the parent. Each of those was measured
+  by running the probe at *medium* integrity and watching it succeed;
+* a **job object** with `KILL_ON_JOB_CLOSE` and breakaway not permitted.
+  `DETACHED_PROCESS` never left a job; the attack worked because there was no
+  job. `CREATE_BREAKAWAY_FROM_JOB` is the flag whose purpose *is* to leave one,
+  and a grandchild that passes it is measured not to. The parent drains the job
+  to zero live processes before it reads one byte out of the build directory;
+  the count is taken by process id after a short settle, because a job keeps
+  counting a process until its last handle closes and because Windows puts its
+  own transient `conhost.exe` in there for under 100 ms of every run;
+* exactly **two inherited handles**, named in a
+  `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`: a `NUL` and one pipe for the transcript;
+* a **constructed environment**. Three of the attacks found the tree they
+  rewrote by reading `PYTHONPATH` out of an inherited one.
+
+Every privilege is deleted except `SeChangeNotifyPrivilege` — bypass traverse
+checking, which `Everyone` holds by default and which grants access to no object.
+
+The workspace is two directories with protected DACLs that inherit nothing:
+`in\` holds **copies** of `model.py` and every `*.py` beside it and is sealed
+read-only after staging, and `out\` is labelled Low and is the only object on
+the machine the child can write. The child is no longer told where the project
+is; it gets a directory and a file name.
+
+Ordering, which is most of the repair: every input is hashed **before** the
+child exists, so `module_sha256` names what ran rather than what survived; and
+nothing is read out of the build directory until the job is dead. Each output is
+then checked by exact byte compare against the name asked for, refused if it is
+a reparse point, refused if it carries an alternate data stream, refused if its
+real path resolves outside the sandbox, and hashed by the parent.
+
+Staging every `*.py` beside `model.py` also closed a gap nobody had named: the
+old boundary put the whole *project directory* on the child's `sys.path` and the
+receipt recorded one digest, so a part built from a model and a helper was
+described by a contract naming half of it. `model_contract.json`'s `source`
+block now carries `sources_sha256`, a digest per staged file.
+
+**Source-integrity hashing is not the gate.** The `.pyc` attack is the reason:
+it left the source byte-identical, and a check that fires after the authority has
+been exercised is detection, not confinement. One narrow canary is kept over
+`acceptance_contract.json`, and a failure of it is reported as a failure of the
+boundary rather than as a finding about the model.
+
+**Named limitations, measured and asserted still open** (`docs/defects.md` D9):
+DNS resolution still succeeds through the DNS Client service, which is a
+low-bandwidth outbound channel; `AppData\LocalLow` and `%TEMP%\Low` carry an
+explicit Low label from Windows and are therefore writable; and the candidate
+can still *read* what `BUILTIN\Users` can read, including the contract it is
+measured against. `AppContainer` is the mechanism that closes the first and the
+third; an Untrusted integrity level closes the second and does not start
+(`STATUS_DLL_INIT_FAILED`, measured), as does a `NULL`-SID lockdown token used as
+a primary token.
+
+Deleted rather than layered: `PARENT_OWNED`, `PARENT_OWNED_DIRS`, `_guarded`,
+`_snapshot` and `_restore` — an eighteen-name list that had to be kept in step
+with `acceptance.INVALIDATED_BY_A_NEW_REVISION` and whose failure mode was a
+silent gap, replaced by an operating system that does not let the write happen;
+`_child_env`, which handed over `os.environ`; and `subprocess` from the boundary
+entirely, which means the D8 mutation "launch the child with `shell=True`" has no
+expression left to mutate.
+
+Tests: `pipeline/test_isolation.py` grew from 16 to 58. It carries the three
+attacks that broke `0a8e464`, a write into the virtual environment, a grandchild
+that asks the kernel to leave the job, an escape through a junction, one probe
+model that measures fourteen confinement properties from inside the confinement
+and asserts the three named limitations still open, and the first tests
+`pipeline/build_child.py` has ever had. Every one of the ported attacks fails
+against `893c9cc` and passes here; 27 of the 53 tests that can run against the
+old boundary fail on it.
+
+`DIRECT` creating no process is now proven with `sys.addaudithook` over a
+`pipeline.confine.spawn` audit event rather than by replacing two module
+attributes, because a hook catches a process created through a name nobody
+thought to replace.
+
+Mutation kill rate, same method both sides (apply one weakening to a clean copy
+of the tree, run `test_isolation.py`): **5 of 15 before, 25 of 25 after.** The
+before figure is the review's own fifteen against `893c9cc`, reproduced exactly.
+The after figure is those fifteen mapped onto the new code — three have no target
+left, because `PARENT_OWNED` and `_restore` are gone — plus thirteen for the
+mechanisms this boundary added: `Authenticated Users` back in the restricting
+set, medium integrity, every privilege kept, the job never terminated, survivors
+never counted, the sweep removed, alternate data streams and reparse points
+unchecked, every inheritable handle inherited, the environment inherited, the
+confinement made optional, the parent reading before the job drains, and sibling
+sources not staged.
+
+Four survived the first pass and each one was a real gap, now closed: the
+timeout was asserted as a constant and not as `build`'s default; nothing built a
+manifest declaring another protocol, so the schema check was extracted into
+`_sections` and unit-tested; nothing asserted the sandbox is deleted; and
+nothing asserted the child's transcript is captured rather than inherited, which
+also turned up a genuine hole — a model that printed a measurement and then
+raised had the print discarded, and the manifest-error path now carries it.
+
+Suite: 964 passed / 4 skipped / 379 subtests to 1006 passed / 4 skipped / 419
+subtests, 673 s to 794 s. `design-tool selftest` 11/11, `gen_harness --check`
+11/11, no frozen contract hash moved, ruff and the internal link check clean.
+
+Cost: a whole authored `design-tool run` goes 1.674 s to 1.668 s, and the
+confinement's own share of it is about 0.14 s — free next to the cold geometry
+import it wraps. `DIRECT` is untouched: 0.191 s to 0.186 s on `c_clip`, inside
+the run-to-run spread, dispatch 0 to 0.
+
 ### Fixed — the candidate is built in a process that cannot reach its own gate
 
 Freezing the acceptance contract before the builder was necessary and was not

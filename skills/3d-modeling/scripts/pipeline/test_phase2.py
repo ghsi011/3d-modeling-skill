@@ -49,6 +49,7 @@ from . import cli
 from . import project as P
 from . import route as RT
 from . import runner
+from . import schemas as S
 from . import selftest as ST
 
 UTC = "1970-01-01T00:00:00Z"
@@ -410,26 +411,55 @@ class AcceptanceIsUpstreamTest(unittest.TestCase):
         self.assertNotIn("freeze", called)
 
     def test_the_contract_is_on_disk_before_the_model_is_imported(self) -> None:
-        """Proved by a model that reports when it ran.
+        """Two facts, observed at the instant the candidate is launched.
 
-        The module writes a marker on import. If the acceptance contract's
-        modification is later than the marker, the freeze happened after the
-        designer's code had a chance to run.
+        This used to be proved by a model that wrote a marker into the project
+        directory carrying the contract it had just read there. The confined
+        build boundary makes both halves of that impossible -- the candidate
+        cannot write the project directory, and it is not told where it is -- so
+        the witness moved to the only party that can still see both sides.
+
+        What is asserted is the same claim and slightly more of it: at the moment
+        `isolation.build` is entered, the contract is already on disk *and*
+        already hashes to the digest every receipt binds; and the directory the
+        candidate is handed contains its own sources and nothing else.
         """
+        observed: dict[str, object] = {}
+        real = cli.ISO.build
+
+        def watch(model_path, *, dest_dir, step, **kw):
+            path = Path(dest_dir) / ACC.ACCEPTANCE_FILE
+            observed["present"] = path.is_file()
+            observed["payload"] = (json.loads(path.read_text(encoding="utf-8"))
+                                   if path.is_file() else None)
+            return real(model_path, dest_dir=dest_dir, step=step, **kw)
+
+        self.addCleanup(setattr, cli.ISO, "build", real)
+        cli.ISO.build = watch
+
         witness = textwrap.dedent(RISER) + textwrap.dedent('''
             from pathlib import Path
-            Path(__file__).with_name("imported.marker").write_text(
-                Path(__file__).with_name("acceptance_contract.json").read_text(
-                    encoding="utf-8"), encoding="utf-8")
+            PROVENANCE = {"visible_to_the_candidate":
+                          sorted(p.name for p in Path(__file__).parent.iterdir())}
             ''')
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), witness, _project())
             cli.run([str(directory), "--no-render"])
-            seen = (directory / "imported.marker").read_text(encoding="utf-8")
-            self.assertEqual(
-                (directory / ACC.ACCEPTANCE_FILE).read_text(encoding="utf-8"), seen,
-                "the model saw a different acceptance contract than the one the run "
-                "gated against, so the freeze is not upstream of the import")
+            visible = _read(directory, "model_contract.json")["source"]["provenance"]
+
+        self.assertTrue(observed["present"],
+                        "the candidate was launched before the acceptance contract "
+                        "reached disk, so the freeze is not upstream of the build")
+        payload = observed["payload"]
+        body = {key: value for key, value in payload.items()
+                if key != "contract_sha256"}
+        self.assertEqual(payload["contract_sha256"], S.payload_hash(body),
+                         "the contract on disk when the candidate started is not "
+                         "the one that hashes to the digest the receipts bind")
+
+        self.assertNotIn(ACC.ACCEPTANCE_FILE, visible["visible_to_the_candidate"],
+                         "the candidate could see the document it is measured "
+                         "against in the directory it was handed")
 
 
 class CandidateCannotWidenItsOwnToleranceTest(unittest.TestCase):

@@ -109,7 +109,7 @@ legitimately steps at: they explain a step, and they cannot clear the part.
 
 `model.py`, loaded by
 [`pipeline/authored.py`](../skills/3d-modeling/scripts/pipeline/authored.py)
-after the freeze, in a separate process — see *The isolated build boundary*
+after the freeze, under an OS-enforced confinement — see *The confined build boundary*
 below:
 
 ```python
@@ -147,51 +147,104 @@ observed doing so.
 There is no validity domain, because nobody has certified one. An authored model
 never routes `DIRECT`.
 
-### The isolated build boundary
+### The confined build boundary
 
-`model.py` runs in a **one-shot child process**, not in the process that freezes
-the contract and decides the status. Freezing first was necessary and was not
-sufficient: importing a module runs its module-level code, and from that code
-`status.decide`, `commission._tol`, `contract.area_tolerance` and
-`AcceptanceSource.expectations` were all one assignment away. The result was
-demonstrated, not argued — a `VERIFIED` receipt on the same 352 mm2 miss, with
-the on-disk contract still at revision 1 and an empty `changed` list.
+`model.py` runs **under an OS-enforced confinement**, not in the process that
+freezes the contract and decides the status, and not as an ordinary peer process
+either. Two things had to be true and only the first was:
 
+* freezing before the builder runs. Necessary, and not sufficient: importing a
+  module runs its module-level code, and from that code `status.decide`,
+  `commission._tol`, `contract.area_tolerance` and
+  `AcceptanceSource.expectations` were all one assignment away — demonstrated,
+  not argued, as a `VERIFIED` receipt on a 352 mm2 miss;
+* running the builder with *less authority*. A separate interpreter gave it a
+  different namespace and the same rights. An adversarial review then rewrote a
+  pipeline module the parent imports **after** the build returns and had the
+  parent execute it; did the same through a `__pycache__` entry that left the
+  `.py` byte-identical; and left a detached grandchild that rewrote
+  `final_status.json` 25 s after the run reported `FAILED`.
+
+[`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py) builds
+the confinement,
 [`pipeline/isolation.py`](../skills/3d-modeling/scripts/pipeline/isolation.py) is
-the parent half and
+the parent half of the protocol, and
 [`pipeline/build_child.py`](../skills/3d-modeling/scripts/pipeline/build_child.py)
-is the child. What crosses, and nothing else:
+is the child.
+
+**The confinement**, on Windows, with no new dependency (`ctypes` against
+`advapi32`/`kernel32`):
+
+| mechanism | what it is | what it buys, measured |
+|---|---|---|
+| restricted token | `CreateRestrictedToken`, restricting SIDs without `Authenticated Users`, all groups but `Everyone`/`Users`/the logon SID deny-only | no write to the repository, `site-packages` or this package's source; no outbound socket |
+| low integrity | token integrity level `S-1-16-4096` | no write to the project directory, the parent's `%TEMP%`, the Startup folder or the sandbox's own inputs; no `OpenProcess(PROCESS_VM_WRITE)` on the parent |
+| job object | `KILL_ON_JOB_CLOSE`, neither kind of breakaway permitted, UI restrictions, 8-process cap | nothing the candidate spawns survives, `DETACHED_PROCESS` and `CREATE_BREAKAWAY_FROM_JOB` included |
+| handle list | `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` | exactly two handles inherited: a `NUL` and one pipe for the transcript |
+| constructed environment | not `os.environ` | the candidate is not handed the project path, the user, or the machine's `PATH` |
+| the confinement together | | `mklink /J` inside the one writable directory comes back `Access is denied.`, so the candidate cannot create a reparse point at all |
+
+Every privilege is deleted except `SeChangeNotifyPrivilege`, which is
+bypass-traverse-checking: `Everyone` holds it by default and it grants access to
+no object.
+
+**The workspace.** Two directories under a fresh sandbox, both with a protected
+DACL that inherits nothing:
+
+| directory | who can write it | what is in it |
+|---|---|---|
+| `in\` | nobody — read and execute only, at the implicit Medium label a Low subject cannot write | *copies* of `model.py` and every `*.py` beside it, plus `build_input.json` |
+| `out\` | the child, and only the child's directory | `candidate.stl`, `build_manifest.json`, a `home\` for anything that wants `%TEMP%` or `Path.home()` |
+
+What crosses, and nothing else:
 
 | direction | contents |
 |---|---|
-| in | the model's path, a scratch build directory, the two output file names, whether a STEP is wanted |
+| in | the sandbox input directory, the model's *file name* within it, the build directory, the two output file names, whether a STEP is wanted |
 | out | `build_manifest.json` — `PARAMS`, `PROVENANCE`, the kernel and its version, the tessellation note, the boolean-engine note, the build duration — plus `candidate.stl` and optionally `candidate.step` |
 
 JSON and files. Never a pickle, never a shared Python object, never a callable.
-Nothing about acceptance goes in, so there is nothing in that process for
-candidate code to rewrite; anything it patches dies with the process.
+Nothing about acceptance goes in, and neither does the project's path.
 
-Three consequences a designer will notice:
+Four consequences a designer will notice:
 
 * **`PARAMS` and `PROVENANCE` must be JSON.** They cross a process boundary as a
   document. A parameter the parent cannot read is a parameter the frozen proposal
   cannot be compared against.
-* **The model's own directory is on `sys.path`**, so `import a_helper_beside_me`
-  resolves the same way every time rather than depending on the directory the
-  command was run from. Third-party packages resolve because the child is the
-  same interpreter and the same environment.
-* **The project directory is not the model's to write in.** Every file the
-  pipeline owns there — the acceptance contract, its history, the proposal, the
-  project, every receipt, and `model.py` itself — is hashed before the child
-  starts and verified after it exits. One that moved is restored and the run is
-  refused. The child's working directory is its scratch build directory, which
-  is deleted afterwards along with anything in it the parent did not ask for by
-  name.
+* **A helper module beside `model.py` still resolves** — every `*.py` in the
+  project directory is copied into the sandbox and that directory is on
+  `sys.path`. A helper in a *subdirectory* is not, and neither is anything the
+  model expects to find by walking up from `__file__`. Third-party packages
+  resolve because the child is the same interpreter and the same environment,
+  read-only.
+* **The model cannot write anywhere except its own build directory** — not the
+  project, not the repository, not the virtual environment, not its own source.
+  A model that tries gets `PermissionError` from the operating system and the run
+  is refused with that message.
+* **A model that spawns anything is refused.** Nothing on this path needs a
+  subprocess, and a build that starts one has started something the run cannot
+  account for.
 
-The parent recomputes the model hash and every artifact digest itself, from the
-files on disk, after the child has exited. `DIRECT` executes no candidate code
-and does not come here at all: `runner.py` does not import the boundary, and the
-route's dispatch count and runtime are unchanged.
+`model_contract.json`'s `source` block now carries `sources_sha256`, a digest
+per staged file, beside the single `module_sha256` it always had: a part built
+from two files whose contract names one of them names less than what ran.
+
+The parent hashes `model.py` and every staged input **before the child exists**,
+waits for the job object to report no live processes before it reads a byte, and
+then validates each output by exact name, rejects reparse points, alternate data
+streams and paths that resolve out of the sandbox, and hashes what it promotes.
+Source-integrity hashing is not the gate — the bytecode-cache attack left the
+source byte-identical — and the one integrity check kept is a narrow canary over
+`acceptance_contract.json`.
+
+**Named limitations**, measured rather than assumed and asserted still open by
+`test_isolation.WhatTheConfinementEnforcesTest`: see
+[`docs/defects.md` D9](defects.md).
+
+`DIRECT` executes no candidate code and does not come here at all: `runner.py`
+imports neither module, the route's dispatch count and runtime are unchanged, and
+`confine.run` raises a `pipeline.confine.spawn` audit event that a `DIRECT` run
+is asserted never to trigger.
 
 ### `acceptance_contract.json` (the `AUTHORED` builder)
 

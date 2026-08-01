@@ -1,31 +1,37 @@
 #!/usr/bin/env python3
-"""The isolated build boundary: the child half. Run as `-m pipeline.build_child`.
+"""The confined build boundary: the child half. Run as `-m pipeline.build_child`.
 
 This is the only module in the package that both imports the candidate's code and
 is *not* imported by the parent. It is reached through `sys.executable` and by no
 other route, so nothing here can be called from the process that freezes the
 acceptance contract, commissions the artifact and decides the final status.
 
+It runs under a restricted, low-integrity token inside a job object it cannot
+leave (`confine.py`), so the authority it holds is: read the sealed input
+directory, write the one output directory, and nothing else on the machine.
+
 What it does, in one shot and then exits:
 
-1. read the input document the parent wrote into a scratch build directory;
-2. put the model's own directory on `sys.path`, so a model that imports a sibling
-   module or a package it ships beside itself resolves the same way every time
-   rather than depending on where the command was invoked from;
+1. read the input document the parent staged into the sealed input directory;
+2. put that input directory on `sys.path`, so a model that imports a helper the
+   designer shipped beside it resolves the same way every time. It is a
+   directory of *copies*; the authoritative sources are not reachable from here;
 3. import and validate the model -- `authored.load`, which is where
    `spec.loader.exec_module` lives;
 4. call the builder and export the geometry into the build directory;
 5. write `build_manifest.json` beside it.
 
-Everything it knows is in that input document: a model path, a directory, and
-whether a STEP was asked for. It is handed no acceptance contract, no proposal,
-no expectations and no tolerances, so there is nothing here for candidate code to
-rewrite. Anything it patches, mutates or monkeypatches dies with the process.
+Everything it knows is in that input document: a directory of copied sources, a
+model file name within it, a build directory, and whether a STEP was asked for.
+It is not told where the project is. It is handed no acceptance contract, no
+proposal, no expectations and no tolerances, so there is nothing here for
+candidate code to rewrite. Anything it patches, mutates or monkeypatches dies
+with the process, and the process dies inside the job.
 
-**It reports, it does not assert.** The parent recomputes the model's hash and
-every artifact digest from the files on disk, copies out only the two files it
-asked for by name, and verifies that nothing in the project directory moved while
-this ran. The manifest is a description of a build, not a receipt about a part;
+**It reports, it does not assert.** The parent hashed the model before this
+process existed, hashes every artifact itself, copies out only the two files it
+asked for by name, and reads none of it until the job object reports no live
+processes. The manifest is a description of a build, not a receipt about a part;
 the only candidate-declared values that cross are `PARAMS`, which the parent
 compares against the frozen proposal, and `PROVENANCE`, which the parent records.
 """
@@ -40,7 +46,7 @@ from typing import Any
 from . import authored as A
 from . import schemas as S
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 def _export(part: Any, stl_path: Path, step_path: Path | None) -> dict[str, Any]:
@@ -108,16 +114,18 @@ def _serialisable(value: Any, what: str) -> Any:
 
 
 def _build(spec: dict[str, Any]) -> dict[str, Any]:
-    model_path = Path(str(spec["model_path"]))
+    input_dir = Path(str(spec["input_dir"]))
+    model_path = input_dir / str(spec["model_name"])
     build_dir = Path(str(spec["build_dir"]))
     stl_path = build_dir / str(spec["stl_name"])
     step_name = spec.get("step_name")
     step_path = (build_dir / str(step_name)) if step_name else None
 
-    # The model's own directory, so `import a_helper_beside_me` resolves. Placed
-    # after this module's own imports are already resolved: the candidate chooses
-    # what it imports, not what the boundary does.
-    sys.path.insert(0, str(model_path.parent))
+    # The sealed input directory, so `import a_helper_beside_me` resolves against
+    # the copies the parent staged. Placed after this module's own imports are
+    # already resolved: the candidate chooses what it imports, not what the
+    # boundary does.
+    sys.path.insert(0, str(input_dir))
 
     started = time.perf_counter()
     model, builder = A.load(model_path)

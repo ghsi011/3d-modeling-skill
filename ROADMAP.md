@@ -421,21 +421,44 @@ It may not be re-read from mutable model code after evaluation.
 
 Proposal changes remain allowed, but create a visible new design revision and invalidate dependent results.
 
-*Isolated build boundary*
+*OS-enforced confined execution*
 
-Execute authored candidate code through an isolated one-shot build boundary. The authoritative process freezes and retains acceptance state, sends only required build inputs to the candidate process, then independently reimports and assesses the produced artifacts.
+Execute authored candidate code through an OS-enforced confinement, not merely in a separate interpreter. A separate interpreter is a different namespace; the claim this release needs is a smaller *privilege*. The first attempt built the former and was broken three ways by an adversarial review — a candidate that rewrote a pipeline module the parent imports after the build and had it executed in the process holding the frozen contract; the same through a bytecode cache entry that left the source byte-identical; and a detached grandchild that outlived the run's timeout and rewrote the final status afterwards. None of those needed an import, a race, or persistence.
+
+The confinement must have these properties:
+
+* read-only candidate inputs;
+* read-only runtime dependencies;
+* exactly one writable output directory;
+* no write access to the repository;
+* no write access to the project or its authority files;
+* no write access to the virtual environment, package installation, user profile, startup locations, or parent temp directories;
+* no network capability for an ordinary geometry build;
+* no inherited writable handles;
+* no access capable of modifying the parent process;
+* rejection of symlinks, junctions, reparse points, alternate data streams, path aliases, and outputs outside the sandbox;
+* parent-side hashing of all inputs before launch;
+* parent-side re-reading, validation, hashing and promotion of outputs only after the entire confinement is dead;
+* parent-only creation of receipts, assessment, status, and authoritative project state.
+
+The candidate receives copies or read-only views of its source and build inputs. It never receives writable access to their authoritative originals.
 
 The ruled design shape is:
 
 1. the parent validates and freezes the proposal;
 2. the parent constructs and retains the authoritative acceptance object;
-3. a one-shot child process executes the candidate code;
-4. the child receives only the build inputs it needs;
-5. the child writes geometry and a small build manifest to a temporary build directory;
-6. the parent reimports and hashes the produced artifacts;
-7. the parent performs commissioning, screening, review binding, and final status in its clean interpreter.
+3. the parent hashes every build input and stages copies of them into a sandbox;
+4. a one-shot confined child process executes the candidate code;
+5. the child receives only the build inputs it needs, as copies, and is not told where the project is;
+6. the child writes geometry and a small build manifest into the one writable directory;
+7. the parent waits for the confinement to report no live processes, then validates, hashes and promotes the produced artifacts;
+8. the parent performs commissioning, screening, review binding, and final status in its clean interpreter.
 
-The protocol is JSON and files, not pickle or shared Python objects. The child must not write authoritative receipts. The parent retains the frozen contract in memory and verifies its on-disk hash after the child exits. `DIRECT` does not need a subprocess; the cost applies only to authored candidate execution.
+The protocol is JSON and files, not pickle or shared Python objects. The child must not write authoritative receipts. `DIRECT` does not need a subprocess; the cost applies only to authored candidate execution.
+
+Source-integrity hashing does not count toward this gate. It detects a compromise after the authority has already been exercised, and the bytecode-cache attack is the demonstration: the source stayed byte-identical. A narrow canary is worth keeping; the privilege claim must not depend on one.
+
+Where a property cannot be reached by the ruled mechanism, it is recorded as a named limitation with the next-strongest mechanism identified, and the boundary is not weakened to make it pass. A boundary with one honestly-named gap is worth more than one with a quiet gap.
 
 *Minimum common tolerance foundation*
 
@@ -501,7 +524,15 @@ Adversarial tests include:
 * candidate code modifies its local copy of the acceptance object;
 * none changes the parent's frozen contract, assessment behavior, or final result;
 * unexpected child-written receipts are ignored or rejected;
-* `DIRECT` dispatch count and runtime remain unchanged.
+* candidate code rewrites a pipeline module the parent imports after the build returns;
+* candidate code poisons that module's bytecode cache, leaving the source byte-identical;
+* candidate code rewrites this package's source for the next run;
+* candidate code writes a `.pth` or `sitecustomize` into the virtual environment;
+* candidate code spawns a detached process intended to outlive the run, and one that asks the kernel to leave the job outright;
+* candidate code attempts a write out of the sandbox through a junction;
+* candidate code rewrites its own source while it builds;
+* every confinement property above is asserted by measurement rather than by inspection, and each named limitation is asserted still open, so that closing one is a visible change;
+* `DIRECT` creates no process at all, proven with an audit hook rather than by replacing a module attribute, and its dispatch count and runtime remain unchanged.
 
 The release passes only when candidate-controlled acceptance is structurally impossible, not merely rejected by one validator.
 

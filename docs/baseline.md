@@ -115,6 +115,46 @@ same way, and one authored build pays this once.
 The test suite's wall time moves 567 s -> 673 s for the same reason: every
 authored-lane fixture now starts a process.
 
+## Re-measured after the OS-enforced confinement
+
+Same machine, same method. The change replaces the one-shot child process with a
+restricted, low-integrity, privilege-stripped token inside a job object with an
+ACL-confined workspace. `DIRECT` still executes no candidate code and still does
+not go through it.
+
+| route | isolated (`0a8e464`) | confined | llm calls |
+|---|---|---|---|
+| `DIRECT` `c_clip` | 0.191 s | 0.186 s | 0 -> 0 |
+| `DIRECT` `trim_ring` (warm) | 0.243 s | 0.252 s | 0 -> 0 |
+| `CUSTOM` riser, whole `design-tool run` | 1.674 s | 1.668 s | 1 -> 1 |
+
+`DIRECT` is inside the run-to-run spread on both templates and still creates no
+process at all -- asserted now with a `sys.addaudithook` over a
+`pipeline.confine.spawn` audit event rather than by replacing two module
+attributes, because a hook catches a process created through a name nobody
+thought to replace.
+
+The confinement is not what an authored build pays for. Decomposed on this
+machine:
+
+| | |
+|---|---|
+| plain `subprocess.run` of a bare interpreter | 0.057 s |
+| the same interpreter, confined | 0.194 s |
+| the whole confined authored build | 1.607 s |
+
+So building the token, sealing two directories, creating the job object,
+draining it and settling for the OS's own transient `conhost.exe` costs about
+**0.14 s**, and the remaining ~1.4 s is the geometry kernel the candidate itself
+imports, paid cold because the process is fresh. The whole run measures the same
+as it did with an unconfined child process.
+
+The suite goes 964 passed / 4 skipped / 379 subtests to **1006 passed / 4
+skipped / 419 subtests**, and its wall time 673 s -> 794 s. That is the
+adversarial coverage rather than the mechanism: `test_isolation.py` goes from 16
+tests to 58, and the two ported grandchild attacks each wait eighteen seconds to
+prove nothing outlived the run.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

@@ -174,70 +174,84 @@ invalidating the evidence that it did the previous thing.
 **Fixture that must fail first.** One parameterised rerun-rejection test over all
 seven intent fields. Three pass today; four fail.
 
-## D7 — the build boundary separates namespaces, not privileges
 
-**Where.** [`pipeline/isolation.py`](../skills/3d-modeling/scripts/pipeline/isolation.py)
-and the design it implements, landed in `0a8e464`.
+## D9 — the confined build boundary denies writes, not reads, DNS or Low-labelled paths
 
-**What is wrong.** The child is a peer process: same user, same filesystem, no
-lifetime bound. ADR 0002 asks the boundary to carry a *privilege* claim and it
-is built as a *namespace* one. Three consequences, each reproduced.
+Numbered past the two it replaces on purpose: D7 and D8 were the boundary that
+did not meet the gate and the tests that did not guard it, and both are closed.
+Reusing their numbers would make every reference to them ambiguous.
 
-1. **Same-run, no persistence needed.** `pipeline/backends/authored.py` is first
-   imported by the parent *after* `ISO.build` returns
-   (`runner.py:369` → `backends/__init__.py:57`), and it is on the path of every
-   authored job. The candidate rewrites that file while it builds; the parent
-   executes its module-level code seconds later in the interpreter holding the
-   frozen contract and `status.decide`. Result on `0a8e464`, first run, clean
-   tree: exit 0, `final_status VERIFIED`, `feature-pad-section PASS expected
-   432.0 measured 80.002`, contract untouched at revision 1, history
-   `changed: []`. That is the pre-change reproduction, verbatim, on the
-   post-change code. A stealth variant writes a poisoned
-   `__pycache__/*.pyc` stamped with the real file's mtime and size, leaving the
-   `.py` byte-identical, so hashing the source would not catch it. Other
-   post-build first-imports exist on other job shapes: `analysis.py:219`,
-   `commission.py:130/225/247`, `screening.py:201/266`, `witness.py:103-104`.
-2. **A detached grandchild outlives the run.** `subprocess.run(timeout=)` kills
-   the direct child only. A `DETACHED_PROCESS` grandchild sleeps past `_restore`,
-   past commissioning, past the parent's exit, then rewrites `final_status.json`
-   and deletes `next_action.json`. Measured: the run reported exit 1 FAILED, and
-   25 s later `design-tool status` reported VERIFIED with nothing outstanding.
-3. **Cross-run.** The candidate rewrites the pipeline source or drops a `.pth` /
-   `sitecustomize` into the writable venv, and owns run N+1 before any candidate
-   code exists in that run.
+**Where.** [`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py),
+`RESTRICTING_SIDS` and `LOW_INTEGRITY_SID`, and the mechanism they add up to.
 
-**What it can cause.** Every claim ADR 0002 gates. The gate is not met.
+**What is wrong.** Three of the confinement's ruled properties are met in part
+rather than in full. None of them is a bug in the code; each is the ceiling of
+the mechanism the boundary was ruled to use, and the entry exists so that "no
+network capability" is not read as more than it is.
 
-**What the boundary does hold**, verified by attack: nothing about acceptance
-crosses in through `build_input.json`; all seven Windows artifact-name variants
-are refused by exact byte compare; `pipeline.authored` and `pipeline.build_child`
-are absent from the parent's import graph; and DIRECT creates zero processes,
-proven with `sys.addaudithook` rather than by monkeypatching.
+1. **Network.** The property asked for is *no network capability*. What is
+   achieved is: an outbound TCP `connect` is refused with `WSAEACCES`
+   (WinError 10013), measured at both Medium and Low integrity, with and without
+   the deny-only SIDs — the restricted token is what refuses it, not the
+   integrity level. **DNS resolution still succeeds.** `gethostbyname` does not
+   open a socket in the calling process; it goes through the DNS Client service
+   over RPC, and the service resolves on the candidate's behalf. That is a
+   low-bandwidth outbound channel — a few bytes per query, encoded in a
+   hostname — and it is not closed.
+2. **The Low-labelled corners of the user profile.**
+   `%USERPROFILE%\AppData\LocalLow` and `%USERPROFILE%\AppData\Local\Temp\Low`
+   carry an explicit *Low* mandatory label from Windows, so a Low-integrity
+   subject can write to them by design. Nothing this pipeline reads lives there,
+   and nothing on this machine auto-runs from there, so the exposure is a
+   drop-box rather than a path back into a run — but "exactly one writable
+   output directory" is, strictly, three.
+3. **Reads.** The confinement is a *write* confinement. The candidate can read
+   anything `BUILTIN\Users` can read, which includes the project directory and
+   therefore `acceptance_contract.json`. It cannot change the contract, and the
+   `build_input.json` it is handed still carries nothing about acceptance — but a
+   candidate that goes looking can see the document it is measured against, and
+   "measured against a document it is never shown" is now true of the protocol
+   and not of the filesystem.
 
-**Fixture that must fail first.** A candidate that rewrites
-`pipeline/backends/authored.py` at import time, asserted to leave the parent's
-final status unchanged. And a second asserting no process survives the run.
+**Evidence.** `test_isolation.WhatTheConfinementEnforcesTest` runs one probe
+model under the real boundary and reports fourteen rows. Eleven are asserted
+closed, one — writing the build directory — is the capability the candidate is
+supposed to have, and the three above are asserted *open*. A change that closes
+one turns that test red, which is the point: a limitation that quietly stops
+being one is a limitation nobody updates the documentation for.
 
-## D8 — ten plausible weakenings leave all sixteen isolation tests green
+**What blocks each.** Network and reads both want a mechanism the ruling did not
+authorise. Low integrity does not gate sockets at all; the refusal observed here
+is a side effect of the restricting-SID set and is not a capability model. Read
+denial and a real network capability model are the same mechanism:
 
-**Where.** [`pipeline/test_isolation.py`](../skills/3d-modeling/scripts/pipeline/test_isolation.py).
+* **`AppContainer`** — `CreateAppContainerProfile` plus
+  `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` with an empty capability set.
+  File access becomes deny-by-default for anything that does not grant the
+  package SID, and network is a capability (`internetClient`) that is simply not
+  granted, enforced by the Windows Filtering Platform rather than by an ACL. The
+  cost is that the interpreter, the standard library and every installed package
+  must be ACL'd for that package SID, which is a persistent change to shared
+  locations outside this repository.
+* A **`NULL`-SID lockdown token** (Chromium's `USER_LOCKDOWN`) would close the
+  read gap without AppContainer, and does not work as a *primary* token: a
+  process created with one dies at `STATUS_DLL_INIT_FAILED` before `main`,
+  measured on this box. Reaching it needs the target to start under a permissive
+  impersonation token and drop it after initialisation — which makes the confined
+  program a participant in its own confinement, and means any lazily-loaded
+  kernel DLL after that point fails.
+* An **Untrusted integrity level** (`S-1-16-0`) would close row 2 outright, since
+  nothing on the system is labelled Untrusted. Measured: a process created with
+  an Untrusted primary token also dies at `STATUS_DLL_INIT_FAILED`. Low is the
+  floor for a process that has to start.
 
-**What is wrong.** Mutation testing against a clean copy killed 5 of 15
-mutations. The survivors include: matching an artifact by basename instead of
-exact name; launching the child with `shell=True`; removing `model.py` from
-`_guarded`, so a candidate can rewrite its own source mid-build while both
-`module_sha256` and `artifact.source_sha256` are taken post-build; taking
-`module_sha256` from the child's own manifest, which the `BuiltCandidate`
-docstring explicitly forbids; and deleting the PARAMS-versus-proposal divergence
-check, which no test anywhere references.
+**What it can cause.** Row 1 is an exfiltration channel, not a route back into
+the gate. Row 2 is a drop-box outside anything this pipeline reads. Row 3 lets a
+candidate tailor geometry to the contract it will be measured against — which is
+a weaker version of the defect this whole boundary exists to close, and the one
+of the three worth closing first.
 
-`test_the_boundary_never_builds_a_shell_string` inspects the argv that
-`child_command()` returns and never the call site, so **it cannot fail for the
-thing it is named after**.
-
-`_accept_artifact`, `_child_env`, `BUILD_TIMEOUT_S`, `_restore`, `_guarded`,
-`_json_object`, `BuiltCandidate` and `boundary_seconds` have zero test
-references each. `pipeline/build_child.py`, the only module that executes
-candidate code, has no test at all.
-
-**Fixture that must fail first.** One mutation-survivor test per row above.
+**Fixture that must fail first.** For row 3, a model that reads
+`acceptance_contract.json` from the project directory and reports its contents
+through `PROVENANCE`, asserted to fail. It passes today, deliberately, in
+`test_the_named_limitations_are_still_the_named_limitations`.

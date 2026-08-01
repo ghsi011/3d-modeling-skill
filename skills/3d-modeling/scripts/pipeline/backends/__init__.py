@@ -44,7 +44,7 @@ def get(name: str, built=None) -> GeometryBackend:
     time loading a kernel it never calls.
 
     `built` is an `isolation.BuiltCandidate` and belongs to the authored backend
-    alone: geometry a one-shot child process already produced. The certified
+    alone: geometry a one-shot confined process already produced. The certified
     backends ignore it, which is why `DIRECT` pays nothing for the boundary.
     """
     if name == "trimesh-manifold":

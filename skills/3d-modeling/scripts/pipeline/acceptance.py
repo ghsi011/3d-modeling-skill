@@ -547,6 +547,11 @@ class AcceptanceSource:
     frozen: Frozen
     module: str | None = None
     module_sha256: str | None = None
+    # Every file the candidate was allowed to import, digested by the parent
+    # before the build. A model may ship a helper beside it, in which case the
+    # part was built from two files and a receipt naming one of them names less
+    # than what ran.
+    sources_sha256: dict[str, str] = dataclasses.field(default_factory=dict)
     provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     backend: str = "authored"
@@ -588,6 +593,7 @@ class AcceptanceSource:
             "kind": "authored",
             "module": self.module,
             "module_sha256": self.module_sha256,
+            "sources_sha256": dict(self.sources_sha256),
             "provenance": dict(self.provenance),
             "acceptance_contract_sha256": self.frozen.contract_sha256,
             "acceptance_revision": self.frozen.revision,

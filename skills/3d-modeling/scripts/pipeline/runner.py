@@ -74,7 +74,7 @@ class JobRequest:
     # frozen `acceptance_contract.json`, generated from the design proposal and
     # written to disk *before* this runner was called; it is what the contract is
     # built from. `authored_build` is an `isolation.BuiltCandidate`: geometry that
-    # a one-shot child process already produced, that this process re-read and
+    # a one-shot confined process already produced, that this process re-read and
     # re-hashed, and that carries no callable at all. It used to be the loaded
     # model -- one object supplying both the expectations and the solid, which is
     # how a designer could widen an expectation after seeing it missed, and then

@@ -886,6 +886,15 @@ The candidate implementation must not silently redefine the criteria used to acc
 
 Candidate implementation executes within a boundary that cannot mutate the authoritative job model, execution plan, acceptance specification, assessment implementation, or final-status authority. The boundary may be a separate process, a restricted declarative runtime, or another mechanism that establishes the same property.
 
+A separate namespace is not by itself such a boundary. The property required is that the candidate *cannot* perform the mutation, not that it is observed to have performed one:
+
+* the candidate's authority must be reduced by the platform, not by convention — a peer process with the same user, the same filesystem rights and no lifetime bound is a different namespace and the same privilege;
+* the boundary must bound the candidate's *lifetime*, not only its call. Anything the candidate starts must be dead before the authoritative process reads what the candidate produced;
+* assessment inputs must be re-read, validated and hashed by the authoritative process after the boundary is closed, and receipts, status and authoritative project state must be created only there;
+* integrity checking of the authoritative process's own code may be kept as a canary and must not be counted toward this property. It reports a compromise that has already had its effect.
+
+Where a required property cannot be established by the available mechanism, it is recorded as a named limitation of the boundary with the mechanism that would close it. It is not quietly dropped, and the boundary is not weakened elsewhere to compensate.
+
 A designer may propose dimensions and features before evaluation.
 
 After seeing a failed result, changing the proposal is a legitimate new design revision. It must be visible and must invalidate results that depended on the previous revision.

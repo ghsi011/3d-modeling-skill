@@ -843,8 +843,9 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     frozen contract, the commissioning bands and `status.decide` -- and all three
     were reachable and were demonstrably rewritten, to a `VERIFIED` receipt on a
     352 mm2 miss with the on-disk contract still at revision 1. The build now
-    happens in a one-shot child process (`isolation.build`), which is handed a
-    model path and a scratch directory and nothing about acceptance; this
+    happens in a one-shot confined process (`isolation.build`), which is handed a
+    sealed directory of copied sources and a scratch directory and nothing about
+    acceptance -- not even where the project is; this
     interpreter re-reads and re-hashes what came back and does the assessing.
 
     Selected by the plan's builder and not by its route. Reaching this lane only
@@ -966,7 +967,8 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         render=render,
         acceptance=ACC.AcceptanceSource(
             frozen=frozen, module=model_path.name,
-            module_sha256=built.module_sha256, provenance=built.provenance),
+            module_sha256=built.module_sha256,
+            sources_sha256=built.input_sha256, provenance=built.provenance),
         authored_build=built,
         plan=plan,
         # No `plan_features` here: the print plan's support rows and the
