@@ -346,7 +346,24 @@ Bind each review response to:
 * the relevant acceptance revision;
 * the sampling-plan identity where applicable.
 
-Reuse valid evidence for unchanged inputs.
+Re-derive evidence for unchanged inputs rather than caching it, and get the same
+bytes back.
+
+This line used to read "reuse valid evidence for unchanged inputs", and the code
+has never done that: the preservation audit is recomputed on every run, in about
+two seconds, and only the build has a cache at all. The line was amended rather
+than implemented, for the reason `pipeline/cache.py` already gives about the
+layers it declines to cache — a cache key has to name every input that could
+change the answer, and the key for a preservation audit is exactly the sampling
+seed and the acceptance revision this release spent its effort binding. Getting
+that key wrong serves a stale audit to a reviewer under a fresh-looking receipt,
+which is the precise failure this release exists to make impossible. Two seconds
+is not worth buying with it.
+
+What the user needs from the line is that a rerun does not invalidate the answer
+they just wrote, and determinism delivers that without a cache: identical inputs
+produce byte-identical evidence, so the second run's envelope matches the first
+run's. That is idempotence rather than reuse, and this release claims the former.
 
 **Explicit exclusions**
 

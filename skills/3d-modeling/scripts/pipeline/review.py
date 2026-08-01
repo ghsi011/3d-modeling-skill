@@ -26,7 +26,17 @@ from . import schemas as S
 # Bumping rather than adding silently: every stored response's digest moves, and
 # a build that refuses one by name is telling the truth more usefully than one
 # that reports an unexplained mismatch.
-REVIEW_PROTOCOL_VERSION = 2
+#
+# 3: the envelope binds `execution_plan_sha256` -- the identity of the plan the
+# run was executed under. The plan decides the builder, the source mode, the lane
+# status and its note, and which artifacts owe a preservation row; none of that
+# reached anything a reviewer answered, because `plan_hash()` was written only
+# into `final_status.json`, which is produced *after* the review. A job whose
+# lane cap or builder changed underneath a stored answer therefore kept the
+# answer. Same reasoning as 2: bumped rather than added silently, so a stored
+# protocol-2 response is refused by name rather than by an unexplained digest
+# mismatch.
+REVIEW_PROTOCOL_VERSION = 3
 REVIEW_KIND = ("specification", "safety", "verification")
 
 SCHEMA_VERSION_BY_KIND = {
@@ -106,6 +116,14 @@ class ReviewEnvelope:
     # handed to the reviewer; this covers measurements computed during the run,
     # which have no file of their own and used not to be nameable at all.
     evidence_digests: dict[str, str] | None = None
+    # The execution plan this run was carried out under. `builder`, `source_mode`,
+    # `lane_status`, `lane_note` and `preserved_artifact_ids` all live in the plan
+    # and in nothing else the reviewer sees, and the plan's own digest reached
+    # only `final_status.json` -- written after the review that it should have
+    # bound. All three review boundaries supply it. It stays optional because an
+    # envelope is a general structure and a caller with no plan in hand must be
+    # able to say so rather than invent one; the runner is not such a caller.
+    execution_plan_sha256: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +143,7 @@ class ReviewEnvelope:
                                 else {k: v for k, v in sorted(self.evidence_hashes.items())}),
             "evidence_digests": (None if self.evidence_digests is None
                                  else {k: v for k, v in sorted(self.evidence_digests.items())}),
+            "execution_plan_sha256": self.execution_plan_sha256,
         }
 
     def digest(self) -> str:
@@ -138,7 +157,8 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
                    witness_dir: Path | None = None,
                    evidence: tuple[str, ...] | list[str] = (),
                    evidence_dir: Path | None = None,
-                   evidence_digests: dict[str, Any] | None = None) -> ReviewEnvelope:
+                   evidence_digests: dict[str, Any] | None = None,
+                   execution_plan_sha256: str | None = None) -> ReviewEnvelope:
     S.require_enum(kind, REVIEW_KIND, what="review kind")
     if evidence_digests is not None:
         for name, digest in sorted(evidence_digests.items()):
@@ -146,6 +166,10 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
                 raise ReviewError(
                     "evidence_digests must map strings to strings, got "
                     f"{name!r}: {digest!r}")
+    if execution_plan_sha256 is not None and not isinstance(execution_plan_sha256, str):
+        raise ReviewError(
+            "execution_plan_sha256 must be a string or absent, got "
+            f"{execution_plan_sha256!r}")
     return ReviewEnvelope(
         protocol_version=REVIEW_PROTOCOL_VERSION,
         answer_schema_version=SCHEMA_VERSION_BY_KIND[kind],
@@ -160,6 +184,7 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
         evidence_hashes=_hash_evidence(evidence, evidence_dir),
         evidence_digests=(None if evidence_digests is None
                           else dict(evidence_digests)),
+        execution_plan_sha256=execution_plan_sha256,
     )
 
 
@@ -174,6 +199,21 @@ def _str_field(env: dict[str, Any], key: str) -> str:
     value = env[key]
     if not isinstance(value, str):
         raise ReviewError(f"review_envelope: {key} must be a string")
+    return value
+
+
+def _optional_str_field(env: dict[str, Any], key: str) -> str | None:
+    """A string the envelope may legitimately not carry.
+
+    Absent and null are one answer here: a review taken with no execution plan in
+    hand binds no plan, and an envelope that omits the key means the same thing as
+    one that spells it `null`. Anything else that is not a string is malformed.
+    """
+    value = env.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ReviewError(f"review_envelope: {key} must be a string or null")
     return value
 
 
@@ -246,6 +286,7 @@ def _envelope_from_dict(env: dict[str, Any]) -> ReviewEnvelope:
             evidence_hashes=_hash_map_field(env, "evidence_hashes", nullable_values=False),
             evidence_digests=_hash_map_field(env, "evidence_digests",
                                              nullable_values=False),
+            execution_plan_sha256=_optional_str_field(env, "execution_plan_sha256"),
         )
     except KeyError as exc:
         raise ReviewError(f"review_envelope is malformed: missing {exc}") from None

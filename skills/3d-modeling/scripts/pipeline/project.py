@@ -296,6 +296,28 @@ class EditScope:
             payload[key] = list(getattr(self, key))
         return payload
 
+    def canonical_alignment_transform(self) -> Any:
+        """The transform in the one spelling a hash is allowed to depend on.
+
+        `"identity"` stays the word it was declared as. A matrix is rounded to
+        the places every other length in this pipeline is rounded to, because two
+        spellings of one value -- `5.0` beside the `4.999999999999999` a kernel's
+        own arithmetic produces, or `-0.0` beside `0.0` -- must not be two
+        different contract hashes and two different sampling plans.
+
+        A malformed matrix comes back verbatim rather than raising: `problems()`
+        is what refuses it, and a hashing helper that threw first would turn a
+        validation finding into a traceback.
+        """
+        matrix = self.alignment_transform
+        if matrix == "identity":
+            return "identity"
+        try:
+            return [[S.canonical_number(value, 6) for value in row]
+                    for row in matrix]
+        except (TypeError, S.SchemaError):
+            return matrix
+
     @property
     def where(self) -> str:
         """How a problem names this scope.

@@ -258,7 +258,16 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         report = PR.audit(source_path=source, candidate_path=ctx.path,
                           region=region, tolerance_mm=tolerance_mm,
                           samples=int(exp.get("samples", PR.DEFAULT_SAMPLES)),
-                          exact=bool(exp.get("exact", False)))
+                          exact=bool(exp.get("exact", False)),
+                          # Where the edit scope declared this source sits in the
+                          # job's frame. Read off the frozen contract row rather
+                          # than off `project.json`, so what the plan is bound to
+                          # is what the acceptance revision froze -- and a
+                          # contract written before this field was carried simply
+                          # has no key here and gets the identity it declared by
+                          # omission.
+                          alignment_transform=exp.get("alignment_transform",
+                                                      "identity"))
         if report["verdict"] == "UNMEASURABLE":
             return _unavailable_check(
                 feature, "Preservation outside the edit region",

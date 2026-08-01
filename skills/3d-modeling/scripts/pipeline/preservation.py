@@ -65,7 +65,12 @@ PRESERVATION_SCHEMA = 2
 # sequence, the ordering rule or the seed material changes every plan digest and
 # invalidates every review bound to one, which is the correct consequence and a
 # silent one unless the version is in the seed material.
-SAMPLE_PLAN_VERSION = 1
+#
+# 2: the seed material gained `alignment_transform` -- where the source artifact
+# sits in the job's shared frame. It is the one edit-intent field that says which
+# geometry the plan is a plan *of*, and it used to be declared, validated, and
+# read by nothing.
+SAMPLE_PLAN_VERSION = 2
 
 # How many points to sample on the preserved surface, per direction. Enough that
 # a missing feature of a few millimetres cannot fall between them on a part of
@@ -233,7 +238,8 @@ def _plan_points(mesh, count: int, seed: str) -> np.ndarray:
 
 
 def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
-                   tolerance_mm: float, samples: int) -> dict[str, Any]:
+                   tolerance_mm: float, samples: int,
+                   alignment_transform: Any = "identity") -> dict[str, Any]:
     """Everything the plan is a function of, in one hashable structure.
 
     The two artifact hashes are in it because a plan must be bound to the exact
@@ -241,6 +247,26 @@ def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
     would be evidence about neither. The region, the band and the count are in
     it because changing any of them is a different measurement, and a
     measurement that quietly kept the old plan would be reporting the old one.
+
+    `alignment_transform` is in it because it says where the source artifact sits
+    in the job's shared frame, and a region box is written in that frame: move the
+    source and the same box selects different surface, so the same plan would be
+    measuring something else under the same digest. It is *bound* here and not yet
+    *applied* to the comparison -- applying it would mean asserting that the
+    candidate's builder applied the same matrix, which nothing in this build
+    checks, and coordinated multi-source preservation is explicitly out of scope
+    for the release that made this deterministic. Binding it makes a changed
+    transform invalidate the evidence; it does not make the audit frame-aware.
+
+    The other declared edit-intent fields -- `preserve`, `may_remove`, `add`,
+    `expected_body_delta`, `preserve_metadata`, `interface_ids` -- are
+    deliberately *not* here. They are promises about the edit rather than
+    statements about where the geometry is, and none of them changes which points
+    get sampled or what they are compared against. They are bound into the
+    acceptance contract instead, which
+    the review envelope carries as `contract_sha256`, so changing one still
+    refuses a stale answer -- without claiming a measurement was rerun that was
+    not.
     """
     return {
         "plan_version": SAMPLE_PLAN_VERSION,
@@ -249,6 +275,7 @@ def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
         "source_sha256": source_sha256,
         "candidate_sha256": candidate_sha256,
         "region": region.as_dict(),
+        "alignment_transform": alignment_transform,
         "tolerance_mm": S.canonical_number(tolerance_mm, 6),
         "samples_per_direction": int(samples),
         "directions": list(DIRECTIONS),
@@ -337,12 +364,17 @@ def _sampled(source, candidate, region: Region, samples: int,
 def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
           tolerance_mm: float = DEFAULT_TOLERANCE_MM,
           samples: int = DEFAULT_SAMPLES,
-          exact: bool = False) -> dict[str, Any]:
+          exact: bool = False,
+          alignment_transform: Any = "identity") -> dict[str, Any]:
     """Compare everything outside the declared edit region.
 
     `exact=True` is a claim about the *inputs*, made by whoever knows they are
     both exact B-reps re-exported from one kernel. It is not inferred from the
     file extension: an STL exported from a STEP is a mesh, whatever it came from.
+
+    `alignment_transform` is the edit scope's declaration of where the source sits
+    in the job's frame. It binds the plan; it is not applied to the meshes. See
+    `_seed_material`.
     """
     source_path, candidate_path = Path(source_path), Path(candidate_path)
     report: dict[str, Any] = {
@@ -388,7 +420,8 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
     material = _seed_material(
         source_sha256=report["source_sha256"],
         candidate_sha256=report["candidate_sha256"],
-        region=region, tolerance_mm=tolerance_mm, samples=samples)
+        region=region, tolerance_mm=tolerance_mm, samples=samples,
+        alignment_transform=alignment_transform)
     measured = _sampled(source, candidate, region, samples, tolerance_mm, material)
     report.update(measured)
     if exact and report["verdict"] == "PRESERVED_WITHIN_TOLERANCE":

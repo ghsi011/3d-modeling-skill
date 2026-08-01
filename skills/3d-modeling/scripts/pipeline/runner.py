@@ -240,7 +240,7 @@ def run(request: JobRequest) -> JobResult:
                 call=request.spec_call, reviewer=request.reviewer or {},
                 job_id=request.job_id, revision=request.updated_utc,
                 contract_hash=pre_contract.contract_hash(), evidence_dir=out,
-                artifact_hashes=None)
+                artifact_hashes=None, execution_plan_sha256=plan.plan_hash())
         except ReviewNeeded:
             raise
         except (S.SchemaError, R.ReviewError, ValueError) as exc:
@@ -503,7 +503,13 @@ def run(request: JobRequest) -> JobResult:
                 # preservation audit is the reason this exists: its plan is now a
                 # function of the artifact pair, and an answer written against
                 # one plan must not survive a run that used another.
-                evidence_digests=report.get("evidence_digests"))
+                evidence_digests=report.get("evidence_digests"),
+                # The plan the run was executed under. `builder`, `source_mode`,
+                # `lane_status`, `lane_note` and `preserved_artifact_ids` are
+                # decided there and nowhere else the reviewer is shown, and the
+                # plan's digest used to reach `final_status.json` alone -- written
+                # after this call, so it bound nothing anybody answered.
+                execution_plan_sha256=plan.plan_hash())
             safety_report = safety.run(packet, request.reviewer or {}, request.safety_call,
                                        envelope=safety_envelope)
         except ReviewNeeded:
@@ -561,7 +567,8 @@ def run(request: JobRequest) -> JobResult:
                 },
                 witness=witness.as_dict(), witness_dir=out / "witness",
                 evidence=request.evidence, evidence_dir=out,
-                evidence_digests=report.get("evidence_digests"))
+                evidence_digests=report.get("evidence_digests"),
+                execution_plan_sha256=plan.plan_hash())
             verification_report = verification.run(packet, request.reviewer or {},
                                                    request.verify_call,
                                                    envelope=verification_envelope)

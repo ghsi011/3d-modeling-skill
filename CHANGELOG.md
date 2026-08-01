@@ -6,6 +6,78 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — seven declared fields that a reviewer's answer did not depend on (D5, D6)
+
+An edit scope declared twelve things about a modification. Five of them reached
+the acceptance contract or the sampling plan; seven did not reach anything at
+all. `alignment_transform`, `preserve`, `may_remove`, `add`,
+`expected_body_delta`, `preserve_metadata` and `interface_ids` were parsed,
+validated, written into `project.json`, covered by `Project.project_hash()` — and
+read by no consumer, and `project_hash()` appears on no receipt. Demonstrated: a
+finished `MODIFY` job given a 5 mm x-translation on its edit scope, saved and
+rerun, produced every evidence digest unchanged, had its stored `PASS` accepted,
+and wrote a final status. (`preserve_metadata` was the seventh; the defect entry
+named six, and it has the same shape.)
+
+* `cli._preservation_feature` now carries all seven into the contract's
+  preservation row, so all seven reach the frozen acceptance revision and
+  therefore `contract_sha256` in the review envelope;
+* `preservation._seed_material` takes `alignment_transform` as well, because it
+  is the one of the seven that says which geometry the plan is a plan *of*: a
+  region box is written in the job's frame, so moving the source under it makes
+  the same box select different surface. It is *bound* there, not applied — the
+  audit is not frame-aware, and coordinated multi-source preservation is out of
+  scope for this release. `SAMPLE_PLAN_VERSION` is 2 accordingly;
+* the other six are contract-only on purpose. They are promises about the edit,
+  not statements about where the geometry is, and none of them changes which
+  points are sampled. Putting them in the seed would move a sample-plan digest to
+  advertise a measurement that was not rerun.
+
+### Fixed — the execution plan bound nothing a reviewer answered
+
+`ExecutionPlan.plan_hash()` reached `final_status.json` and nothing else, and
+that file is written *after* the review it should have bound. So `builder`,
+`source_mode`, `lane_status`, `lane_note` and `preserved_artifact_ids` — the
+lane cap included — could change under a stored answer and keep it.
+`ReviewEnvelope` carries `execution_plan_sha256` now, supplied at all three review
+boundaries — safety, verification, and the `FITTED` specification recovery, which
+is only asked for because the plan routed `FITTED`.
+`REVIEW_PROTOCOL_VERSION` is 3: the envelope's
+shape changed, so a stored protocol-2 answer is refused by name rather than by an
+unexplained digest mismatch. No fixture or benchmark carried one.
+
+### Added — the Release 1 rerun-rejection proofs, run end to end
+
+`ROADMAP.md` Release 1 asks for five rerun-rejection proofs. The nearest tests
+compared two digests computed in-process without running a job, or fabricated a
+digest rather than changing an input; none offered a review a stored response or
+checked whether a final status was written anyway. `test_phase3.py` now runs the
+whole loop — run to the review pause, store the answer, change exactly one thing,
+rerun — over changed source, changed candidate, changed algorithm version and
+every edit-intent field, and requires both a `ReviewError` and no
+`final_status.json`. Seven of the eleven cases failed before this change. A
+twelfth case covers the protocol bump: a stored protocol-2 answer is refused by
+version, not reinterpreted.
+
+Two more shapes had been demonstrated and never tested: a two-scope job, where
+changing one scope must leave the other artifact's evidence byte-identical and
+must still refuse the answer; and clean-clone reproduction for the `MODIFY` lane,
+where the two existing two-directory tests are certified-template `DIRECT` jobs
+with no edit scope, no preservation audit and no sample plan. `module_sha256` is
+excluded from the clone comparison, and the exclusion is asserted rather than
+assumed: the confined build stages `model.py` alone into a sandbox and runs it
+there, so a `MODIFY` model must name its source artifact by absolute path.
+
+### Changed — Release 1 no longer claims evidence reuse
+
+Its scope said "reuse valid evidence for unchanged inputs". The code has never
+done that and should not: only the build is cached, a preservation audit is about
+two seconds, and a cache key for one would have to name exactly the bindings this
+release exists to get right. A wrong key serves a stale audit under a fresh
+receipt. `ROADMAP.md` now says what the code does — identical inputs re-derive
+byte-identical evidence, which is idempotence and is what makes the round trip
+resumable.
+
 ### Fixed — the candidate is built with less authority, not just in another interpreter
 
 The previous entry moved the builder into its own process. An adversarial review

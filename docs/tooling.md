@@ -385,6 +385,16 @@ preservation row: `execution_plan.json` names the artifacts in
 `preserved_artifact_ids` and the runner refuses a contract that carries fewer
 rows than that.
 
+Every field of the scope reaches the frozen acceptance contract's preservation
+row, so every one of them reaches `contract_sha256` and therefore the review envelope:
+changing what the edit promised refuses the answer written against the previous
+promise. `alignment_transform` additionally reaches `preservation._seed_material`,
+because it is the one field that says which geometry the sampling plan is a plan
+of. It is bound there and **not applied** to the meshes — applying it would assert
+that the candidate's builder applied the same matrix, which nothing here checks.
+A changed transform invalidates the evidence; it does not make the audit
+frame-aware.
+
 The audit itself is not there yet for that job. `preservation.audit` compares one
 source against one candidate in both directions, and the second direction samples
 the whole candidate — so where the candidate carries a second edited artifact, that

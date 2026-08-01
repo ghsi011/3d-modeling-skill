@@ -682,6 +682,17 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     preflight refuses a duplicate feature id, and an id whose spelling depended
     on how many scopes there happened to be is one no receipt reader could
     predict.
+
+    The row carries every field of the scope. It used to carry four -- the
+    artifact id in the feature id, the region name in the note, `region_box` and
+    `preservation_tolerance_mm`, with `mesh_fallback_allowed` folded into `exact`
+    -- so a job could change what it promised about the edit (what must survive,
+    what may go, what is being added, how many bodies should result, whether the
+    source's metadata must, which interface the edit realizes, where the source
+    sits in the job's frame) without moving the contract hash, and keep the review
+    answer somebody wrote against the previous promise. Everything here reaches
+    the frozen acceptance revision and therefore `contract_sha256` in the review
+    envelope.
     """
     rows: list[dict[str, Any]] = []
     for scope in project.edit_scopes:
@@ -710,6 +721,22 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             "region": scope.region_box,
             "tolerance_mm": scope.preservation_tolerance_mm,
             "exact": exact,
+            # The rest of the declared edit intent, not only the fields the
+            # measurement happens to consume. Everything here reaches the frozen
+            # acceptance contract, so it reaches `contract_sha256`, so it reaches
+            # the review envelope: a job that changes what it claims to be doing
+            # can no longer keep the answer somebody wrote against the previous
+            # claim. Only `alignment_transform` goes on to the sampling seed --
+            # see `preservation._seed_material`. The other six say what the edit
+            # promised, not where the geometry is, so they must not move the plan
+            # digest of a measurement they cannot change.
+            "alignment_transform": scope.canonical_alignment_transform(),
+            "preserve": list(scope.preserve),
+            "may_remove": list(scope.may_remove),
+            "add": list(scope.add),
+            "expected_body_delta": int(scope.expected_body_delta),
+            "preserve_metadata": bool(scope.preserve_metadata),
+            "interface_ids": list(scope.interface_ids),
             # `abs: 0.0` on top of the row's own tolerance_mm: the band lives in
             # the comparison, and a second one here would widen it.
             "tolerance": {"abs": 0.0},

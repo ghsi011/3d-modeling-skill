@@ -369,7 +369,8 @@ def recover(*, brief: str, evidence: list[str], template: str, template_covers: 
             bounds: dict[str, Any], call: Callable[[dict[str, Any]], dict[str, Any]],
             reviewer: dict[str, Any], job_id: str, revision: str,
             contract_hash: str, evidence_dir: Path | None = None,
-            artifact_hashes: dict[str, str | None] | None = None) -> dict[str, Any]:
+            artifact_hashes: dict[str, str | None] | None = None,
+            execution_plan_sha256: str | None = None) -> dict[str, Any]:
     """One call, validated, with every deterministic consequence computed here."""
     from . import review as R
 
@@ -379,7 +380,12 @@ def recover(*, brief: str, evidence: list[str], template: str, template_covers: 
     envelope = R.build_envelope(
         kind="specification", job_id=job_id, revision=revision,
         packet_hash=packet_hash, reviewer=reviewer, contract_hash=contract_hash,
-        artifact_hashes=artifact_hashes, evidence=evidence, evidence_dir=evidence_dir)
+        artifact_hashes=artifact_hashes, evidence=evidence, evidence_dir=evidence_dir,
+        # Bound here as at the other two review boundaries. This review is only
+        # asked because the plan routed FITTED, so the plan is one of the things
+        # the question is a function of; leaving it out here would be the same
+        # gap in miniature.
+        execution_plan_sha256=execution_plan_sha256)
     request["review_envelope"] = envelope.as_dict()
     response = call(request)
     # Validate the payload shape and types first. A malformed but correctly bound

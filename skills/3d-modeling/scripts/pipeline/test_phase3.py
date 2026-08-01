@@ -16,6 +16,7 @@ preservation and must not say it did.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import textwrap
@@ -32,6 +33,7 @@ from . import commission as CM
 from . import diagnose as D
 from . import preservation as PR
 from . import project as P
+from . import review as R
 from . import route as RT
 from . import schemas as S
 
@@ -957,6 +959,490 @@ class ModifyReviewRoundTripTest(unittest.TestCase):
                              "a refused answer must not leave a decision behind")
             self.assertFalse((directory / "final_status.json").is_file(),
                              "an unbound answer must not produce a final status")
+
+
+def _store_passing_answer(directory: Path) -> dict:
+    """Write the answer the run just asked for, echoing its envelope unchanged."""
+    packet = json.loads((directory / "reviews" / "verification_packet.json")
+                        .read_text(encoding="utf-8"))
+    (directory / "reviews" / "verification_response.json").write_text(
+        json.dumps({
+            "decision": "PASS", "defects": [], "unmet_requirements": [],
+            "missing_evidence": [],
+            "summary": "everything outside the declared region is as supplied",
+            "review_envelope": packet["review_envelope"],
+        }, indent=2), encoding="utf-8")
+    return packet
+
+
+class ModifyRerunRejectionTest(unittest.TestCase):
+    """Store the answer, change one bound input, rerun: the answer must be refused.
+
+    `ROADMAP.md` Release 1 asks for five of these -- changed source, changed
+    candidate, changed edit intent, changed transform, changed algorithm version --
+    and the nearest tests in this file are not them. Two of them compare two
+    digests computed in-process without ever running a job;
+    `test_an_answer_to_a_different_audit_is_refused` fabricates a digest rather
+    than changing an input. None of the three offers a review a stored response
+    written against a real run, and none looks at whether a final status was
+    written anyway. This does the whole loop: run to the review pause, store the
+    answer the run asked for, change exactly one thing, run the same command
+    again, and require both a `ReviewError` and no `final_status.json`.
+
+    "Edit intent" is not one field. `region_box`, the region name and
+    `preservation_tolerance_mm` reached the acceptance contract already;
+    `preserve`, `may_remove`, `add`, `expected_body_delta`, `preserve_metadata`,
+    `interface_ids` and `alignment_transform` were declared, validated and
+    serialised into `project.json`, and read by nothing -- so a job could change
+    what it promised about the edit, or where its source sits in the job's frame,
+    and keep the answer somebody wrote against the previous promise. The property
+    worth having is that the set is closed, so every member of it is a case here
+    rather than the three that happened to work.
+
+    The stored response is deliberately *not* cleaned up between the two runs. A
+    new acceptance revision deletes the receipts of the superseded one; it does
+    not delete `reviews/`, so the second run really does read an answer a person
+    wrote and really does have to refuse it.
+    """
+
+    # Declared on the project so a scope may cite it: `Project.validate` refuses
+    # an `interface_id` naming an interface nothing declares, so the field cannot
+    # be exercised at all on a project with no interfaces.
+    INTERFACE = P.Interface(
+        interface_id="boss-seat", kind="ball seat", external=False,
+        owner="this job", note="the seat this edit cuts")
+
+    def _laid_out(self, root: Path) -> Path:
+        return _laid_out(root, MODIFIER, _modify_project(
+            verification_requested=True,
+            reviewer={"model_snapshot": "test", "fresh_context": True},
+            interfaces=(self.INTERFACE,)))
+
+    def _rescope(self, directory: Path, **fields) -> None:
+        """Rewrite the one edit scope on disk with one field changed."""
+        project = P.load(directory)
+        project.edit_scopes = (
+            dataclasses.replace(project.edit_scopes[0], **fields),)
+        project.save(directory)
+
+    # -- the changed inputs, one per case ---------------------------------
+    def _changed_source(self, directory: Path) -> None:
+        """The supplied artifact itself: a plate 0.2 mm taller than the one given."""
+        plate = trimesh.creation.box(extents=(50.0, 30.0, 8.2))
+        plate.apply_translation((25.0, 15.0, 4.1))
+        plate.export(directory / "bracket.stl")
+
+    def _changed_candidate(self, directory: Path) -> None:
+        """The model: a 16 mm seat instead of 17, with `PARAMS` left alone.
+
+        The declared parameters still agree with the proposal, so nothing but the
+        geometry has moved -- which is exactly the change a hash of the parameter
+        dict would miss.
+        """
+        path = directory / "model.py"
+        text = path.read_text(encoding="utf-8")
+        edited = text.replace("radius=17.0 / 2.0", "radius=16.0 / 2.0")
+        self.assertNotEqual(text, edited,
+                            "the fixture no longer spells the seat radius the way "
+                            "this mutation looks for")
+        path.write_text(edited, encoding="utf-8")
+
+    def _changed_region_box(self, directory: Path) -> None:
+        scope = P.load(directory).edit_scopes[0]
+        box = dict(scope.region_box)
+        box["max"] = [box["max"][0] + 1.0, box["max"][1], box["max"][2]]
+        self._rescope(directory, region_box=box)
+
+    def _changed_transform(self, directory: Path) -> None:
+        """Where the source sits in the job's frame: 5 mm along x."""
+        self._rescope(directory, alignment_transform=[
+            [1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+    def _changed_plan_version(self, directory: Path) -> None:
+        """The algorithm version, which lives in no file the job can edit."""
+        PR.SAMPLE_PLAN_VERSION = PR.SAMPLE_PLAN_VERSION + 1
+
+    def _changed_preserve(self, directory: Path) -> None:
+        self._rescope(directory, preserve=(
+            "the plate, its outline and both screw holes",
+            "and the boss cylinder it stands on"))
+
+    def _changed_may_remove(self, directory: Path) -> None:
+        self._rescope(directory, may_remove=("the boss face material the seat takes",))
+
+    def _changed_add(self, directory: Path) -> None:
+        self._rescope(directory, add=("a 17 mm ball socket and a retaining lip",))
+
+    def _changed_body_delta(self, directory: Path) -> None:
+        self._rescope(directory, expected_body_delta=1)
+
+    def _changed_preserve_metadata(self, directory: Path) -> None:
+        """Named by no audit entry, and unbound for the same reason as the rest."""
+        self._rescope(directory, preserve_metadata=False)
+
+    def _changed_interface_ids(self, directory: Path) -> None:
+        self._rescope(directory, interface_ids=(self.INTERFACE.interface_id,))
+
+    def _refuses(self, mutate) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._laid_out(Path(raw))
+            self.assertEqual(
+                cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]),
+                "the first run must stop and ask for the verification review")
+            _store_passing_answer(directory)
+
+            mutate(directory)
+
+            code = cli.run([str(directory), "--no-render"])
+            self.assertNotEqual(0, code,
+                               "a job whose bound input changed under a stored "
+                               "answer must not report success")
+            report = directory / "verification_report.json"
+            self.assertTrue(report.is_file(),
+                            "the refusal has to be written down; a run that "
+                            "leaves no report leaves no reason")
+            parsed = json.loads(report.read_text(encoding="utf-8"))
+            self.assertIn("ReviewError", parsed.get("error", ""),
+                          "the stored answer was not refused as unbound")
+            self.assertNotIn("decision", parsed,
+                             "a refused answer must not leave a decision behind")
+            self.assertFalse(
+                (directory / "final_status.json").is_file(),
+                "an answer written against different inputs must not produce a "
+                "final status")
+
+    def test_changing_one_bound_input_refuses_the_stored_answer(self) -> None:
+        cases = (
+            # ROADMAP Release 1's five, in its own words.
+            ("changed source", self._changed_source),
+            ("changed candidate", self._changed_candidate),
+            ("changed edit intent: region_box", self._changed_region_box),
+            ("changed transform", self._changed_transform),
+            ("changed algorithm version", self._changed_plan_version),
+            # The rest of the declared edit intent, which is the same proof.
+            ("changed edit intent: preserve", self._changed_preserve),
+            ("changed edit intent: may_remove", self._changed_may_remove),
+            ("changed edit intent: add", self._changed_add),
+            ("changed edit intent: expected_body_delta", self._changed_body_delta),
+            ("changed edit intent: preserve_metadata", self._changed_preserve_metadata),
+            ("changed edit intent: interface_ids", self._changed_interface_ids),
+        )
+        for name, mutate in cases:
+            with self.subTest(changed=name):
+                # Restored for every case, not only the one that moves it: a
+                # module global left bumped would silently change what every
+                # later case measures.
+                version = PR.SAMPLE_PLAN_VERSION
+                try:
+                    self._refuses(mutate)
+                finally:
+                    PR.SAMPLE_PLAN_VERSION = version
+
+    def test_an_answer_from_the_previous_protocol_is_refused_by_name(self) -> None:
+        """The bump has to refuse a stored answer, not reinterpret it.
+
+        The envelope gained `execution_plan_sha256`, so an answer written against
+        the previous shape is an answer to a question with one fewer binding in
+        it. `review.py` prescribes the bump for exactly this, and what makes the
+        bump worth more than a silent added field is the refusal naming the
+        version: "unknown protocol_version 2" tells whoever has to fix it what
+        happened, and a digest mismatch does not.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._laid_out(Path(raw))
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+            packet = _store_passing_answer(directory)
+
+            response = directory / "reviews" / "verification_response.json"
+            stale = json.loads(response.read_text(encoding="utf-8"))
+            # Spelled 2 rather than `VERSION - 1`: this is the one specific
+            # stored answer this bump invalidates, and it must stay refused
+            # however many versions are added after it.
+            envelope = {k: v for k, v in packet["review_envelope"].items()
+                        if k != "execution_plan_sha256"}
+            stale["review_envelope"] = {**envelope, "protocol_version": 2}
+            response.write_text(json.dumps(stale, indent=2), encoding="utf-8")
+
+            code = cli.run([str(directory), "--no-render"])
+            self.assertNotEqual(0, code,
+                                "an answer bound to the previous envelope shape "
+                                "was accepted and the job finished")
+            report = json.loads((directory / "verification_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertIn("unknown protocol_version 2", report.get("error", ""))
+            self.assertIn(f"this build speaks {R.REVIEW_PROTOCOL_VERSION}",
+                          report["error"],
+                          "the refusal must say which protocol this build does "
+                          "speak, or nobody can act on it")
+            self.assertFalse((directory / "final_status.json").is_file())
+
+
+class ModifyCleanCloneTest(unittest.TestCase):
+    """One MODIFY project laid out at two paths has one identity.
+
+    `ROADMAP.md` Release 1's ninth proof. Two tests already compare two
+    directories byte for byte -- `test_frozen`'s
+    `test_two_direct_runs_write_byte_identical_receipts` and `test_pipeline`'s
+    `DeterminismTest` -- and both are certified-template `DIRECT` jobs with no
+    edit scope, no preservation audit and no sample plan. Neither exercises the
+    identity this release is about, which is the identity of a *measurement* and
+    of the plan that produced it.
+
+    `module_sha256` is deliberately not asserted equal, and the inequality is
+    asserted instead so the exclusion is a recorded fact rather than a silence.
+    The confined build stages `model.py` into a sandbox and runs it with its
+    working directory inside that sandbox, staging nothing else; a MODIFY model
+    therefore has to name its source artifact by absolute path, and this fixture's
+    `model.py` differs between two directories by exactly that string and nothing
+    else. Making it relative would mean staging source artifacts into the build
+    sandbox -- a change to the build boundary, not to a test.
+    """
+
+    def _run_to_the_review(self, root: Path) -> Path:
+        directory = _laid_out(root, MODIFIER, _modify_project(
+            verification_requested=True,
+            reviewer={"model_snapshot": "test", "fresh_context": True}))
+        self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+        return directory
+
+    def test_the_same_project_at_two_paths_measures_one_thing(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            first = self._run_to_the_review(Path(a))
+            second = self._run_to_the_review(Path(b))
+            self.assertNotEqual(first, second)
+
+            for name in ("acceptance_contract.json", "execution_plan.json"):
+                with self.subTest(artifact=name):
+                    self.assertEqual((first / name).read_text(encoding="utf-8"),
+                                     (second / name).read_text(encoding="utf-8"))
+
+            reports = [json.loads((d / "commission_report.json").read_text(encoding="utf-8"))
+                       for d in (first, second)]
+            self.assertEqual(reports[0]["evidence_digests"],
+                             reports[1]["evidence_digests"],
+                             "the preservation audit measured two different things "
+                             "at two paths, so the evidence is a function of where "
+                             "the project happens to sit")
+            self.assertTrue(reports[0]["evidence_digests"],
+                            "a MODIFY job with an edit scope owes evidence digests; "
+                            "comparing two empty dicts proves nothing")
+
+            manifests = [json.loads((d / "artifact_manifest.json").read_text(encoding="utf-8"))
+                         for d in (first, second)]
+            self.assertEqual(manifests[0]["stl_sha256"], manifests[1]["stl_sha256"])
+
+            envelopes = [json.loads((d / "reviews" / "verification_packet.json")
+                                    .read_text(encoding="utf-8"))["review_envelope"]
+                         for d in (first, second)]
+            self.assertEqual(envelopes[0]["execution_plan_sha256"],
+                             envelopes[1]["execution_plan_sha256"])
+            # Hashed from the text rather than from the file: `write_text`
+            # translates the canonical `\n` to `\r\n` on this platform, so the
+            # bytes on disk are not the bytes the canonical hash covers.
+            self.assertEqual(
+                S.sha256_text((first / "execution_plan.json").read_text(encoding="utf-8")),
+                envelopes[0]["execution_plan_sha256"],
+                "the plan digest the reviewer is bound to must be the digest of "
+                "the plan file the run was carried out under")
+
+            # The one thing that legitimately differs, and why. See the class
+            # docstring: it is the fixture's absolute path, not the pipeline's.
+            self.assertNotEqual(manifests[0]["source_sha256"],
+                                manifests[1]["source_sha256"])
+            elided = [(d / "model.py").read_text(encoding="utf-8")
+                      .replace(str(d).replace("\\", "\\\\"), "<project>")
+                      for d in (first, second)]
+            self.assertEqual(elided[0], elided[1],
+                             "the two models differ by more than the project path, "
+                             "so the excluded difference is no longer the declared one")
+
+
+# --- the two-artifact case --------------------------------------------------
+# Two supplied plates, one magnet pocket cut into each, declared as two edit
+# scopes over one interface. Every multi-scope test in `test_phase1.py` is
+# schema and validation only; no multi-scope job has ever been run.
+
+TWO_PLATE_MODEL = '''
+import trimesh
+
+PARAMS = {{"seat_d": 8.0}}
+
+
+def build():
+    left = trimesh.load(r"{left}", force="mesh")
+    right = trimesh.load(r"{right}", force="mesh")
+    body = trimesh.boolean.union([left, right], engine="manifold")
+    for x in (10.0, 50.0):
+        cut = trimesh.creation.cylinder(radius=4.0, height=20.0, sections=64)
+        cut.apply_translation((x, 10.0, 10.0))
+        body = trimesh.boolean.difference([body, cut], engine="manifold")
+    return body
+'''
+
+TWO_PLATE_PROPOSAL = {
+    "schema_version": 1, "job_id": "two-scopes", "design_id": "two-plates",
+    "rationale": "one magnet pocket in each of two supplied plates",
+    "params": {"seat_d": 8.0},
+    "bbox_mm": {"x": 60.0, "y": 20.0, "z": 12.0}, "bodies": 2,
+    "profile_marks": {"z": [6.0]},
+    "features": [
+        {"feature_id": "plate-section", "kind": "section_area",
+         "at": {"z": 6.0}, "value_mm2": 2 * (400.0 - 3.14159265 * 16.0)},
+    ],
+}
+
+TWO_PLATE_INTERFACE = P.Interface(
+    interface_id="magnet-pockets", kind="magnet pocket", external=False,
+    owner="this job", note="one feature cut in two places")
+
+LEFT_BOX = {"min": [4.0, 4.0, 4.0], "max": [16.0, 16.0, 14.0]}
+RIGHT_BOX = {"min": [44.0, 4.0, 4.0], "max": [56.0, 16.0, 14.0]}
+
+
+def _plate(x0: float) -> trimesh.Trimesh:
+    plate = trimesh.creation.box(extents=(20.0, 20.0, 12.0))
+    plate.apply_translation((x0 + 10.0, 10.0, 6.0))
+    return plate
+
+
+def _two_scope_project() -> P.Project:
+    return P.Project(
+        job_id="two-scopes", updated_utc=UTC, source_mode="MODIFY",
+        consequence="INCONSEQUENTIAL",
+        consequence_rationale="a bench fixture; failure drops nothing",
+        printer="Test Printer", material={"process": "FDM", "material": "PETG"},
+        nozzle={"diameter_mm": 0.4},
+        orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+        model="model.py", envelope_mm={"x": 60.0, "y": 20.0, "z": 12.0},
+        verification_requested=True,
+        reviewer={"model_snapshot": "test", "fresh_context": True},
+        interfaces=(TWO_PLATE_INTERFACE,),
+        source_artifacts=(
+            P.SourceArtifact(artifact_id="left", path="left.stl", format="STL",
+                             classification="USABLE_MESH"),
+            P.SourceArtifact(artifact_id="right", path="right.stl", format="STL",
+                             classification="USABLE_MESH")),
+        edit_scopes=(
+            P.EditScope(artifact_id="left", region="the left pocket",
+                        region_box=dict(LEFT_BOX),
+                        interface_ids=("magnet-pockets",)),
+            P.EditScope(artifact_id="right", region="the right pocket",
+                        region_box=dict(RIGHT_BOX),
+                        interface_ids=("magnet-pockets",))))
+
+
+def _two_scopes_laid_out(root: Path) -> Path:
+    directory = root / "project"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "brief.md").write_text("cut a magnet pocket into each plate",
+                                        encoding="utf-8")
+    left, right = directory / "left.stl", directory / "right.stl"
+    _plate(0.0).export(left)
+    _plate(40.0).export(right)
+    (directory / "model.py").write_text(
+        textwrap.dedent(TWO_PLATE_MODEL).format(
+            left=str(left).replace("\\", "\\\\"),
+            right=str(right).replace("\\", "\\\\")),
+        encoding="utf-8")
+    (directory / ACC.PROPOSAL_FILE).write_text(
+        json.dumps(TWO_PLATE_PROPOSAL, indent=2, sort_keys=True), encoding="utf-8")
+    _two_scope_project().save(directory)
+    return directory
+
+
+class TwoScopeModifyTest(unittest.TestCase):
+    """Two edit scopes, one job, and one of them changed under a stored answer.
+
+    Every multi-scope test in `test_phase1.py` is schema or validation only: two
+    scopes are declared, `Project.validate` is asked what it thinks, and no job is
+    ever run. So the property that matters -- that each scope's row carries its
+    own bindings, and that changing one does not silently re-measure or silently
+    keep the other -- had never been observed.
+
+    The three cases below are the same rerun-rejection proof, with the extra
+    question of *which* row moved. They also separate the two places a binding can
+    live: `region_box` and `alignment_transform` are in the sampling seed, so
+    changing one moves that row's plan digest and leaves the other row's bytes
+    alone; `preserve` is in the contract only, so changing it moves no evidence
+    digest at all and the answer is still refused -- through `contract_sha256`,
+    which is the honest binding for a field that changed no measurement.
+    """
+
+    def _digests(self, directory: Path) -> dict:
+        return json.loads((directory / "commission_report.json")
+                          .read_text(encoding="utf-8"))["evidence_digests"]
+
+    def _only(self, digests: dict, artifact: str) -> dict:
+        return {k: v for k, v in digests.items()
+                if k.startswith(f"feature-preservation-{artifact}.")}
+
+    def _one_scope_moves(self, mutate, *, evidence_moves: bool) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _two_scopes_laid_out(Path(raw))
+            self.assertEqual(cli.NEEDS_ACTION, cli.run([str(directory), "--no-render"]))
+
+            contract = json.loads((directory / "acceptance_contract.json")
+                                  .read_text(encoding="utf-8"))
+            rows = [f for f in contract["features"] if f["kind"] == "preservation"]
+            self.assertEqual(["preservation-left", "preservation-right"],
+                             sorted(row["feature_id"] for row in rows),
+                             "two declared scopes owe two rows, each naming its "
+                             "own artifact")
+
+            before = self._digests(directory)
+            self.assertEqual(2, len(self._only(before, "left")))
+            self.assertEqual(2, len(self._only(before, "right")))
+            _store_passing_answer(directory)
+
+            project = P.load(directory)
+            project.edit_scopes = (project.edit_scopes[0],
+                                   mutate(project.edit_scopes[1]))
+            project.save(directory)
+
+            code = cli.run([str(directory), "--no-render"])
+            after = self._digests(directory)
+            self.assertEqual(self._only(before, "left"), self._only(after, "left"),
+                             "only the right scope changed, so the left artifact's "
+                             "evidence must be byte-identical")
+            if evidence_moves:
+                self.assertNotEqual(self._only(before, "right"),
+                                    self._only(after, "right"),
+                                    "the changed scope's sampling plan did not move")
+            else:
+                self.assertEqual(self._only(before, "right"),
+                                 self._only(after, "right"),
+                                 "a field that changes nothing about what is "
+                                 "sampled must not move a sample plan digest")
+
+            self.assertNotEqual(0, code)
+            report = json.loads((directory / "verification_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertIn("ReviewError", report.get("error", ""))
+            self.assertFalse((directory / "final_status.json").is_file())
+
+    def test_changing_one_scope_binds_only_that_scope(self) -> None:
+        cases = (
+            ("region_box",
+             lambda scope: dataclasses.replace(scope, region_box={
+                 **RIGHT_BOX, "max": [57.0, 16.0, 14.0]}),
+             True),
+            ("alignment_transform",
+             lambda scope: dataclasses.replace(scope, alignment_transform=[
+                 [1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0],
+                 [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]),
+             True),
+            # In the contract and not in the seed, and the assertion says so:
+            # the answer is still refused, and no sample plan pretends to have
+            # been recomputed.
+            ("preserve",
+             lambda scope: dataclasses.replace(
+                 scope, preserve=("the plate rim and both mounting faces",)),
+             False),
+        )
+        for name, mutate, evidence_moves in cases:
+            with self.subTest(changed=name):
+                self._one_scope_moves(mutate, evidence_moves=evidence_moves)
 
 
 if __name__ == "__main__":
