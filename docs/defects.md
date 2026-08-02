@@ -314,3 +314,85 @@ carries no run id, no sequence and no self-digest.
 
 **Fixture that must fail first.** `init` then `route`, asserting the next action
 names the state after routing.
+
+## D18 — one unreadable source zeroes the inherited-overhang allowance for all of them
+
+**Where.** `cli._inherited_overhang`.
+
+**What is wrong.** It returns `None` if *any* source cannot be measured. On a
+two-source job where one source is a STEP (D13), the allowance the candidate is
+entitled to inherit from the *readable* source is zeroed too.
+
+**Evidence.** The vent-ball run: the candidate failed
+`feature-plan-support-00` with 4582.055 mm² of overhang **it inherited from the
+source it was told to preserve**. That is a contract failure caused entirely by a
+missing importer, and it reads like a design defect.
+
+**What it can cause.** D13 produces a second, misattributed failure. A user
+debugging the overhang would be debugging geometry that was never wrong.
+
+**Fixture that must fail first.** A two-source job with one unreadable source,
+asserted to inherit the readable source's allowance and to report the other as
+unmeasured.
+
+## D19 — the audit is not reliably completable on real geometry
+
+**Where.** `pipeline/preservation.audit`. Supersedes D16's severity.
+
+**What is wrong.** Measured on the vent-ball fixture: 22.4 GB peak working set,
+23.49 GB across processes, 39.74 GB page file, free RAM at 0–1.5 GB throughout.
+**One of eleven identical invocations died** with
+`MemoryError: Unable to allocate 1.57 GiB for an array with shape (210081703,)`.
+
+It failed controllably — `BLOCKED`, receipt written — and the retry succeeded.
+That is the problem: the same unchanged job produced two different outcomes.
+Determinism of the *answer* is achieved; determinism of *completing* is not.
+
+**What it can cause.** A liveness defect, not a rigor one. Release 1 exists so
+that an unchanged job can be rerun and resumed; a job that completes on ten
+attempts out of eleven cannot be relied on to do that, and the failure rate
+scales with source size.
+
+**Fixture that must fail first.** An audit under a declared memory ceiling,
+asserted to refuse before allocating past it rather than to race the allocator.
+
+## D20 — the user-facing verdict does not say the source was unreadable
+
+**Where.** `final_status.json` and the CLI summary line.
+
+**What is wrong.** The check row keeps the distinction cleanly —
+`ran: false`, `status: UNAVAILABLE`, `measured: null`, `result: ESCALATE`,
+`error_code: PRESERVATION_UNMEASURABLE`, with the `ModuleNotFoundError` as its
+reason, beside a sibling row reading `ran: true / MEASURED / FAIL / CHANGED`.
+Nothing collapses them **in that JSON**.
+
+The distinction stops there. `final_status.json` says only "rejected by
+independent verification", and the CLI summary says the same. A user who does not
+open `commission_report.json` learns that a reviewer rejected their part, not
+that the tool could not read their primary source.
+
+**What it can cause.** "Your part changed" and "the instrument cannot read your
+primary source" demand different actions from the user, and only one of them is
+their fault.
+
+**Fixture that must fail first.** A run with an unmeasurable source, asserted to
+name that in the final status and in the summary line.
+
+## D21 — a lane cap that only downgrades a passing verdict
+
+**Where.** `pipeline/status.py`, the `lane_status` interaction.
+
+**What is wrong.** `EXPERIMENTAL_UNAVAILABLE` replaces a verdict that would
+otherwise be `COMMISSIONED` or `VERIFIED`. When commissioning fails first the
+final status is `FAILED` and the cap never applies — so on the vent-ball fixture
+the MODIFY lane's own cap is unreachable.
+
+**What it can cause.** Documentation, ADR 0002 and this project's own reporting
+have repeatedly said "every job declaring an edit scope reports
+`EXPERIMENTAL_UNAVAILABLE`". That is true only of jobs that would otherwise pass.
+The claim has been made in commit messages and in `docs/tooling.md` without that
+qualifier.
+
+**Fixture that must fail first.** An edit-scope job that fails commissioning,
+asserted to report both the failure and the lane's unavailability rather than one
+of them.
