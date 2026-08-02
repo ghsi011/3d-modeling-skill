@@ -538,8 +538,20 @@ class CliRunTest(unittest.TestCase):
                 {"schema_version", "job_id", "kind", "role", "stage", "route",
                  "reason", "authorized_inputs", "required_outputs", "proposal_api",
                  "source_api", "bound", "unresolved", "required_reviews",
-                 "completion_command", "updated_utc"},
+                 "completion_command", "updated_utc",
+                 # The state this instruction was computed from, and its digest.
+                 # Digests of files that already exist -- the contract, the plan,
+                 # the artifacts -- so a reader can tell the instruction no longer
+                 # describes the project. There is nothing about the answer in
+                 # them: at commission time the candidate does not exist and every
+                 # artifact digest is null.
+                 "state", "state_sha256"},
                 set(action))
+            self.assertEqual(
+                {"stl": None, "step": None, "source": None},
+                {key: action["state"][key] for key in ("stl", "step", "source")},
+                "a commission cannot carry a digest of geometry nobody has "
+                "written yet")
 
     def test_a_consequential_job_asks_for_its_safety_review_then_continues(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

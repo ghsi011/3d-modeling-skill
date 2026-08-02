@@ -164,7 +164,7 @@ def _legacy(project: P.Project) -> RouteDecision:
     """
     decision = intent.select(
         requested_template=project.template, parameters=project.parameters,
-        external_geometry=bool(project.status.get("external_geometry", False)),
+        external_geometry=bool(project.external_geometry),
         ambiguities=project.blocking_questions)
     escalations = ["the job was adapted from job.json and routes under the legacy "
                    "rules"]

@@ -124,8 +124,8 @@ BUILD_TIMEOUT_S = 600.0
 
 # The frozen contract, by name. Not a list of everything the pipeline owns: the
 # candidate has no write access to any of it, and a second list that has to be
-# kept in step with `acceptance.INVALIDATED_BY_A_NEW_REVISION` is a maintenance
-# obligation whose failure mode is a silent gap. This one file is re-read after
+# kept in step with `bindings.RECEIPTS` is a maintenance obligation whose failure
+# mode is a silent gap. This one file is re-read after
 # the job is dead as a canary on the confinement itself -- if it ever moves, the
 # boundary did not hold and the run is refused whatever else is true.
 CANARY_FILE = "acceptance_contract.json"

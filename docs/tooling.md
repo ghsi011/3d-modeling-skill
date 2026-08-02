@@ -48,8 +48,20 @@ job id, source mode, consequence and rationale, the manufacturing inputs, every
 requirement with its provenance (`STATED` / `INHERITED` / `MEASURED` / `CHOSEN`),
 source artifacts with hashes and classification, interfaces and who owns the other
 side of each, declared motion, edit scope, expected components, open questions,
-required reviews, bindings, status, and — only once the job has branched — its
-design alternatives and which one is active.
+required reviews, and — only once the job has branched — its design alternatives
+and which one is active.
+
+There is no `status` and no `bindings` block. They mirrored one run's outcome —
+its stage, its final status, its allowed claim and its artifact digests — into
+the one file that has to stay shared, so the project said the job was whatever
+had finished last, and a branch could not stamp them at all without saying that
+about its sibling. A formulation's outcome is `final_status.json` in that
+formulation's own directory, and whether it is still *current* is derived from
+the bindings on disk rather than repeated from a copy nothing keeps in step. A
+project file written under the old mirror still loads: what is dropped is a copy
+of something that is on disk in its own right, and the one value in there that
+was a declaration rather than an outcome — `external_geometry`, which the
+`job.json` adapter recorded — is read across into its own field.
 
 There is no `candidate_strategy`. `PARALLEL` was validated, stored and hashed,
 and its entire behavioural effect was one extra sentence in the route rationale:
@@ -67,12 +79,13 @@ Old completed projects need no migration.
 
 ### `next_action.json`
 
-What the job is waiting for, written when `run` stops and deleted when it
-finishes:
+What the job is waiting for, written when `route` or `run` stops and deleted when
+the job finishes:
 
 | kind | meaning |
 | --- | --- |
 | `FIX_PROJECT` | `project.json` is not complete enough to route; `unresolved` names every problem |
+| `RUN` | the route is decided and the plan is compiled, and nothing has been executed against it |
 | `AGENT_COMMISSION` | a specialist has to produce something — `role`, `authorized_inputs`, `required_outputs`, `bound` hashes, `completion_command` |
 | `REVIEW` | a bounded review is needed — `evidence` is the packet, `respond_with` is where the answer goes |
 | `NEEDS_EVIDENCE` / `BLOCKED` | the run completed but could not reach a claim, or a gate failed; `unresolved` carries the status reasons |
@@ -81,12 +94,94 @@ finishes:
 A commission carries no expectation of what the specialist should conclude. That
 is not politeness: a verifier told what to conclude has stopped being a verifier.
 
+Every instruction carries `state` — the acceptance contract, the model contract,
+the execution plan, the three artifact digests and which formulation this is —
+and `state_sha256` over it. That is the same map `design-tool status` checks the
+receipts against, deliberately: an instruction and a receipt go stale for the
+same reasons, and two answers to "has this project moved" is one answer and one
+bug. `status` reports `waiting_for_superseded` when the digest no longer matches,
+and does not count a superseded instruction as something to do.
+
+The file used to carry no identity at all — no run id, no sequence, no digest —
+so staleness was handled entirely by overwriting or unlinking it, and any path
+that changed the project without reaching one of those two calls left an
+instruction pointing at work already done. A successful `route` was exactly such
+a path (D17): it wrote "this project cannot be routed", the project was then
+completed, and the sentence stayed. `route` now recomputes the instruction
+against the state after routing — nothing, when the receipts still support a
+current success; `RUN` otherwise.
+
 `bound` carries `requirement_sha256` — the brief, the stated, inherited and
 measured values, the envelope, the interfaces, the components and the modifiers,
 which is the half of the job nobody on the design side owns and the same digest
 the frozen acceptance contract carries. It replaced a digest of the whole
-`project.json`, which covered the mutable `status` and `bindings` blocks and so
-moved every time a run finished, binding nothing to anything.
+`project.json`, which covered the then-mutable `status` and `bindings` blocks and
+so moved every time a run finished, binding nothing to anything. Those two blocks
+have since been removed for the same reason.
+
+### `design-tool status` — derived, not repeated
+
+The status was **stored**: `status.decide` ran once, mid-run, its answer went
+into `final_status.json`, and every reader from then on repeated it verbatim.
+`design-tool status` recomputed the project's `problems` and took the verdict as
+given, so a `VERIFIED` receipt beside a candidate somebody had rebuilt, an
+evidence file somebody had corrected, or an execution plan that had since moved
+all read as current.
+
+`final_status` in the report is now **derived**. `bindings.py` reads each
+receipt's own record of what it was issued against — the artifact manifest's
+digests, the commissioning report's contract hash, a review report's whole
+envelope including the witness images and evidence files it was shown, the final
+status's artifact hashes and plan digest — and compares it against what is on
+disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derives
+`STALE`; a directory where no run has concluded derives `NOT_RUN`.
+
+| field | meaning |
+| --- | --- |
+| `final_status` | what the evidence on disk currently supports |
+| `stored_status` | what the run concluded, still the record of that run |
+| `stale` | each receipt that no longer binds, and which binding broke |
+| `state` | the binding values the receipts are being checked against |
+| `bindings` | this formulation's own artifact hashes, from its own final status |
+| `alternatives[].status` | the same derivation, run per alternative in its own directory, so switching branches is not the price of finding out where the other one stands |
+
+Two rules bound it. **It is not a second gate**: nothing is re-run and no
+threshold is re-applied, so a job whose bindings all hold derives exactly what it
+stored. And it can only ever weaken — a `FAILED` or `NEEDS_MORE_EVIDENCE` whose
+bindings broke keeps its own name and carries the breakage alongside, because a
+finding replaced by "this is out of date" is a defect nobody is looking at any
+more. That is the same choice the lane cap makes in `status.decide`.
+
+`status` never writes. Reporting a broken binding is not invalidating it: a
+superseded receipt is neither current nor erased, and a command that tidied away
+the evidence it was describing would change the thing it was asked about.
+
+### Invalidation: what depended on the thing that changed
+
+`design-tool run` removes the receipts whose bindings no longer hold, immediately
+before executing, and says what it removed. A new acceptance revision does the
+same through `acceptance.freeze`, which additionally writes their digests into
+`acceptance_history.json`.
+
+The rule is derived from the bindings rather than from a list of names. It used
+to be a fixed six-name tuple deleted on any acceptance revision, which could
+express "something changed, therefore everything is stale" and nothing else. Now:
+
+* an **acceptance revision** still reaches every receipt — each one binds the
+  model contract's hash and the model contract binds the acceptance contract's,
+  so one broken edge takes the chain, and the set is the same six files;
+* a **rebuilt candidate** takes the artifact manifest, the commissioning report
+  measured beside it, the reviews and the final status;
+* a **corrected evidence file** takes only the reviews that were shown it and the
+  status that rested on them. The commissioning measurements of a candidate that
+  did not move are still true and stay on disk;
+* a change inside **one alternative** reaches nothing in a sibling's directory,
+  because the whole comparison is scoped to one formulation's work directory.
+
+`model_contract.json` is reported stale and never removed: it is the contract
+every other receipt binds, and deleting it would turn "issued against a contract
+that has moved" into "there is no contract here", which says less and is no more
+true.
 
 ### `design-tool branch` — competing formulations of one job
 

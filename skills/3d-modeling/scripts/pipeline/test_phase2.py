@@ -45,6 +45,7 @@ from pathlib import Path
 
 from . import acceptance as ACC
 from . import authored as A
+from . import bindings as B
 from . import cli
 from . import project as P
 from . import route as RT
@@ -667,7 +668,11 @@ class RevisionTest(unittest.TestCase):
             self.assertEqual(2, cli.run([str(directory), "--no-render"]))
 
             self.assertEqual(2, _read(directory, ACC.ACCEPTANCE_FILE)["revision"])
-            for name in ACC.INVALIDATED_BY_A_NEW_REVISION:
+            # `bindings.REMOVABLE`, not a tuple restated in `acceptance.py`: what
+            # a revision invalidates is derived from what each receipt records
+            # about the contract it was issued against, and the set it reaches
+            # here is the same six files the hardcoded tuple used to name.
+            for name in B.REMOVABLE:
                 self.assertFalse((directory / name).is_file(),
                                  f"{name} was issued against revision 1 and is "
                                  "still on disk under revision 2")

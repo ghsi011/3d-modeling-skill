@@ -6,6 +6,87 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — the status is computed from the evidence, and invalidation is scoped to it
+
+Release 3 slice B. Three separate ways for a receipt to say something that is no
+longer so, and one mechanism that answers all three.
+
+**The status was stored.** `status.decide` ran once, mid-run, its answer went
+into `final_status.json`, and every reader afterwards repeated it verbatim —
+`design-tool status` recomputed the project's `problems` and took the verdict as
+given. A `VERIFIED` receipt beside a candidate somebody had rebuilt, an evidence
+file somebody had corrected, or a plan that had since moved all read as current,
+and nothing on disk could tell.
+
+`final_status` in the `status` report is now derived. `pipeline/bindings.py`
+reads each receipt's own record of what it was issued against — the artifact
+manifest's digests, the commissioning report's contract hash, a review report's
+whole envelope down to the witness images and evidence files it was shown, the
+final status's artifact hashes and plan digest — and compares it against what is
+on disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind
+derives `STALE`; a directory where no run concluded derives `NOT_RUN`. The stored
+verdict is still reported under its own name, because it remains the record of
+what that run concluded; what changed is that a reader no longer trusts it
+without checking.
+
+It is deliberately **not a second gate**. Nothing is re-run and no threshold is
+re-applied, so a job whose bindings all hold derives exactly what it stored, and
+the only move available is downward. A `FAILED` or `NEEDS_MORE_EVIDENCE` whose
+bindings broke keeps its own name and carries the breakage alongside — the same
+choice the lane cap makes, and for the same reason: a finding replaced by "this
+is out of date" is a defect nobody is looking at any more.
+
+**Invalidation was all-or-nothing.** A changed acceptance body deleted a fixed
+six-name tuple, whatever had actually moved. That rule can express "something
+changed, therefore everything is stale" and nothing else — not "this changed,
+therefore that is", and not "this is still true, leave it alone". The tuple is
+gone and the rule is derived from the bindings each receipt carries. An
+acceptance revision still reaches the same six files, because every receipt binds
+the model contract's hash and the model contract binds the acceptance contract's,
+so one broken edge takes the chain. What is new is everything else: a rebuilt
+candidate takes the artifact manifest and the commissioning report measured
+beside it; a corrected caliper sheet takes only the reviews that were shown it
+and the status that rested on them, and the measurements of a candidate that did
+not move stay on disk. `model_contract.json` is reported stale and never removed —
+it is the contract the others are checked against, and deleting it would turn
+"issued against a contract that has moved" into "there is no contract here".
+
+`design-tool run` performs that sweep immediately before executing, which is what
+keeps ADR 0002 §4's promise on a run that does not finish: a job that stops for a
+review no longer leaves the previous run's success sitting beside it.
+
+**`project.json` no longer mirrors either.** The `status` and `bindings` blocks
+copied one run's stage, verdict, claim and artifact digests into the one file
+that has to stay shared, so the project said the job was whatever had finished
+last — and slice A had already had to stop a branch stamping them, which left a
+mirror that was true of the root and silently wrong while a branch was active.
+They are dropped rather than made per-alternative: two authorities over one fact
+is the shape this codebase removes, and it is the same argument that deleted
+`project_hash()`. A project file written under the old mirror still loads, since
+what is dropped is a copy of something that is on disk in its own right; the one
+value in there that was a declaration rather than an outcome —
+`external_geometry`, recorded by the `job.json` adapter and read by `route.decide`
+and `to_job_request_fields` — is carried across into its own field.
+
+### Fixed — a successful `route` no longer instructs toward a state the project has left (D17)
+
+`next_action.json` carried no identity: no run id, no sequence, no self-digest.
+Staleness was handled entirely by overwriting or unlinking the file, so any path
+that changed the project without reaching one of those two calls left an
+instruction pointing at work already done, and nothing could detect it. A
+successful `route` was exactly such a path — it wrote "this project cannot be
+routed" while the project was incomplete, and left the sentence there once the
+project was completed and routed.
+
+Every instruction now carries `state` (the acceptance contract, the model
+contract, the execution plan, the artifact digests, and which formulation it is)
+and `state_sha256` over it — the same map the derived status checks receipts
+against, because an instruction and a receipt go stale for the same reasons.
+`status` reports `waiting_for_superseded` and stops counting a superseded
+instruction as something to do. `route` recomputes the instruction against the
+state after routing: nothing, when the receipts still support a current success,
+and `RUN` otherwise.
+
 ### Fixed — a STEP can be read, by the kernel that was already here (D13, D14)
 
 `preservation.audit` handed every source path to `trimesh.load`, which dispatches

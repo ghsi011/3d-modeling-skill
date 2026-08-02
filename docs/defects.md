@@ -257,21 +257,6 @@ it. Overhang, bridging and strength direction are all orientation-dependent.
 **Fixture that must fail first.** Two contracts differing only in orientation,
 asserted to produce different assessments.
 
-## D17 — a successful `route` leaves a stale `next_action.json`
-
-**Where.** `pipeline/cli.py`, the `route` verb.
-
-**What is wrong.** `route` succeeds without clearing or rewriting the pending
-next action, so the file continues to instruct toward a state the project has
-left.
-
-**What it can cause.** The file exists to tell an agent what to do next. A stale
-one sends it to the wrong step, and nothing detects the staleness — `next_action`
-carries no run id, no sequence and no self-digest.
-
-**Fixture that must fail first.** `init` then `route`, asserting the next action
-names the state after routing.
-
 ## D21 — a lane cap that only downgrades a passing verdict
 
 **Where.** `pipeline/status.py`, the `lane_status` interaction.

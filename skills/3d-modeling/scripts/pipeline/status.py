@@ -22,6 +22,25 @@ from . import schemas as S
 from . import verification as _verification_review
 from .contract import Contract
 
+# Two answers `decide` can never produce and a reader can. `decide` runs once,
+# mid-run, with the evidence in front of it; `derive` runs whenever somebody
+# asks, over what is on disk, and its whole job is to say when the stored answer
+# is no longer about the project it is sitting in.
+#
+# `NOT_RUN` is not "failed" and not "passed": no run has concluded here.
+# `STALE` is not a verdict about the part at all -- it says the verdict that was
+# reached was reached against evidence that has since moved, so nobody may repeat
+# it as current. Neither belongs in `S.FINAL_STATUS`, because neither is a thing
+# a run may write down about a candidate it measured.
+DERIVED_ONLY = ("NOT_RUN", "STALE")
+DERIVED_STATUS = S.FINAL_STATUS + DERIVED_ONLY
+
+# The two a broken binding is allowed to take away. The lane cap in `decide`
+# makes the same choice for the same reason: `FAILED` and `NEEDS_MORE_EVIDENCE`
+# are findings the run is entitled to report, and replacing one with "stale"
+# would hide a real defect behind a bookkeeping caveat.
+CLAIMS_SUCCESS = ("COMMISSIONED", "VERIFIED")
+
 # Predicates no mesh can answer. Without a named, versioned slicer adapter these
 # are always DEFERRED -- and this toolchain has no slicer, by design. Promising
 # otherwise would be promising verification the stack cannot produce.
@@ -50,6 +69,67 @@ NOT_YET_MEASURED = {
 }
 
 KNOWN_MODIFIERS = frozenset(SLICER_DEPENDENT) | frozenset(NOT_YET_MEASURED)
+
+
+def derive(stored: dict[str, Any] | None,
+           stale: dict[str, tuple[str, ...]]) -> dict[str, Any]:
+    """The status the evidence on disk currently supports.
+
+    `final_status.json` is the record of what a run concluded and stays exactly
+    that. What changes is that a reader no longer takes it verbatim: the receipts
+    it was issued against either still bind or they do not, and `bindings.broken`
+    is what answers that. Everything before this ran `decide` once, mid-run,
+    serialized the answer, and every reader afterwards repeated it -- so a
+    `VERIFIED` receipt beside a candidate somebody had since rebuilt read as
+    current, and nothing anywhere could tell.
+
+    **This is not a second gate.** It re-adjudicates nothing: no check is re-run,
+    no threshold is re-applied, and a job whose bindings all hold derives exactly
+    what it stored. The only move it can make is downward -- `STALE` in place of a
+    success whose evidence moved -- and it cannot make one upward, because there is
+    no input here that could turn a `FAILED` into anything else.
+
+    A `FAILED` or `NEEDS_MORE_EVIDENCE` whose bindings broke keeps its own name
+    and carries the breakage in `stale`. That is deliberate, and it is the same
+    rule the lane cap follows: those are findings, and a finding replaced by
+    "this is out of date" is a defect nobody is looking at any more.
+    """
+    if not isinstance(stored, dict) or not stored.get("final_status"):
+        return {
+            "derived_status": "NOT_RUN",
+            "stored_status": None,
+            "allowed_claim": None,
+            "stale": {name: list(rows) for name, rows in sorted(stale.items())},
+            "reasons": ["no run has concluded in this directory"],
+        }
+
+    was = str(stored.get("final_status"))
+    broke = stale.get("final_status.json") or ()
+    reasons: list[str] = []
+    derived = was
+    if broke:
+        if was in CLAIMS_SUCCESS:
+            derived = "STALE"
+            reasons.append(
+                f"the run concluded {was} and the evidence it was issued against "
+                "has moved, so that claim is not current")
+        else:
+            reasons.append(
+                f"{was} stands -- it is a finding this run was entitled to report "
+                "-- but the evidence it was issued against has moved")
+        reasons.extend(broke)
+    for name, rows in sorted(stale.items()):
+        if name == "final_status.json":
+            continue
+        reasons.append(f"{name} no longer binds: {'; '.join(rows)}")
+    S.require_enum(derived, DERIVED_STATUS, what="derived_status")
+    return {
+        "derived_status": derived,
+        "stored_status": was,
+        "allowed_claim": stored.get("allowed_claim"),
+        "stale": {name: list(rows) for name, rows in sorted(stale.items())},
+        "reasons": reasons,
+    }
 
 
 def _promotable(report: dict[str, Any] | None, kind: str,

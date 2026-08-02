@@ -560,8 +560,24 @@ class Project:
     step: bool = False
     cache_dir: str | None = None
 
-    bindings: dict[str, Any] = dataclasses.field(default_factory=dict)
-    status: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # There are deliberately no `status` and `bindings` fields any more. They
+    # mirrored one run's outcome -- its stage, its final status, its allowed
+    # claim and its artifact digests -- into the one file that has to be shared,
+    # so the project said the job was whatever had finished last. Slice A already
+    # had to stop a branch stamping them, which left the mirror true only of the
+    # shared root and silently wrong the moment anybody read it while a branch
+    # was active; the same argument that deleted `project_hash()` applies to the
+    # values it was hashing. A formulation's outcome is `final_status.json` in
+    # that formulation's own directory, and what is *current* is derived from the
+    # bindings on disk (`bindings.py`, `status.derive`) rather than repeated from
+    # a copy nothing keeps in step.
+    #
+    # Whether the job's geometry is externally owned was living in `status`, and
+    # that is a declaration rather than an outcome, so it has its own field.
+    # `None` means "nobody said", which is not the same as `False`: the legacy
+    # adapter is told by `job.json`, and a canonical project is read off its
+    # declared external interfaces.
+    external_geometry: bool | None = None
     # Set by an adapter. `job.json@1` means the routing authority reproduces the
     # legacy answers rather than the new ones -- see `route.decide`.
     compat: str | None = None
@@ -614,10 +630,14 @@ class Project:
             "verification_requested": self.verification_requested,
             "step": self.step,
             "cache_dir": self.cache_dir,
-            "bindings": dict(self.bindings),
-            "status": dict(self.status),
             "compat": self.compat,
         }
+        if self.external_geometry is not None:
+            # Absent when nobody said, following the rule every other optional
+            # key here follows: a `null` in a serialized document is a statement
+            # that somebody considered the question, and on a canonical project
+            # the answer is read off the declared interfaces instead.
+            payload["external_geometry"] = self.external_geometry
         if self.alternatives:
             payload["alternatives"] = [a.as_dict() for a in self.alternatives]
             payload["active_alternative"] = self.active_alternative
@@ -1034,10 +1054,35 @@ def from_payload(payload: dict[str, Any]) -> Project:
         verification_requested=bool(payload.get("verification_requested", False)),
         step=bool(payload.get("step", False)),
         cache_dir=payload.get("cache_dir"),
-        bindings=dict(payload.get("bindings") or {}),
-        status=dict(payload.get("status") or {}),
+        external_geometry=_external_geometry(payload),
         compat=payload.get("compat"),
     )
+
+
+def _external_geometry(payload: dict[str, Any]) -> bool | None:
+    """Whether the job's geometry is externally owned, from either spelling.
+
+    `status` and `bindings` are gone from this schema, and unlike `edit_scope`
+    and `candidate_strategy` they are not refused by name. Those two were
+    *declarations*, and dropping a declaration in silence loses what somebody
+    wrote; `status` and `bindings` were a run's own outcome stamped back into the
+    shared file, so a document carrying them is carrying a copy of something that
+    is on disk in its own right. Refusing them would make every project this
+    build has ever written unloadable in order to remove a mirror.
+
+    One value in there was not an outcome. `from_job_json` recorded
+    `external_geometry` in `status`, and `route.decide` and
+    `to_job_request_fields` both read it back, so dropping the key in silence
+    would re-route every legacy job. It is read from either place, the field
+    winning, and it is the only thing that survives the mirror.
+    """
+    declared = payload.get("external_geometry")
+    if isinstance(declared, bool):
+        return declared
+    mirrored = payload.get("status")
+    if isinstance(mirrored, dict) and isinstance(mirrored.get("external_geometry"), bool):
+        return bool(mirrored["external_geometry"])
+    return None
 
 
 def load(project_dir: Path) -> Project:
@@ -1109,7 +1154,7 @@ def from_job_json(spec: dict[str, Any]) -> Project:
         step=bool(spec.get("step", False)),
         cache_dir=spec.get("cache_dir"),
         compat="job.json@1",
-        status={"external_geometry": external},
+        external_geometry=external,
     )
 
 
@@ -1134,8 +1179,9 @@ def to_job_request_fields(project: Project) -> dict[str, Any]:
         "nozzle": project.nozzle,
         "orientation": project.orientation,
         "modifiers": tuple(project.modifiers),
-        "external_geometry": bool(project.status.get("external_geometry",
-                                                     bool(project.external_interfaces))),
+        "external_geometry": bool(project.external_interfaces
+                                  if project.external_geometry is None
+                                  else project.external_geometry),
         "ambiguities": project.blocking_questions,
         "step": project.step,
         "evidence": tuple(project.evidence),

@@ -34,11 +34,18 @@ the gate rather than a validator standing in front of one.
 **Revisions, never overwrites.** A freeze that generates the same body as the one
 on disk leaves the file alone. A freeze that generates a different body writes a
 new revision, records in `acceptance_history.json` what moved and what the
-superseded revision had claimed, and deletes the receipts bound to it -- the
-artifact manifest, the commissioning report, the manufacturing report, both
-review reports and the final status. A designer may still change their mind about
-what the part should be. They cannot do it invisibly, and they cannot do it while
-keeping the receipt that was issued against the old expectation.
+superseded revision had claimed, and invalidates the receipts bound to it. A
+designer may still change their mind about what the part should be. They cannot
+do it invisibly, and they cannot do it while keeping the receipt that was issued
+against the old expectation.
+
+Which receipts those are is no longer a tuple written down here. `bindings.py`
+reads each receipt's own record of what it was issued against and compares it
+with what is on disk, so a new revision removes what depended on the contract and
+leaves alone whatever did not. The set it reaches on a revision is the same six
+files the tuple named -- every receipt binds the model contract, and the model
+contract binds this one -- and the difference is that the rule can now answer the
+other direction too.
 """
 from __future__ import annotations
 
@@ -47,6 +54,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from . import bindings as B
 from . import contract as C
 from . import schemas as S
 
@@ -55,18 +63,13 @@ ACCEPTANCE_SCHEMA = 1
 HISTORY_SCHEMA = 1
 
 PROPOSAL_FILE = "design_proposal.json"
-ACCEPTANCE_FILE = "acceptance_contract.json"
+# Defined in `bindings.py`, which is the module that reads this file to find the
+# current value of the `acceptance` binding, and re-exported here because this is
+# the module that writes it. Two spellings of one filename is two authorities
+# over where a thing lives, in the same way two digests over one declaration is
+# two authorities over what it says.
+ACCEPTANCE_FILE = B.CONTRACT_FILE
 HISTORY_FILE = "acceptance_history.json"
-
-# Everything a run writes that only means something against one acceptance
-# revision. A bump deletes them and records their digests in the history, so a
-# superseded pass cannot be read as a current one and cannot be read as never
-# having happened either.
-INVALIDATED_BY_A_NEW_REVISION = (
-    "artifact_manifest.json", "commission_report.json", "manufacturing_report.json",
-    "safety_verification_report.json", "verification_report.json",
-    "final_status.json",
-)
 
 # Where an expected solid volume may legitimately come from. Five sources and one
 # admission -- ADR 0002 section 3. There is no universal second-party source for
@@ -436,25 +439,6 @@ def _body(payload: dict[str, Any]) -> dict[str, Any]:
             if key not in ("revision", "frozen_utc", "contract_sha256")}
 
 
-def _invalidate(project_dir: Path) -> dict[str, Any]:
-    """Remove the receipts the superseded revision issued, recording them first.
-
-    Deleting rather than leaving them: `final_status.json` is what a reader and
-    `design-tool status` treat as the job's answer, and an answer measured
-    against an expectation that has since moved is worse than no answer. Their
-    digests go into the history, so a superseded pass is neither current nor
-    erased.
-    """
-    removed: dict[str, Any] = {}
-    for name in INVALIDATED_BY_A_NEW_REVISION:
-        path = project_dir / name
-        if not path.is_file():
-            continue
-        removed[name] = S.sha256_file(path)
-        path.unlink()
-    return removed
-
-
 def _revision_alternative(history: dict[str, Any], revision: int) -> str | None:
     """Which alternative wrote a given revision, according to the history itself.
 
@@ -471,7 +455,8 @@ def _revision_alternative(history: dict[str, Any], revision: int) -> str | None:
 
 
 def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
-           alternative_id: str | None = None) -> Frozen:
+           alternative_id: str | None = None,
+           evidence_dir: Path | None = None) -> Frozen:
     """Write the contract if it is new, keep it byte-for-byte if it is not.
 
     Called before the builder, from the CLI, and never from `runner.py` -- the
@@ -481,7 +466,7 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
 
     `project_dir` is the *work* directory: the project root for an unbranched
     job, and `alternatives/<id>` for a branched one. That scoping is what makes
-    `_invalidate` correct across siblings. It used to be the project root
+    the invalidation below correct across siblings. It used to be the project root
     unconditionally, so a second formulation's freeze read the first's contract
     as `previous`, cut a revision from it, and deleted the first's final status,
     commissioning report, artifact manifest, manufacturing report and both review
@@ -492,6 +477,11 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
     *fork* (a revision cut from a different one). With the scoping above a fork
     cannot happen; the field is what says so, rather than leaving every branch
     permanently recorded as somebody changing their mind.
+
+    `evidence_dir` is the project root, where shared evidence files live. The
+    invalidation below reads the review envelopes, which bind the digests of the
+    files the reviewer was shown, and a branch's work directory is not where a
+    shared caliper sheet was declared.
     """
     project_dir = Path(project_dir)
     path = project_dir / ACCEPTANCE_FILE
@@ -519,7 +509,15 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
     payload = {**body, "revision": revision, "frozen_utc": updated_utc}
     payload["contract_sha256"] = S.payload_hash(payload)
 
-    invalidated = _invalidate(project_dir) if previous else {}
+    # Written before the invalidation and not after it. `bindings.invalidate`
+    # decides what is stale by comparing each receipt against what is on disk
+    # *now*, so the new revision has to be on disk for the comparison to be about
+    # it. The old hardcoded tuple did not care about the order because it did not
+    # look at anything.
+    path.write_text(S.canonical_json(payload), encoding="utf-8")
+    invalidated = (B.invalidate(project_dir, evidence_dir=evidence_dir,
+                                alternative_id=alternative_id)
+                   if previous else {})
     history = _history(project_dir)
     entry: dict[str, Any] = {
         "revision": revision,
@@ -554,7 +552,6 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
             entry["supersedes"]["alternative_id"] = superseded_by
     history["revisions"].append(entry)
     (project_dir / HISTORY_FILE).write_text(S.canonical_json(history), encoding="utf-8")
-    path.write_text(S.canonical_json(payload), encoding="utf-8")
     return Frozen(path=path, payload=payload, revision=revision,
                   contract_sha256=payload["contract_sha256"],
                   disposition="FROZEN" if previous is None else "SUPERSEDED",

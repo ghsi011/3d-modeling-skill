@@ -481,23 +481,27 @@ class TwoSiblingsTest(unittest.TestCase):
             self.assertEqual(untouched, _digests(_alt(directory, "screw-fastened")))
 
     def test_the_shared_project_file_never_speaks_for_one_formulation(self) -> None:
-        """`status` and `bindings` are one run's outcome, and there is one of each.
+        """`status` and `bindings` were one run's outcome, and are gone.
 
         The project file cannot move, so a branch must not stamp it: otherwise
         `project.json` says the job is whatever the last sibling to finish was --
         the same collision as a shared `final_status.json`, in the one file that
-        has to stay shared. An alternative's outcome is read from its own
-        `final_status.json`, which is where it already lives.
+        has to stay shared. Slice A stopped the branch stamping it, which left
+        the mirror true of the root and silently wrong for as long as a branch
+        was active; slice B removes it. Every formulation's outcome, the root's
+        included, is `final_status.json` in that formulation's own directory.
         """
         with tempfile.TemporaryDirectory() as raw:
             directory = self._forked(Path(raw))
-            project = P.load(directory)
-            root = _read(directory / "final_status.json")
-            self.assertEqual(root["artifact_hashes"], project.bindings)
+            payload = _read(directory / P.PROJECT_FILE)
+            self.assertNotIn("status", payload)
+            self.assertNotIn("bindings", payload)
+
+            root = _read(directory / "final_status.json")["artifact_hashes"]
             for name in ("screw-fastened", "snap-fit"):
                 with self.subTest(alternative=name):
                     branch = _read(_alt(directory, name) / "final_status.json")
-                    self.assertNotEqual(branch["artifact_hashes"], project.bindings)
+                    self.assertNotEqual(branch["artifact_hashes"], root)
 
     def test_status_reports_the_active_formulation_and_its_own_bindings(self) -> None:
         import contextlib
