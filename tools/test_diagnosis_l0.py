@@ -26,6 +26,12 @@ Cost: three external files back the whole set, and both the hash verification an
 the diagnosis of each are cached for the module. Six cases ask different questions
 of the same 2.2 MB Pixel 9 export; re-reading it once per case would multiply the
 most expensive item here by six for nothing.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_diagnosis_l0_heavy.py`, and runs before merge instead of
+on every push: `L0UntessellatableStep`. Same tests, moved rather than weakened;
+`conftest.py` carries the rule and `benchmarks/heavy/README.md` the measurement
+behind it.
 """
 from __future__ import annotations
 
@@ -620,69 +626,6 @@ class L0RootSelection(unittest.TestCase):
             self.assertEqual([], report["build_items"])
             self.assertEqual([], report["placed"])
             self.assertIn("authored extent", report["bbox_note"])
-
-
-class L0UntessellatableStep(unittest.TestCase):
-    """6 — the vent mount: an exact B-rep nothing can turn into triangles.
-
-    D14. `vent_mount.step` was reported `USABLE_EXACT` with no findings, and then
-    every operation that needed geometry died on
-    ``'NoneType' object has no attribute 'NbNodes'`` -- OCC's way of saying a face
-    has a null triangulation. That is the exact failure diagnosis exists to
-    prevent: the file passed the stage whose job is to say whether it can be
-    worked with, and the error surfaced at a stage with less context to explain
-    it.
-
-    Face area is what the old check measured, and area is not tessellability.
-    Every one of this file's 329 faces has a finite positive area -- one of them
-    is 1.75e-14 mm2, which is small and is not zero -- so `invalid_faces` was 0
-    and stayed 0 whatever the mesher could do.
-
-    The facts are asserted, not the verdict, as everywhere else in this file: the
-    count of untessellatable faces, the surface type OCC named, and that the
-    finding says what a reader has to do about it. A test asserting only
-    `REPAIR_REQUIRED` would pass on any wrong reason at all.
-    """
-
-    FIXTURE = "vent-ball-combine"
-
-    def _report(self) -> dict:
-        return _report(self, self.FIXTURE)
-
-    def test_the_faces_that_cannot_be_tessellated_are_counted(self) -> None:
-        report = self._report()
-        self.assertEqual("STEP", report["format"])
-        self.assertEqual(329, report["faces"])
-        self.assertGreater(report["untessellatable_faces"], 0,
-                           "a file whose cone faces defeat every mesher this "
-                           "runtime has must not be reported clean")
-        self.assertEqual(report["untessellatable_faces"],
-                         len(report["tessellation"]["failures"]))
-        self.assertEqual(report["faces"],
-                         report["tessellation"]["faces"])
-        self.assertEqual(report["faces"] - report["untessellatable_faces"],
-                         report["tessellation"]["tessellated_faces"])
-
-    def test_the_area_test_alone_would_still_call_this_file_clean(self) -> None:
-        """Why the new probe had to be added rather than the old one tightened."""
-        report = self._report()
-        self.assertEqual(0, report["invalid_faces"],
-                         "every face has a finite positive area; if this ever "
-                         "becomes non-zero the area test has started catching "
-                         "this file and this fixture is measuring something else")
-
-    def test_the_finding_names_the_faces_and_the_deflection(self) -> None:
-        report = self._report()
-        finding = next((f for f in report["findings"]
-                        if "cannot be tessellated" in f), None)
-        self.assertIsNotNone(finding, report["findings"])
-        self.assertIn("CONE", finding,
-                      "the surface type is what tells a repairer where to look")
-        self.assertIn(str(report["tessellation"]["linear_deflection"]), finding,
-                      "a tessellation failure is only a fact against a deflection")
-
-    def test_it_is_not_usable_as_it_stands(self) -> None:
-        self.assertEqual("REPAIR_REQUIRED", self._report()["classification"])
 
 
 if __name__ == "__main__":

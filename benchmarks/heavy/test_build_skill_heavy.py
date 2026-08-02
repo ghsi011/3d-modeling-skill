@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 BUILD_SCRIPT = ROOT / "tools" / "build_skill.py"
 
 ARTIFACT = "3d-modeling.skill"
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 ROLE_FILES = ["roles/designer.md", "roles/metrologist.md",
               "roles/print-engineer.md", "roles/verifier.md"]
 

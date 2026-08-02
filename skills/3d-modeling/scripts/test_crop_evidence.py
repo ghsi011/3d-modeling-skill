@@ -5,6 +5,12 @@ dispatch's peak context, and the habit that made it worse was saving 3x-upscaled
 PNG crops -- one 1.74 MB source became a 35 MB crop, whose extra pixels are
 discarded before a model sees them. So these assert the caps hold and the
 output is small, not merely that an image comes out.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_crop_evidence_heavy.py`, and runs before merge instead
+of on every push: `ContactSheetTest`. Same tests, moved rather than weakened;
+`conftest.py` carries the rule and `benchmarks/heavy/README.md` the measurement
+behind it.
 """
 
 from __future__ import annotations
@@ -73,28 +79,6 @@ class CropTest(unittest.TestCase):
                 centre = cropped.getpixel((cropped.width // 2, cropped.height // 2))
             self.assertGreater(centre[0], 200)
             self.assertLess(centre[1], 60)
-
-
-class ContactSheetTest(unittest.TestCase):
-    def test_many_photos_become_one_small_page(self) -> None:
-        """Triage is a whole-set question; answering it per file costs a read
-        per file."""
-        with TemporaryDirectory() as raw:
-            work = Path(raw)
-            sources = [_photo(work / f"p{i}.jpg", colour=(i * 12 % 255, 80, 140))
-                       for i in range(17)]
-            total = sum(p.stat().st_size for p in sources)
-
-            sheet = crop_evidence.contact_sheet(sources, work / "sheet.jpg")
-
-            self.assertLess(sheet.stat().st_size, total / 10)
-            with Image.open(sheet) as image:
-                self.assertLessEqual(max(image.size), crop_evidence.MAX_LONG_EDGE + 8)
-
-    def test_an_empty_set_is_an_error_not_a_blank_page(self) -> None:
-        with TemporaryDirectory() as raw:
-            with self.assertRaises(ValueError):
-                crop_evidence.contact_sheet([], Path(raw) / "sheet.jpg")
 
 
 class RotationsTest(unittest.TestCase):

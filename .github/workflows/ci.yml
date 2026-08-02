@@ -1,8 +1,11 @@
 name: CI
 
+# ROADMAP.md section 5.1 says L0 runs on every commit and L1 on pull requests.
+# `push:` with no branch filter is what "every commit" means for a workflow: a
+# filter of `[main]` gates only what has already been merged, which is after the
+# only moment the gate could have stopped anything.
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -36,12 +39,20 @@ jobs:
       - name: Generated and stale-file scan
         run: uv run python tools/gen_harness.py --check
 
-      # L0. `testpaths` in pyproject.toml is `skills/3d-modeling/scripts` and
-      # `tools`, so this collects the unit suite and the harness guards and does
-      # not collect `benchmarks/replays`. ROADMAP.md section 4.4 budgets the two
-      # ladders separately and neither number means anything if one suite can run
-      # inside the other.
-      - name: Pytest (L0 — unit and component fixtures)
+      # L0, the commit gate. `testpaths` in pyproject.toml is
+      # `skills/3d-modeling/scripts` and `tools`, so this collects the unit suite
+      # and the harness guards and collects neither `benchmarks/heavy` nor
+      # `benchmarks/replays`. ROADMAP.md section 4.4 budgets the ladders
+      # separately and no number means anything if one suite can run inside
+      # another.
+      #
+      # The timeout is the budget, made enforceable. Section 4.4 budgets this
+      # suite at about a minute and it measures 47 s on the reference machine;
+      # three minutes is the room a shared runner needs and still an order below
+      # the 997 s this gate used to cost. A wall clock nobody bounds is how it
+      # got there.
+      - name: Pytest (L0 — the commit gate)
+        timeout-minutes: 3
         run: uv run pytest
 
       - name: Internal markdown links
@@ -53,18 +64,21 @@ jobs:
       - name: Build production wheel
         run: uv build --wheel --out-dir dist/wheels
 
-  # L1 — recorded engineering jobs replayed through the current command surface,
-  # with no live AI call. ROADMAP.md section 5.1 puts L1 on pull requests and
-  # before merge, and 4.3 requires at least one relevant replay of every release.
+  # Everything that runs before a merge and cannot run on every commit. Two
+  # suites, one job, one trigger: ROADMAP.md section 5.1 puts L1 on pull requests
+  # and before merge, and the heavy half of L0 was cut out of the commit gate for
+  # a cost reason, not a coverage one, so it belongs on the same trigger rather
+  # than on none. A tier nobody runs is worse than no tier: it reports all clear.
   #
-  # Its own job rather than a step in `test`, for two reasons. One Python version
+  # Its own job rather than steps in `test`, for two reasons. One Python version
   # is enough: a replay compares a run against a recording of the same pipeline,
   # so running it twice measures the interpreter and not the job. And a separate
   # job keeps the wall clock of the L0 gate readable, which is the number section
   # 4.4 actually budgets.
-  replay:
+  pre-merge:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -78,6 +92,16 @@ jobs:
 
       - name: Install all dependencies (core + extras + dev)
         run: uv sync --frozen --all-extras
+
+      # L0-heavy — the component fixtures that start a child interpreter: the
+      # two command surfaces, the confined build boundary, the packaging and
+      # bundle smokes, the screening corpus. Same tests as before the split,
+      # moved rather than weakened; benchmarks/heavy/README.md carries the
+      # profile that decided the seam. Before the replays, because it is the
+      # cheaper of the two and a broken command surface fails a replay in a way
+      # that is much harder to read.
+      - name: Pytest (L0-heavy — component fixtures that cost a process)
+        run: uv run pytest benchmarks/heavy -q
 
       # A case whose supplied artifact is an `ExternalFile` this runner does not
       # have skips, exactly as the L0 fixture set does. `custom-knob-sleeve` and

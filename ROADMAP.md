@@ -62,7 +62,8 @@ The repository has:
 * public/private answer separation;
 * fixture licensing rules;
 * immutable artifact checks;
-* an L1 replay harness (`tools/replay.py`) and four recorded cases under `benchmarks/replays/`, run separately from the commit-gating suite.
+* an L1 replay harness (`tools/replay.py`) and four recorded cases under `benchmarks/replays/`, run separately from the commit-gating suite;
+* a commit gate that is one, rather than the whole suite under a different name: `benchmarks/heavy/` holds the component fixtures that cost a child interpreter, and the root `conftest.py` refuses one inside the gate.
 
 The replay harness answers the question section 4.3 asks and section 5.1 defines,
 and its own docstring carries the argument for what a replay asserts — the exit
@@ -116,7 +117,7 @@ Three slices of Release 3 are implemented — branching and sibling isolation, d
 * **4.1 functional — partial.** `branch`, `run` and `status` work through the normal command surface, refuse actionably, keep producing receipts when the claim is limited, and cannot let one alternative overwrite a sibling's artifacts. But "supported interrupted work resumes correctly" is met only by re-running the identical command; the *explicit resume versus restart* this release scoped does not exist, and neither do run identities.
 * **4.2 authority — pass.** The runner consumes the compiled plan, candidate code cannot reach the criteria that judge it, a review is bound to the evidence *and* the formulation it was answered for, derived status can only ever weaken a claim, and branching copies nothing — so a shared mandatory requirement is shared by construction rather than by a check that could be forgotten.
 * **4.3 regression — met for Release 3's own work, and still not for Releases 1 and 2.** The suite is green, the new behaviour has component-level coverage, and each slice's principal protection has been shown to fail under mutation. `tools/replay.py` drives a recorded job through `design-tool branch`, `route`, `run` and `status`, answering every review from a recorded judgement and never from a live call, and `benchmarks/replays/` holds four cases: an authored `CUSTOM` job; a `MODIFY` job over the real vendored `ball_male_17mm.stl` with a declared edit scope, a preservation row inside the frozen contract and a two-review round trip; a three-formulation branched job on the `berlingo-knob` request; and the same `MODIFY` job with its edit scope as somebody first mis-wrote it, refused before it builds. The branched case is the one this clause turned on: two siblings from one ancestor, each freezing revision 1 and superseding nothing, one building a materially different solid and one byte-identical to its parent — so a verification PASS written for the ancestor is refused by the fallback, and the suite shows the two envelopes differ in nothing but `alternative_id`, carried directly and through the execution plan, which is the false pass 4.2 forbids. The fallback's model is then revised after its run concluded and its stored `VERIFIED` derives `STALE` while both siblings stay current. The refused case carries slice C: `next_action.json` kind `FIX_PROJECT` with `SCHEMA_RANGE@edit_scopes[0].region_box.y` and `REF_UNDECLARED@edit_scopes[0].interface_ids[0]`. All four run on a bare checkout; the suite is 68 s against a two-minute budget. Read the clause as a claim about Releases 1 and 2 and it is still false, and cannot be made true: those releases shipped with no replay and nothing written now changes that. Read it slice by slice for Release 3 and one piece is still missing: slice C is *superseded instructions and structured findings*, and only the findings half has a replay. `waiting_for_superseded` does not, because no case here reaches the state it describes — a job either finishes, which clears the instruction, or is refused, which leaves one that is still true. Manufacturing a state change that made a true instruction report as superseded would be recording the mechanism firing on a case it was not built for, which is worse evidence than none. Everything else Release 3 shipped now has a replay, and what has none is what Release 3 scoped and did not build — merge, the five unhonoured dispositions, run identities, explicit resume versus restart — where a replay of an absent capability is not a thing that can be owed.
-* **4.4 performance — partial, and partly vacuous.** A job that declares no alternative gains no key in `project.json`, the execution plan or the review envelope, and the five pinned contract goldens are unmoved. Dispatch counts are unchanged. The clause about a job declaring no tolerance profile, no per-body material and no operation plan passes only because those fields were never built — it is vacuous rather than satisfied. Shared *intent* is reused across alternatives; shared *computation* is not measured. Two of the three suite budgets can now be read off a run. The L0/L1 split is structural — `testpaths` names `skills/3d-modeling/scripts` and `tools`, and `benchmarks/replays` is in neither, so a bare `uv run pytest` cannot collect a job replay — and CI runs them as separate jobs, L0 on every push and L1 on pull requests. Measured on the reference machine: the L1 replay suite is **68 s** against a two-minute budget — 35 s of that is the two cases recorded first, 31 s the branched job and its adversarial replay, 2 s the refusal — and the commit-gating suite is **about 994 s** against a five-second budget, which it misses by two orders of magnitude. That number was previously unmeasurable rather than good; it is now measurable and bad, and no part of it is the replay suite: the guards on the replay harness itself are 3 s of it. Splitting that 994 s into a fast commit gate and a slower pre-merge tier is the work this measurement now makes possible and does not itself do. The branched case is also where the zero-cost claim stops being an assertion about serialization: a case that declares no formulations issues no `branch` command, produces the recording it produced before formulations existed, and the two cases frozen at `4442921d` did not move when the harness gained the capability.
+* **4.4 performance — partial, and partly vacuous.** A job that declares no alternative gains no key in `project.json`, the execution plan or the review envelope, and the five pinned contract goldens are unmoved. Dispatch counts are unchanged. The clause about a job declaring no tolerance profile, no per-body material and no operation plan passes only because those fields were never built — it is vacuous rather than satisfied. Shared *intent* is reused across alternatives; shared *computation* is not measured. Every suite budget can now be read off a run. The ladder is structural at both joints — `testpaths` names `skills/3d-modeling/scripts` and `tools`, and neither `benchmarks/heavy` nor `benchmarks/replays` is in either, so a bare `uv run pytest` collects only the commit gate — and CI runs them as separate jobs, L0 on every push and the other two on pull requests. Measured on the reference machine: the L1 replay suite is **68 s** against a two-minute budget — 35 s of that is the two cases recorded first, 31 s the branched job and its adversarial replay, 2 s the refusal. The commit-gating suite was **994 s** against a five-second budget, and the split that measurement made possible is now done: profiling it per test showed 194 of 1163 tests starting a child interpreter and holding 876 s of 1020 s, so the seam was cut there. The gate is **43 s** over 830 of those tests, the 343 that moved run before merge as **L0-heavy** in about 16 minutes, and the budget is amended to a minute in section 4.4 with the argument for why five was not reachable. Structure decides which tier collects a file; `conftest.py` decides whether it belongs there, by refusing a child process inside the gate rather than by trusting a decorator. The branched case is also where the zero-cost claim stops being an assertion about serialization: a case that declares no formulations issues no `branch` command, produces the recording it produced before formulations existed, and the two cases frozen at `4442921d` did not move when the harness gained the capability.
 * **4.5 real job — partial, and less partial than it was.** The vent-ball combine exercise at `2721ffe` drove the branch half on real geometry and recorded it properly: two formulations, per-alternative acceptance revisions, a review answer accepted by one sibling and refused by the other at the instant the two were still byte-identical, and a materially different solid from each. It is honest evidence and it counts for the branching slice. It does not count for slices B and C: it was run before derived status existed, so nothing in it exercises a stale binding, a `waiting_for_superseded` instruction or a structured finding, and its own `next_action.json` carries no `state_sha256` at all. What has changed is that both now have evidence of a different kind — two recorded jobs, on the real `berlingo-knob` and `vent-ball-combine` requests and the real vendored `ball_male_17mm.stl`, driven end to end through the command surface with no live call. That is a weaker instrument than a live commission and it is not nothing: a stale binding and a structured finding are now produced by a whole job rather than by a unit fixture, which is the gap this clause named. What is still owed on this gate, honestly, is a live exercise: nobody has *used* derived status to make a decision about a real part, no alternative has been paused, preferred or rejected on evidence, and neither replayed job was printed, fitted or physically tested. `--no-render` means no witness image exists in either, so nobody has looked at either part. Read 4.5 as "the release has been exercised on an authentic project" and branching passes and B and C do not; read it as "every slice has been driven on real inputs outside its own unit tests" and all three now have.
 * **4.6 documentation — pass.** `docs/tooling.md` describes the command surface as it behaves, and this section names what is missing rather than implying it is present. The Release 3 section further down is still a statement of intended scope and is not a claim about what shipped; the list below is what closes the gap between the two.
 
@@ -317,11 +318,38 @@ A test that only confirms a nominal verdict is insufficient when the underlying 
 
 Provisional suite budgets on the reference machine:
 
-* commit-gating L0 suite: approximately five seconds or less;
+* commit-gating L0 suite: approximately one minute or less;
+* pre-merge L0-heavy suite: approximately twenty minutes or less;
 * normal warm L1 replay suite: approximately two minutes or less;
 * live L2 suite: on demand, limited to a small number of jobs.
 
 These are budgets, not correctness limits. A necessary exception must be documented.
+
+**The L0 budget was five seconds and is amended here.** It was written before the
+suite existed, and the suite that exists cannot hold it. Measured at `79244ae`
+with `--durations=0` and an audit hook counting process creation per test, the
+997 s commit gate decomposed into 194 tests that started a child interpreter and
+held 876 s — 86% of the wall clock in 17% of the tests — and 969 tests that
+started nothing and cost 143 s together. Cutting at that seam leaves 830 tests in
+the gate, and they measure **43 s**. Five is not reachable from there by any
+route that keeps the coverage:
+
+* the floor is not zero. `uv run pytest --collect-only` is 2.5 s on this machine,
+  because collection imports trimesh, numpy and PIL across thirty modules, and
+  `import trimesh` alone is 1.8 s;
+* the cheapest unit of behaviour this system has to test is a job run, and the
+  cheapest *confined* one is one child interpreter at ~1.6 s — so a single L0 test
+  of the build boundary would be a third of a five-second budget;
+* what is left is already the cheap half. 43 s over 838 tests is 50 ms each and
+  the median is under 5 ms. Reaching five seconds means removing about 95% of
+  them, and section 5.1's own list of what L0 must protect — branching and
+  alternative isolation, preservation comparison, state invalidation — is largely
+  in the part that would go.
+
+A minute is a number a commit gate can hold and a person will wait for; five was
+a number this work could only have met by protecting nothing. What the heavy half
+costs is not thereby forgiven — it is 16 minutes, it runs before merge, and
+bringing it down is real work this does not do.
 
 ### 4.5 Real-job gate
 
@@ -1915,7 +1943,17 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit.
+Run on every commit: `uv run pytest`, 838 tests in 43 s.
+
+Which tier a test is collected in is structural. `testpaths` in `pyproject.toml`
+names `skills/3d-modeling/scripts` and `tools`; `benchmarks/heavy` and
+`benchmarks/replays` are in neither, so a bare run cannot collect either of them.
+Whether a test *belongs* where it sits is measured rather than declared: the
+repository-root `conftest.py` fails any L0 test that starts a child process
+(`git` excepted, at ~45 ms a call) or that exceeds a five-second per-test
+ceiling, and names `benchmarks/heavy/` in the failure. `tools/test_tiers.py` and
+`benchmarks/heavy/test_tiers_heavy.py` are the guard's own pair — the decision as
+a function, and the decision shown red in a real session.
 
 Protect:
 
@@ -1933,6 +1971,19 @@ Protect:
 * material assignment inheritance and scoped invalidation;
 * operation dependencies and resulting states;
 * serialization.
+
+**L0-heavy — the component fixtures that cost a process**
+
+Run on pull requests and before merge, on the same trigger as L1:
+`uv run pytest benchmarks/heavy`, 350 tests in about 16 minutes.
+
+Not a fourth rung. It is the part of L0 that cannot be paid on every commit — the
+two command surfaces, the confined build boundary, the packaging and bundle
+smokes, the screening corpus, the B-rep reads — cut out of the gate for a cost
+reason and not a coverage one, which is why it runs on a trigger rather than on
+none. `benchmarks/heavy/README.md` carries the profile that decided the seam. The
+counts are conserved: 820 of the 1163 tests that were in the gate stayed, 343
+moved, and nothing was deleted or weakened to make either number.
 
 **L1 — replay**
 

@@ -300,6 +300,11 @@ tools/                    # gen_harness · build_skill · check_internal_links �
   fixtures.py             #   the benchmark fixture manifest: evidence class,
                           #   licence, and the wall between a request and its answer
   test_diagnosis_l0.py    #   the L0 set — five artifacts, facts asserted not verdicts
+  test_tiers.py           #   the commit gate's own guard, as a function
+conftest.py               # the gate, enforced: no L0 test may start a child interpreter
+benchmarks/heavy/         # L0-heavy — the component fixtures that cost a process.
+                          # Outside testpaths, so a bare `pytest` cannot collect
+                          # them; run before merge. See its README for the profile
 benchmarks/fixtures/      # public request material — everything under a fixture's
                           # own directory is material an agent may read. Licence
                           # decides where the bytes live: the owner's own source
@@ -326,13 +331,43 @@ uv run pytest
 The `bambu` extra adds multi-colour 3MF packing, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
 so the suites resolve their bare imports with no install step.
 
-### The replay suite, which `pytest` does not collect
+That command is the **commit gate**: 838 tests in 43 s. It is not the whole
+suite. Two more tiers run before merge and a bare `pytest` collects neither,
+because `testpaths` is `skills/3d-modeling/scripts` and `tools` and they are in
+neither — the same structural separation, at both joints:
 
-`uv run pytest` collects `testpaths` — `skills/3d-modeling/scripts` and `tools` —
-and `benchmarks/replays` is in neither. That is deliberate: it holds recorded
-engineering jobs replayed end to end through `design-tool` with no live AI call,
-and [`ROADMAP.md`](ROADMAP.md) section 4.4 budgets the two tiers separately.
-Neither number means anything if one suite can run inside the other.
+```bash
+uv run pytest                     # L0        838 tests,  43 s, every push
+uv run pytest benchmarks/heavy    # L0-heavy  350 tests, ~16 m, pull requests
+uv run pytest benchmarks/replays  # L1         55 tests,  68 s, pull requests
+```
+
+### The commit gate, and what it will not carry
+
+The gate used to be 997 s against a five-second budget, because there was no tier
+— one undifferentiated run. Profiling it per test found the cost in one place:
+**194 of 1163 tests started a child interpreter and held 876 s of 1020 s**, at
+about 1.6 s each, because a fresh interpreter that reaches `import trimesh` costs
+that here. Those tests are the two command surfaces, the confined build boundary,
+the packaging smokes; they now live in
+[`benchmarks/heavy/`](benchmarks/heavy/README.md), which has the full profile and
+the rule a new test follows.
+
+Where a test is collected is structural. Whether it belongs there is *measured*:
+[`conftest.py`](conftest.py) fails any L0 test that starts a child process — `git`
+excepted, at ~45 ms a call — or that runs longer than five seconds, and names the
+heavy directory in the message. A marker would be one forgotten decorator away
+from a test silently leaving its tier; here the default is the gating tier and
+forgetting costs a red test rather than lost coverage. `tools/test_tiers.py`
+tests the decision as a function and `benchmarks/heavy/test_tiers_heavy.py` shows
+it going red in a real session.
+
+### The replay suite
+
+`benchmarks/replays` holds recorded engineering jobs replayed end to end through
+`design-tool` with no live AI call, and [`ROADMAP.md`](ROADMAP.md) section 4.4
+budgets the tiers separately. No number means anything if one suite can run
+inside another.
 
 ```bash
 uv run pytest benchmarks/replays          # ~68 s, four recorded jobs
@@ -367,10 +402,12 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
 3.11 and 3.12 via `uv sync --frozen --all-extras`, then `uv run ruff check`,
 the generated/stale-file scan, internal links, `uv run python tools/build_skill.py`,
 `uv build --wheel`, and `uv run pytest` — with all optional dependencies
-so the cross-section tests run rather than skip. A second job runs the replay
-suite on pull requests only, on one Python version: a replay compares a run
-against a recording of the same pipeline, so running it twice measures the
-interpreter rather than the job.
+so the cross-section tests run rather than skip. That job runs on every push, with
+a three-minute step timeout on the gate so the budget is enforced and not merely
+recorded. A second job runs the heavy tier and then the replays, on pull requests
+only and on one Python version: a replay compares a run against a recording of
+the same pipeline, so running it twice measures the interpreter rather than the
+job.
 
 ### Release surfaces
 

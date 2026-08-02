@@ -3,10 +3,13 @@
 The property under test is that the receipt describes the mesh actually being
 shipped. One archived run's hand-written receipt described a mesh that was no
 longer the one on disk, which is the failure re-typing these numbers invites.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_receipts_heavy.py`, and runs before merge instead of on
+every push: `CliTest`. Same tests, moved rather than weakened; `conftest.py`
+carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 """
 
-import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -270,35 +273,6 @@ class ReadinessTest(unittest.TestCase):
             self.assertIn("`visual_accept`: <!-- CANNOT BE ANSWERED HERE", text)
             for verdict in ("`visual_accept`: yes", "`visual_accept`: no"):
                 self.assertNotIn(verdict, text)
-
-
-class CliTest(unittest.TestCase):
-    def test_the_command_emits_both_receipts(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-            stl = _seated_box(work / "box.stl", (30.0, 20.0, 10.0))
-            plan_path = work / "plan.json"
-            plan_path.write_text(json.dumps(plan.direct_template((30.0, 20.0, 10.0))),
-                                 encoding="utf-8")
-
-            completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit.commission", "--stl", str(stl),
-                 "--plan", str(plan_path), "--out", str(work), "--no-render",
-                 "--job-id", "t", "--updated-utc", _WHEN],
-                cwd=_SCRIPTS, capture_output=True, text=True, check=False,
-            )
-
-            self.assertEqual(0, completed.returncode, completed.stderr)
-            self.assertTrue((work / "artifact_manifest.json").is_file())
-            self.assertTrue((work / "candidate_readiness.md").is_file())
-
-    def test_the_timestamp_is_injected_so_a_rerun_is_byte_identical(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-            first = receipts.build_readiness(_run(work), job_id="t", updated_utc=_WHEN)
-            second = receipts.build_readiness(_run(work), job_id="t", updated_utc=_WHEN)
-
-            self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

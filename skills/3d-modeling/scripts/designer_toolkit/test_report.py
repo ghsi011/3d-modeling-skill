@@ -4,12 +4,14 @@ The property under test is what the draft REFUSES to fill in. Transcribing a
 measurement is safe; pre-filling a verdict, a visual observation or an upstream
 audit would turn the draft into the finding, which is the one thing a
 verification cannot borrow.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_report_heavy.py`, and runs before merge instead of on
+every push: `CliTest`. Same tests, moved rather than weakened; `conftest.py`
+carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 """
 
-import json
-import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -143,23 +145,6 @@ class DefectScaffoldTest(unittest.TestCase):
         table = self._defects([{"id": "watertight", "result": "PASS", "detail": "closed"}])
 
         self.assertEqual([], [ln for ln in table.splitlines() if ln.startswith("| D-")])
-
-
-class CliTest(unittest.TestCase):
-    def test_it_writes_a_draft_from_a_commission_file(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-            source = work / "commission.json"
-            source.write_text(json.dumps(_commission()), encoding="utf-8")
-            out = work / "verification_report.md"
-
-            completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit.report", "--commission", str(source),
-                 "--out", str(out), "--job-id", "t", "--updated-utc", _WHEN],
-                cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-            self.assertEqual(0, completed.returncode, completed.stderr)
-            self.assertIn("contract: verification-report", out.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

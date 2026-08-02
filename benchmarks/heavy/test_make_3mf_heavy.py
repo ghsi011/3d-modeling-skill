@@ -18,7 +18,8 @@ from pathlib import Path
 import pytest
 import trimesh
 
-SCRIPT = Path(__file__).resolve().parent / "make_3mf.py"
+SCRIPT = (Path(__file__).resolve().parents[2]
+          / "skills" / "3d-modeling" / "scripts" / "make_3mf.py")
 
 
 def _stl(path: Path, extents=(10, 10, 10), translate=(0, 0, 0)) -> trimesh.Trimesh:

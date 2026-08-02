@@ -4,10 +4,13 @@ An archived run spent turns discovering by trial which interpreter had a CAD
 kernel; another skipped a datum check after learning mid-run that its
 environment lacked the `section` extra. The property under test is that one call
 answers both, and that it distinguishes "cannot run" from "runs with less".
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_doctor_heavy.py`, and runs before merge instead of on
+every push: `CliTest`. Same tests, moved rather than weakened; `conftest.py`
+carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 """
 
-import json
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -48,24 +51,6 @@ class ReportTest(unittest.TestCase):
                            if not e["present"] and n not in doctor._REQUIRED]
         if optional_absent:
             self.assertTrue(data["can_run_commission"])
-
-
-class CliTest(unittest.TestCase):
-    def test_json_output_is_parseable(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, "-m", "designer_toolkit", "doctor", "--json"],
-            cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertIn("capabilities", json.loads(completed.stdout))
-
-    def test_the_text_form_names_the_backends_it_found(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, "-m", "designer_toolkit", "doctor"],
-            cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertIn("commission can run", completed.stdout)
 
 
 if __name__ == "__main__":

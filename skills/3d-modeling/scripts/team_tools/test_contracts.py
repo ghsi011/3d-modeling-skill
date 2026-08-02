@@ -11,13 +11,17 @@ paths, duplicate IDs, enums, and hashes/mutation are covered with hand-rolled
 property-based loops that walk every applicable field rather than one
 hardcoded case. Every assertion below checks that the failure message names
 the exact contract field/id/rule, not just that *something* failed.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_contracts_heavy.py`, and runs before merge instead of on
+every push: `CliTest`. Same tests, moved rather than weakened; `conftest.py`
+carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -1299,48 +1303,6 @@ class ProjectValidateReceiptTest(unittest.TestCase):
 # CLI subprocess tests (matches the invocation style in the implementation
 # plan: `uv run --project <skill> --frozen python -m team_tools.contracts <cmd> <path>`).
 # ---------------------------------------------------------------------------
-
-
-class CliTest(unittest.TestCase):
-    SCRIPTS_DIR = Path(__file__).resolve().parent.parent
-
-    def _run(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, "-m", "team_tools.contracts", *args],
-            cwd=str(self.SCRIPTS_DIR),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def test_help_works(self) -> None:
-        completed = self._run("--help")
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertIn("validate", completed.stdout)
-        self.assertIn("status", completed.stdout)
-
-    def test_validate_cli_end_to_end(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            helper = ProjectValidateReceiptTest()
-            helper._build_full_project(project_dir)
-            completed = self._run("validate", str(project_dir), "--timestamp", "FIXED")
-            self.assertEqual(0, completed.returncode, completed.stderr)
-            payload = json.loads(completed.stdout)
-            self.assertEqual("PASS", payload["results"]["overall"])
-            self.assertEqual("FIXED", payload["timestamp"])
-
-    def test_status_cli_exit_code_reflects_staleness(self) -> None:
-        with tempfile.TemporaryDirectory() as raw_dir:
-            project_dir = Path(raw_dir)
-            dimensions = clone(_DIMENSIONS)
-            dimensions["revision"] = 9
-            print_plan = clone(_PRINT_PLAN)
-            print_plan["dimensions_revision"] = 1
-            _write_project(project_dir, dimensions=dimensions, print_plan=print_plan)
-            completed = self._run("status", str(project_dir))
-            self.assertEqual(1, completed.returncode)
-            self.assertIn("STALE", completed.stdout)
 
 
 if __name__ == "__main__":

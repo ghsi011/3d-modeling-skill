@@ -6,6 +6,63 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — a commit gate that is one: 997 s to 43 s, with nothing dropped
+
+`ROADMAP.md` section 5.1 puts L0 on every commit and section 4.4 budgeted it at
+about five seconds. There was no L0 tier. There was one undifferentiated `pytest`
+run costing **997 s**, and a ladder that existed in a document and nowhere else.
+
+**Measured before deciding.** `--durations=0` plus a `sys.addaudithook` counting
+process creation per test, over all 1163 tests: **194 of them started a child
+interpreter and held 876 s of the 1020 s measured**, at about 1.6 s each, because
+a fresh interpreter that reaches `import trimesh` costs that on this machine. The
+other 969 cost 143 s together and nearly all are under 0.2 s. Not a long tail —
+one mechanism. The full profile is in `docs/baseline.md` and
+`benchmarks/heavy/README.md`.
+
+**Cut at that seam.** `benchmarks/heavy/` now holds the two command surfaces, the
+confined build boundary, the packaging and bundle smokes, the screening corpus
+and the B-rep reads: 343 tests moved, 820 stayed, and 820 + 343 is the 1163 that
+were there. Every moved class is byte-identical to the original apart from
+`from . import x` becoming `from pipeline import x` and three constants that used
+to be found through a `__file__` that has moved. Nothing was deleted and no
+assertion was weakened; the subtest counts add up the same way, 458 + 190 = 648.
+
+* L0 — `uv run pytest`, 838 tests, **43 s**, every push.
+* L0-heavy — `uv run pytest benchmarks/heavy`, 350 tests, ~16 min, pull requests.
+* L1 — `uv run pytest benchmarks/replays`, 55 tests, 68 s, pull requests.
+
+**Structural, and then measured.** Which tier collects a file is decided by where
+the file is, the same lever that made L1 real: `testpaths` names
+`skills/3d-modeling/scripts` and `tools`, and neither benchmark directory is in
+either. Whether a file *belongs* there is not left to that, because a decorator
+is one forgotten line away from a test silently leaving its tier: the root
+`conftest.py` fails any L0 test that starts a child process — `git` excepted, one
+name, measured at ~45 ms a call — or that exceeds five seconds, and names
+`benchmarks/heavy/` in the message. The default is the gating tier, so forgetting
+costs a red test rather than lost coverage. `tools/test_tiers.py` tests the
+decision as a function and `benchmarks/heavy/test_tiers_heavy.py` shows it going
+red in a real pytest session over a test that really starts an interpreter — and
+that proof costs an interpreter, so it lives where its own rule puts it.
+
+The guard found two things the profile had not: a class whose reparse-point
+fixtures shell out to make a junction, and `ShippedSelftestTest`, which was 1 s
+only because another class in the same file had already paid the build123d cold
+import and became 12 s once that class left. Both moved.
+
+**The five-second budget is amended to a minute**, in section 4.4, with the
+argument: collection alone is 2.5 s, the cheapest confined job run is 1.6 s, and
+the 838 tests that remain average 50 ms. Five was reachable only by protecting
+nothing. What the heavy half costs is not forgiven by moving it — 16 minutes is a
+real number and bringing it down is real work this does not do.
+
+**CI matches the triggers section 5.1 states.** `on: push` no longer filters to
+`main`, because a filter that only fires after merge gates nothing at the moment
+a gate could have stopped something. The gate step carries a three-minute
+timeout, so the budget is enforced rather than recorded. The heavy tier runs
+before the replays in the pull-request job; `tools/test_tiers.py` goes red if CI
+stops naming it, because a tier nobody runs reports all clear.
+
 ### Added — the three slices Release 3 shipped, replayed as jobs
 
 The harness below landed with two cases, a `CUSTOM` job and a `MODIFY` job, and

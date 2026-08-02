@@ -3,12 +3,15 @@
 Each case is a defect an archived run paid a full build/export/measure cycle to
 discover -- or, in the fillet case, four of them. The property under test is
 that the same finding now costs no geometry at all.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_static_heavy.py`, and runs before merge instead of on
+every push: `FailsBeforeTheBuildTest`. Same tests, moved rather than weakened;
+`conftest.py` carries the rule and `benchmarks/heavy/README.md` the measurement
+behind it.
 """
 
-import json
-import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -180,36 +183,6 @@ class SilenceTest(unittest.TestCase):
         checks = static.check({"wall_mm": float("nan"), "nozzle_mm": 0.4}, {})
 
         self.assertEqual("SKIPPED", checks[0].result)
-
-
-class FailsBeforeTheBuildTest(unittest.TestCase):
-    def test_a_static_failure_costs_no_export(self) -> None:
-        """The whole point. If the export still runs, nothing was saved."""
-        with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-            model = work / "model.py"
-            model.write_text(
-                "PARAMS = {'wall_mm': 0.6, 'nozzle_mm': 0.4}\n"
-                "def build():\n"
-                "    raise AssertionError('build() must not run after a static failure')\n",
-                encoding="utf-8")
-            plan_path = work / "plan.json"
-            plan_path.write_text(json.dumps(plan.direct_template((10.0, 10.0, 10.0))),
-                                 encoding="utf-8")
-            out = work / "out"
-
-            completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit.commission", "--model", str(model),
-                 "--plan", str(plan_path), "--out", str(out), "--no-render",
-                 "--job-id", "t", "--updated-utc", "2026-01-01T00:00:00Z"],
-                cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-            self.assertEqual(1, completed.returncode, completed.stderr)
-            self.assertIn("FAIL static-wall", completed.stderr)
-            self.assertFalse((out / "candidate_01.stl").exists(),
-                             "nothing should have been exported")
-            payload = json.loads((out / "commission.json").read_text(encoding="utf-8"))
-            self.assertEqual("static", payload["evidence"]["stage_reached"])
 
 
 if __name__ == "__main__":

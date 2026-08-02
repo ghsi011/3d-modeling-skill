@@ -8,8 +8,9 @@
     uv run python tools/replay.py --record modify-ball-flange-flat  # re-freeze
 
 `ROADMAP.md` section 5.1 defines three tiers and this repository shipped three
-releases with only two of them. L0 is `tools/test_diagnosis_l0.py` and the unit
-suite: fast component fixtures, run on every commit. L2 is blind live
+releases with only two of them. L0 is the unit suite under `testpaths`, run on
+every commit, minus the half that costs a child interpreter -- that half is
+`benchmarks/heavy/` and runs on this suite's trigger. L2 is blind live
 evaluation, deliberately manual. **L1 is a recorded engineering output replayed
 through the current system with no live AI call**, and nothing here replayed a
 *job*. `test_diagnosis_l0.py` replays five artifacts through `diagnose`, which is

@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 import trimesh
 
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = (Path(__file__).resolve().parents[2]
+               / "skills" / "3d-modeling" / "scripts")
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:

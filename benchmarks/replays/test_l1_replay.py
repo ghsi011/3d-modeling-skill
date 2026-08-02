@@ -6,16 +6,16 @@
 `pyproject.toml` sets `testpaths = ["skills/3d-modeling/scripts", "tools"]`, and
 this directory is in neither, so a bare `uv run pytest` does not collect this
 file. That is the separation, and it is structural rather than a marker somebody
-has to remember to apply: ROADMAP.md section 4.4 budgets the commit-gating L0
-suite at about five seconds and the L1 replay suite at about two minutes, and
-those two numbers stop meaning anything the moment one suite can silently run
-inside the other. The unit suite is 994 s wall clock on the reference machine
-today; hiding a job replay in it would make a slow suite slower and an L1 budget
-unmeasurable at the same time.
+has to remember to apply: ROADMAP.md section 4.4 budgets each suite, and those
+numbers stop meaning anything the moment one can silently run inside another.
 
-CI runs them as two steps for the same reason: `uv run pytest` on every push, and
-`uv run pytest benchmarks/replays` on pull requests, which is where section 5.1
-says L1 belongs.
+`benchmarks/heavy` is outside `testpaths` by the same mechanism and for the same
+reason one rung down -- the commit gate was 994 s when this file was written,
+because everything that starts a child interpreter was still in it. It is 43 s
+now. See `benchmarks/heavy/README.md`.
+
+CI runs L0 on every push and this suite on pull requests, which is where section
+5.1 says L1 belongs; the heavy tier shares this trigger.
 
 The guards on the harness itself are L0 and live in `tools/test_replay.py`, so
 the commit-gating suite still pays for the thing that decides whether a replay

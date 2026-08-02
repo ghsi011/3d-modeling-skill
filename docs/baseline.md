@@ -155,6 +155,50 @@ adversarial coverage rather than the mechanism: `test_isolation.py` goes from 16
 tests to 58, and the two ported grandchild attacks each wait eighteen seconds to
 prove nothing outlived the run.
 
+## Where the 997 s commit gate went, and the tier cut out of it
+
+Profiled at `79244ae` on the same machine, two ways over the same suite:
+`pytest --durations=0`, and a plugin holding a `sys.addaudithook` that counts
+`subprocess.Popen` per test. Run in five chunks, so the totals carry about 6 s of
+extra interpreter start against a single 997 s run.
+
+| | tests | wall |
+|---|---|---|
+| whole suite | 1163 | 1020 s |
+| tests that started at least one child process | 194 | 876 s |
+| tests that started none | 969 | 143 s |
+
+86% of the gate in 17% of the tests, and it is one mechanism rather than a long
+tail: a child interpreter that reaches `import trimesh` is ~1.6 s here, which is
+the modal cost of a test in that first row. Of the 969 that start nothing, all but
+about twenty are under 0.2 s.
+
+The five files holding the most:
+
+| file | wall | of which spawning |
+|---|---|---|
+| `designer_toolkit/test_audit.py` | 230 s | 230 s |
+| `pipeline/test_phase3.py` | 188 s | 160 s |
+| `tools/test_build_skill.py` | 121 s | 121 s |
+| `pipeline/test_pipeline.py` | 82 s | 58 s (the screening corpus, in-process) |
+| `pipeline/test_isolation.py` | 73 s | 73 s |
+
+Cut at that seam, with the handful of in-process heavies — the corpus at 19 s a
+test, the B-rep STEP reads, the preservation and determinism fixtures that run a
+job more than once — moved with them:
+
+| tier | tests | subtests | wall |
+|---|---|---|---|
+| L0, `uv run pytest` | 838 | 458 | **43 s** (42.8 / 43.0 / 43.7) |
+| L0-heavy, `uv run pytest benchmarks/heavy` | 350 | 190 | ~962 s |
+| L1, `uv run pytest benchmarks/replays` | 55 | 38 | 68 s |
+
+820 of the 1163 stayed and 343 moved; the other 25 are the tier guard's own
+tests, new here. `pytest --collect-only` is 2.5 s of the 43 s, and `import
+trimesh` alone is 1.8 s of that — which is the floor a commit gate on this
+dependency set cannot go below, and the reason section 4.4's five-second budget
+is amended to a minute rather than met.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

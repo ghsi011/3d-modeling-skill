@@ -4,10 +4,13 @@ This is the one acceptance check a verifier cannot delegate to the gate -- every
 shared tool downstream loads the normalized mesh, so an export defect only shows
 on the raw side. It existed only as a snippet each verifier wrote by hand, in
 the one step whose whole point is that it must not be re-authored.
+
+The half of this file the commit gate will not carry is in
+`benchmarks/heavy/test_integrity_heavy.py`, and runs before merge instead of on
+every push: `CliTest`. Same tests, moved rather than weakened; `conftest.py`
+carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 """
 
-import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -56,29 +59,6 @@ class ReportTest(unittest.TestCase):
             data = integrity.report(_stl(Path(raw) / "box.stl"))
 
             self.assertEqual(64, len(data["normalized_sha256"]))
-
-
-class CliTest(unittest.TestCase):
-    def test_it_emits_parseable_json(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-            completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit", "integrity",
-                 str(_stl(work / "box.stl"))],
-                cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-            self.assertEqual(0, completed.returncode, completed.stderr)
-            self.assertIn("raw_integrity", json.loads(completed.stdout))
-
-    def test_a_missing_file_is_named_not_tracebacked(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            completed = subprocess.run(
-                [sys.executable, "-m", "designer_toolkit", "integrity",
-                 str(Path(raw) / "absent.stl")],
-                cwd=_SCRIPTS, capture_output=True, text=True, check=False)
-
-            self.assertEqual(2, completed.returncode)
-            self.assertIn("absent.stl", completed.stderr)
 
 
 if __name__ == "__main__":
