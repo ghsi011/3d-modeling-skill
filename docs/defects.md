@@ -291,32 +291,90 @@ qualifier.
 asserted to report both the failure and the lane's unavailability rather than one
 of them.
 
-## D22 — the vent mount's cone faces are still untessellatable
+## D22 — OCC cannot mesh five legal cone faces in the vent mount
 
 **Where.** `benchmarks/fixtures/vent-ball-combine/public/sources/vent_mount.step`,
 and therefore `ROADMAP.md` Release 1's authentic exercise.
 
-**What is wrong.** Not a code defect — a source-artifact one, recorded here
-because D13's closure does not close it and a reader would otherwise assume it
-did. `preservation.audit` and `diagnose` can both read a STEP now, and this
-particular STEP still has six `GeomAbs_Cone` faces that OCC produces no
-triangulation for at any deflection tried (0.001 to 0.5 mm linear, 0.1 to 0.5 rad
-angular, relative and absolute). `diagnose` reports it `REPAIR_REQUIRED` and names
-the faces; the audit refuses and names them.
+**What is wrong.** A bounded limitation in our mesher on legal geometry — not,
+as this entry previously said, a broken source. The distinction decides whether
+the honest statement is about the user's data or about our toolchain.
+`BRepMesh_IncrementalMesh` returns `IsDone() = True` with
+`GetStatusFlags() = 4` (`IMeshData_Failure`) on five cone faces of the
+hinge-pivot bore.
 
-**Evidence.** `tools/test_diagnosis_l0.py::L0UntessellatableStep`, which runs
-against the committed file. Also measured against `cascadio`, the alternative
-importer: it produces triangles for the file, in 324 disconnected bodies with
-8,284 boundary edges, and in **metres** — so it does not close this either.
+**Evidence that the faces are legal.** Every structural hypothesis was measured
+and refuted: `BRepCheck_Analyzer(face).IsValid()` is True for all of them;
+`ShapeAnalysis_Wire` reports Order, Connected, SmallEdges, Degenerated,
+SelfIntersection, Closed and Gaps3d clean, MaxDistance3d 8.4e-08 mm; outer-wire
+orientation follows the file's own convention; every bounding edge lies within
+2.918e-07 mm of its cone, inside the edges' declared tolerances; every edge has
+a pcurve and none is degenerate.
 
-**What it can cause.** The repository's only `PHYSICALLY_PROVEN` fixture cannot
-be preserved against until this file is repaired or replaced. That is now a
-stated limitation with a named cause rather than a clean verdict followed by a
-crash, but Release 1's exercise still cannot use this source as its base.
+Three things settle it. `BRepBuilderAPI_MakeFace` on the **same**
+`Geom_ConicalSurface` over the **same** UV range meshes perfectly, 502 nodes —
+so the surface is sound and the failure is BRepMesh's handling of this
+seam-closed boundary representation. Faces 96 and 106 are geometric twins of two
+that fail — same surface parameters, same area to six decimals, same 5-edge
+1-seam wire — and they mesh. And **gmsh triangulates all six**, 204 triangles
+each. Identical data on either side of a cliff is a numerical robustness
+failure, not a structural defect in the file.
 
-**What would close it.** A repair path (`ROADMAP.md` section 2 already records
-that there is none), or a re-export of the source from the CAD it came from. Both
-are outside a defect fix.
+The STEP contains **zero `PCURVE` and zero `SEAM_CURVE` entities** — every
+pcurve and seam is manufactured by OCC's own reader from an ordinary AP214
+`CONICAL_SURFACE` plus an `EDGE_LOOP`. OCC 7.9.3 is the newest available, so a
+version bump is not a remedy.
+
+**Corrections to this entry's earlier text.** It is **five** faces that fail at
+every deflection, not six: face 94 triangulates at angular deflection ≥ 0.12 rad
+and fails at ≤ 0.10. And the cascadio figures quoted here — 324 bodies, 8,284
+boundary edges — do not reproduce, because both depend on the vertex-merge
+tolerance and the trimesh version and this entry stated neither. Re-measured,
+cascadio returns 658 raw bodies, 10 after a 1e-5 mm merge, still no cone
+triangles, in **metres**.
+
+**The file is separately unclean, in other faces.** Face 101, a plane of
+1.75e-14 mm², is the only one of 329 that `BRepCheck_Analyzer` calls invalid
+(`BRepCheck_UnorientableShape`, wire `BRepCheck_SelfIntersectingWire`), and it is
+why the whole-shape check fails. gmsh independently refuses three surfaces — a
+BSpline patch and two planes 0.0066 mm and 0.0028 mm thick. Those slivers are
+real defects. They are not the five cones.
+
+**What it can cause.** Preservation cannot be measured against the repository's
+only `PHYSICALLY_PROVEN` source. Release 1's exercise completes with that row
+`UNAVAILABLE` / `PRESERVATION_UNMEASURABLE`, which is deterministic and bound to
+the same hashes as a measured row — so the gate's nine proofs are unaffected —
+but no claim may be made that the instrument was exercised on the proven
+artifact.
+
+**What would close it.** A bounded, disclosed repair, prototyped and measured:
+`ShapeUpgrade_ShapeDivideClosed` then `ShapeFix_Shape` makes all 345 faces
+tessellate by splitting 16 closed faces at their seams. Topology only — 74
+distinct analytic surfaces before and after, **zero added and zero removed at
+`repr()` precision**, every cone and cylinder axis, radius and semi-angle
+bit-identical, maximum on-face deviation **4.02e-14 mm**, the 50 × 60 phone-rest
+datum plane identical to six decimals. That is `ROADMAP.md` Release 6's *Bounded
+repair* slice and its first fixture, not a defect fix, and its result must be a
+separate artifact that never overwrites the supplied file.
 
 **Fixture that must fail first.** `L0UntessellatableStep`, inverted: the same
 file asserted to tessellate completely.
+
+## D23 — the function built to prevent a false clean verdict returns one
+
+**Where.** `mesh_io.tessellate_brep`, and `validate_brep_tessellation` behind it.
+
+**What is wrong.** It returns `complete=True` for input whose faces it cannot
+enumerate. A shape it cannot walk produces no failures, and no failures reads as
+success.
+
+**Evidence.** Hit twice by accident while investigating D22:
+`build123d.Shape.cast` returns `None` for a `ShapeFix_Shape` result, and a
+zero-volume shape reported `complete=True` with 33,683 triangles.
+
+**What it can cause.** This is the exact function added in `a792b67` to stop
+`diagnose` calling an untessellatable STEP clean — a false clean in the
+false-clean detector.
+
+**Fixture that must fail first.** A shape whose faces cannot be enumerated,
+asserted to report unknown rather than complete.
