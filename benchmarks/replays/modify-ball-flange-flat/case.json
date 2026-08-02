@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case_id": "modify-ball-flange-flat",
   "use_case": "MODIFY",
   "source_mode": "MODIFY",
@@ -19,6 +19,7 @@
     "safety",
     "verification"
   ],
+  "concludes": "BUILT",
   "max_invocations": 4,
   "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
   "provenance": "REAL_SOURCE_ARTIFACT_AND_REQUEST_AUTHORED_EDIT",

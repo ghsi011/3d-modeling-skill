@@ -9,7 +9,7 @@ file. That is the separation, and it is structural rather than a marker somebody
 has to remember to apply: ROADMAP.md section 4.4 budgets the commit-gating L0
 suite at about five seconds and the L1 replay suite at about two minutes, and
 those two numbers stop meaning anything the moment one suite can silently run
-inside the other. The unit suite is 992 s wall clock on the reference machine
+inside the other. The unit suite is 994 s wall clock on the reference machine
 today; hiding a job replay in it would make a slow suite slower and an L1 budget
 unmeasurable at the same time.
 
@@ -94,18 +94,39 @@ class _CaseChecks:
         for row in RP.compare(self.recorded, self.observed):
             if row.severity == RP.ADVISORY:
                 print(f"  advisory: {row}")
-        self.assertIn("reasons", self.recorded,
-                      "the recording keeps the prose even though nothing "
-                      "fails on it, because a maintainer reading expected.json "
-                      "should be able to see what the run said")
+        blocks = (list((self.recorded.get("formulations") or {}).values())
+                  or [self.recorded])
+        for block in blocks:
+            self.assertIn("reasons", block,
+                          "the recording keeps the prose even though nothing "
+                          "fails on it, because a maintainer reading "
+                          "expected.json should be able to see what the run said")
 
     # -- zero live dispatches ---------------------------------------------
     def test_every_review_was_answered_from_the_recording(self) -> None:
         self.assertEqual(list(self.case.reviews), self.play.reviews_answered)
+        # Project-relative and walked to the bottom: two formulations each
+        # answering one `verification` review are two answers, and under the bare
+        # filename they were one.
         self.assertEqual(sorted(self.play.responses_written),
-                         sorted(path.name for path in
-                                (self.project / "reviews").glob("*_response.json"))
-                         if (self.project / "reviews").is_dir() else [])
+                         sorted(path.relative_to(self.project).as_posix()
+                                for path in self.project.rglob("*_response.json")
+                                if path.parent.name == "reviews"))
+
+    def test_the_case_concluded_the_way_it_says_it_does(self) -> None:
+        """`concludes` is a declaration and this is what makes it one.
+
+        A case that stopped building would otherwise go quiet rather than red:
+        every assertion about a receipt it no longer writes is an assertion about
+        a file that is absent, and absence compares equal to absence.
+        """
+        for key, directory in self.play.work_dirs.items():
+            with self.subTest(formulation=key):
+                built = (directory / "final_status.json").is_file()
+                self.assertEqual(self.case.concludes == "BUILT", built,
+                                 f"case.json says this job {self.case.concludes} "
+                                 f"and {directory / 'final_status.json'} "
+                                 f"{'exists' if built else 'does not exist'}")
 
     def test_nothing_is_still_waiting_for_a_judgement_nobody_recorded(self) -> None:
         """A replay that ends paused is a replay that stopped exercising the job.
@@ -114,14 +135,25 @@ class _CaseChecks:
         pipeline is asking a designer to author geometry -- which is the live
         dispatch itself. Either one surviving to the end means this case is
         incomplete, whatever the receipts happen to say.
+
+        Every formulation's own instruction, not the project root's: on a
+        branched job the root's is the ancestor's, and a branch left waiting for
+        a review nobody answered would be invisible from there.
         """
-        pending = self.project / "next_action.json"
-        if not pending.is_file():
-            return
-        kind = json.loads(pending.read_text(encoding="utf-8")).get("kind")
-        self.assertNotIn(kind, ("REVIEW", "AGENT_COMMISSION"), kind)
+        for key, directory in self.play.work_dirs.items():
+            pending = directory / "next_action.json"
+            if not pending.is_file():
+                continue
+            with self.subTest(formulation=key):
+                kind = json.loads(pending.read_text(encoding="utf-8")).get("kind")
+                self.assertNotIn(kind, ("REVIEW", "AGENT_COMMISSION"), kind)
 
     # -- the hashes that are the property ---------------------------------
+    #
+    # Every one is over each formulation's *own* directory. On an unbranched job
+    # that is the project root and nothing about them changed; on a branched one
+    # reading the root would be reading whichever sibling happened to write
+    # there, which is the failure the work directory exists to remove.
     def test_the_plan_the_reviewer_saw_is_the_plan_that_ran(self) -> None:
         """An equality between two values from this run, never a pinned literal.
 
@@ -129,25 +161,30 @@ class _CaseChecks:
         4 -- written after the review it should have bound -- so a job whose lane
         cap or builder moved underneath a stored answer kept the answer.
         """
-        final = json.loads((self.project / "final_status.json")
-                           .read_text(encoding="utf-8"))
-        plan_digest = final.get("execution_plan_sha256")
-        self.assertTrue(plan_digest)
-        for kind in self.case.reviews:
-            with self.subTest(review=kind):
-                report = json.loads(
-                    (self.project / self._report_name(kind)).read_text(encoding="utf-8"))
-                self.assertEqual(plan_digest,
-                                 report["review_envelope"]["execution_plan_sha256"])
+        for formulation, work in self._built():
+            final = json.loads((work / "final_status.json")
+                               .read_text(encoding="utf-8"))
+            plan_digest = final.get("execution_plan_sha256")
+            self.assertTrue(plan_digest)
+            for kind in formulation.reviews:
+                with self.subTest(formulation=formulation.key, review=kind):
+                    report = json.loads((work / self._report_name(kind))
+                                        .read_text(encoding="utf-8"))
+                    self.assertEqual(
+                        plan_digest,
+                        report["review_envelope"]["execution_plan_sha256"])
 
     def test_the_receipt_describes_the_contract_it_was_judged_against(self) -> None:
-        final = json.loads((self.project / "final_status.json")
-                           .read_text(encoding="utf-8"))
-        manifest = json.loads((self.project / "artifact_manifest.json")
-                              .read_text(encoding="utf-8"))
-        self.assertEqual(manifest["contract_sha256"],
-                         final["artifact_hashes"]["contract"])
-        self.assertEqual(manifest["stl_sha256"], final["artifact_hashes"]["stl"])
+        for formulation, work in self._built():
+            with self.subTest(formulation=formulation.key):
+                final = json.loads((work / "final_status.json")
+                                   .read_text(encoding="utf-8"))
+                manifest = json.loads((work / "artifact_manifest.json")
+                                      .read_text(encoding="utf-8"))
+                self.assertEqual(manifest["contract_sha256"],
+                                 final["artifact_hashes"]["contract"])
+                self.assertEqual(manifest["stl_sha256"],
+                                 final["artifact_hashes"]["stl"])
 
     def test_each_answer_is_bound_to_the_question_it_was_asked(self) -> None:
         """What keeps re-binding honest.
@@ -157,17 +194,18 @@ class _CaseChecks:
         the one it had just issued, that is the authority failure the envelope
         exists to prevent, and it would look like a passing replay without this.
         """
-        for kind in self.case.reviews:
-            with self.subTest(review=kind):
-                packet = json.loads(
-                    (self.project / "reviews" / f"{kind}_packet.json")
-                    .read_text(encoding="utf-8"))
-                report = json.loads(
-                    (self.project / self._report_name(kind)).read_text(encoding="utf-8"))
-                self.assertNotIn("error", report,
-                                 "the recorded judgement was refused")
-                self.assertEqual(packet["review_envelope"],
-                                 report["review_envelope"])
+        for formulation, work in self._built():
+            for kind in formulation.reviews:
+                with self.subTest(formulation=formulation.key, review=kind):
+                    packet = json.loads(
+                        (work / "reviews" / f"{kind}_packet.json")
+                        .read_text(encoding="utf-8"))
+                    report = json.loads((work / self._report_name(kind))
+                                        .read_text(encoding="utf-8"))
+                    self.assertNotIn("error", report,
+                                     "the recorded judgement was refused")
+                    self.assertEqual(packet["review_envelope"],
+                                     report["review_envelope"])
 
     def test_two_replays_of_one_case_produce_the_same_geometry_and_plan(self) -> None:
         """Determinism, and the one hash a literal could never test.
@@ -180,9 +218,27 @@ class _CaseChecks:
         """
         with tempfile.TemporaryDirectory() as raw:
             second = RP.materialise(self.case, Path(raw) / "project")
-            RP.play(self.case, second)
-            self.assertEqual(RP.determinism_marks(self.project),
-                             RP.determinism_marks(second))
+            replayed = RP.play(self.case, second)
+            self.assertEqual(sorted(self.play.work_dirs),
+                             sorted(replayed.work_dirs))
+            self.assertEqual(
+                {key: RP.determinism_marks(work)
+                 for key, work in self.play.work_dirs.items()},
+                {key: RP.determinism_marks(work)
+                 for key, work in replayed.work_dirs.items()})
+
+    def _built(self):
+        """Each formulation and its work directory, for a case that builds.
+
+        Empty for a case declared `REFUSED`, and that is not a silent skip:
+        `test_the_case_concluded_the_way_it_says_it_does` binds the declaration
+        against what is on disk, so a job that stopped producing a final status
+        goes red there rather than going quiet here.
+        """
+        if self.case.concludes != "BUILT":
+            return []
+        return [(formulation, self.play.work_dirs[formulation.key])
+                for formulation in self.case.formulations]
 
     @staticmethod
     def _report_name(kind: str) -> str:
@@ -298,6 +354,326 @@ class ModifyBallFlangeFlatTest(_CaseChecks, unittest.TestCase):
                     set(digests))
 
 
+class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
+    """Three formulations of one job: the fork Release 3 shipped, on a real request.
+
+    The shared root is the sleeve as drawn; `plate-seated` trusts the base-plate
+    estimate and spends the whole envelope on it; `as-drawn` carries the ancestor
+    forward unchanged as the fallback. Everything asserted here failed before
+    Release 3's slice A, and for different reasons -- see
+    `pipeline/test_alternatives.py`'s docstring, which lists them. What is new
+    at this tier is that they are asserted over a whole job driven through the
+    command surface a user has, rather than over a project a test constructed.
+    """
+
+    CASE_ID = "branch-knob-seat-fallback"
+
+    def _read(self, key: str, name: str) -> dict:
+        return json.loads((self.play.work_dirs[key] / name)
+                          .read_text(encoding="utf-8"))
+
+    def test_neither_sibling_cut_an_acceptance_revision_from_the_other(self) -> None:
+        """The collision that ran in a loop, on a job rather than a fixture.
+
+        With one shared `acceptance_contract.json` the second formulation's
+        freeze read the first's as `previous`, bumped the revision, and the
+        invalidation deleted the first's final status, commissioning report,
+        artifact manifest and review reports. Re-running the first did it back.
+        Each of these freezes revision 1 and supersedes nothing.
+        """
+        for key in self.play.work_dirs:
+            with self.subTest(formulation=key):
+                history = self._read(key, "acceptance_history.json")
+                self.assertEqual(1, len(history["revisions"]))
+                entry = history["revisions"][0]
+                self.assertEqual(1, entry["revision"])
+                self.assertIsNone(entry["supersedes"],
+                                  "a branch is not a correction of its sibling")
+                # Absent at the shared root rather than null, the way every
+                # optional branching key in this pipeline is absent until it
+                # means something.
+                self.assertEqual(None if key == RP.ROOT_ALTERNATIVE else key,
+                                 entry.get("alternative_id"))
+
+    def test_the_shared_half_stays_shared_and_nothing_writes_over_it(self) -> None:
+        """One `project.json` for the whole fork, and one brief.
+
+        The project file cannot move: it is where the requirements, the printer
+        and the source declarations live for every formulation at once. A branch
+        that stamped its own outcome into it would make the job read as whatever
+        finished last, in the one file that has to be shared.
+        """
+        self.assertEqual(
+            [self.project / "project.json"],
+            sorted(self.project.rglob("project.json")))
+        self.assertEqual([self.project / "brief.md"],
+                         sorted(self.project.rglob("brief.md")))
+        payload = json.loads((self.project / "project.json")
+                             .read_text(encoding="utf-8"))
+        self.assertNotIn("status", payload)
+        self.assertNotIn("bindings", payload)
+        self.assertEqual(
+            [("plate-seated", []), ("as-drawn", [])],
+            [(row["alternative_id"], row["parents"])
+             for row in payload["alternatives"]],
+            "both are branched from the shared root, which is what `parents: []` "
+            "records")
+
+    def test_each_formulation_kept_its_own_artifacts(self) -> None:
+        """`candidate.stl` is a fixed literal, so one directory means one part."""
+        seated = self.play.work_dirs["plate-seated"] / "candidate.stl"
+        root = self.play.work_dirs[RP.ROOT_ALTERNATIVE] / "candidate.stl"
+        self.assertNotEqual(RP.digest_of(root), RP.digest_of(seated),
+                            "the two concepts are materially different solids")
+        self.assertNotEqual(
+            self._read(RP.ROOT_ALTERNATIVE, "final_status.json")["artifact_hashes"],
+            self._read("plate-seated", "final_status.json")["artifact_hashes"])
+
+    def test_the_fallback_is_the_ancestor_carried_forward_byte_for_byte(self) -> None:
+        """Why this case can say anything about the false pass at all.
+
+        A branch that differed from its parent would be refused on the contract
+        hash alone, which proves nothing about the instant that matters: the one
+        where the two are still the same part and the only thing telling their
+        reviews apart is which formulation each was taken on.
+        """
+        root = self.play.work_dirs[RP.ROOT_ALTERNATIVE]
+        fallback = self.play.work_dirs["as-drawn"]
+        self.assertEqual(RP.digest_of(root / "candidate.stl"),
+                         RP.digest_of(fallback / "candidate.stl"))
+        self.assertEqual(
+            self._read(RP.ROOT_ALTERNATIVE, "acceptance_contract.json")["contract_sha256"],
+            self._read("as-drawn", "acceptance_contract.json")["contract_sha256"],
+            "two formulations that require identical geometry are two ways of "
+            "getting there, not two parts, so `alternative_id` deliberately does "
+            "not join the contract hash")
+
+    def test_the_whole_difference_between_the_two_reviews_is_the_formulation(self) -> None:
+        """The protection, and the mutation that removes it, on real envelopes.
+
+        Everything the reviewer of the fallback was shown equals what the
+        reviewer of the root was shown -- the contract, the artifacts, the
+        witnesses, the evidence, the packet itself. Two fields differ, and both
+        are the same slice's doing: `alternative_id`, and the plan digest, which
+        differs *because the plan carries the alternative id and nothing else*.
+
+        Strip that one field from both plans and the digests are equal; strip it
+        from both envelopes too and the two are the same document, so the PASS
+        written for one is `is_bound` for the other. That is the false pass the
+        authority gate forbids, reachable with nobody doing anything wrong, and
+        it is what protocol 4 exists for.
+        """
+        from pipeline import schemas as S
+
+        root, fallback = (self.play.work_dirs[RP.ROOT_ALTERNATIVE],
+                          self.play.work_dirs["as-drawn"])
+        here, there = (json.loads((where / "reviews" /
+                                   "verification_packet.json")
+                                  .read_text(encoding="utf-8"))["review_envelope"]
+                       for where in (root, fallback))
+        self.assertEqual({"alternative_id", "execution_plan_sha256"},
+                         {key for key in set(here) | set(there)
+                          if here.get(key) != there.get(key)})
+        self.assertIsNone(here.get("alternative_id"),
+                          "a review taken at the shared root omits the key "
+                          "rather than writing null, so an unbranched job's "
+                          "digests do not move")
+        self.assertEqual("as-drawn", there["alternative_id"])
+
+        plans = [json.loads((where / "execution_plan.json")
+                            .read_text(encoding="utf-8"))
+                 for where in (root, fallback)]
+        self.assertEqual({"alternative_id"},
+                         {key for key in set(plans[0]) | set(plans[1])
+                          if plans[0].get(key) != plans[1].get(key)})
+        for plan in plans:
+            plan.pop("alternative_id", None)
+        self.assertEqual(S.payload_hash(plans[0]), S.payload_hash(plans[1]),
+                         "the plan cannot tell two formulations apart on its own")
+
+        without = [{key: value for key, value in envelope.items()
+                    if key not in ("alternative_id", "execution_plan_sha256")}
+                   for envelope in (here, there)]
+        self.assertEqual(without[0], without[1],
+                         "with the id taken out -- of the envelope and of the "
+                         "plan it binds -- the two reviews are one review, and "
+                         "the first answer settles the second")
+
+    def test_the_revised_formulation_can_no_longer_claim_what_it_concluded(self) -> None:
+        """Slice B, on a job: a verdict read after the evidence under it moved.
+
+        The fallback was picked back up and its model edited after the run that
+        verified it. Nothing was re-adjudicated and nothing was deleted --
+        `final_status.json` still records `VERIFIED`, because that is what that
+        run concluded -- but what a reader is allowed to repeat is derived from
+        the bindings, and those no longer hold. Its two siblings are untouched,
+        which is the scoping half: staleness follows the binding that broke.
+        """
+        derived = self.play.derived
+        self.assertEqual("STALE", derived["as-drawn"]["derived_status"])
+        self.assertEqual("VERIFIED", derived["as-drawn"]["stored_status"])
+        self.assertEqual(
+            ["artifact_manifest.json", "commission_report.json",
+             "final_status.json", "verification_report.json"],
+            derived["as-drawn"]["stale"],
+            "the receipts that stopped binding, and only those: the frozen "
+            "acceptance contract and the model contract still describe the same "
+            "contract and are still true")
+        for key in (RP.ROOT_ALTERNATIVE, "plate-seated"):
+            with self.subTest(formulation=key):
+                self.assertEqual("VERIFIED", derived[key]["derived_status"])
+                self.assertEqual([], derived[key]["stale"])
+
+        stored = self._read("as-drawn", "final_status.json")
+        self.assertEqual("VERIFIED", stored["final_status"],
+                         "the record of what that run concluded is not rewritten")
+        self.assertNotEqual(
+            stored["artifact_hashes"]["source"],
+            RP.digest_of(self.play.work_dirs["as-drawn"] / "model.py"),
+            "and this is why: the model it was issued against is not the model "
+            "on disk")
+
+
+class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
+    """The false pass, tried for real, on the pair that makes it reachable.
+
+    `TheBindingStillBitesTest` moves an evidence digest, which is a stale answer.
+    This one moves nothing: it takes the envelope the shared root's review was
+    issued under -- a live, current, correctly-formed envelope for a part with
+    the same contract hash, the same STL digest and the same source digest -- and
+    offers it as the answer to the fallback's review. Before protocol 4 that was
+    accepted, and both formulations passed on one judgement.
+
+    What is asserted is the whole consequence rather than an exception: the run
+    stopped, said why, left no final status behind, and the layered comparison
+    against the recording went red.
+    """
+
+    CASE_ID = "branch-knob-seat-fallback"
+
+    def test_a_pass_written_for_the_ancestor_does_not_settle_the_fallback(self) -> None:
+        case = RP.load(self.CASE_ID)
+        with tempfile.TemporaryDirectory() as raw:
+            try:
+                project = RP.materialise(case, Path(raw) / "project")
+            except FX.FixtureUnavailable as exc:
+                self.skipTest(str(exc))
+
+            def next_door(kind: str, packet: dict, formulation) -> dict:
+                if formulation.alternative_id != "as-drawn":
+                    return packet["review_envelope"]
+                return json.loads(
+                    (project / "reviews" / f"{kind}_packet.json")
+                    .read_text(encoding="utf-8"))["review_envelope"]
+
+            run = RP.play(case, project, envelope_for=next_door)
+
+            self.assertEqual(
+                [0, RP.NEEDS_ACTION, 0,
+                 0, 0, RP.NEEDS_ACTION, 0,
+                 0, 0, RP.NEEDS_ACTION, 1],
+                run.exit_codes,
+                "the first two formulations answer their own reviews and "
+                "finish; the third is handed the answer written next door and "
+                "stops")
+
+            fallback = project / "alternatives" / "as-drawn"
+            report = json.loads((fallback / "verification_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertIn("ReviewError", report["error"])
+            self.assertIn("review envelope mismatch", report["error"])
+            self.assertNotIn("decision", report,
+                             "a refused answer must not leave a decision behind")
+            self.assertFalse((fallback / "final_status.json").is_file())
+            for sibling in (project, project / "alternatives" / "plate-seated"):
+                self.assertTrue((sibling / "final_status.json").is_file(),
+                                "the refusal is the fallback's alone")
+
+            failures = RP.binding(
+                RP.compare(RP.expected(self.CASE_ID), RP.observe(case, run)))
+            self.assertTrue(failures,
+                            "an answer bound to a sibling has to make the replay "
+                            "go red. If this passes, the comparison is not "
+                            "reading the thing it claims to read.")
+
+
+class ModifyBallScopeRefusedTest(_CaseChecks, unittest.TestCase):
+    """A real job refused before it builds, and the findings it leaves behind.
+
+    Nothing else at this tier covers the refusal path, which is half of the
+    functional gate -- "failures are actionable and controlled" -- and it is the
+    only path on which Release 3's slice C produces anything: a structured
+    finding exists because a validator found something wrong.
+    """
+
+    CASE_ID = "modify-ball-scope-refused"
+
+    def _instruction(self) -> dict:
+        return json.loads((self.project / "next_action.json")
+                          .read_text(encoding="utf-8"))
+
+    def test_the_findings_name_the_position_in_the_file_and_the_rule(self) -> None:
+        """Slice C: a `code` to match on and a `where` a caller can go and edit.
+
+        `edit_scopes[0].region_box.y` rather than "edit_scope 'ball-17mm'": the
+        sentence names the scope by id and the field path names the position,
+        and only one of the two survives a list somebody reorders. The axis is
+        part of the path because a box can be empty on two axes at once and
+        `CODE@where` has to name one finding -- an id two findings share is one
+        nobody can key on.
+        """
+        from pipeline import findings as F
+
+        instruction = self._instruction()
+        self.assertEqual("FIX_PROJECT", instruction["kind"])
+        self.assertEqual(
+            [("SCHEMA_RANGE", "edit_scopes[0].region_box.y"),
+             ("REF_UNDECLARED", "edit_scopes[0].interface_ids[0]")],
+            [(row["code"], row["where"]) for row in instruction["findings"]])
+        for row in instruction["findings"]:
+            with self.subTest(finding=row["id"]):
+                self.assertEqual("error", row["severity"])
+                self.assertEqual(f"{row['code']}@{row['where']}", row["id"])
+                self.assertIn(row["code"], F.CODES)
+                self.assertTrue(
+                    any(row["code"].startswith(group) for group in F.CODE_GROUPS),
+                    "the prefix names what has to change to clear it")
+
+    def test_the_sentence_and_the_structure_are_one_validation_and_not_two(self) -> None:
+        """`unresolved` and `findings` come from one `validate()` call.
+
+        Two calls would be two answers to one question and the cheaper of the
+        two ways to make them disagree; the English stays a list of sentences
+        because four writers fill that field and a reader cannot parse a field
+        whose element type depends on which of them wrote it.
+        """
+        instruction = self._instruction()
+        self.assertEqual([row["message"] for row in instruction["findings"]],
+                         instruction["unresolved"])
+
+    def test_the_refusal_reached_neither_the_freeze_nor_the_build(self) -> None:
+        """No dispatch, and no confined build either -- by never getting there.
+
+        A job refused at validation costs a second and produces no candidate, so
+        "zero live dispatches" is true of this case for a stronger reason than
+        the harness's accounting: there was nothing to dispatch about.
+        """
+        for name in ("acceptance_contract.json", "candidate.stl",
+                     "final_status.json", "execution_plan.json", "timings.json"):
+            with self.subTest(receipt=name):
+                self.assertFalse((self.project / name).exists())
+        self.assertFalse((self.project / "reviews").exists())
+        self.assertTrue((self.project / "ball_male_17mm.stl").is_file(),
+                        "the supplied artifact is still there to be modified "
+                        "once the declaration is corrected")
+
+    def test_the_supplied_artifact_is_the_one_the_register_records(self) -> None:
+        declared = FX.public("vent-ball-combine").sources[1]
+        self.assertEqual("ball_male_17mm.stl", declared.name)
+        self.assertEqual(declared.sha256,
+                         RP.digest_of(self.project / "ball_male_17mm.stl"))
+
+
 class TheBindingStillBitesTest(unittest.TestCase):
     """The adversarial half, and the reason re-binding is not a hole.
 
@@ -325,7 +701,7 @@ class TheBindingStillBitesTest(unittest.TestCase):
             except FX.FixtureUnavailable as exc:
                 self.skipTest(str(exc))
 
-            def wrong(kind: str, packet: dict) -> dict:
+            def wrong(kind: str, packet: dict, formulation) -> dict:
                 # Every field the run issued, with one digest replaced. Not a
                 # fabricated envelope: an envelope for a job whose preservation
                 # evidence moved, which is the case the binding exists for.

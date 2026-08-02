@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "case_id": "modify-ball-scope-refused",
+  "use_case": "MODIFY",
+  "source_mode": "MODIFY",
+  "consequence": "CONSEQUENTIAL",
+  "request": "benchmarks/fixtures/vent-ball-combine/public/request.md",
+  "sources": [
+    {
+      "fixture_id": "vent-ball-combine",
+      "index": 1,
+      "as": "ball_male_17mm.stl"
+    }
+  ],
+  "substitutions": {},
+  "reviews": [],
+  "concludes": "REFUSED",
+  "max_invocations": 2,
+  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "provenance": "REAL_SOURCE_ARTIFACT_AND_REQUEST_AUTHORED_MISDECLARATION",
+  "notes": "The same real job as `modify-ball-flange-flat` -- the same vendored request and the same `ball_male_17mm.stl`, resolved through `tools/fixtures.py` so its size and SHA-256 are verified before the job sees it -- with the edit scope as somebody first wrote it rather than as it ended up. Two mistakes, both of the kind a person actually makes: the region box's two y values are transposed, so the box is empty on y and 'outside the edit region' is the whole part; and the scope names the interface `flange-key`, which the project declares nowhere.\n\nWhat this case exercises is the refusal, which nothing else here covers. `design-tool route` and `design-tool run` both stop at 2, write no acceptance contract, execute no confined build and produce no candidate at all -- so the whole job is deterministic and costs about a second -- and what they leave behind is `next_action.json` with kind FIX_PROJECT carrying Release 3 slice C's structured findings: a `code` a caller matches on, a `severity`, an `id` two runs agree on, and a `where` that is a position in the file (`edit_scopes[0].region_box.y`, `edit_scopes[0].interface_ids[0]`) rather than the noun the English sentence uses. Both codes and both paths are asserted by the suite, and the two are deliberately from different groups: SCHEMA_RANGE is one field wrong in itself and REF_UNDECLARED is a reference to a row nothing declares, which is the grouping rule `findings.py` says decides what clearing a finding costs.\n\nIt carries no `model.py` and no `design_proposal.json`, and that is the point rather than an omission: the job is refused before the builder is reached. `tools/test_replay.py` asserts that a case declared REFUSED writes no final status, no candidate and no checks, and the suite asserts the declaration against what is on disk, so a case that quietly started building would go red rather than go quiet.",
+  "inputs_sha256": {
+    "inputs/project.json": "e30cefc66f2c5662cb274fbd43fc38e7bc43c568577d9f60cf43d555c8c2335c"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "bbox_mm": {
+    "x": 38.0,
+    "y": 38.0,
+    "z": 52.0
+  },
+  "bodies": 1,
+  "design_id": "berlingo-b9-knob-seated",
+  "features": [
+    {
+      "at": {
+        "z": 8.0
+      },
+      "feature_id": "grip-section",
+      "kind": "section_area",
+      "note": "the solid grip below the bore floor: a full 38 mm circle",
+      "value_mm2": 1134.1149479459152
+    },
+    {
+      "at": {
+        "z": 34.0
+      },
+      "feature_id": "bore-wall-section",
+      "kind": "section_area",
+      "note": "the wall left around the bore and its two rail slots",
+      "value_mm2": 881.3277999957038
+    },
+    {
+      "feature_id": "crown-footprint",
+      "kind": "bed_contact",
+      "note": "the crown face, which is what the part is printed on",
+      "value_mm2": 1134.1149479459152
+    }
+  ],
+  "job_id": "berlingo-knob-seat-replay",
+  "params": {
+    "body_h_mm": 52.0,
+    "bore_d_mm": 17.4,
+    "bore_floor_z_mm": 16.0,
+    "facets": 96,
+    "grip_d_mm": 38.0,
+    "rail_depth_mm": 1.5,
+    "rail_w_mm": 5.0
+  },
+  "profile_marks": {
+    "z": [
+      16.0
+    ]
+  },
+  "rationale": "a straight-walled sleeve, bored to the engagement length and keyed by two opposed rail slots. Every stated expectation is the closed form of a circle or of a circle less an annulus and two rectangles, so none of them is a number read off the mesh being judged.",
+  "schema_version": 1
+}

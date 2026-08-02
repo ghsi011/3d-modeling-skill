@@ -18,35 +18,50 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from tools import replay as RP
 
 UNCHANGED = "0" * 64
 
 
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def _case(directory: Path, *, reviews=(), judgements=None, substitutions=None,
-          inputs=None, case_id="synthetic") -> RP.ReplayCase:
-    """A case on disk under a temporary CASES_ROOT, sealed and loadable."""
+          inputs=None, revisions=None, formulations=None, concludes="BUILT",
+          case_id="synthetic") -> Path:
+    """A case on disk under a temporary CASES_ROOT, sealed and loadable.
+
+    `inputs`, `revisions` and `judgements` take the case-relative path inside
+    their own tree, so a nested branch layout is written the same way a real
+    case writes one.
+    """
     room = directory / case_id
     (room / RP.INPUT_DIR).mkdir(parents=True)
     for name, text in (inputs or {"project.json": "{}"}).items():
-        (room / RP.INPUT_DIR / name).write_text(text, encoding="utf-8")
-    if judgements:
-        (room / RP.JUDGEMENT_DIR).mkdir()
-        for kind, payload in judgements.items():
-            (room / RP.JUDGEMENT_DIR / f"{kind}.json").write_text(
-                json.dumps(payload), encoding="utf-8")
-    (room / RP.CASE_FILE).write_text(json.dumps({
+        _write(room / RP.INPUT_DIR / name, text)
+    for name, text in (revisions or {}).items():
+        _write(room / RP.REVISION_DIR / name, text)
+    for name, payload in (judgements or {}).items():
+        _write(room / RP.JUDGEMENT_DIR / f"{name}.json", json.dumps(payload))
+    payload = {
         "schema_version": RP.CASE_SCHEMA, "case_id": case_id,
         "use_case": "MODIFY", "source_mode": "MODIFY",
         "consequence": "INCONSEQUENTIAL",
         "request": "benchmarks/fixtures/berlingo-knob/public/request.md",
         "sources": [], "substitutions": substitutions or {},
-        "reviews": list(reviews), "max_invocations": 3,
+        "concludes": concludes, "max_invocations": 3,
         "recorded_at": "synthetic", "provenance": "synthetic", "notes": "",
         "inputs_sha256": {},
-    }), encoding="utf-8")
+    }
+    if formulations is None:
+        payload["reviews"] = list(reviews)
+    else:
+        payload["formulations"] = list(formulations)
+    (room / RP.CASE_FILE).write_text(json.dumps(payload), encoding="utf-8")
     return room
 
 
@@ -161,27 +176,81 @@ class TheRecordedJudgementCarriesNoEnvelopeTest(_Sandboxed):
         case = self._seal()
         with self.assertRaises(RP.NoRecordedAnswer) as caught:
             case.judgement("verification")
-        self.assertIn("no verification judgement", str(caught.exception))
+        self.assertIn("no such judgement", str(caught.exception))
+
+    def test_a_judgement_is_looked_up_under_the_formulation_it_answers(self) -> None:
+        """Two siblings answering one review kind are two recorded answers.
+
+        Under a single `judgements/<kind>.json` the first formulation's decision
+        would be replayed as the second's -- which is the same class of mistake
+        as one shared `reviews/` directory, one level up.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners", "reviews": ["safety"]}],
+              judgements={"snap-fit/safety": {"decision": "BLOCK",
+                                              "summary": "the clip shears"}})
+        case = self._seal()
+        self.assertEqual("BLOCK",
+                         case.judgement("safety", "snap-fit")["decision"])
+        with self.assertRaises(RP.NoRecordedAnswer) as caught:
+            case.judgement("safety")
+        self.assertIn("judgements", str(caught.exception).replace("\\", "/"))
 
 
 class _FakeSurface:
-    """A `design-tool` that does whatever the test needs it to do next."""
+    """A `design-tool` that does whatever the test needs it to do next.
+
+    It writes into the *work* directory the way the real one does, which is what
+    lets the branch loop be exercised for milliseconds: `branch` moves
+    `active_alternative` in `project.json` and creates the directory, and
+    everything after that lands wherever `RP.work_dir` now points.
+    """
 
     def __init__(self, project_dir: Path, script) -> None:
         self.project_dir, self.script, self.calls = project_dir, list(script), []
 
+    def _project(self) -> dict:
+        path = self.project_dir / "project.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def _save(self, payload: dict) -> None:
+        (self.project_dir / "project.json").write_text(json.dumps(payload),
+                                                       encoding="utf-8")
+
     def __call__(self, argv: list[str]) -> int:
         self.calls.append(list(argv))
+        if argv[0] == "branch":
+            payload = self._project()
+            rows = list(payload.get("alternatives") or ())
+            if "--activate" in argv:
+                wanted = argv[argv.index("--activate") + 1]
+                payload["active_alternative"] = (
+                    None if wanted == RP.ROOT_ALTERNATIVE else wanted)
+            else:
+                wanted = argv[argv.index("--id") + 1]
+                rows.append({"alternative_id": wanted})
+                payload["alternatives"] = rows
+                payload["active_alternative"] = wanted
+            self._save(payload)
+            RP.work_dir(self.project_dir).mkdir(parents=True, exist_ok=True)
+            return 0
+        if argv[0] == "status":
+            print(json.dumps({"final_status": "NOT_RUN", "stored_status": None,
+                              "stale": {}}))
+            return 0
         if argv[0] == "route":
             return 0
+        work = RP.work_dir(self.project_dir)
         code, action = self.script.pop(0) if self.script else (0, None)
-        pending = self.project_dir / "next_action.json"
+        pending = work / "next_action.json"
         if action is None:
             pending.unlink(missing_ok=True)
         else:
-            (self.project_dir / "reviews").mkdir(exist_ok=True)
+            (work / "reviews").mkdir(parents=True, exist_ok=True)
             if action.get("kind") == "REVIEW":
-                (self.project_dir / action["evidence"]).write_text(
+                (work / action["evidence"]).write_text(
                     json.dumps({"review_envelope": {"packet_sha256": UNCHANGED}}),
                     encoding="utf-8")
             pending.write_text(json.dumps(action), encoding="utf-8")
@@ -254,37 +323,88 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
                 project, [(RP.NEEDS_ACTION, self.REVIEW), (0, None)]))
         self.assertIn("already exists", str(caught.exception))
 
-    def test_a_branched_project_is_refused_rather_than_read_from_the_root(self) -> None:
-        """The trap this harness is not yet built for, made loud.
+    def test_an_unbranched_project_issues_no_branch_command_at_all(self) -> None:
+        """The zero-cost half, in the harness rather than in the pipeline.
 
-        A branch keeps its proposal, its acceptance revision, its receipts and
-        its review packets under `alternatives/<id>/`, and every path joined here
-        is relative to the project root. Resolving that correctly is work a
-        branch case should arrive with; reading the root and calling it the
-        branch is a replay that passes for the wrong reason, which is worse than
-        not having one.
+        A case that declares no formulations must play the sequence it played
+        before formulations existed -- which is why the two cases recorded
+        before this arrived did not have to be re-recorded.
         """
-        room = _case(self.root)
-        case = self._seal()
-        project = self.root / "project"
-        project.mkdir()
-        (project / "project.json").write_text(
-            json.dumps({"active_alternative": "snap-fit"}), encoding="utf-8")
-        self.assertTrue((room / RP.CASE_FILE).is_file())
-        with self.assertRaises(RP.ReplayError) as caught:
-            RP.play(case, project, invoke=_FakeSurface(project, [(0, None)]))
-        self.assertIn("snap-fit", str(caught.exception))
-        self.assertIn("alternatives/", str(caught.exception))
-
-    def test_an_unbranched_project_is_not_refused(self) -> None:
         _case(self.root)
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
         (project / "project.json").write_text(
             json.dumps({"active_alternative": None}), encoding="utf-8")
-        self.assertEqual([0, 0], RP.play(
-            case, project, invoke=_FakeSurface(project, [(0, None)])).exit_codes)
+        surface = _FakeSurface(project, [(0, None)])
+        run = RP.play(case, project, invoke=surface)
+        self.assertEqual([0, 0], run.exit_codes)
+        self.assertEqual({RP.ROOT_ALTERNATIVE: project}, run.work_dirs)
+        self.assertEqual({}, run.derived)
+        self.assertEqual([], [argv for argv in surface.calls
+                              if argv[0] in ("branch", "status")])
+
+    def test_each_formulation_is_reached_through_the_branch_verb(self) -> None:
+        """The resolver, driven the way a user drives it.
+
+        Every path below the first `branch` has moved: the instruction, the
+        review packet and the answer are all in `alternatives/<id>/`, and a
+        harness that kept joining against the project root would look for the
+        packet where nobody put it.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners", "reviews": ["safety"]}],
+              judgements={"snap-fit/safety": {"decision": "PASS",
+                                              "summary": "fine"}})
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        surface = _FakeSurface(project, [(0, None),
+                                         (RP.NEEDS_ACTION, self.REVIEW),
+                                         (0, None)])
+        run = RP.play(case, project, invoke=surface)
+        self.assertEqual(["safety"], run.reviews_answered)
+        self.assertEqual(
+            {RP.ROOT_ALTERNATIVE: project,
+             "snap-fit": project / RP.ALTERNATIVES_DIR / "snap-fit"},
+            run.work_dirs)
+        self.assertEqual(["alternatives/snap-fit/reviews/safety_response.json"],
+                         run.responses_written,
+                         "the answer is written into the branch's own directory, "
+                         "and is named by the path rather than by the filename "
+                         "two siblings would share")
+        self.assertEqual(
+            ["branch", str(project), "--from", ".", "--id", "snap-fit",
+             "--reason", "no fasteners"],
+            [argv for argv in surface.calls if argv[0] == "branch"][0])
+
+    def test_a_branch_that_will_not_be_created_stops_the_play(self) -> None:
+        """A `branch` that fails leaves the project on the wrong formulation.
+
+        Without this the next `route` and `run` would succeed against whatever
+        was active, and the recording would be compared against a formulation
+        nobody asked for.
+        """
+        _case(self.root, formulations=[{"alternative_id": "snap-fit",
+                                        "parent": ".", "reason": "no fasteners"}])
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+
+        class _RefusesToBranch(_FakeSurface):
+            def __call__(self, argv):
+                if argv[0] == "branch":
+                    self.calls.append(list(argv))
+                    return 2
+                return super().__call__(argv)
+
+        with self.assertRaises(RP.ReplayError) as caught:
+            RP.play(case, project, invoke=_RefusesToBranch(project, [(0, None)]))
+        self.assertIn("exited 2", str(caught.exception))
 
     def test_a_job_that_never_settles_is_reported_rather_than_looped(self) -> None:
         with self.assertRaises(RP.ReplayError) as caught:
@@ -293,6 +413,71 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
                        judgements={"safety": {"decision": "PASS",
                                               "summary": "fine"}})
         self.assertIn("still asking for something", str(caught.exception))
+
+
+class TheWorkDirectoryResolverTest(unittest.TestCase):
+    """A second implementation of `Project.work_dir`, kept honest against it.
+
+    A second one on purpose: a harness that asked the system under test where to
+    look could not catch the system looking in the wrong place. What that buys
+    has to be paid for, and this is the payment -- the two answers are compared
+    directly, and the two constants the copy depends on are compared to
+    `pipeline.project`'s own rather than eyeballed.
+    """
+
+    def _project(self, directory: Path, active) -> Path:
+        (directory / "project.json").write_text(
+            json.dumps({"active_alternative": active}), encoding="utf-8")
+        return directory
+
+    def test_an_unbranched_project_resolves_to_its_own_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._project(Path(raw), None)
+            self.assertEqual(directory, RP.work_dir(directory))
+
+    def test_a_branch_resolves_under_alternatives(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._project(Path(raw), "snap-fit")
+            self.assertEqual(directory / "alternatives" / "snap-fit",
+                             RP.work_dir(directory))
+
+    def test_it_agrees_with_the_pipelines_own_resolver(self) -> None:
+        from pipeline import project as P
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            for active in (None, "snap-fit"):
+                with self.subTest(active=active):
+                    self._project(directory, active)
+                    project = P.Project(
+                        job_id="j", updated_utc="1970-01-01T00:00:00Z",
+                        source_mode="NEW", consequence="INCONSEQUENTIAL",
+                        active_alternative=active)
+                    self.assertEqual(project.work_dir(directory).resolve(),
+                                     RP.work_dir(directory).resolve())
+
+    def test_the_two_constants_the_copy_rests_on_are_the_pipelines(self) -> None:
+        from pipeline import bindings as B
+        from pipeline import project as P
+        self.assertEqual(P.ALTERNATIVES_DIR, RP.ALTERNATIVES_DIR)
+        self.assertEqual(P.ALTERNATIVE_ID.pattern, RP.ALTERNATIVE_ID.pattern)
+        self.assertEqual(B.ROOT_ALTERNATIVE, RP.ROOT_ALTERNATIVE)
+
+    def test_an_id_this_harness_cannot_resolve_is_refused_not_flattened(self) -> None:
+        """The one thing the resolver still will not express.
+
+        `design-tool branch` cannot write any of these and `Project.validate`
+        reports one as a finding, so the only way to get here is a hand-edited
+        `project.json`. Falling back to the project root would compare the shared
+        root's receipts and report them as the branch's -- a replay passing for
+        the wrong reason, which is what the refusal it replaced existed to stop.
+        """
+        for active in ("../escape", "Snap-Fit", "snap fit", "a/b", 7):
+            with self.subTest(active=active), \
+                    tempfile.TemporaryDirectory() as raw:
+                directory = self._project(Path(raw), active)
+                with self.assertRaises(RP.ReplayError) as caught:
+                    RP.work_dir(directory)
+                self.assertIn(repr(active), str(caught.exception))
 
 
 class TheSubstitutionReachesTheModelTest(_Sandboxed):
@@ -321,6 +506,65 @@ class TheSubstitutionReachesTheModelTest(_Sandboxed):
         case = self._seal()
         destination = RP.materialise(case, self.root / "work")
         self.assertFalse((destination / "reviews").exists())
+
+    def test_the_input_tree_is_mirrored_rather_than_flattened(self) -> None:
+        """`inputs/` *is* the project directory, nesting included.
+
+        Flattened, a branch's `model.py` would land beside the root's and one of
+        the two would overwrite the other -- and the case would still load,
+        because the digests are of the case tree and not of what was written.
+        """
+        _case(self.root, inputs={
+            "project.json": "{}", "model.py": "ROOT = 1\n",
+            "alternatives/snap-fit/model.py": "BRANCH = 1\n"})
+        case = self._seal()
+        destination = RP.materialise(case, self.root / "work")
+        self.assertEqual("ROOT = 1\n",
+                         (destination / "model.py").read_text(encoding="utf-8"))
+        self.assertEqual(
+            "BRANCH = 1\n",
+            (destination / "alternatives" / "snap-fit" / "model.py")
+            .read_text(encoding="utf-8"))
+
+    def test_a_revision_is_not_materialised_and_lands_after_the_run(self) -> None:
+        """The whole point of the third tree.
+
+        A revised input that was materialised would be the input the run used,
+        and the verdict would have been issued against it -- so nothing would
+        ever have been bound to the version it superseded, which is the state a
+        derived `STALE` exists to report.
+        """
+        _case(self.root, inputs={"project.json": "{}", "model.py": "V = 1\n"},
+              revisions={"model.py": "V = 2\n"})
+        case = self._seal()
+        destination = RP.materialise(case, self.root / "work")
+        self.assertEqual("V = 1\n",
+                         (destination / "model.py").read_text(encoding="utf-8"))
+        RP._apply_revisions(case, destination, case.formulations[0])
+        self.assertEqual("V = 2\n",
+                         (destination / "model.py").read_text(encoding="utf-8"))
+
+    def test_a_revision_belongs_to_the_formulation_whose_tree_it_sits_in(self) -> None:
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              inputs={"project.json": "{}", "model.py": "V = 1\n",
+                      "alternatives/snap-fit/model.py": "V = 1\n"},
+              revisions={"alternatives/snap-fit/model.py": "V = 2\n"})
+        case = self._seal()
+        destination = RP.materialise(case, self.root / "work")
+        root, branch = case.formulations
+        RP._apply_revisions(case, destination, root)
+        self.assertEqual("V = 1\n",
+                         (destination / "model.py").read_text(encoding="utf-8"),
+                         "the root's own model is not touched by a branch's "
+                         "revision")
+        RP._apply_revisions(case, destination, branch)
+        self.assertEqual(
+            "V = 2\n",
+            (destination / "alternatives" / "snap-fit" / "model.py")
+            .read_text(encoding="utf-8"))
 
 
 class TheComparatorLayersTest(unittest.TestCase):
@@ -429,9 +673,9 @@ class TheComparatorLayersTest(unittest.TestCase):
 class TheObservationReadsTheReceiptsTest(unittest.TestCase):
     """`observe` off a directory, so the recording is not a second derivation."""
 
-    def _directory(self, root: Path) -> Path:
-        directory = root / "project"
-        directory.mkdir()
+    def _directory(self, root: Path, name: str = "project") -> Path:
+        directory = root / name
+        directory.mkdir(parents=True)
         (directory / "final_status.json").write_text(json.dumps({
             "final_status": "FAILED", "commission_verdict": "FAIL",
             "reasons": ["a"], "allowed_claim": "no"}), encoding="utf-8")
@@ -448,19 +692,57 @@ class TheObservationReadsTheReceiptsTest(unittest.TestCase):
         (directory / "candidate.stl").write_bytes(b"solid x\nendsolid x\n")
         return directory
 
+    @staticmethod
+    def _case(**over) -> RP.ReplayCase:
+        base = dict(case_id="x", use_case="MODIFY", source_mode="MODIFY",
+                    consequence="INCONSEQUENTIAL", request="r", sources=(),
+                    substitutions={},
+                    formulations=(RP.Formulation(alternative_id=None),),
+                    branched=False, concludes="BUILT", max_invocations=2,
+                    inputs_sha256={}, recorded_at="", provenance="", notes="")
+        return RP.ReplayCase(**{**base, **over})
+
     def test_the_receipt_set_excludes_what_the_runner_calls_non_identifying(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = self._directory(Path(raw))
-            run = RP.Play(directory, [0], [], [], "")
-            observed = RP.observe(
-                RP.ReplayCase("x", "MODIFY", "MODIFY", "INCONSEQUENTIAL", "r", (),
-                              {}, (), 2, {}, "", "", ""), run)
+            run = RP.Play(directory, [0], [], [], "",
+                          work_dirs={RP.ROOT_ALTERNATIVE: directory})
+            observed = RP.observe(self._case(), run)
         self.assertNotIn("timings.json", observed["receipts"])
         self.assertIn("candidate.stl", observed["receipts"])
         self.assertEqual("FAILED", observed["outcome"]["final_status"])
         self.assertEqual({"profile-z": "ANOMALY"},
                          observed["screening_detail"]["detectors"])
         self.assertEqual({"abs": 0.05}, observed["tolerances"]["seated"])
+        self.assertNotIn("formulations", observed,
+                         "an unbranched job carries no trace of the capability, "
+                         "which is why the cases recorded before it arrived "
+                         "did not move")
+
+    def test_a_branched_observation_nests_the_same_block_per_formulation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            directory = self._directory(root)
+            branch = self._directory(directory, "alternatives/snap-fit")
+            run = RP.Play(directory, [0], [], [], "",
+                          work_dirs={RP.ROOT_ALTERNATIVE: directory,
+                                     "snap-fit": branch},
+                          derived={"snap-fit": {"derived_status": "STALE",
+                                                "stored_status": "VERIFIED",
+                                                "stale": ["final_status.json"]}})
+            observed = RP.observe(
+                self._case(branched=True,
+                           formulations=(RP.Formulation(None),
+                                         RP.Formulation("snap-fit"))), run)
+        self.assertEqual({".", "snap-fit"}, set(observed["formulations"]))
+        self.assertEqual("FAILED",
+                         observed["formulations"]["."]["outcome"]["final_status"])
+        self.assertEqual("STALE",
+                         observed["formulations"]["snap-fit"]["derived"]
+                         ["derived_status"])
+        self.assertNotIn("outcome", observed,
+                         "a branched job has no single outcome; every one of "
+                         "them belongs to a formulation")
 
     def test_the_determinism_marks_are_the_digests_two_runs_must_agree_on(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -489,9 +771,35 @@ class TheShippedCasesAreWellFormedTest(unittest.TestCase):
     def test_every_case_carries_a_judgement_for_every_review_it_declares(self) -> None:
         for case_id in RP.case_ids():
             case = RP.load(case_id)
-            for kind in case.reviews:
-                with self.subTest(case=case_id, review=kind):
-                    self.assertIn("decision", case.judgement(kind))
+            for formulation in case.formulations:
+                for kind in formulation.reviews:
+                    with self.subTest(case=case_id, formulation=formulation.key,
+                                      review=kind):
+                        self.assertIn("decision", case.judgement(
+                            kind, formulation.alternative_id))
+
+    def test_every_declared_formulation_has_somewhere_to_be_played_from(self) -> None:
+        """A parent nothing declares is a `branch` that cannot succeed.
+
+        Caught by loading rather than by playing, which is the difference
+        between a case that says what is wrong with it and one that fails eleven
+        seconds later inside a command whose output nobody kept.
+        """
+        for case_id in RP.case_ids():
+            case = RP.load(case_id)
+            # The shared root is always a legitimate parent and is never itself
+            # declared by a `branch`, so it starts in one set and not the other.
+            parents = {RP.ROOT_ALTERNATIVE}
+            declared: set[str] = set()
+            for formulation in case.formulations:
+                with self.subTest(case=case_id, formulation=formulation.key):
+                    self.assertIn(formulation.parent, parents,
+                                  "a formulation is branched from the shared "
+                                  "root or from one declared before it")
+                    self.assertNotIn(formulation.key, declared,
+                                     "two rows for one formulation")
+                declared.add(formulation.key)
+                parents.add(formulation.key)
 
     def test_every_case_has_a_recording_taken_at_a_named_commit(self) -> None:
         for case_id in RP.case_ids():
@@ -505,14 +813,44 @@ class TheShippedCasesAreWellFormedTest(unittest.TestCase):
 
         `_run_authored` writes an `AGENT_COMMISSION` exactly when the proposal or
         the model is absent. A case that carries both cannot reach that branch,
-        which is a stronger statement than counting calls afterwards.
+        which is a stronger statement than counting calls afterwards -- and it
+        has to hold for *every* formulation, because a branch that inherited
+        nothing is exactly the job that asks a designer to author one.
+
+        A case declared `REFUSED` is refused before the builder is reached and
+        carries neither; what it must not do is build, which
+        `test_a_refused_case_builds_nothing_at_all` states directly.
         """
         for case_id in RP.case_ids():
+            case = RP.load(case_id)
+            if case.concludes != "BUILT":
+                continue
+            names = set(RP.recorded_files(case_id))
+            self.assertIn(f"{RP.INPUT_DIR}/project.json", names)
+            for formulation in case.formulations:
+                where = PurePosixPath(RP.INPUT_DIR) / formulation.relative_dir()
+                with self.subTest(case=case_id, formulation=formulation.key):
+                    self.assertIn((where / "design_proposal.json").as_posix(),
+                                  names)
+                    self.assertIn((where / "model.py").as_posix(), names)
+
+    def test_a_refused_case_builds_nothing_at_all(self) -> None:
+        """What `REFUSED` has to mean, stated as an absence in the recording.
+
+        A refusal that still reached the confined build would be a case whose
+        expectations were about a job nobody meant to run, and the release gate
+        it stands for -- "failures are actionable and controlled" -- would be
+        met by something that was neither.
+        """
+        for case_id in RP.case_ids():
+            case = RP.load(case_id)
+            if case.concludes == "BUILT":
+                continue
             with self.subTest(case=case_id):
-                names = {Path(name).name for name in RP.recorded_files(case_id)}
-                self.assertIn("design_proposal.json", names)
-                self.assertIn("model.py", names)
-                self.assertIn("project.json", names)
+                recorded = RP.expected(case_id)
+                self.assertIsNone(recorded["outcome"]["final_status"])
+                self.assertNotIn("candidate.stl", recorded["receipts"])
+                self.assertEqual({}, recorded["checks"])
 
 
 if __name__ == "__main__":

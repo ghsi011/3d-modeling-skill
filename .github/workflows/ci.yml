@@ -80,9 +80,10 @@ jobs:
         run: uv sync --frozen --all-extras
 
       # A case whose supplied artifact is an `ExternalFile` this runner does not
-      # have skips, exactly as the L0 fixture set does. `custom-knob-sleeve`
-      # needs nothing outside the repository and `modify-ball-flange-flat`'s
-      # source is vendored, so both run on a bare checkout -- and a suite that
-      # skipped everything here would be a gate that does not gate.
+      # have skips, exactly as the L0 fixture set does. `custom-knob-sleeve` and
+      # `branch-knob-seat-fallback` need nothing outside the repository, and the
+      # two `modify-ball-*` cases share a vendored source, so all four run on a
+      # bare checkout -- and a suite that skipped everything here would be a gate
+      # that does not gate.
       - name: Pytest (L1 — recorded job replays)
         run: uv run pytest benchmarks/replays -q

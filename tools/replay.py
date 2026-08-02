@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """L1 — a recorded engineering job, replayed through the current command surface.
 
-    uv run pytest benchmarks/replays              # the suite; ~35 s, two cases
+    uv run pytest benchmarks/replays              # the suite; ~70 s, four cases
     uv run python tools/replay.py --list
     uv run python tools/replay.py --run    modify-ball-flange-flat
     uv run python tools/replay.py --reseal modify-ball-flange-flat  # inputs moved
@@ -73,6 +73,9 @@ a different reason.
      property that makes a review round trip possible at all, and the one thing
      here that a *literal* hash could never test because it would have to be
      re-pinned on every legitimate geometry change.
+* *The derived status of each formulation, and which receipts stopped binding.*
+  `derived_status`, `stored_status`, and the sorted *names* in `stale`. See the
+  next section for why a computed value belongs in this list at all.
 
 **Advisory, reported and never failing on its own.** `reasons` and
 `allowed_claim` are prose written for a human. They are recorded verbatim,
@@ -82,8 +85,69 @@ sentence is not a regression and must not be able to stop a build.
 
 **Deliberately not asserted at all.** The bytes of any receipt; any literal
 sha256 of a receipt, packet, envelope, contract or artifact; `findings` text;
-`lane_note` text; timings; the witness images. Every one of them moves for
-reasons that have nothing to do with whether the job still behaves.
+`lane_note` text; timings; the witness images; the *sentences* under a `stale`
+entry, which name two short digests and are prose about them. Every one of them
+moves for reasons that have nothing to do with whether the job still behaves.
+
+## Derived status is computed, not a receipt, and it is still binding
+
+Everything else in the binding list is read off a file the run wrote.
+`status.derive` is different: it is computed on demand from the bindings on disk,
+so `design-tool status` can answer a question `final_status.json` cannot -- is
+the verdict this run reached still about the project it is sitting in. Recording
+it means recording something no receipt carries.
+
+It goes in the binding list anyway, and the existing rule is what puts it there
+rather than an exception made for it. The rule separates *answers the system
+gives* from *prose written for a human*: a status, a verdict and a per-check
+result bind; `reasons` and `allowed_claim` do not. `STALE` versus `VERIFIED`
+versus `NOT_RUN` is an answer, not a sentence -- `design-tool status` returns a
+different exit code for each, so a caller scripting the loop branches on it, and
+a change that stopped weakening a superseded claim would move it while every
+receipt on disk stayed byte-identical. It is also deterministic in the way the
+binding layer requires: `derive` re-adjudicates nothing, applies no threshold and
+reads no clock, so two replays of one recording produce the same answer or
+something is wrong.
+
+The *reasons* underneath it are the same prose `final_status.reasons` is, and are
+treated the same way. The `stale` map splits: its keys are the set of receipts
+that stopped binding, which is a shape, and shapes bind here -- a receipt that
+silently stops being checked is the failure `RECEIPTS` exists to prevent. Its
+values name two truncated digests inside an English sentence and are recorded
+nowhere.
+
+## Where a branched job writes, and what this harness still refuses
+
+Everything belonging to one formulation -- the proposal, the model, the frozen
+acceptance contract, the receipts, `next_action.json`, the review packets --
+lives in that formulation's *work directory*: the project root while no
+alternative is active, and `alternatives/<id>` once one is. The shared half
+never moves: `project.json`, the brief and the supplied artifacts stay at the
+root, and the review envelope's evidence digests are taken relative to it.
+
+So `work_dir()` is re-read from `project.json` at every step rather than
+computed once. `design-tool branch` changes the answer mid-play, and a resolver
+that cached it would read one formulation's receipts as another's -- which is
+the whole failure this exists to avoid.
+
+It is a second implementation of `Project.work_dir` on purpose, for the reason
+`NEEDS_ACTION` is a literal here: a harness that asked the system under test
+where to look could not catch the system looking in the wrong place.
+`tools/test_replay.py` asserts the two agree, and asserts the id pattern and the
+directory name against `pipeline.project`'s own, so the copy cannot drift
+unnoticed.
+
+What it still refuses, loudly, is an `active_alternative` that is not a plain
+`[a-z0-9-]+` id, or one whose join would leave the project. `design-tool branch`
+cannot write one; a hand-edited `project.json` can, and `Project.validate` names
+it as a finding. A replay that quietly resolved it to the project root would
+compare the root's receipts and report a pass.
+
+Deliberately still not expressed: nothing here selects a formulation by anything
+other than the ordered list a case declares. There is no resume-from-the-middle,
+no scoping below job-versus-alternative and no merge with several parents,
+because no committed case needs one -- which is the same argument that kept the
+resolver itself out until this case arrived.
 
 ## Why the review answer is re-bound rather than replayed verbatim
 
@@ -102,11 +166,19 @@ reviewer does; the only thing that is recorded rather than fresh is the
 judgement, which is the part a live AI call would have produced.
 
 Re-binding would be a hole if nothing checked that the binding still bites, so
-two things guard it. The harness asserts that the envelope on each review report
-is the envelope of the packet that asked for it -- if the runner ever accepted an
-answer that did not match, the replay fails. And the L1 suite carries an
-adversarial case that stamps a *wrong* envelope and requires the run to refuse
-it, write no final status, and exit non-zero.
+three things guard it. The harness asserts that the envelope on each review
+report is the envelope of the packet that asked for it -- if the runner ever
+accepted an answer that did not match, the replay fails. And the L1 suite carries
+two adversarial fixtures, both of which stamp an envelope the run did not issue
+and require it to refuse, write no final status and exit non-zero:
+
+* one moves an *evidence digest*, which is a stale answer -- the case the
+  envelope was built for;
+* one moves nothing at all. It offers a formulation the envelope its *sibling's*
+  review was issued under: live, current, correctly formed, and for a part whose
+  contract hash, STL digest and source digest are byte-identical. That is the
+  false pass protocol 4 exists for, and it is only reachable at all because a
+  branch is a copy of its ancestor at the instant it is created.
 
 ## Zero live dispatches, asserted rather than assumed
 
@@ -142,6 +214,28 @@ past, so a case cannot silently be replayed against different bytes -- and a cas
 whose source is an `ExternalFile` this machine does not have skips, exactly as
 the L0 set does.
 
+A case directory holds three trees, and two of them are the project directory::
+
+    case.json      what to play, and the digest of every file below
+    expected.json  what it produced, at the commit that recorded it
+    inputs/        the project directory as it must be before the play
+    revisions/     files written over it *after* a named formulation settles
+    judgements/    the reviewers' decisions, by formulation and kind
+
+`inputs/` and `revisions/` mirror the project tree exactly -- `inputs/model.py`
+at the root, `inputs/alternatives/as-drawn/model.py` on a branch -- because they
+*are* files that land in it, and a second naming scheme over one directory layout
+is a mapping to get wrong. `judgements/` does not land in the project at all: it
+is indexed by formulation and review kind (`judgements/safety.json` at the root,
+`judgements/as-drawn/safety.json` on a branch), which is what the harness looks
+one up by.
+
+`revisions/` exists for one property nothing else can reach. A stored verdict
+goes stale when an input it was issued against moves *after* the run concluded --
+a designer picking a formulation back up and editing its model. That cannot be an
+`inputs/` file, because then the run would have been executed against it and
+nothing would ever have bound the older one.
+
 ## What is frozen, and at which commit
 
 Every `expected.json` here is recorded at the commit that added it, on purpose.
@@ -176,6 +270,7 @@ import dataclasses
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 from pathlib import Path, PurePosixPath
@@ -192,9 +287,30 @@ import fixtures as FX                                                # noqa: E40
 CASE_FILE = "case.json"
 EXPECTED_FILE = "expected.json"
 INPUT_DIR = "inputs"
+REVISION_DIR = "revisions"
 JUDGEMENT_DIR = "judgements"
-CASE_SCHEMA = 1
+# 2: a case may declare `formulations` -- the ordered list of alternatives one
+# recorded job is played across -- and must declare `concludes`, which says
+# whether the job reaches a final status or is refused before it builds. Both
+# are read by the loader, so a case written against schema 1 is refused by
+# version rather than silently played as an unbranched one that concludes.
+CASE_SCHEMA = 2
 EXPECTED_SCHEMA = 1
+
+# Where a branched formulation's work directory sits, and how its id may be
+# spelled. Both are `pipeline.project`'s, duplicated here for the reason the
+# module docstring gives and asserted equal in `tools/test_replay.py`.
+ALTERNATIVES_DIR = "alternatives"
+ALTERNATIVE_ID = re.compile(r"^[a-z0-9-]+$")
+# How the shared root spells itself on the command line and in a case file.
+ROOT_ALTERNATIVE = "."
+
+# What a case says its job does. A replay of a job that is *correctly refused*
+# is a replay: "failures are actionable and controlled" is a release gate, and
+# an actionable refusal is an outcome with receipts. It is declared rather than
+# inferred so that a case which silently stopped building would be caught by the
+# declaration rather than by nobody noticing the assertions had gone quiet.
+CONCLUDES = ("BUILT", "REFUSED")
 
 # The band a replay allows two *measurements* of one quantity to differ by when
 # the contract row itself declares none. 0.5% is not invented here: it is the
@@ -256,6 +372,40 @@ class SourceRef:
 
 
 @dataclasses.dataclass(frozen=True)
+class Formulation:
+    """One formulation of the job, and how the play reaches it.
+
+    `alternative_id` is `None` for the shared root, which is a real place with
+    its own proposal, its own contract and its own receipts -- not a bookkeeping
+    entry for "no branch". Every other formulation is created by
+    `design-tool branch --from <parent> --id <id> --reason <reason>` and worked
+    on in its own directory.
+
+    A list rather than a graph: a case declares the order its formulations are
+    played in, and the ancestry lives in `parent`, which is what `branch` writes
+    into `project.json`. Nothing here resumes into the middle of one.
+    """
+
+    alternative_id: str | None
+    # `.` for the shared root, or the id of a formulation declared before this
+    # one. Unused when this row *is* the root.
+    parent: str = ROOT_ALTERNATIVE
+    reason: str = ""
+    # The review kinds this formulation is expected to be asked for, in order.
+    reviews: tuple[str, ...] = ()
+
+    @property
+    def key(self) -> str:
+        """How this formulation is named in a recording and on the command line."""
+        return self.alternative_id or ROOT_ALTERNATIVE
+
+    def relative_dir(self) -> PurePosixPath:
+        """Its work directory, relative to the project root."""
+        return (PurePosixPath() if self.alternative_id is None
+                else PurePosixPath(ALTERNATIVES_DIR) / self.alternative_id)
+
+
+@dataclasses.dataclass(frozen=True)
 class ReplayCase:
     case_id: str
     use_case: str
@@ -269,9 +419,18 @@ class ReplayCase:
     # path inside `model.py`, because a recorded model cannot carry the path of a
     # temporary directory that does not exist yet.
     substitutions: dict[str, str]
-    # The review kinds this case holds a recorded judgement for, in the order the
-    # run is expected to ask for them.
-    reviews: tuple[str, ...]
+    # Every formulation this job is played across, in order. Always at least one:
+    # a case that declares none is one unbranched formulation at the root, which
+    # is what `load` builds from the case's own `reviews` list.
+    formulations: tuple[Formulation, ...]
+    # Whether the case declared branching at all. Derived and not stored, so an
+    # unbranched case cannot accidentally opt into the branch machinery: `play`
+    # issues no `branch` command and `observe` produces exactly the payload it
+    # produced before formulations existed, which is why the two cases recorded
+    # before this arrived did not have to be re-recorded.
+    branched: bool
+    # `BUILT` or `REFUSED`. See `CONCLUDES`.
+    concludes: str
     max_invocations: int
     inputs_sha256: dict[str, str]
     recorded_at: str
@@ -282,14 +441,29 @@ class ReplayCase:
     def directory(self) -> Path:
         return CASES_ROOT / self.case_id
 
-    def judgement(self, kind: str) -> dict[str, Any]:
-        path = self.directory / JUDGEMENT_DIR / f"{kind}.json"
+    @property
+    def reviews(self) -> tuple[str, ...]:
+        """Every review this play answers, in order, across all formulations.
+
+        One flat list because that is what "the reviews answered, in order, and
+        that every one came from the recording" means for a whole job. Which
+        formulation each belongs to is in `formulations`.
+        """
+        return tuple(kind for row in self.formulations for kind in row.reviews)
+
+    def judgement(self, kind: str,
+                  alternative_id: str | None = None) -> dict[str, Any]:
+        room = self.directory / JUDGEMENT_DIR
+        path = (room / f"{kind}.json" if alternative_id is None
+                else room / alternative_id / f"{kind}.json")
         if not path.is_file():
+            where = ("" if alternative_id is None
+                     else f" for alternative {alternative_id!r}")
             raise NoRecordedAnswer(
-                f"{self.case_id}: the run asked for a {kind} review and this case "
-                f"records no {kind} judgement at {path}. A replay answers from a "
-                "recording or it does not answer; there is no live call here to "
-                "fall back on.")
+                f"{self.case_id}: the run asked for a {kind} review{where} and "
+                f"this case records no such judgement at {path}. A replay answers "
+                "from a recording or it does not answer; there is no live call "
+                "here to fall back on.")
         payload = json.loads(path.read_text(encoding="utf-8"))
         if "review_envelope" in payload:
             raise ReplayError(
@@ -325,18 +499,22 @@ def digest_of(path: Path) -> str:
 def recorded_files(case_id: str) -> tuple[str, ...]:
     """Every file whose bytes a case's expectations were recorded against.
 
-    Repo-relative, POSIX-spelled, sorted. `case.json` is out because it is where
-    the digests live, and `expected.json` is out because it is the recording
-    rather than an input to it.
+    Case-relative, POSIX-spelled, sorted, and walked to the bottom of each tree:
+    a branched case's `inputs/` mirrors the project directory, so its files are
+    nested, and a digest set that only looked one level down would leave every
+    branch's model and proposal unchecked.
+
+    `case.json` is out because it is where the digests live, and `expected.json`
+    is out because it is the recording rather than an input to it.
     """
     directory = CASES_ROOT / case_id
     names = []
-    for sub in (INPUT_DIR, JUDGEMENT_DIR):
+    for sub in (INPUT_DIR, REVISION_DIR, JUDGEMENT_DIR):
         room = directory / sub
         if not room.is_dir():
             continue
-        names += [f"{sub}/{path.name}" for path in sorted(room.iterdir())
-                  if path.is_file()]
+        names += [path.relative_to(directory).as_posix()
+                  for path in sorted(room.rglob("*")) if path.is_file()]
     return tuple(sorted(names))
 
 
@@ -360,6 +538,22 @@ def load(case_id: str) -> ReplayCase:
             f"{CASE_SCHEMA}; a reader that guesses at an unknown version is "
             "indistinguishable from one that read it correctly")
 
+    declared = payload.get("formulations")
+    if declared and payload.get("reviews"):
+        raise ReplayError(
+            f"{case_id}: case.json declares both `formulations` and a top-level "
+            "`reviews`. On a branched job a review belongs to one formulation, "
+            "and two places to read the expected order from is two answers and "
+            "one bug. Put the reviews on the formulation that is asked for them.")
+    formulations = (
+        tuple(_formulation(case_id, index, row)
+              for index, row in enumerate(declared))
+        if declared else
+        # The shape every case had before branching arrived: one formulation, at
+        # the root, holding whatever reviews the case declared.
+        (Formulation(alternative_id=None,
+                     reviews=tuple(payload.get("reviews") or ())),))
+
     case = ReplayCase(
         case_id=case_id,
         use_case=payload["use_case"],
@@ -370,14 +564,47 @@ def load(case_id: str) -> ReplayCase:
                                 as_name=row["as"])
                       for row in payload.get("sources", ())),
         substitutions=dict(payload.get("substitutions") or {}),
-        reviews=tuple(payload.get("reviews") or ()),
+        formulations=formulations,
+        branched=bool(declared),
+        concludes=payload["concludes"],
         max_invocations=int(payload["max_invocations"]),
         inputs_sha256=dict(payload["inputs_sha256"]),
         recorded_at=payload["recorded_at"],
         provenance=payload["provenance"],
         notes=payload.get("notes", ""))
+    if case.concludes not in CONCLUDES:
+        raise ReplayError(
+            f"{case_id}: concludes {case.concludes!r} is not one of "
+            f"{list(CONCLUDES)}")
     _verify_inputs(case)
     return case
+
+
+def _formulation(case_id: str, index: int, row: dict[str, Any]) -> Formulation:
+    """One declared formulation, with the id checked before it becomes a path.
+
+    Checked here and not only where it is joined: the id reaches the command
+    line as `--id`, the filesystem as a directory name and `expected.json` as a
+    key, and a case that had to be played before anybody found out it was
+    unspellable is a case that fails somewhere unhelpful.
+    """
+    raw = row.get("alternative_id")
+    alternative_id = None if raw in (None, ROOT_ALTERNATIVE) else str(raw)
+    if alternative_id is not None and not ALTERNATIVE_ID.match(alternative_id):
+        raise ReplayError(
+            f"{case_id}: formulations[{index}].alternative_id {raw!r} must match "
+            f"{ALTERNATIVE_ID.pattern} or be {ROOT_ALTERNATIVE!r} for the shared "
+            "root -- it becomes a directory name, a command-line argument and a "
+            "key in the recording.")
+    if alternative_id is not None and not str(row.get("reason") or "").strip():
+        raise ReplayError(
+            f"{case_id}: formulations[{index}] declares no reason. "
+            "`design-tool branch` refuses one without it, so a case that carried "
+            "none could never be played.")
+    return Formulation(alternative_id=alternative_id,
+                       parent=str(row.get("parent") or ROOT_ALTERNATIVE),
+                       reason=str(row.get("reason") or ""),
+                       reviews=tuple(row.get("reviews") or ()))
 
 
 def _verify_inputs(case: ReplayCase) -> None:
@@ -444,15 +671,27 @@ def materialise(case: ReplayCase, destination: Path) -> Path:
                         destination / source.as_name)
 
     for name in recorded_files(case.case_id):
-        target = destination / PurePosixPath(name).name
         if not name.startswith(f"{INPUT_DIR}/"):
             continue
-        text = (case.directory / name).read_text(encoding="utf-8")
-        for token, relative in sorted(case.substitutions.items()):
-            text = text.replace(token,
-                                str(destination / relative).replace("\\", "\\\\"))
-        target.write_text(text, encoding="utf-8")
+        _write_input(case, name, destination)
     return destination
+
+
+def _write_input(case: ReplayCase, name: str, destination: Path) -> Path:
+    """One recorded file into the place the project tree wants it.
+
+    `inputs/` mirrors the project directory, so the path after the prefix is the
+    path inside it -- no mapping, and a branch's model lands under
+    `alternatives/<id>/` because that is where the case put it.
+    """
+    relative = PurePosixPath(name).relative_to(PurePosixPath(name).parts[0])
+    target = destination / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = (case.directory / name).read_text(encoding="utf-8")
+    for token, where in sorted(case.substitutions.items()):
+        text = text.replace(token, str(destination / where).replace("\\", "\\\\"))
+    target.write_text(text, encoding="utf-8")
+    return target
 
 
 # --------------------------------------------------------------------------
@@ -466,46 +705,55 @@ class Play:
     reviews_answered: list[str]
     responses_written: list[str]
     transcript: str
+    # Formulation key -> its work directory. One entry for an unbranched job,
+    # one per formulation otherwise, in play order.
+    work_dirs: dict[str, Path] = dataclasses.field(default_factory=dict)
+    # Formulation key -> what `design-tool status` derives for it at the end of
+    # the play. Empty unless the case declared formulations; see `observe`.
+    derived: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
 
 
-def _next_action(project_dir: Path) -> dict[str, Any] | None:
-    path = project_dir / "next_action.json"
+def work_dir(project_dir: Path) -> Path:
+    """Where the *currently active* formulation writes, read off `project.json`.
+
+    The project root while no alternative is active -- which is every job that
+    has never branched -- and `alternatives/<id>` once one is. Re-read on every
+    use rather than computed once, because `design-tool branch` moves it
+    mid-play.
+
+    Refused rather than resolved, loudly, for an id that is not a plain
+    `[a-z0-9-]+` or whose join would leave the project. `branch` cannot write
+    one and `Project.validate` reports one as a finding, so the only way to get
+    here is a hand-edited `project.json` -- and falling back to the project root
+    would compare the root's receipts and call them the branch's, which is a
+    replay passing for the wrong reason.
+    """
+    project_dir = Path(project_dir)
+    active = (_read(project_dir, "project.json") or {}).get("active_alternative")
+    if active in (None, "", ROOT_ALTERNATIVE):
+        return project_dir
+    if not isinstance(active, str) or not ALTERNATIVE_ID.match(active):
+        raise ReplayError(
+            f"project.json makes {active!r} the active alternative, and an id "
+            f"this harness can resolve matches {ALTERNATIVE_ID.pattern}. "
+            "Resolving it to the project root instead would read the shared "
+            "root's receipts and report them as this formulation's.")
+    resolved = (project_dir / ALTERNATIVES_DIR / active).resolve()
+    if not resolved.is_relative_to(project_dir.resolve()):
+        raise ReplayError(                          # pragma: no cover - see above
+            f"the work directory for alternative {active!r} resolves to "
+            f"{resolved}, which is outside the project.")
+    return resolved
+
+
+def _next_action(work: Path) -> dict[str, Any] | None:
+    path = work / "next_action.json"
     if not path.is_file():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
-
-
-def _refuse_a_branch(case: ReplayCase, project_dir: Path) -> None:
-    """A case with an active alternative is refused, loudly, rather than misread.
-
-    Everything belonging to one formulation lives under `alternatives/<id>/` --
-    the proposal, the acceptance revision, the reviews, `next_action.json` -- and
-    every path this harness joins is relative to the project root. On a branched
-    job those two are different directories, so the loop would look for the
-    review packet where nobody put it and read the root's receipts as the
-    branch's.
-
-    Refused rather than resolved. Building a work-directory resolver that no
-    committed case exercises is the broad unfinished framework ROADMAP.md 3.1
-    forbids; a branch replay is a case that needs recording, and when one is, the
-    resolver comes with it and has something to fail on. What must not happen in
-    the meantime is a replay that quietly compares the wrong directory and
-    reports it as a pass.
-    """
-    payload = _read(project_dir, "project.json") or {}
-    active = payload.get("active_alternative")
-    if active:
-        raise ReplayError(
-            f"{case.case_id}: project.json makes {active!r} the active "
-            "alternative, and this harness joins every path against the project "
-            "root. A branched formulation keeps its receipts, its acceptance "
-            "revision and its review packets under alternatives/<id>/, so a "
-            "replay of one would read the root's and call them the branch's. "
-            "Record a branch case and give this a work-directory resolver "
-            "together; do not do either on its own.")
 
 
 def command_surface() -> Callable[[list[str]], int]:
@@ -529,11 +777,18 @@ NEEDS_ACTION = 3
 def play(case: ReplayCase, project_dir: Path,
          *, envelope_for: Callable[[str, dict], Any] | None = None,
          invoke: Callable[[list[str]], int] | None = None) -> Play:
-    """`design-tool route`, then `run` until it stops, answering from the record.
+    """Every declared formulation in turn: branch, `route`, then `run` until it
+    stops, answering from the record.
 
-    `envelope_for` exists for one caller: the adversarial fixture, which stamps an
-    envelope the run did not ask for so that the binding can be shown to still
-    fail closed. Every other caller takes the default, which echoes the packet.
+    On an unbranched case there is one formulation, no `branch` command is
+    issued, and this is exactly the loop it always was.
+
+    `envelope_for` exists for the adversarial fixtures, which stamp an envelope
+    the run did not ask for -- one belonging to another question, and one
+    belonging to a *sibling* -- so that the binding can be shown to still fail
+    closed. It is given the formulation as well as the kind, because on a
+    branched job "the answer written next door" is the whole point. Every other
+    caller takes the default, which echoes the packet.
 
     `invoke` exists so the guards below -- an unrecorded review, an
     `AGENT_COMMISSION`, an answer this harness did not write, a job that will not
@@ -544,10 +799,10 @@ def play(case: ReplayCase, project_dir: Path,
     """
     invoke_surface = invoke or command_surface()
     project_dir = Path(project_dir)
-    _refuse_a_branch(case, project_dir)
     exit_codes: list[str | int] = []
     answered: list[str] = []
     written: list[str] = []
+    work_dirs: dict[str, Path] = {}
     transcript = io.StringIO()
 
     def step(argv: list[str]) -> int:
@@ -555,14 +810,86 @@ def play(case: ReplayCase, project_dir: Path,
                 contextlib.redirect_stderr(transcript):
             return invoke_surface(argv)
 
-    exit_codes.append(step(["route", str(project_dir)]))
+    for formulation in case.formulations:
+        exit_codes += _select(case, project_dir, formulation, step)
+        exit_codes.append(step(["route", str(project_dir)]))
+        _play_one(case, project_dir, formulation, step,
+                  exit_codes=exit_codes, answered=answered, written=written,
+                  envelope_for=envelope_for)
+        work_dirs[formulation.key] = work_dir(project_dir)
+        _apply_revisions(case, project_dir, formulation)
 
+    on_disk = sorted(
+        path.relative_to(project_dir).as_posix()
+        for path in project_dir.rglob("*_response.json")
+        if path.parent.name == "reviews")
+    if on_disk != sorted(written):
+        raise ReplayError(
+            f"{case.case_id}: the review answers on disk are {on_disk} and this "
+            f"harness wrote {sorted(written)}. An answer nobody recorded reached "
+            "the run.")
+    derived = _derive_all(case, project_dir, step, invoke_surface, transcript)
+    return Play(project_dir=project_dir, exit_codes=exit_codes,
+                reviews_answered=answered, responses_written=written,
+                transcript=transcript.getvalue(), work_dirs=work_dirs,
+                derived=derived)
+
+
+def _select(case: ReplayCase, project_dir: Path, formulation: Formulation,
+            step: Callable[[list[str]], int]) -> list[str | int]:
+    """Put the project on this formulation, through `design-tool branch`.
+
+    Declared for the first time it is created; declared already it is switched
+    to. Both are the one verb a user has, and both are recorded in the exit
+    sequence -- a branch that started failing would otherwise show up two
+    commands later as a job writing into the wrong directory.
+
+    An unbranched case issues nothing at all, so its play is byte-for-byte the
+    sequence it was before this existed.
+    """
+    if not case.branched:
+        return []
+    payload = _read(project_dir, "project.json") or {}
+    declared = {row.get("alternative_id")
+                for row in payload.get("alternatives") or ()}
+    active = payload.get("active_alternative") or None
+    wanted = formulation.alternative_id
+    if wanted is None:
+        argv = ([] if active is None
+                else ["branch", str(project_dir), "--activate", ROOT_ALTERNATIVE])
+    elif wanted not in declared:
+        argv = ["branch", str(project_dir), "--from", formulation.parent,
+                "--id", wanted, "--reason", formulation.reason]
+    elif active != wanted:
+        argv = ["branch", str(project_dir), "--activate", wanted]
+    else:
+        argv = []
+    if not argv:
+        return []
+    code = step(argv)
+    if code != 0:
+        raise ReplayError(
+            f"{case.case_id}: `design-tool {' '.join(argv[:1] + argv[2:])}` "
+            f"exited {code}. The formulation this case declares could not be "
+            "reached, so nothing below it is a replay of anything.")
+    return [code]
+
+
+def _play_one(case: ReplayCase, project_dir: Path, formulation: Formulation,
+              step: Callable[[list[str]], int], *,
+              exit_codes: list[str | int], answered: list[str],
+              written: list[str],
+              envelope_for: Callable[..., Any] | None) -> None:
+    """`run` one formulation until it stops, answering from the record."""
     for _ in range(case.max_invocations):
         code = step(["run", str(project_dir), "--no-render"])
         exit_codes.append(code)
         if code != NEEDS_ACTION:
             break
-        action = _next_action(project_dir)
+        # Re-read: the run that just paused wrote its instruction into *this*
+        # formulation's directory, which the last `branch` moved.
+        work = work_dir(project_dir)
+        action = _next_action(work)
         kind = (action or {}).get("kind")
         if kind == "AGENT_COMMISSION":
             raise LiveDispatchRequired(
@@ -573,9 +900,15 @@ def play(case: ReplayCase, project_dir: Path,
         if kind != "REVIEW":
             break
         review_kind = action["review_kind"]
-        packet_path = project_dir / action["evidence"]
-        response_path = project_dir / action["respond_with"]
-        if response_path.exists() and response_path.name not in written:
+        # Both are relative to the work directory, which is where the pipeline
+        # wrote them and where it will look for the answer.
+        packet_path = work / action["evidence"]
+        response_path = work / action["respond_with"]
+        # Project-relative, so two formulations answering one review kind are two
+        # entries rather than one. Under the bare filename a sibling's answer
+        # would have counted as this one's own earlier attempt.
+        relative = response_path.relative_to(project_dir).as_posix()
+        if response_path.exists() and relative not in written:
             # Not "exists": this play may legitimately be looking at its own
             # earlier answer, and a run that asks twice for one kind is a job
             # that is not consuming what it was given -- which the invocation
@@ -583,34 +916,97 @@ def play(case: ReplayCase, project_dir: Path,
             # an answer that was on disk before this harness wrote anything,
             # because that is an answer nobody recorded.
             raise ReplayError(
-                f"{case.case_id}: {response_path.name} already exists and this "
-                "harness did not write it. Every answer a replay consumes must "
-                "come from the recording.")
+                f"{case.case_id}: {relative} already exists and this harness did "
+                "not write it. Every answer a replay consumes must come from the "
+                "recording.")
         packet = json.loads(packet_path.read_text(encoding="utf-8"))
-        stamp = (envelope_for(review_kind, packet) if envelope_for is not None
-                 else packet["review_envelope"])
+        stamp = (envelope_for(review_kind, packet, formulation)
+                 if envelope_for is not None else packet["review_envelope"])
         response_path.write_text(
-            json.dumps({**case.judgement(review_kind), "review_envelope": stamp},
+            json.dumps({**case.judgement(review_kind, formulation.alternative_id),
+                        "review_envelope": stamp},
                        indent=2, sort_keys=True) + "\n", encoding="utf-8")
         answered.append(review_kind)
-        if response_path.name not in written:
-            written.append(response_path.name)
+        if relative not in written:
+            written.append(relative)
     else:
         raise ReplayError(
-            f"{case.case_id}: still asking for something after "
-            f"{case.max_invocations} invocations of `design-tool run`. A replay "
-            "that loops is a replay that never finishes.")
+            f"{case.case_id}: formulation {formulation.key!r} is still asking for "
+            f"something after {case.max_invocations} invocations of "
+            "`design-tool run`. A replay that loops is a replay that never "
+            "finishes.")
 
-    on_disk = sorted(path.name for path in (project_dir / "reviews").glob("*_response.json")) \
-        if (project_dir / "reviews").is_dir() else []
-    if on_disk != sorted(written):
+
+def _apply_revisions(case: ReplayCase, project_dir: Path,
+                     formulation: Formulation) -> None:
+    """Write this formulation's recorded revisions over what it just produced.
+
+    After it settles, never before: the point is a verdict that was reached
+    against one version of an input and is read afterwards against another. An
+    input revised before the run would simply be the input the run used, and
+    nothing would ever have bound the older one.
+    """
+    prefix = PurePosixPath(REVISION_DIR) / formulation.relative_dir()
+    for name in recorded_files(case.case_id):
+        path = PurePosixPath(name)
+        if path.parent != prefix:
+            continue
+        _write_input(case, name, project_dir)
+
+
+def _derive_all(case: ReplayCase, project_dir: Path,
+                step: Callable[[list[str]], int],
+                invoke_surface: Callable[[list[str]], int],
+                transcript: io.StringIO) -> dict[str, dict[str, Any]]:
+    """What `design-tool status` currently derives for each formulation.
+
+    Read through the command surface, one formulation at a time, because that is
+    the only place derived status exists: it is computed from the bindings on
+    disk and no receipt carries it. See the module docstring for why a computed
+    value is nonetheless binding.
+
+    Only for a branched case. An unbranched one would gain a key in every
+    recording for a value that is `stored_status` by construction the moment the
+    run finishes, and the two cases recorded before this arrived would have had
+    to be re-recorded to say nothing new.
+    """
+    if not case.branched:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for formulation in case.formulations:
+        _select(case, project_dir, formulation, step)
+        report = _status_report(project_dir, invoke_surface, transcript)
+        out[formulation.key] = {
+            "derived_status": report.get("final_status"),
+            "stored_status": report.get("stored_status"),
+            # The names only. Which receipts stopped binding is a shape; the
+            # sentence under each names two truncated digests and is prose.
+            "stale": sorted(report.get("stale") or {}),
+        }
+    return out
+
+
+def _status_report(project_dir: Path,
+                   invoke_surface: Callable[[list[str]], int],
+                   transcript: io.StringIO) -> dict[str, Any]:
+    """`design-tool status --json`, parsed.
+
+    Its own stdout buffer: the transcript is a human record of the whole play and
+    this is a document the harness reads, and interleaving the two would make the
+    parse depend on what every earlier command happened to print. Through the
+    same injected surface as everything else, so the seam stays one seam.
+    """
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured), \
+            contextlib.redirect_stderr(transcript):
+        code = invoke_surface(["status", str(project_dir), "--json"])
+    transcript.write(captured.getvalue())
+    try:
+        return json.loads(captured.getvalue())
+    except json.JSONDecodeError as exc:
         raise ReplayError(
-            f"{case.case_id}: the review answers on disk are {on_disk} and this "
-            f"harness wrote {sorted(written)}. An answer nobody recorded reached "
-            "the run.")
-    return Play(project_dir=project_dir, exit_codes=exit_codes,
-                reviews_answered=answered, responses_written=written,
-                transcript=transcript.getvalue())
+            f"`design-tool status --json` exited {code} and did not print a JSON "
+            f"report: {exc}") from exc
 
 
 # --------------------------------------------------------------------------
@@ -637,8 +1033,37 @@ def _read(project_dir: Path, name: str) -> dict[str, Any] | None:
 
 
 def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
-    """Everything a replay compares, read off the finished job directory."""
-    directory = run.project_dir
+    """Everything a replay compares, read off the finished job.
+
+    Two shapes, and the second is the first repeated. An unbranched case
+    produces exactly the payload it produced before formulations existed --
+    which is why the two cases recorded before this arrived did not move. A
+    branched one nests the same block under `formulations`, keyed by alternative
+    id with `.` for the shared root, and adds what `design-tool status` derives
+    for each.
+
+    Absent rather than null on an unbranched job, following the rule
+    `Project.as_payload` already follows for `alternatives`: a key that says
+    nothing a reader did not already know is a key that moves every recording in
+    the set to say it.
+    """
+    payload: dict[str, Any] = {
+        "schema_version": EXPECTED_SCHEMA,
+        "case_id": case.case_id,
+        "exit_codes": list(run.exit_codes),
+        "reviews_answered": list(run.reviews_answered),
+    }
+    if not case.branched:
+        payload.update(_observe_dir(run.project_dir))
+        return payload
+    payload["formulations"] = {
+        key: {**_observe_dir(directory), "derived": run.derived.get(key)}
+        for key, directory in run.work_dirs.items()}
+    return payload
+
+
+def _observe_dir(directory: Path) -> dict[str, Any]:
+    """One formulation's receipts, as a block a recording can hold."""
     final = _read(directory, "final_status.json") or {}
     report = _read(directory, "commission_report.json") or {}
     frozen = _read(directory, "acceptance_contract.json") or {}
@@ -660,10 +1085,6 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
         and path.name not in NOT_A_RECEIPT)
 
     return {
-        "schema_version": EXPECTED_SCHEMA,
-        "case_id": case.case_id,
-        "exit_codes": list(run.exit_codes),
-        "reviews_answered": list(run.reviews_answered),
         "outcome": {
             "final_status": final.get("final_status"),
             "commission_verdict": final.get("commission_verdict"),
@@ -807,31 +1228,56 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
     """Every layer, each by its own rule. See the module docstring for the argument."""
     out: list[Difference] = []
 
-    for field in ("exit_codes", "reviews_answered", "receipts"):
+    for field in ("exit_codes", "reviews_answered"):
         _compare_exact(field, recorded.get(field), observed.get(field), out)
-    for field in ("outcome", "coverage", "screening_detail", "acceptance"):
-        _compare_exact(field, recorded.get(field), observed.get(field), out)
+
+    if "formulations" in recorded or "formulations" in observed:
+        rows = recorded.get("formulations") or {}
+        seen = observed.get("formulations") or {}
+        if set(rows) != set(seen):
+            out.append(Difference(BINDING, "formulations.ids",
+                                  sorted(rows), sorted(seen)))
+        for key in sorted(set(rows) & set(seen)):
+            _compare_block(f"formulations.{key}.", rows[key], seen[key], out)
+    else:
+        _compare_block("", recorded, observed, out)
+    return out
+
+
+def _compare_block(prefix: str, recorded: dict[str, Any],
+                   observed: dict[str, Any], out: list[Difference]) -> None:
+    """One formulation's receipts, or a whole unbranched job's.
+
+    `prefix` is empty for an unbranched case, so every `where` a maintainer has
+    ever read out of a failure message is unchanged.
+    """
+    for field in ("receipts", "outcome", "coverage", "screening_detail",
+                  "acceptance", "derived"):
+        if field == "derived" and recorded.get(field) is None \
+                and observed.get(field) is None:
+            continue
+        _compare_exact(f"{prefix}{field}", recorded.get(field),
+                       observed.get(field), out)
 
     recorded_checks = recorded.get("checks") or {}
     observed_checks = observed.get("checks") or {}
     if set(recorded_checks) != set(observed_checks):
-        out.append(Difference(BINDING, "checks.ids",
+        out.append(Difference(BINDING, f"{prefix}checks.ids",
                               sorted(recorded_checks), sorted(observed_checks)))
     for check_id in sorted(set(recorded_checks) & set(observed_checks)):
-        _compare_exact(f"checks.{check_id}", recorded_checks[check_id],
+        _compare_exact(f"{prefix}checks.{check_id}", recorded_checks[check_id],
                        observed_checks[check_id], out)
 
     recorded_measured = recorded.get("measured") or {}
     observed_measured = observed.get("measured") or {}
     tolerances = recorded.get("tolerances") or {}
     for check_id in sorted(set(recorded_measured) & set(observed_measured)):
-        _compare_value(f"measured.{check_id}", recorded_measured[check_id],
+        _compare_value(f"{prefix}measured.{check_id}", recorded_measured[check_id],
                        observed_measured[check_id], tolerances.get(check_id), out)
 
     for field in ("reasons", "allowed_claim"):
-        _compare_exact(field, recorded.get(field), observed.get(field), out,
-                       severity=ADVISORY)
-    return out
+        _compare_exact(f"{prefix}{field}", recorded.get(field),
+                       observed.get(field), out, severity=ADVISORY)
 
 
 def binding(differences: list[Difference]) -> list[Difference]:
@@ -892,6 +1338,20 @@ def _head() -> str:
         return "unknown"                               # outside a checkout still records
 
 
+def _statuses(payload: dict[str, Any]) -> dict[str, str]:
+    """What each formulation in a recording concluded, for the command line."""
+    if "formulations" not in payload:
+        stored = (payload.get("outcome") or {}).get("final_status")
+        return {ROOT_ALTERNATIVE: str(stored)}
+    out = {}
+    for key, block in (payload["formulations"] or {}).items():
+        derived = (block.get("derived") or {}).get("derived_status")
+        stored = (block.get("outcome") or {}).get("final_status")
+        out[key] = (str(stored) if derived in (None, stored)
+                    else f"{derived} (the run concluded {stored})")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
     import tempfile
@@ -919,6 +1379,8 @@ def main(argv: list[str] | None = None) -> int:
         for case_id in case_ids():
             case = load(case_id)
             print(f"  {case_id:28s} {case.use_case:9s} {case.source_mode:10s} "
+                  f"{case.concludes:8s} "
+                  f"{len(case.formulations)} formulation(s), "
                   f"{len(case.reviews)} recorded review(s), frozen at "
                   f"{case.recorded_at[:12]}")
         return 0
@@ -927,8 +1389,9 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as raw:
             payload = record(args.record, Path(raw))
         print(f"recorded {args.record} at {payload['recorded_at'][:12]}: "
-              f"{payload['outcome']['final_status']}, "
               f"exit {payload['exit_codes']}")
+        for key, status in sorted(_statuses(payload).items()):
+            print(f"  {key:18s} {status}")
         return 0
 
     with tempfile.TemporaryDirectory() as raw:

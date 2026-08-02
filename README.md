@@ -335,11 +335,16 @@ and [`ROADMAP.md`](ROADMAP.md) section 4.4 budgets the two tiers separately.
 Neither number means anything if one suite can run inside the other.
 
 ```bash
-uv run pytest benchmarks/replays          # ~35 s, two recorded jobs
+uv run pytest benchmarks/replays          # ~68 s, four recorded jobs
 uv run python tools/replay.py --list
 uv run python tools/replay.py --run modify-ball-flange-flat
 uv run python tools/replay.py --record modify-ball-flange-flat   # re-freeze
 ```
+
+One of the four is branched: `branch-knob-seat-fallback` plays three formulations
+of one job through `design-tool branch`, `route`, `run` and `status`, with the
+brief and the requirements shared at the project root and every receipt under the
+formulation that produced it.
 
 Re-record only when a change legitimately moves an expectation, and put the diff
 in the review — that diff is the point. The argument for what a replay asserts,

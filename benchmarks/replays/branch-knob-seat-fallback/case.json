@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "case_id": "branch-knob-seat-fallback",
+  "use_case": "FROM_SCRATCH",
+  "source_mode": "NEW",
+  "consequence": "INCONSEQUENTIAL",
+  "request": "benchmarks/fixtures/berlingo-knob/public/request.md",
+  "sources": [],
+  "substitutions": {},
+  "formulations": [
+    {
+      "alternative_id": ".",
+      "reviews": [
+        "verification"
+      ]
+    },
+    {
+      "alternative_id": "plate-seated",
+      "parent": ".",
+      "reason": "the base-plate height is a photo estimate, and this is the formulation that trusts it: 52 mm of body over the same 36 mm engagement, so the mouth lands on the plate",
+      "reviews": [
+        "verification"
+      ]
+    },
+    {
+      "alternative_id": "as-drawn",
+      "parent": ".",
+      "reason": "the sleeve as drawn, retained unchanged as the fallback if the estimated plate height is wrong. A control the seated concept can be compared against",
+      "reviews": [
+        "verification"
+      ]
+    }
+  ],
+  "concludes": "BUILT",
+  "max_invocations": 3,
+  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "provenance": "AUTHORED_AGAINST_A_RECORDED_REQUEST",
+  "notes": "The request is real and vendored: `berlingo-knob`, evidence class DESIGN_STAGE_UNVERIFIED, a gear-shift knob measured with calipers and photographs and never printed. The fork is the request's own recorded uncertainty rather than an invented one -- the base-plate height is a photo estimate its notes give as +/-2 mm, and whether the sleeve's mouth seats on that plate or stops short of it is a decision nobody can make from the evidence, which is exactly ROADMAP.md 3.5's condition for exploring an alternative instead of guessing. So the shared root is the sleeve as drawn, `plate-seated` trusts the estimate and spends the whole 52 mm envelope on it, and `as-drawn` carries the ancestor forward unchanged as the fallback. The proposals and models were authored for this replay; no recorded run of a branched knob job exists in a form this pipeline can execute.\n\nWhat this case exercises that nothing else in the repository does. Three formulations of one job through the real `design-tool branch`, `route`, `run` and `status`, with the shared half -- the brief, the requirements, the engagement length, the printer -- read from one `project.json` that no formulation rewrites, and every receipt under the formulation that produced it. Each freezes acceptance revision 1 and supersedes nothing, so neither sibling cuts a revision from the other. `plate-seated` builds a materially different solid; `as-drawn` builds one byte-identical to its parent's, which is the instant a review answer written for one formulation could bind the other and is the false pass ROADMAP.md 4.2 forbids -- the suite shows the two envelopes differ in nothing but the alternative id, carried directly and through the execution plan, and that the answer written for the root is refused next door. Then `as-drawn`'s model is revised after its run concluded, and its stored VERIFIED derives STALE while both its siblings stay current: Slice B's derived status on a real job rather than a constructed one.\n\nIt runs with `--no-render`, so no witness image exists and all three recorded judgements say so. A verification PASS may not carry missing evidence -- the schema refuses it -- so what carries the limitation is the status the pipeline derives from the answer, which says in its own words that nobody has seen this part.",
+  "inputs_sha256": {
+    "inputs/alternatives/as-drawn/design_proposal.json": "379797a9ee60219700ffca61558f1c7781146613cca4f88791ede817c21bad34",
+    "inputs/alternatives/as-drawn/model.py": "ff3cf2397503d17db45d3ea7794f1751e9847970da1c4bb0b987523433612f6b",
+    "inputs/alternatives/plate-seated/design_proposal.json": "e75c4e286329683c953f0505147b524a7554dd3b4a0ef1bdf56864e6ed0e51b2",
+    "inputs/alternatives/plate-seated/model.py": "7beb933b1220eb8b7110b03dffc71ee6dc83dce17ad2fe2a5b7d3854c5a87b88",
+    "inputs/design_proposal.json": "379797a9ee60219700ffca61558f1c7781146613cca4f88791ede817c21bad34",
+    "inputs/model.py": "ff3cf2397503d17db45d3ea7794f1751e9847970da1c4bb0b987523433612f6b",
+    "inputs/project.json": "4d8fe3fae3dc2a76a9529f6547d49c17488f944fb17378219ad7e86276be3d38",
+    "judgements/as-drawn/verification.json": "f3d53902461e8451bedee9f01e4f52fd288f27e92f08c034d398f1e07a2857e8",
+    "judgements/plate-seated/verification.json": "13bb7dee840f1e3908a867ccdd5031b4a9723b1839b3aee13126cf321078b598",
+    "judgements/verification.json": "1c45b148ccca59f609aa89b32ffbb334b5b6227c769e8dd1dd19b55c27cbd710",
+    "revisions/alternatives/as-drawn/model.py": "56b94c480634f6ff88e29431dc6ef2da9515c9fe03626c06761a402286057061"
+  }
+}

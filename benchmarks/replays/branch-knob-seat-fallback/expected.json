@@ -1,0 +1,479 @@
+{
+  "case_id": "branch-knob-seat-fallback",
+  "exit_codes": [
+    0,
+    3,
+    0,
+    0,
+    0,
+    3,
+    0,
+    0,
+    0,
+    3,
+    0
+  ],
+  "formulations": {
+    ".": {
+      "acceptance": {
+        "expected_volume_basis": "NOT_INDEPENDENTLY_SPECIFIED",
+        "features": [
+          "bore-wall-section",
+          "crown-footprint",
+          "grip-section",
+          "plan-support-00"
+        ],
+        "history_entries": 1,
+        "revision": 1,
+        "tolerance_owner": "pipeline"
+      },
+      "allowed_claim": "independently verified against its contract on measurements alone -- no images were rendered, so nobody has seen this part",
+      "checks": {
+        "bodies": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "envelope": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-bore-wall-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-crown-footprint": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-grip-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-plan-support-00": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "repair": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "seated": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "unit_scale": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "watertight": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        }
+      },
+      "coverage": {
+        "covered": 4,
+        "declared": 4,
+        "fraction": 1.0,
+        "minimum": 1.0
+      },
+      "derived": {
+        "derived_status": "VERIFIED",
+        "stale": [],
+        "stored_status": "VERIFIED"
+      },
+      "measured": {
+        "bodies": 1,
+        "envelope": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "feature-bore-wall-section": 879.38,
+        "feature-crown-footprint": 1133.305,
+        "feature-grip-section": 1133.331,
+        "feature-plan-support-00": 0.0,
+        "repair": "none",
+        "seated": 0.0,
+        "unit_scale": "mm",
+        "watertight": true
+      },
+      "outcome": {
+        "backend": "authored",
+        "commission_verdict": "PASS",
+        "consequence": "INCONSEQUENTIAL",
+        "final_status": "VERIFIED",
+        "lane_status": "AVAILABLE",
+        "route": "CUSTOM",
+        "safety_verification": null,
+        "screening": "CLEAR",
+        "screening_calibrated": false,
+        "verification": "PASS"
+      },
+      "reasons": [
+        "screening is uncalibrated; the independent review is what covers undeclared geometry here -- and it saw no images, only numbers",
+        "verification saw no images; undeclared geometry is not covered by a numeric check"
+      ],
+      "receipts": [
+        "acceptance_contract.json",
+        "acceptance_history.json",
+        "artifact_manifest.json",
+        "brief.md",
+        "candidate.stl",
+        "candidate_declaration.json",
+        "commission_report.json",
+        "design_proposal.json",
+        "execution_plan.json",
+        "final_status.json",
+        "intent_manifest.json",
+        "model.py",
+        "model_contract.json",
+        "print_plan_checks.json",
+        "project.json",
+        "route_decision.json",
+        "verification_report.json"
+      ],
+      "screening_detail": {
+        "calibrated": false,
+        "detectors": {
+          "bed-plane": "CLEAR",
+          "components": "CLEAR",
+          "profile-z": "NOT_APPLICABLE",
+          "volume": "NOT_APPLICABLE"
+        },
+        "overall": "CLEAR"
+      },
+      "tolerances": {
+        "bodies": null,
+        "envelope": 0.5,
+        "feature-bore-wall-section": 4.406638999978519,
+        "feature-crown-footprint": 5.6705747397295765,
+        "feature-grip-section": 5.6705747397295765,
+        "feature-plan-support-00": 0.0,
+        "repair": null,
+        "seated": 0.05,
+        "unit_scale": null,
+        "watertight": null
+      }
+    },
+    "as-drawn": {
+      "acceptance": {
+        "expected_volume_basis": "NOT_INDEPENDENTLY_SPECIFIED",
+        "features": [
+          "bore-wall-section",
+          "crown-footprint",
+          "grip-section",
+          "plan-support-00"
+        ],
+        "history_entries": 1,
+        "revision": 1,
+        "tolerance_owner": "pipeline"
+      },
+      "allowed_claim": "independently verified against its contract on measurements alone -- no images were rendered, so nobody has seen this part",
+      "checks": {
+        "bodies": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "envelope": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-bore-wall-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-crown-footprint": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-grip-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-plan-support-00": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "repair": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "seated": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "unit_scale": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "watertight": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        }
+      },
+      "coverage": {
+        "covered": 4,
+        "declared": 4,
+        "fraction": 1.0,
+        "minimum": 1.0
+      },
+      "derived": {
+        "derived_status": "STALE",
+        "stale": [
+          "artifact_manifest.json",
+          "commission_report.json",
+          "final_status.json",
+          "verification_report.json"
+        ],
+        "stored_status": "VERIFIED"
+      },
+      "measured": {
+        "bodies": 1,
+        "envelope": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "feature-bore-wall-section": 879.38,
+        "feature-crown-footprint": 1133.305,
+        "feature-grip-section": 1133.331,
+        "feature-plan-support-00": 0.0,
+        "repair": "none",
+        "seated": 0.0,
+        "unit_scale": "mm",
+        "watertight": true
+      },
+      "outcome": {
+        "backend": "authored",
+        "commission_verdict": "PASS",
+        "consequence": "INCONSEQUENTIAL",
+        "final_status": "VERIFIED",
+        "lane_status": "AVAILABLE",
+        "route": "CUSTOM",
+        "safety_verification": null,
+        "screening": "CLEAR",
+        "screening_calibrated": false,
+        "verification": "PASS"
+      },
+      "reasons": [
+        "screening is uncalibrated; the independent review is what covers undeclared geometry here -- and it saw no images, only numbers",
+        "verification saw no images; undeclared geometry is not covered by a numeric check"
+      ],
+      "receipts": [
+        "acceptance_contract.json",
+        "acceptance_history.json",
+        "artifact_manifest.json",
+        "candidate.stl",
+        "candidate_declaration.json",
+        "commission_report.json",
+        "design_proposal.json",
+        "execution_plan.json",
+        "final_status.json",
+        "intent_manifest.json",
+        "model.py",
+        "model_contract.json",
+        "print_plan_checks.json",
+        "route_decision.json",
+        "verification_report.json"
+      ],
+      "screening_detail": {
+        "calibrated": false,
+        "detectors": {
+          "bed-plane": "CLEAR",
+          "components": "CLEAR",
+          "profile-z": "NOT_APPLICABLE",
+          "volume": "NOT_APPLICABLE"
+        },
+        "overall": "CLEAR"
+      },
+      "tolerances": {
+        "bodies": null,
+        "envelope": 0.5,
+        "feature-bore-wall-section": 4.406638999978519,
+        "feature-crown-footprint": 5.6705747397295765,
+        "feature-grip-section": 5.6705747397295765,
+        "feature-plan-support-00": 0.0,
+        "repair": null,
+        "seated": 0.05,
+        "unit_scale": null,
+        "watertight": null
+      }
+    },
+    "plate-seated": {
+      "acceptance": {
+        "expected_volume_basis": "NOT_INDEPENDENTLY_SPECIFIED",
+        "features": [
+          "bore-wall-section",
+          "crown-footprint",
+          "grip-section",
+          "plan-support-00"
+        ],
+        "history_entries": 1,
+        "revision": 1,
+        "tolerance_owner": "pipeline"
+      },
+      "allowed_claim": "independently verified against its contract on measurements alone -- no images were rendered, so nobody has seen this part",
+      "checks": {
+        "bodies": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "envelope": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-bore-wall-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-crown-footprint": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-grip-section": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "feature-plan-support-00": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "repair": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "seated": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "unit_scale": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        },
+        "watertight": {
+          "ran": true,
+          "result": "PASS",
+          "status": "MEASURED"
+        }
+      },
+      "coverage": {
+        "covered": 4,
+        "declared": 4,
+        "fraction": 1.0,
+        "minimum": 1.0
+      },
+      "derived": {
+        "derived_status": "VERIFIED",
+        "stale": [],
+        "stored_status": "VERIFIED"
+      },
+      "measured": {
+        "bodies": 1,
+        "envelope": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 52.0
+        },
+        "feature-bore-wall-section": 879.296,
+        "feature-crown-footprint": 1133.305,
+        "feature-grip-section": 1133.331,
+        "feature-plan-support-00": 0.0,
+        "repair": "none",
+        "seated": 0.0,
+        "unit_scale": "mm",
+        "watertight": true
+      },
+      "outcome": {
+        "backend": "authored",
+        "commission_verdict": "PASS",
+        "consequence": "INCONSEQUENTIAL",
+        "final_status": "VERIFIED",
+        "lane_status": "AVAILABLE",
+        "route": "CUSTOM",
+        "safety_verification": null,
+        "screening": "CLEAR",
+        "screening_calibrated": false,
+        "verification": "PASS"
+      },
+      "reasons": [
+        "screening is uncalibrated; the independent review is what covers undeclared geometry here -- and it saw no images, only numbers",
+        "verification saw no images; undeclared geometry is not covered by a numeric check"
+      ],
+      "receipts": [
+        "acceptance_contract.json",
+        "acceptance_history.json",
+        "artifact_manifest.json",
+        "candidate.stl",
+        "candidate_declaration.json",
+        "commission_report.json",
+        "design_proposal.json",
+        "execution_plan.json",
+        "final_status.json",
+        "intent_manifest.json",
+        "model.py",
+        "model_contract.json",
+        "print_plan_checks.json",
+        "route_decision.json",
+        "verification_report.json"
+      ],
+      "screening_detail": {
+        "calibrated": false,
+        "detectors": {
+          "bed-plane": "CLEAR",
+          "components": "CLEAR",
+          "profile-z": "NOT_APPLICABLE",
+          "volume": "NOT_APPLICABLE"
+        },
+        "overall": "CLEAR"
+      },
+      "tolerances": {
+        "bodies": null,
+        "envelope": 0.5,
+        "feature-bore-wall-section": 4.406638999978519,
+        "feature-crown-footprint": 5.6705747397295765,
+        "feature-grip-section": 5.6705747397295765,
+        "feature-plan-support-00": 0.0,
+        "repair": null,
+        "seated": 0.05,
+        "unit_scale": null,
+        "watertight": null
+      }
+    }
+  },
+  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "reviews_answered": [
+    "verification",
+    "verification",
+    "verification"
+  ],
+  "schema_version": 1
+}

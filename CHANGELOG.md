@@ -6,6 +6,88 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — the three slices Release 3 shipped, replayed as jobs
+
+The harness below landed with two cases, a `CUSTOM` job and a `MODIFY` job, and
+neither exercised what Release 3 actually shipped: branching and sibling
+isolation, derived status and `STALE`, superseded instructions and structured
+findings. Section 4.3 was therefore met for that release by the lane the harness
+was built on rather than by the release's own work, and 4.5 was partial for the
+same reason. Two cases close it, and the harness gained exactly what they needed
+and no more.
+
+**The work directory, resolved instead of refused.** The harness used to refuse
+any case declaring an `active_alternative`, because every path it joined was
+relative to the project root while a branch keeps its receipts under
+`alternatives/<id>/`. `tools/replay.py` now reads `project.json` before every
+step and joins against the formulation that is active — `design-tool branch`
+moves that answer mid-play, so a resolver that cached it would read one
+formulation's receipts as another's. It is a second implementation of
+`Project.work_dir` on purpose: a harness that asked the system under test where
+to look could not catch the system looking in the wrong place, and
+`tools/test_replay.py` asserts the two agree and that the two constants the copy
+rests on are the pipeline's own. What it still refuses is an `active_alternative`
+that is not a plain `[a-z0-9-]+` id — `branch` cannot write one, a hand-edited
+project can, and resolving it to the root would compare the wrong directory and
+report a pass.
+
+* **`branch-knob-seat-fallback`** — three formulations of one job on the vendored
+  `berlingo-knob` request, forked on that request's *own* recorded uncertainty:
+  the base-plate height is a photo estimate its notes give as ±2 mm, so the
+  shared root is the sleeve as drawn, `plate-seated` trusts the estimate and
+  spends the whole 52 mm envelope on it, and `as-drawn` carries the ancestor
+  forward unchanged as the fallback. Each freezes acceptance revision 1 and
+  supersedes nothing, so neither sibling cuts a revision from the other; one
+  builds a materially different solid and one builds a byte-identical one. That
+  second pair is what makes the case say anything: their review envelopes differ
+  in `alternative_id` and in the plan digest, the plans differ in
+  `alternative_id` and nothing else, and stripping that one field makes the two
+  reviews one review — so the PASS written for the ancestor settles the
+  fallback's. Protocol 4 refuses it, and the suite shows the refusal end to end.
+  Then the fallback's model is revised *after* its run concluded, and its stored
+  `VERIFIED` derives `STALE` while both siblings stay current. 31 s including the
+  adversarial replay.
+* **`modify-ball-scope-refused`** — the same real `MODIFY` job as below, with the
+  edit scope as somebody first wrote it: the region box's two y values
+  transposed, and an `interface_ids` naming an interface nothing declares. Both
+  commands stop at 2, nothing is frozen and nothing is built, and what is left is
+  `next_action.json` kind `FIX_PROJECT` carrying slice C's structured findings —
+  `SCHEMA_RANGE@edit_scopes[0].region_box.y` and
+  `REF_UNDECLARED@edit_scopes[0].interface_ids[0]`, two codes from two groups,
+  each with a `where` that is a position in the file rather than the noun the
+  sentence uses. The refusal path had no L1 coverage at all, and it is half of
+  the functional gate. Two seconds.
+
+**Derived status is computed and is still binding.** Everything else a replay
+compares is read off a file the run wrote; `status.derive` is computed on demand
+from the bindings on disk, and `STALE` exists nowhere else. It goes in the
+binding layer under the rule that was already there — it is an answer the system
+gives, not prose, `design-tool status` returns a different exit code for each
+value, and `derive` re-adjudicates nothing and reads no clock, so two replays of
+one recording agree or something is wrong. The *reasons* under it are prose and
+stay advisory; the `stale` map's keys are a shape and bind, and its sentences,
+which quote two truncated digests, are recorded nowhere.
+
+**What a case may now declare, and what it costs a case that does not.** A case
+may list `formulations` and must say whether it `concludes` `BUILT` or `REFUSED`;
+`inputs/` and a new `revisions/` mirror the project tree, and `judgements/` is
+indexed by formulation and kind. A case that declares no formulations issues no
+`branch` command and produces the recording it produced before any of this
+existed — which is why `custom-knob-sleeve` and `modify-ball-flange-flat` are
+still frozen at `4442921d` and did not move. `revisions/` exists for one property
+nothing else reaches: an input revised *after* a formulation settles is the only
+way a stored verdict can be read against evidence that has since moved, because
+an input revised before it would simply be the input the run used.
+
+L1 is now 68 s of a two-minute budget over four cases; the commit-gating suite is
+unchanged at about 994 s. Seven mutations were run against the new protections —
+each harness resolver, the pipeline's work directory, the alternative id on the
+envelope *and* on the plan, `CLAIMS_SUCCESS`, the finding's axis-qualified field
+path, the revision's ordering, and the copied constant — and every one turns a
+green fixture red. The third is worth quoting: with `alternative_id` off both the
+envelope and the plan, the fallback's run exits 0 instead of 1. The false pass is
+reachable, and this is the fixture that says so.
+
 ### Added — a recorded job, replayed, with nothing asked of a model
 
 `ROADMAP.md` section 5.1 defines three benchmark tiers and this repository
@@ -21,8 +103,9 @@ Nothing replayed a *job*.
 
 `tools/replay.py` does. It materialises a recorded case into a fresh directory,
 runs `design-tool route` and then `design-tool run` until the job settles, and
-compares what came out against `expected.json`. `benchmarks/replays/` holds two
-cases, which is the number two real lanes need and not one more:
+compares what came out against `expected.json`. `benchmarks/replays/` held two
+cases when this landed, which is the number two real lanes needed and not one
+more:
 
 * **`custom-knob-sleeve`** — an authored `CUSTOM` job against the vendored
   `berlingo-knob` request. Proposal, acceptance freeze at revision 1, the
@@ -72,7 +155,7 @@ the `CUSTOM` lane.
 `skills/3d-modeling/scripts` and `tools`; `benchmarks/replays` is in neither, so
 a bare `uv run pytest` cannot collect a job replay. CI runs L0 on every push and
 L1 on pull requests as its own job. The harness's own guards are L0 —
-`tools/test_replay.py`, 34 tests in 2 s, with every guard shown red under a
+`tools/test_replay.py`, 47 tests in 3 s, with every guard shown red under a
 mutation that disables it — because a check nobody checks
 reports all clear just as convincingly when it is broken.
 

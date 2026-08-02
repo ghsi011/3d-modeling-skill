@@ -1,0 +1,46 @@
+{
+  "acceptance": {
+    "expected_volume_basis": null,
+    "features": [],
+    "history_entries": 0,
+    "revision": null,
+    "tolerance_owner": null
+  },
+  "allowed_claim": null,
+  "case_id": "modify-ball-scope-refused",
+  "checks": {},
+  "coverage": null,
+  "exit_codes": [
+    2,
+    2
+  ],
+  "measured": {},
+  "outcome": {
+    "backend": null,
+    "commission_verdict": null,
+    "consequence": null,
+    "final_status": null,
+    "lane_status": null,
+    "route": null,
+    "safety_verification": null,
+    "screening": null,
+    "screening_calibrated": null,
+    "verification": null
+  },
+  "reasons": [],
+  "receipts": [
+    "ball_male_17mm.stl",
+    "brief.md",
+    "next_action.json",
+    "project.json"
+  ],
+  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "reviews_answered": [],
+  "schema_version": 1,
+  "screening_detail": {
+    "calibrated": null,
+    "detectors": {},
+    "overall": null
+  },
+  "tolerances": {}
+}

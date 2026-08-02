@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case_id": "custom-knob-sleeve",
   "use_case": "FROM_SCRATCH",
   "source_mode": "NEW",
@@ -8,6 +8,7 @@
   "sources": [],
   "substitutions": {},
   "reviews": [],
+  "concludes": "BUILT",
   "max_invocations": 2,
   "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
   "provenance": "AUTHORED_AGAINST_A_RECORDED_REQUEST",

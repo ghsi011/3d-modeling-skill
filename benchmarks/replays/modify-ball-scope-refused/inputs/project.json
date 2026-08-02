@@ -1,0 +1,114 @@
+{
+  "brief": "brief.md",
+  "brief_sha256": null,
+  "cache_dir": null,
+  "compat": null,
+  "components": [],
+  "consequence": "CONSEQUENTIAL",
+  "consequence_rationale": "vehicle-mounted. The ball root carries a phone on a magnetic cradle in a moving car, and a root that lets go drops it into the footwell",
+  "edit_scopes": [
+    {
+      "add": [],
+      "alignment_transform": "identity",
+      "artifact_id": "ball-17mm",
+      "expected_body_delta": 0,
+      "interface_ids": [
+        "flange-key"
+      ],
+      "may_remove": [
+        "a 2 mm strip off the +y edge of the flange, z 0 to 3.5"
+      ],
+      "mesh_fallback_allowed": true,
+      "preservation_tolerance_mm": 0.1,
+      "preserve": [
+        "the 17 mm ball",
+        "the neck between the ball and the flange",
+        "the flange's three remaining edges and its three feet"
+      ],
+      "preserve_metadata": false,
+      "region": "the +y edge of the mounting flange",
+      "region_box": {
+        "max": [
+          193.0,
+          172.0,
+          3.5
+        ],
+        "min": [
+          170.0,
+          176.0,
+          -1.0
+        ]
+      }
+    }
+  ],
+  "envelope_mm": {
+    "x": 21.0,
+    "y": 29.0,
+    "z": 29.0
+  },
+  "evidence": [],
+  "expected_artifacts": [],
+  "interface_map": {},
+  "interfaces": [],
+  "job_id": "ball-flange-flat-scope-refused",
+  "material": {
+    "material": "ASA",
+    "process": "FDM"
+  },
+  "model": "model.py",
+  "modifiers": [],
+  "motion": [],
+  "nozzle": {
+    "diameter_mm": 0.4
+  },
+  "open_questions": [],
+  "orientation": {
+    "bed_z_mm": 0.0,
+    "model_to_printer_matrix": "identity"
+  },
+  "parameters": {},
+  "printer": "Bambu Lab X2D",
+  "required_reviews": [],
+  "requirements": [
+    {
+      "artifact_id": "ball-17mm",
+      "name": "ball_diameter_mm",
+      "note": "the ball is supplied and is not redrawn",
+      "provenance": "INHERITED",
+      "source": "ball-17mm",
+      "unit": "mm",
+      "value": 17.0
+    },
+    {
+      "artifact_id": null,
+      "name": "flat_depth_mm",
+      "note": "how much of the flange edge comes off",
+      "provenance": "STATED",
+      "source": "user",
+      "unit": "mm",
+      "value": 2.0
+    }
+  ],
+  "reviewer": {
+    "model_snapshot": "recorded"
+  },
+  "route": null,
+  "route_rationale": "",
+  "schema_version": 1,
+  "source_artifacts": [
+    {
+      "artifact_id": "ball-17mm",
+      "classification": "USABLE_MESH",
+      "format": "STL",
+      "note": "the 17 mm male ball the user had already printed and used",
+      "path": "ball_male_17mm.stl",
+      "sha256": null,
+      "units": null
+    }
+  ],
+  "source_mode": "MODIFY",
+  "step": false,
+  "template": null,
+  "updated_utc": "2026-08-02T00:00:00Z",
+  "verification_requested": false
+}
