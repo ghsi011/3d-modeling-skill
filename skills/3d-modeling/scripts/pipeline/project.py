@@ -62,13 +62,45 @@ ALTERNATIVE_ID = re.compile(r"^[a-z0-9-]+$")
 ALTERNATIVE_DISPOSITION = ("ACTIVE", "PREFERRED", "PAUSED", "REJECTED",
                            "SUPERSEDED", "FALLBACK", "MERGED")
 
-# The two dispositions this build *honours*. The rest are stored, round-tripped
-# and reported, and nothing reads them: no transition is implemented, no
-# comparison exists, and claiming to honour a state whose behaviour is absent is
-# exactly the defect that retired `candidate_strategy`. An alternative in any
-# other state cannot be the active one, which is the only decision a disposition
-# reaches in this slice.
-RUNNABLE_DISPOSITION = ("ACTIVE", "PREFERRED")
+# The three a formulation may be *worked under*: it can be the active one, and
+# `design-tool run` will build it.
+#
+# `FALLBACK` is here and the other four are not, and the reason is a real job.
+# The vent-ball exercise retained one formulation unchanged as the thing to fall
+# back on if a photo estimate turned out wrong, and had to record it `ACTIVE`
+# because a build that would not run a `FALLBACK` gives "retained" and
+# "abandoned" the same behaviour. A fallback you may not keep current is not a
+# fallback; it is a rejection with a kinder word. So a fallback runs, and what
+# separates it from `ACTIVE` is `status`: it is named as the option to fall back
+# on exactly when the current formulation has no claim (`cli.status`).
+RUNNABLE_DISPOSITION = ("ACTIVE", "PREFERRED", "FALLBACK")
+
+# The three that say this formulation is finished with. They are not runnable,
+# and concluding one *clears its `next_action.json`*: an instruction is read as
+# "this is what the job is waiting for", and a formulation nobody will pick up
+# again is waiting for nothing. Its receipts stay exactly where they are --
+# 13.1 says history is not rewritten, and a rejection is evidence.
+CONCLUDED_DISPOSITION = ("REJECTED", "SUPERSEDED", "MERGED")
+
+# Why a formulation is in the state it is in. ARCHITECTURE.md 14.6 is explicit
+# that "the disposition must include its basis", and this is that list, spelled
+# as a closed set so that the answer is comparable across jobs rather than a
+# free sentence per project. `ACTIVE` needs none: it is the state a formulation
+# starts in, and demanding a reason for the default would be demanding a reason
+# for nothing having happened yet.
+DISPOSITION_BASIS = ("USER_SELECTION", "REQUIREMENT_FAILURE",
+                     "MANUFACTURING_DISADVANTAGE", "PHYSICAL_TEST",
+                     "UNRESOLVED_EVIDENCE", "STRONGER_CONCEPT")
+
+BASIS_REQUIRED = tuple(d for d in ALTERNATIVE_DISPOSITION if d != "ACTIVE")
+
+# The two that must name what replaced them. `SUPERSEDED` without a successor is
+# an assertion that something better exists with no way to find it, and `MERGED`
+# without one is a claim about a graph edge nobody can check -- which is the
+# whole reason `MERGED` survives in a build that has no merge: it is refused
+# unless the successor's `parents` actually record the merge, so the state
+# cannot be claimed ahead of the capability.
+SUCCESSOR_REQUIRED = ("SUPERSEDED", "MERGED")
 
 # Where a design-driving value came from. Four, not two: collapsing `INHERITED`
 # into `STATED` claims the user said something the supplied artifact did, and
@@ -500,12 +532,28 @@ class Alternative:
     parents: tuple[str, ...] = ()
     reason: str = ""
     disposition: str = "ACTIVE"
+    # Why it is in that state, and -- for the two terminal states that imply one
+    # -- which formulation replaced it. `reason` is why this branch was *started*
+    # and never changes; these two are why it is where it ended up, and they move
+    # with every transition. One field for both would lose the first the moment
+    # anything was paused.
+    basis: str = ""
+    superseded_by: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"alternative_id": self.alternative_id,
-                "parents": list(self.parents),
-                "reason": self.reason,
-                "disposition": self.disposition}
+        payload: dict[str, Any] = {"alternative_id": self.alternative_id,
+                                   "parents": list(self.parents),
+                                   "reason": self.reason,
+                                   "disposition": self.disposition}
+        # Absent while empty, which is the rule every optional key in this file
+        # follows: an `ACTIVE` row serializes to exactly the bytes it did before
+        # a basis existed, so no project in the corpus moves for a field it has
+        # nothing to put in.
+        if self.basis:
+            payload["basis"] = self.basis
+        if self.superseded_by:
+            payload["superseded_by"] = self.superseded_by
+        return payload
 
     def problems(self, index: int = 0) -> list[Issue]:
         where = f"alternative {self.alternative_id!r}"
@@ -534,6 +582,46 @@ class Alternative:
                for parent in self.parents):
             out.append(F.problem(F.SCHEMA_TYPE, f"{path}.parents",
                                  f"{where}: parents must be a list of alternative ids"))
+        out.extend(self._basis_problems(path, where))
+        return out
+
+    def _basis_problems(self, path: str, where: str) -> list[Issue]:
+        """The disposition's own justification, refused when it is missing.
+
+        A disposition that only labels is the defect it was supposed to fix with
+        a nicer name -- `PAUSED` with nothing saying why is the same amount of
+        information as `ACTIVE`, and the next person to read it has to guess
+        whether the work was parked or abandoned. ARCHITECTURE.md 14.6 already
+        required the basis; this is where the requirement bites.
+        """
+        out: list[Issue] = []
+        if self.basis and self.basis not in DISPOSITION_BASIS:
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.basis",
+                                 f"{where}: basis {self.basis!r} is not one of "
+                                 f"{list(DISPOSITION_BASIS)}"))
+        if self.disposition in BASIS_REQUIRED and not self.basis.strip():
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.basis",
+                f"{where}: {self.disposition} must say what it rests on -- one of "
+                f"{list(DISPOSITION_BASIS)}. A disposition with no basis records "
+                "that somebody decided and not what they decided it on, which is "
+                "the label this lifecycle exists to stop being"))
+        if self.disposition in SUCCESSOR_REQUIRED and not self.superseded_by.strip():
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.superseded_by",
+                f"{where}: {self.disposition} must name the formulation that "
+                "replaced it. Without one this row says a better concept exists "
+                "and gives no way to find it"))
+        if self.superseded_by and self.disposition not in SUCCESSOR_REQUIRED:
+            out.append(F.problem(
+                F.INTENT_CONTRADICTION, f"{path}.superseded_by",
+                f"{where}: superseded_by names {self.superseded_by!r} while the "
+                f"disposition is {self.disposition}, which is not one of "
+                f"{list(SUCCESSOR_REQUIRED)}"))
+        if self.superseded_by and self.superseded_by == self.alternative_id:
+            out.append(F.problem(
+                F.REF_ORDER, f"{path}.superseded_by",
+                f"{where}: a formulation cannot supersede itself"))
         return out
 
 
@@ -982,6 +1070,8 @@ class Project:
                         "no cycles rather than one that has to be walked to find out"))
             declared.add(row.alternative_id)
 
+        problems.extend(self._disposition_problems())
+
         if self.active_alternative is not None:
             active = self.alternative(self.active_alternative)
             if active is None:
@@ -994,10 +1084,58 @@ class Project:
                 problems.append(F.problem(
                     F.INTENT_UNSUPPORTED, "active_alternative",
                     f"active_alternative {self.active_alternative!r} is "
-                    f"{active.disposition}, and only {list(RUNNABLE_DISPOSITION)} are "
-                    "honoured by this build. The other states are recorded and read "
-                    "by nothing, so working under one would be working under a "
-                    "lifecycle that does not exist"))
+                    f"{active.disposition}, and only {list(RUNNABLE_DISPOSITION)} may "
+                    "be worked under. "
+                    + ("Resume it first (`design-tool branch --disposition ACTIVE "
+                       f"--of {self.active_alternative} --basis USER_SELECTION`); "
+                       "a run that silently continued a paused formulation would be "
+                       "a pause that paused nothing"
+                       if active.disposition == "PAUSED" else
+                       f"{active.disposition} says this formulation is finished "
+                       "with; branch a new one from it rather than reopening it in "
+                       "place, which would rewrite the history it is the record of")))
+        return problems
+
+    def _disposition_problems(self) -> list[Issue]:
+        """The rules one row cannot see, because they are about the set.
+
+        Two of them, and each removes a way for the lifecycle to hold two answers
+        to one question: which formulation is the job's answer, and whether a
+        claimed merge is in the graph at all.
+        """
+        problems: list[Issue] = []
+        by_id = {row.alternative_id: row for row in self.alternatives}
+        preferred = [(index, row) for index, row in enumerate(self.alternatives)
+                     if row.disposition == "PREFERRED"]
+        for index, row in preferred[1:]:
+            problems.append(F.problem(
+                F.REF_DUPLICATE, f"alternatives[{index}].disposition",
+                f"alternative {row.alternative_id!r} is PREFERRED and so is "
+                f"{preferred[0][1].alternative_id!r}. Two preferred formulations "
+                "are two answers to what this job's design is; switch with "
+                "`design-tool branch --disposition PREFERRED`, which demotes the "
+                "previous one to ACTIVE rather than leaving both standing"))
+
+        for index, row in enumerate(self.alternatives):
+            if not row.superseded_by or row.superseded_by == row.alternative_id:
+                continue
+            successor = by_id.get(row.superseded_by)
+            if successor is None:
+                problems.append(F.problem(
+                    F.REF_UNDECLARED, f"alternatives[{index}].superseded_by",
+                    f"alternative {row.alternative_id!r}: superseded_by "
+                    f"{row.superseded_by!r} names no declared alternative"))
+            elif (row.disposition == "MERGED"
+                  and row.alternative_id not in successor.parents):
+                problems.append(F.problem(
+                    F.REF_UNDECLARED, f"alternatives[{index}].superseded_by",
+                    f"alternative {row.alternative_id!r} is MERGED into "
+                    f"{row.superseded_by!r}, and {row.superseded_by!r} does not "
+                    f"list it among its parents. A merge is a revision with "
+                    "several contributing parents (ARCHITECTURE.md 13.2); until "
+                    "one records it, MERGED is a label over a graph that shows no "
+                    "merge -- and this build does not perform merges, so the row "
+                    "has to be written before the state can be claimed"))
         return problems
 
 
@@ -1155,7 +1293,9 @@ def from_payload(payload: dict[str, Any]) -> Project:
                         parents=_ids(row.get("parents"),
                                      f"alternatives[{index}].parents"),
                         reason=str(row.get("reason", "")),
-                        disposition=str(row.get("disposition") or "ACTIVE"))
+                        disposition=str(row.get("disposition") or "ACTIVE"),
+                        basis=str(row.get("basis") or ""),
+                        superseded_by=str(row.get("superseded_by") or ""))
             for index, row in enumerate(
                 _rows(payload.get("alternatives"), "alternatives"))),
         active_alternative=payload.get("active_alternative"),

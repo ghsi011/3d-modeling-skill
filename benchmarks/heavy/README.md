@@ -1,7 +1,7 @@
 # L0-heavy — the component fixtures that cost a child interpreter
 
 ```bash
-uv run pytest benchmarks/heavy -q     # ~16 min, 333 tests, before merge
+uv run pytest benchmarks/heavy -q     # ~15 min, 353 tests, before merge
 uv run pytest                         # the commit gate this half was cut out of
 ```
 
@@ -24,7 +24,9 @@ So the split is along that seam. Everything that starts a child — the `dt.py` 
 bundle smokes — moved here. Everything that answers in the parent stayed in the
 unit suite beside the module it tests. Nothing was deleted and nothing was
 weakened: 830 tests stayed, 333 moved, and 830 + 333 is the 1163 that were there
-before.
+before. Written *since* the split rather than moved by it: three cases in
+`test_lifecycle_heavy.py`, which restart a job whose review answer had to survive
+the confined build boundary to exist.
 
 A handful of tests moved without starting anything, because they do the
 expensive work themselves: the screening corpus (19 s a test), the STEP reads

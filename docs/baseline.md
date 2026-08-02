@@ -193,6 +193,21 @@ job more than once — moved with them:
 | L0-heavy, `uv run pytest benchmarks/heavy` | 350 | 190 | ~962 s |
 | L1, `uv run pytest benchmarks/replays` | 55 | 38 | 68 s |
 
+Re-measured on the same machine after Release 3's lifecycle group, which added 31
+gating tests, 3 heavy ones and nothing to L1:
+
+| tier | tests | subtests | wall |
+|---|---|---|---|
+| L0, `uv run pytest` | 869 | 477 | **45 s** (43.9 / 45.7 / 47.1) |
+| L0-heavy, `uv run pytest benchmarks/heavy` | 353 | 190 | 889 s |
+| L1, `uv run pytest benchmarks/replays` | 55 | 38 | 62 s |
+
+The gate grew 3 s for 31 tests, all of which answer in this process: the
+lifecycle group's end-to-end cases are on the certified lane, which builds
+without a child interpreter, and the authored-lane restart — the one that needs a
+real review answer to exist before it can discard one — is in `benchmarks/heavy`
+where the tier rule puts it.
+
 820 of the 1163 stayed and 343 moved; the other 25 are the tier guard's own
 tests, new here. `pytest --collect-only` is 2.5 s of the 43 s, and `import
 trimesh` alone is 1.8 s of that — which is the floor a commit gate on this

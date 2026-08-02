@@ -105,6 +105,8 @@ snap-fit one — declare each as an **alternative**:
 uv run design-tool branch project/ --from . --id snap-fit --reason "no fasteners to lose"
 uv run design-tool run project/
 uv run design-tool branch project/ --activate .        # back to the first concept
+uv run design-tool branch project/ --disposition PREFERRED --of snap-fit \
+    --basis PHYSICAL_TEST                              # and this one is the answer
 ```
 
 Branching writes one row in `project.json` and **copies nothing**: the brief, the
@@ -115,8 +117,17 @@ acceptance revision, the reviews and every receipt — lives under
 review answered for one is refused by the other rather than accepted: at the
 instant a branch is created its sibling is a copy, so the contract, the artifacts
 and the witnesses all hash the same, and the alternative's identity is what the
-review envelope binds. Details and the exit contract are in
-[`docs/tooling.md`](docs/tooling.md).
+review envelope binds.
+
+Each formulation carries a **disposition**, and all seven states do something.
+`PREFERRED` is at most one per project and switching it demotes the previous
+holder rather than deleting it; `FALLBACK` is a concept you are keeping ready,
+still runnable, and `design-tool status` names it as the thing to fall back on
+exactly when the current formulation has no claim it may make; `PAUSED` parks one
+and keeps the instruction that says what to do on resuming; `REJECTED`,
+`SUPERSEDED` and `MERGED` finish with one, clear its instruction and keep every
+receipt it earned. Every state but the default has to say what it rests on.
+Details and the exit contract are in [`docs/tooling.md`](docs/tooling.md).
 
 A project that never branches pays nothing for this: no directory appears, no
 payload gains a field, and every frozen contract hash is unchanged.

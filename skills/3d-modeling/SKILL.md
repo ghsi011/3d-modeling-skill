@@ -22,9 +22,11 @@ uv run design-tool init <project> --job-id J --source-mode NEW|MODIFY|RECONSTRUC
     --consequence INCONSEQUENTIAL|CONSEQUENTIAL --updated-utc <iso8601>
 uv run design-tool route  <project>     # decide and record the route
 uv run design-tool run    <project>     # every deterministic stage, then stop cleanly
+uv run design-tool run    <project> --restart   # discard this branch's conclusions
 uv run design-tool status <project>     # route, bindings, what it is waiting for
 uv run design-tool branch <project> --from <alt|.> --id <name> --reason "<text>"
 uv run design-tool branch <project> --activate <alt|.>
+uv run design-tool branch <project> --disposition <state> --basis <basis> [--of <alt>]
 uv run design-tool doctor               # what this interpreter can actually do
 uv run design-tool selftest             # does this installation build what it certifies
 ```
@@ -35,6 +37,21 @@ only what differs — the proposal, the model, the artifacts, the acceptance
 revision, the reviews and every receipt — lives under `alternatives/<id>/`. A
 review answered for one branch is refused by its sibling. A project that never
 branches pays nothing: no directory appears and no payload gains a field.
+
+`--disposition` moves a formulation between the seven lifecycle states and each
+one changes something: `ACTIVE`, `PREFERRED` (at most one; switching demotes the
+previous holder rather than erasing it) and `FALLBACK` (retained, still runnable,
+and named by `status` when the current formulation has no claim) may be worked
+under; `PAUSED` is parked and keeps its instruction; `REJECTED`, `SUPERSEDED` and
+`MERGED` are concluded, clear their instruction and keep every receipt. Every
+state but `ACTIVE` must say what it rests on with `--basis`. Transitions and
+restarts are recorded in `lifecycle.json`.
+
+`run --restart` discards what *this* formulation concluded — its receipts and its
+review answers — and keeps what it concluded from: the frozen contract, the
+proposal, the model, the build cache and every sibling. Use it when an answer
+whose bindings all still hold is one you no longer trust; ordinary staleness is
+already handled by re-running.
 
 `project.json` is the one machine-authoritative description of a job. Fill it in,
 then run `design-tool run <project>` and keep running the identical command.

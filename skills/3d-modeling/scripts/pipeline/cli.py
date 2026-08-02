@@ -46,6 +46,7 @@ front page advertised the pipeline.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import sys
@@ -57,6 +58,7 @@ from . import bindings as B
 from . import execution as EX
 from . import findings as F
 from . import isolation as ISO
+from . import lifecycle as LC
 from . import project as P
 from . import review as R
 from . import route as RT
@@ -430,6 +432,142 @@ def _clear_next_action(work_dir: Path) -> None:
     path = work_dir / NEXT_ACTION_FILE
     if path.is_file():
         path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Resume and restart
+# ---------------------------------------------------------------------------
+#
+# The model until now was "re-run the identical command", and reuse was four
+# independent presence and content checks with no central authority: an artifact
+# was reused if it was on disk, a review if a response file existed, an
+# acceptance contract if its body compared equal, a build if the content cache
+# held it. That is resumption, and it works, and there was no way to *say* it --
+# so there was also no way to say the other thing.
+#
+# **Resume** is what the default already does, and `--resume` is not a synonym
+# for it. It asserts the precondition the default assumes: that there is
+# something here to continue. On a formulation with no receipts, no instruction
+# and no answered review, "resume" is a user who believes work exists that does
+# not, and the useful answer is to say so rather than to start from nothing under
+# a word that promised otherwise.
+#
+# **Restart** is the question this slice actually had to decide, because
+# invalidation is already scoped. "Delete everything and start again" would throw
+# away the frozen acceptance contract (cutting a spurious revision on the next
+# run), the content cache (re-paying for geometry that is still valid by
+# content), the design proposal and model (which are inputs, not conclusions),
+# and, if it were scoped to the project rather than the formulation, every
+# sibling -- which is exactly what 13.5 forbids. A restart that costs more than
+# it corrects is a worse default than no restart at all.
+#
+# So restart is scoped twice over: to **one formulation**, and to that
+# formulation's **conclusions**. It removes what this alternative concluded --
+# the receipts, and the review answers that fed them -- and keeps everything it
+# concluded *from*. What it buys that resume cannot is the one case scoped
+# invalidation is blind to by construction: a conclusion whose bindings all still
+# hold and which somebody nonetheless no longer trusts. A review answered PASS
+# against evidence that has not moved is reused forever by resume, correctly;
+# restart is the only way to ask again.
+
+# The review answers a restart discards. Not the packets: a packet is the
+# question, rewritten at the top of every run, and deleting one removes nothing
+# that was concluded.
+RESPONSE_GLOB = "*_response.json"
+
+
+def _concluded_files(work_dir: Path) -> list[Path]:
+    """Everything in this formulation that records a conclusion, in removal order.
+
+    `bindings.REMOVABLE` is derived from the receipt table rather than restated,
+    so a receipt added there is discarded by a restart without anyone
+    remembering to add it here. `model_contract.json` is deliberately not in it
+    -- it is the definition of the `contract` binding, not a conclusion -- and
+    neither is anything a run reads as input.
+    """
+    found = [work_dir / name for name in B.REMOVABLE]
+    room = work_dir / REVIEW_DIR
+    if room.is_dir():
+        found.extend(sorted(room.glob(RESPONSE_GLOB)))
+    found.append(work_dir / NEXT_ACTION_FILE)
+    return [path for path in found if path.is_file()]
+
+
+def _has_progress(work_dir: Path) -> bool:
+    """Whether there is anything here to resume."""
+    return bool(_concluded_files(work_dir))
+
+
+def _restart(project_dir: Path, work_dir: Path, project: P.Project) -> None:
+    """Discard this formulation's conclusions, recording them before they go.
+
+    The digests are written to `lifecycle.json` and not only to stderr. A
+    restart is the one operation here that removes a receipt whose bindings still
+    hold, so it is the one where "neither current nor erased" needs somewhere
+    durable to live -- ADR 0002's rule, applied to the case that rule did not
+    cover.
+    """
+    stored = _final_status(work_dir) or {}
+    doomed = _concluded_files(work_dir)
+    discarded: dict[str, str] = {}
+    for path in doomed:
+        discarded[path.relative_to(work_dir).as_posix()] = S.sha256_file(path)
+        path.unlink()
+    LC.record(project_dir, {
+        "event": "RESTART",
+        "alternative": project.active_alternative or B.ROOT_ALTERNATIVE,
+        # What the discarded conclusions were issued against. Content-derived,
+        # so it is the same value for two restarts of one unchanged formulation
+        # -- which is correct: they discarded the same thing.
+        "run_id": B.identity(_state(work_dir, project)),
+        "discarded_status": stored.get("final_status"),
+        "discarded": discarded,
+        "updated_utc": project.updated_utc,
+    })
+    if not discarded:
+        sys.stderr.write("design-tool: --restart: nothing had concluded here; "
+                         "this run starts from the same state a resume would.\n")
+        return
+    sys.stderr.write(
+        f"design-tool: --restart discarded {len(discarded)} file(s) this "
+        "formulation had concluded"
+        + (f", including a stored {stored['final_status']}"
+           if stored.get("final_status") else "")
+        + f". Recorded in {LC.LIFECYCLE_FILE}:\n"
+        + "".join(f"    - {name}\n" for name in sorted(discarded)))
+    sys.stderr.write(
+        "  Kept: the frozen acceptance contract, the design proposal, the model, "
+        "the content cache\n  and every sibling formulation. A restart discards "
+        "what this alternative concluded,\n  not what it concluded from.\n")
+
+
+def _resume(project_dir: Path, work_dir: Path, project: P.Project) -> int:
+    """Report what an explicit resume is continuing, or refuse if it is nothing."""
+    if not _has_progress(work_dir):
+        where = work_dir.relative_to(project_dir).as_posix()
+        sys.stderr.write(
+            "design-tool: --resume: nothing has concluded in "
+            f"{'the project root' if where == '.' else where} -- no receipt, no "
+            "answered review and no pending instruction. There is nothing to "
+            "continue, so the flag is asserting something that is not true. Drop "
+            "it to start this formulation.\n")
+        return 2
+    stale = B.broken(work_dir, evidence_dir=project_dir,
+                     alternative_id=project.active_alternative or None,
+                     model_name=project.model)
+    # The receipts, not the review answers: a receipt is what records a binding
+    # and is therefore what `broken` can speak about. Listing an answer here
+    # would be reporting it as verified-still-current when what was checked is
+    # the report it produced.
+    kept = [name for name in B.REMOVABLE
+            if (work_dir / name).is_file() and name not in stale]
+    sys.stderr.write(
+        f"design-tool: --resume: {len(kept)} receipt(s) still bind what they "
+        f"were issued against and are being reused: {', '.join(kept) or 'none'}.\n")
+    if stale:
+        sys.stderr.write(
+            f"  {len(stale)} no longer bind and are discarded below.\n")
+    return 0
 
 
 def _relative(work_dir: Path, project_dir: Path, name: str) -> str:
@@ -1465,6 +1603,19 @@ def run(argv: list[str]) -> int:
     parser.add_argument("--no-render", action="store_true",
                         help="skip the witness images -- and with them the only "
                              "evidence that is not conditioned on a declaration")
+    continuation = parser.add_mutually_exclusive_group()
+    continuation.add_argument(
+        "--resume", action="store_true",
+        help="continue this formulation, and say what is being reused. This is "
+             "what a bare run already does; the flag asserts that there is "
+             "something here to continue and refuses when there is not")
+    continuation.add_argument(
+        "--restart", action="store_true",
+        help="discard what this formulation concluded -- its receipts and its "
+             "review answers -- and build it again. Keeps the acceptance "
+             "contract, the proposal, the model, the content cache and every "
+             "sibling; the discarded receipts are recorded in "
+             f"{LC.LIFECYCLE_FILE} before they go")
     args = parser.parse_args(argv)
 
     project_dir = args.project_dir.resolve()
@@ -1473,6 +1624,17 @@ def run(argv: list[str]) -> int:
     problems = project.validate(project_dir, require_buildable=False)
     if problems:
         return _report_problems(project_dir, work_dir, project, problems, stage="run")
+
+    # After validation and before anything is compiled. A restart that ran on a
+    # project too broken to route would discard a formulation's conclusions in
+    # exchange for a refusal, and a resume that reported on one would be
+    # describing a state the run is about to refuse to use.
+    if args.restart:
+        _restart(project_dir, work_dir, project)
+    elif args.resume:
+        refused = _resume(project_dir, work_dir, project)
+        if refused:
+            return refused
 
     decision = RT.decide(project)
     previous = project.route
@@ -1557,6 +1719,15 @@ def status(argv: list[str]) -> int:
         alternatives.append({**row.as_dict(),
                              "status": other["derived_status"],
                              "stored_status": other["stored_status"]})
+    # What FALLBACK means to a reader, which is the only thing that separates it
+    # from ACTIVE. A retained formulation is the answer to "and if this one does
+    # not work out", so it is named exactly when that question is live: the
+    # current formulation has no claim it may make. Naming it is not comparison
+    # and not selection -- Release 4 owns both -- it is reading a status this
+    # command already derives and honouring a disposition the user declared.
+    fallbacks = [{"alternative_id": row["alternative_id"], "status": row["status"],
+                  "reason": row["reason"]}
+                 for row in alternatives if row["disposition"] == "FALLBACK"]
     # One validate() call, read in two registers: `problems` keeps its shape as
     # the sentences a person reads, `findings` carries the code, field path and
     # severity a caller matches on. Calling validate twice would be two answers
@@ -1568,6 +1739,16 @@ def status(argv: list[str]) -> int:
         "consequence": project.consequence,
         "alternative": project.active_alternative,
         "alternatives": alternatives,
+        "fallbacks": fallbacks,
+        # Which run this formulation currently *is*, content-derived, so that a
+        # caller can carry one value instead of re-deriving the binding map --
+        # and so that two byte-identical siblings are still two runs. See
+        # `bindings.identity` for why it is not an invocation counter.
+        "run_id": B.identity(state),
+        # What was deliberately done to this job's formulations, oldest first.
+        # Bound by nothing: appending to it cannot make a receipt stale, which
+        # is what lets it record the one thing scoped invalidation cannot.
+        "lifecycle": LC.read(project_dir),
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
@@ -1599,11 +1780,17 @@ def status(argv: list[str]) -> int:
         for row in report["alternatives"]:
             mark = "*" if row["alternative_id"] == report["alternative"] else " "
             parents = ", ".join(row["parents"]) or "(the shared root)"
+            state_of = row["disposition"]
+            if row.get("basis"):
+                state_of += f" on {row['basis']}"
+            if row.get("superseded_by"):
+                state_of += f" by {row['superseded_by']}"
             print(f"  {mark} alternative {row['alternative_id']} "
-                  f"[{row['disposition']}] {row['status']} "
+                  f"[{state_of}] {row['status']} "
                   f"from {parents}: {row['reason']}")
         if report["alternatives"] and report["alternative"] is None:
             print("  * the shared root")
+        print(f"  run          {report['run_id'][:12]}")
         print(f"  route        {report['route'] or '(not decided)'}")
         if report["route_rationale"]:
             print(f"  because      {report['route_rationale']}")
@@ -1616,8 +1803,22 @@ def status(argv: list[str]) -> int:
             else:
                 print(f"  claim        none is current. The run concluded "
                       f"{report['stored_status']}: {report['allowed_claim']}")
+        if report["final_status"] not in STATUS.CLAIMS_SUCCESS:
+            for row in report["fallbacks"]:
+                standing = ("its claim is current"
+                            if row["status"] in STATUS.CLAIMS_SUCCESS
+                            else "it has no current claim either")
+                print(f"  fallback     {row['alternative_id']} is retained "
+                      f"({row['status']}) and {standing}: {row['reason']}")
         for name, rows in sorted(report["stale"].items()):
             print(f"  stale        {name}: {'; '.join(rows)}")
+        if report["lifecycle"]:
+            event = report["lifecycle"][-1]
+            print(f"  last change  {event.get('event')} on "
+                  f"{event.get('alternative')}: "
+                  + (f"{event.get('was')} -> {event.get('now')}"
+                     if event.get("event") == "DISPOSITION"
+                     else f"discarded {len(event.get('discarded') or {})} file(s)"))
         if report["lane_status"] and report["lane_status"] != "AVAILABLE":
             print(f"  lane         {report['lane_status']}")
         if next_action:
@@ -1691,6 +1892,23 @@ def branch(argv: list[str]) -> int:
                         help=f"switch to an existing alternative, or "
                              f"{ROOT_ALTERNATIVE!r} for the shared root, without "
                              "declaring a new one")
+    parser.add_argument("--disposition", default=None,
+                        choices=P.ALTERNATIVE_DISPOSITION,
+                        help="move an existing alternative to a lifecycle state. "
+                             f"{list(P.RUNNABLE_DISPOSITION)} may be worked under; "
+                             "PAUSED parks one and keeps its instruction; "
+                             f"{list(P.CONCLUDED_DISPOSITION)} finish with it and "
+                             "clear it")
+    parser.add_argument("--of", dest="of", default=None,
+                        help="which alternative --disposition applies to; defaults "
+                             "to the active one")
+    parser.add_argument("--basis", default=None, choices=P.DISPOSITION_BASIS,
+                        help="what the new disposition rests on. Required for every "
+                             "state but ACTIVE: a disposition with no basis records "
+                             "that somebody decided and not what they decided on")
+    parser.add_argument("--superseded-by", dest="superseded_by", default=None,
+                        help="the alternative that replaced or absorbed this one. "
+                             f"Required by {list(P.SUCCESSOR_REQUIRED)}")
     args = parser.parse_args(argv)
 
     project_dir = args.project_dir.resolve()
@@ -1698,6 +1916,19 @@ def branch(argv: list[str]) -> int:
 
     creating = any(value is not None
                    for value in (args.parent, args.alternative_id, args.reason))
+    setting = any(value is not None
+                  for value in (args.disposition, args.of, args.basis,
+                                args.superseded_by))
+    if setting and (creating or args.activate is not None):
+        sys.stderr.write(
+            "design-tool: --disposition moves an alternative that already exists "
+            "between lifecycle states. It is not combined with declaring one "
+            "(--from/--id/--reason) or with switching to one (--activate): a new "
+            "branch starts ACTIVE, and a transition is a decision worth its own "
+            "command and its own record.\n")
+        return 2
+    if setting:
+        return _set_disposition(project_dir, project, args)
     if args.activate is not None and creating:
         sys.stderr.write(
             "design-tool: --activate switches to an alternative that already "
@@ -1779,6 +2010,120 @@ def branch(argv: list[str]) -> int:
     return 0
 
 
+def _set_disposition(project_dir: Path, project: P.Project, args: Any) -> int:
+    """Move one formulation between lifecycle states, and record the move.
+
+    Four things happen here that a stored field could not do on its own, and they
+    are what the seven states now *mean*:
+
+    * **preferring one demotes the other.** ARCHITECTURE.md 13.3 says changing
+      the preferred alternative does not erase the previously preferred one, so
+      the displaced row goes back to ACTIVE and both halves of the switch are
+      journalled. Two PREFERRED rows are refused by `Project.validate`, which is
+      what makes "the preferred one" a thing a reader can name;
+    * **concluding one clears its instruction.** `next_action.json` is read as
+      "this is what the job is waiting for", and a formulation nobody will pick
+      up again is waiting for nothing. Its receipts stay: a rejection is
+      evidence, and 13.1 does not rewrite history;
+    * **parking or concluding the active one moves the project off it.** A
+      non-runnable disposition on the active formulation would otherwise leave
+      the project in a state its own validation refuses, and the next command a
+      user ran would be a refusal they did not ask for;
+    * **the whole project is validated before anything is written.** A
+      transition that produced an unloadable project would be a lifecycle that
+      broke the job it was describing.
+    """
+    wanted = args.of or project.active_alternative
+    if wanted is None:
+        sys.stderr.write(
+            "design-tool: --disposition needs --of <id>; no alternative is "
+            "active, and the shared root is not one of the formulations a "
+            "disposition applies to -- it is what they were branched from.\n")
+        return 2
+    if args.disposition is None:
+        sys.stderr.write("design-tool: --of/--basis/--superseded-by move an "
+                         "alternative between states; say which with "
+                         "--disposition.\n")
+        return 2
+    row = project.alternative(wanted)
+    if row is None:
+        sys.stderr.write(
+            f"design-tool: {wanted!r} names no declared alternative; have "
+            f"{[a.alternative_id for a in project.alternatives]}\n")
+        return 2
+
+    basis = args.basis if args.basis is not None else (
+        "" if args.disposition == "ACTIVE" else row.basis)
+    successor = args.superseded_by if args.superseded_by is not None else (
+        row.superseded_by if args.disposition in P.SUCCESSOR_REQUIRED else "")
+    moved = dataclasses.replace(row, disposition=args.disposition, basis=basis,
+                                superseded_by=successor)
+
+    rows = []
+    demoted: str | None = None
+    for existing in project.alternatives:
+        if existing.alternative_id == wanted:
+            rows.append(moved)
+        elif (args.disposition == "PREFERRED"
+              and existing.disposition == "PREFERRED"):
+            demoted = existing.alternative_id
+            rows.append(dataclasses.replace(existing, disposition="ACTIVE"))
+        else:
+            rows.append(existing)
+
+    before = project.alternatives
+    was_active = project.active_alternative
+    project.alternatives = tuple(rows)
+    if (project.active_alternative == wanted
+            and args.disposition not in P.RUNNABLE_DISPOSITION):
+        project.active_alternative = None
+
+    problems = project.validate(project_dir, require_buildable=False)
+    if problems:
+        project.alternatives = before
+        project.active_alternative = was_active
+        for problem in problems:
+            sys.stderr.write(f"design-tool: {problem.message}\n")
+        return 2
+
+    if args.disposition in P.CONCLUDED_DISPOSITION:
+        _clear_next_action(_alternative_dir(project_dir, wanted) or project_dir)
+    project.save(project_dir)
+    if demoted:
+        # First, because it is what the promotion displaced: a reader following
+        # the journal in order sees the seat vacated and then taken, and the last
+        # event is the decision somebody made rather than its consequence.
+        LC.record(project_dir, {
+            "event": "DISPOSITION", "alternative": demoted,
+            "was": "PREFERRED", "now": "ACTIVE", "basis": "USER_SELECTION",
+            "superseded_by": "", "note": f"displaced as preferred by {wanted}",
+            "updated_utc": project.updated_utc})
+    LC.record(project_dir, {
+        "event": "DISPOSITION", "alternative": wanted,
+        "was": row.disposition, "now": args.disposition, "basis": basis,
+        "superseded_by": successor, "note": "",
+        "updated_utc": project.updated_utc})
+
+    sys.stderr.write(f"\n  alternative  {wanted}\n"
+                     f"  disposition  {row.disposition} -> {args.disposition}"
+                     + (f" on {basis}" if basis else "") + "\n")
+    if successor:
+        sys.stderr.write(f"  replaced by  {successor}\n")
+    if demoted:
+        sys.stderr.write(f"  demoted      {demoted} PREFERRED -> ACTIVE "
+                         "(nothing was deleted)\n")
+    if was_active == wanted and project.active_alternative is None:
+        sys.stderr.write(
+            f"  active       the shared root -- {args.disposition} may not be "
+            "worked under\n")
+    if args.disposition in P.CONCLUDED_DISPOSITION:
+        sys.stderr.write("  cleared      next_action.json; a formulation this job "
+                         "is finished with is waiting for nothing. Its receipts "
+                         "are untouched.\n")
+    sys.stderr.write(f"  recorded     {LC.LIFECYCLE_FILE}\n\n")
+    return 0
+
+
 def _activate(project_dir: Path, project: P.Project, wanted: str) -> int:
     """Point the project at an existing formulation, or back at the shared root."""
     if wanted != ROOT_ALTERNATIVE:
@@ -1791,10 +2136,15 @@ def _activate(project_dir: Path, project: P.Project, wanted: str) -> int:
         if row.disposition not in P.RUNNABLE_DISPOSITION:
             sys.stderr.write(
                 f"design-tool: alternative {wanted!r} is {row.disposition}, and "
-                f"only {list(P.RUNNABLE_DISPOSITION)} are honoured by this build. "
-                "The other states are recorded and read by nothing, so working "
-                "under one would be working under a lifecycle that does not "
-                "exist.\n")
+                f"only {list(P.RUNNABLE_DISPOSITION)} may be worked under. "
+                + (f"Resume it first: `design-tool branch {project_dir.as_posix()} "
+                   f"--disposition ACTIVE --of {wanted} --basis USER_SELECTION`. "
+                   "Activating a paused formulation in silence would be a pause "
+                   "that paused nothing.\n"
+                   if row.disposition == "PAUSED" else
+                   f"{row.disposition} says this job is finished with it. Branch a "
+                   "new formulation from it rather than reopening it in place, "
+                   "which would rewrite the history it is the record of.\n"))
             return 2
     project.active_alternative = None if wanted == ROOT_ALTERNATIVE else wanted
     work_dir = _work_dir(project_dir, project)

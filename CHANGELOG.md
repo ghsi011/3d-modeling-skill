@@ -6,6 +6,104 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — Release 3's lifecycle group: run identity, resume versus restart, seven honoured dispositions
+
+Three items that belong together: what a run *is*, what continuing one means, and
+what a formulation's declared state changes.
+
+**Run identity, decided rather than deferred.** A previous scoping pass parked
+this item with an argument worth engaging: the command surface is built so a
+rerun on unchanged inputs is byte-identical — `--updated-utc` is required from
+the caller for exactly that — so an invocation counter ends the property by
+construction, and a content-derived id "is a hash that already exists". The first
+half is right; the second is not. The identity is now
+`pipeline.bindings.identity`, a SHA-256 over the *whole* binding map, and the last
+entry in that map is which formulation this is. Two formulations are
+byte-identical at the instant one is branched from the other — same contract
+hash, same artifact digests, same plan — and no digest already in the build can
+tell them apart. This one can, and a rerun on unchanged inputs still moves
+nothing. `design-tool status --json` reports it as `run_id`; `next_action.json`'s
+`state_sha256` is the same function, because an instruction and a receipt go
+stale for the same reasons. No receipt gained a field, so no frozen contract hash
+moved. The argument, the rejected alternatives and what it deliberately does not
+decide are in [ADR 0004](docs/adr/0004-run-identity-is-content-derived.md).
+
+**`--resume` and `--restart`.** Resume is what a bare `run` already did. The flag
+asserts the precondition the default assumes — that something here has concluded
+— and refuses with exit 2 when nothing has, rather than starting from scratch
+under a word that promised otherwise.
+
+Restart is the one that needed deciding, because invalidation is already scoped.
+"Delete everything and start again" would discard the frozen acceptance contract
+(cutting a spurious revision on the next run), the content cache (re-paying for
+geometry still valid by content), the proposal and the model (inputs, not
+conclusions) and — if scoped to the project rather than the formulation — every
+sibling, which §13.5 forbids. So restart is scoped twice: to **one formulation**,
+and to that formulation's **conclusions**. It removes the six removable receipts,
+the review *answers* (not the packets, which are the questions) and
+`next_action.json`; it keeps everything those were concluded from. What it buys
+that resume cannot is the one case scoped invalidation is blind to by
+construction: **a conclusion whose bindings all still hold and that somebody no
+longer trusts**. A `PASS` answered against unmoved evidence is reused by resume
+forever, correctly; restart is the only way to ask again.
+
+**`lifecycle.json`.** Append-only at the project root, bound by nothing — no
+receipt carries its digest and `bindings.RECEIPTS` does not name it, so writing
+to it cannot make anything stale. It holds the two things that are decisions
+rather than derivations: a restart with the digest and stored verdict of
+everything it discarded, and every disposition transition. `bindings.invalidate`
+already had the rule that a superseded pass must be "neither current nor erased"
+and kept it by printing digests to stderr, where nothing can read them ten
+minutes later. This is where they live now.
+
+**All seven dispositions honoured, each changing something.** Previously two were
+honoured and five were stored and read by nothing — the shape this repository
+removed from `candidate_strategy` and `project_hash`. Rather than deleting five
+states ARCHITECTURE.md §14.6 names, each was given behaviour:
+
+* `PREFERRED` — **at most one per project**, refused otherwise, because two are
+  two answers to what the job's design is. Switching demotes the previous holder
+  to `ACTIVE` and journals both halves (§13.3: the previous preferred is not
+  erased). This closes a declared proof.
+* `FALLBACK` — **runnable**, which is the point. The vent-ball replay had to
+  record a genuinely retained fallback as `ACTIVE` because a build that would not
+  run one gives "retained" and "abandoned" the same behaviour. `design-tool
+  status` names it as the option to fall back on exactly when the current
+  formulation has no claim.
+* `PAUSED` — not runnable, and its `next_action.json` is **kept**, because that
+  is what to do on resuming. Resuming is a recorded transition, not a silent
+  activation. `PAUSED` could previously be stored and never left; this closes the
+  second declared proof.
+* `REJECTED`, `SUPERSEDED`, `MERGED` — concluded. Their `next_action.json` is
+  **cleared** (a formulation nobody will pick up is waiting for nothing) and
+  every receipt is kept (§13.1: a rejection is evidence). The last two must name
+  the declared formulation that replaced them, and `MERGED` is **refused unless
+  that formulation's `parents` record the merge** — this build performs no
+  merges, so the state cannot be claimed ahead of the graph that would justify
+  it.
+
+Every state but `ACTIVE` must carry a `basis` from a closed vocabulary, which
+§14.6 always required and nothing enforced. A disposition that only labels is the
+defect it was meant to fix with a nicer name.
+
+Reached through `design-tool branch --disposition <state> [--of <id>] --basis
+<basis> [--superseded-by <id>]`, which is not combined with creating a branch or
+with `--activate`, validates the whole project before writing, and moves the
+project off a formulation it has just made non-runnable.
+
+**Cost and proof.** L0 43 s → **45 s** (838 → 869 tests, 458 → 477 subtests);
+L1 unchanged at **62 s** against a 120 s budget; L0-heavy **889 s** over 353
+tests, three of them the end-to-end restart cases this adds. `selftest` 11/11. `project.json` is byte-identical for any row
+that carries no basis, so nothing in the corpus moved and no golden was re-pinned.
+Every behaviour above has a fixture that fails when its protection is mutated:
+**18 mutations, 18 caught** — an identity that mixes in a counter, a map that
+drops the formulation, a restart that takes the inputs, one that keeps the review
+answers, one scoped to the project, a resume that never refuses, a journal that
+binds, a damaged journal overwritten, `FALLBACK` demoted to unrunnable, the basis
+requirement, the single-`PREFERRED` rule, the `MERGED` graph check, the successor
+rules, the demotion, the instruction clearing, the active-formulation move, a
+refused transition that writes anyway, and a fallback that is never named.
+
 ### Changed — a commit gate that is one: 997 s to 43 s, with nothing dropped
 
 `ROADMAP.md` section 5.1 puts L0 on every commit and section 4.4 budgeted it at

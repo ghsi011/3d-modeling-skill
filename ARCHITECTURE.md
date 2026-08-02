@@ -1406,6 +1406,10 @@ The disposition must include its basis, such as:
 * unresolved evidence;
 * replacement by a stronger concept.
 
+A basis is required by every disposition except the one a formulation starts in, and is drawn from a closed vocabulary rather than written freely, so that the answer is comparable across jobs. A disposition recorded without one says that somebody decided and not what they decided on, which is the same amount of information as no disposition at all.
+
+A disposition that asserts a relationship to another alternative — superseded by, merged into — names that alternative, and a merge is accepted only where the revision graph records it as a contributing parent. A state nothing in the graph supports is a label.
+
 ### 14.7 Alternative comparison
 
 Comparison results should show:

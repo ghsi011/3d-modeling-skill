@@ -149,6 +149,44 @@ def current(work_dir: Path, *, alternative_id: str | None = None,
     }
 
 
+def identity(state: dict[str, str | None]) -> str:
+    """The run identity: the digest of the state a run is issued against.
+
+    **Why it is this and not a counter.** A run id is supposed to answer "which
+    invocation produced this receipt". This command surface is built so that a
+    rerun on unchanged inputs is *byte-identical* -- `cli.py` requires
+    `--updated-utc` from the caller precisely so that nothing in a receipt moves
+    when nothing about the job did -- and an invocation counter breaks that by
+    construction: the second run of an unchanged job would differ from the first
+    in a field, and every downstream digest with it. So the question has to be
+    asked more carefully. Two invocations over identical bindings produce
+    identical evidence, are interchangeable in every claim this system can make,
+    and there is no reader for whom telling them apart changes an answer. They
+    are the same run, and the honest identity says so.
+
+    What that leaves is a genuine identity rather than a synonym for one hash:
+    it is over the *whole* binding map, so it separates two things no single
+    existing digest does. Two formulations byte-identical at the instant one was
+    branched from the other -- the case `test_alternatives` was built around --
+    have different run identities, because `alternative` is in the map. And a
+    contract, a plan, a candidate and a source that agree individually still
+    produce one value a caller can carry, compare and quote.
+
+    Deliberately *not* the digest of a receipt: `final_status.json` records what
+    a run concluded, and a conclusion is not an identity -- two runs reaching the
+    same verdict against different evidence must not share an id, and one run
+    whose verdict is rewritten must not change it.
+    """
+    return S.payload_hash(state)
+
+
+def run_id(work_dir: Path, *, alternative_id: str | None = None,
+           model_name: str | None = None) -> str:
+    """`identity` over what this formulation's files say right now."""
+    return identity(current(work_dir, alternative_id=alternative_id,
+                            model_name=model_name))
+
+
 # ---------------------------------------------------------------------------
 # What each receipt records about what it was issued against
 # ---------------------------------------------------------------------------

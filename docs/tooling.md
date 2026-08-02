@@ -27,10 +27,12 @@ One command surface over one machine-authoritative project file. See
 uv run design-tool init <project> --job-id J --source-mode NEW|MODIFY|RECONSTRUCT \
     --consequence INCONSEQUENTIAL|CONSEQUENTIAL --updated-utc <iso8601> [--from-job-json]
 uv run design-tool route  <project>
-uv run design-tool run    <project> [--no-render]
+uv run design-tool run    <project> [--no-render] [--resume | --restart]
 uv run design-tool status <project> [--json]
 uv run design-tool branch <project> --from <alternative|.> --id <name> --reason "<text>"
 uv run design-tool branch <project> --activate <alternative|.>
+uv run design-tool branch <project> --disposition <state> [--of <alternative>] \
+    --basis <basis> [--superseded-by <alternative>]
 ```
 
 | exit | meaning |
@@ -126,7 +128,9 @@ and `state_sha256` over it. That is the same map `design-tool status` checks the
 receipts against, deliberately: an instruction and a receipt go stale for the
 same reasons, and two answers to "has this project moved" is one answer and one
 bug. `status` reports `waiting_for_superseded` when the digest no longer matches,
-and does not count a superseded instruction as something to do.
+and does not count a superseded instruction as something to do. `state_sha256` is
+the **run identity** under another name and by the same function — see *Run
+identity* below and [ADR 0004](adr/0004-run-identity-is-content-derived.md).
 
 The file used to carry no identity at all — no run id, no sequence, no digest —
 so staleness was handled entirely by overwriting or unlinking it, and any path
@@ -172,6 +176,9 @@ disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derive
 | `problems` | every reason the project cannot be routed, as sentences |
 | `findings` | the same list as structure — `code`, `where`, `severity`, `id` — so "which alternative and which field" is a match rather than a search |
 | `alternatives[].status` | the same derivation, run per alternative in its own directory, so switching branches is not the price of finding out where the other one stands |
+| `run_id` | which run this formulation currently is — the digest of `state`, content-derived; see *Run identity* below |
+| `fallbacks` | every formulation the user declared `FALLBACK`, with its own derived status. The terminal names them only when `final_status` is not a claim, which is when the question is live |
+| `lifecycle` | `lifecycle.json`'s events, oldest first: the restarts and the disposition transitions |
 
 Two rules bound it. **It is not a second gate**: nothing is re-run and no
 threshold is re-applied, so a job whose bindings all hold derives exactly what it
@@ -211,6 +218,108 @@ every other receipt binds, and deleting it would turn "issued against a contract
 that has moved" into "there is no contract here", which says less and is no more
 true.
 
+### Run identity: which run this is, and why it is not a counter
+
+`design-tool status --json` reports `run_id`: the SHA-256 of the binding map the
+formulation currently presents — its frozen acceptance contract, its model
+contract, its execution plan, its STL, its STEP, its source, and which
+formulation it is. `next_action.json` carries the same value as `state_sha256`,
+computed by the same function (`pipeline.bindings.identity`), because an
+instruction and a receipt go stale for the same reasons and two answers to "has
+this project moved" is one answer and one bug.
+
+It is **content-derived on purpose**. An invocation counter would answer "which
+invocation produced this receipt" by ending the property this command surface is
+built around: `--updated-utc` is required from the caller precisely so a rerun on
+unchanged inputs is byte-identical, and a counter differs on the second run of
+every job. Two invocations over identical bindings produce identical evidence and
+are interchangeable in every claim the system can make — they are the same run,
+and the identity says so.
+
+What it buys over any single existing digest is the last entry in the map. Two
+formulations are byte-identical at the instant one is branched from the other:
+same contract hash, same artifact digests, same plan. Their run identities
+differ, because `alternative` is a binding.
+
+### `design-tool run --resume` and `--restart`
+
+A bare `run` resumes: it reuses every receipt whose bindings still hold and
+discards exactly those that do not (see *Invalidation* above).
+
+`--resume` is that, said out loud. It asserts the precondition the default
+assumes — that something here has concluded — and **refuses with exit 2 when
+nothing has**, rather than starting from nothing under a word that promised
+otherwise. It also prints what is being reused before the run touches anything.
+
+`--restart` discards what **this formulation concluded** and builds it again:
+
+| discarded | kept |
+| --- | --- |
+| the six removable receipts (`artifact_manifest.json`, `commission_report.json`, `manufacturing_report.json`, both review reports, `final_status.json`) | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
+| `reviews/<kind>_response.json` — the answers | `reviews/<kind>_packet.json` — the questions, rewritten every run |
+| `next_action.json` | `design_proposal.json`, `model.py`, `model_contract.json`, `execution_plan.json` |
+| | the content cache, and **every sibling formulation** |
+
+It is not "delete everything and start again". The expensive work here is
+content-addressed, so re-deriving it is cheap and correct; the proposal and the
+model are *inputs*, not conclusions; and a restart scoped to the project rather
+than the formulation would invalidate siblings, which section 13.5 forbids. A
+restart that throws away still-valid work is a worse default than no restart.
+
+What it buys that resume cannot is the one case scoped invalidation is blind to
+by construction: **a conclusion whose bindings all still hold and that somebody
+no longer trusts**. A review answered `PASS` against evidence that has not moved
+is reused by resume forever, correctly. `--restart` is the only way to ask again.
+
+Everything it removes is recorded in `lifecycle.json` first — name, SHA-256, the
+verdict discarded and the run identity it was issued under — because a restart is
+the one operation here that erases a receipt whose bindings still hold, and
+"neither current nor erased" needs somewhere durable to live.
+
+### `lifecycle.json` — what was deliberately done to this job
+
+At the project root, appended to and **bound by nothing**: no receipt carries its
+digest, `bindings.RECEIPTS` does not name it, and writing to it cannot make
+anything stale. That is what lets it hold the one thing a content-derived
+identity cannot — a record ordered by when things happened, in a build whose
+every other artifact is ordered by what it contains. Every event is stamped with
+the project's caller-supplied `updated_utc` rather than a clock.
+
+| event | recorded |
+| --- | --- |
+| `RESTART` | the formulation, the run identity, the stored verdict discarded, and every discarded file with its digest |
+| `DISPOSITION` | the formulation, the state it left, the state it entered, the basis, any successor, and a note — including the automatic demotion when a new formulation is preferred |
+
+### `design-tool branch --disposition` — the alternative lifecycle
+
+```bash
+uv run design-tool branch <project> --disposition PREFERRED --of plate-seated --basis PHYSICAL_TEST
+uv run design-tool branch <project> --disposition PAUSED --basis UNRESOLVED_EVIDENCE
+uv run design-tool branch <project> --disposition SUPERSEDED --of v1 --basis STRONGER_CONCEPT --superseded-by v2
+```
+
+`--of` defaults to the active formulation. A transition is not combined with
+creating a branch or with `--activate`: a new branch starts `ACTIVE`, and a
+lifecycle move is a decision worth its own command and its own record. The whole
+project is validated before anything is written, so a refused transition changes
+nothing on disk.
+
+All seven states are honoured, and each one changes something:
+
+| state | may be worked under | what it changes |
+| --- | --- | --- |
+| `ACTIVE` | yes | the state a branch starts in; the only one needing no basis |
+| `PREFERRED` | yes | **at most one per project** — two are two answers to what the job's design is. Preferring one demotes the previous holder to `ACTIVE` (13.3: the previous preferred is not erased) and journals both halves |
+| `FALLBACK` | yes | retained rather than abandoned. `design-tool status` names it as the option to fall back on exactly when the current formulation has no claim it may make |
+| `PAUSED` | no | parked. A run cannot silently continue it; its `next_action.json` is **kept**, because that is what to do on resuming. Resuming is `--disposition ACTIVE`, which is a recorded transition rather than a silent activation |
+| `REJECTED` | no | concluded. Its `next_action.json` is **cleared** — a formulation nobody will pick up again is waiting for nothing — and its receipts are untouched, because a rejection is evidence |
+| `SUPERSEDED` | no | as `REJECTED`, and must name the declared formulation that replaced it |
+| `MERGED` | no | as `SUPERSEDED`, and **refused unless the successor lists this formulation among its `parents`**. This build performs no merges; the state cannot be claimed ahead of a revision graph that records one |
+
+Setting a non-runnable state on the active formulation moves the project to the
+shared root, so that the next command a user runs is not a refusal they did not
+ask for.
+
 ### `design-tool branch` — competing formulations of one job
 
 ```bash
@@ -227,7 +336,9 @@ row to `project.json`, creates the directory that row names, and makes it active
 | `alternative_id` | lower-case letters, digits and hyphens. It becomes a directory name and appears in the execution plan and every review envelope, so an id two filesystems spell differently is one two receipts disagree about |
 | `parents` | a **list** of ancestor ids, empty for a branch from the shared root. A list from the first release that has one, because a merge is a revision with several contributing parents and a field that has to change shape to record one is a field every reader has to be migrated off. Nothing in this release writes more than one entry |
 | `reason` | why this formulation exists. Required: two alternatives with no stated difference cannot be compared, and the one nobody can justify is the one kept by accident |
-| `disposition` | `ACTIVE`, `PREFERRED`, `PAUSED`, `REJECTED`, `SUPERSEDED`, `FALLBACK` or `MERGED`. Only the first two are **honoured** — an alternative in any other state cannot be made active. The rest are stored, round-tripped and reported, and no transition is implemented |
+| `disposition` | one of the seven states below. `branch` always creates `ACTIVE`; every other state is reached by `--disposition` |
+| `basis` | why the formulation is in that state: `USER_SELECTION`, `REQUIREMENT_FAILURE`, `MANUFACTURING_DISADVANTAGE`, `PHYSICAL_TEST`, `UNRESOLVED_EVIDENCE` or `STRONGER_CONCEPT`. Required by every state but `ACTIVE`, and absent from the serialized row when empty |
+| `superseded_by` | the formulation that replaced or absorbed this one. Required by `SUPERSEDED` and `MERGED`, refused elsewhere |
 
 Ancestry order is the acyclicity rule: a parent must be declared before the child
 that names it. `branch` appends, so it holds by construction, and a hand-edited
@@ -241,7 +352,9 @@ means something about *one* formulation is written under
 `acceptance_history.json`, `execution_plan.json`, `route_decision.json`,
 `print_plan_checks.json`, `next_action.json`, `reviews/`, `witness/` and all ten
 run receipts. Everything shared stays where it was and is read by reference:
-`project.json`, the brief, source artifacts, evidence and the build cache.
+`project.json`, the brief, source artifacts, evidence, the build cache and
+`lifecycle.json` — the journal is shared because a disposition is a decision
+taken about a formulation from outside it, and preferring one demotes another.
 
 That is not tidiness. With one directory the collisions ran worst-first:
 

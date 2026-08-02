@@ -47,6 +47,7 @@ rather than weakened; `conftest.py` carries the rule and
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import textwrap
@@ -145,6 +146,24 @@ def _alt(directory: Path, name: str) -> Path:
 
 def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _lifecycle_rows(disposition: str) -> tuple[P.Alternative, ...]:
+    """`snap-fit` in one lifecycle state, with everything that state demands.
+
+    The successor exists and names `snap-fit` as a parent, so a `MERGED` row here
+    is describing a graph that records the merge rather than asserting one -- and
+    the only finding the caller can be left with is the runnability rule.
+    """
+    rows = [P.Alternative(
+        alternative_id="snap-fit", reason="no fasteners",
+        disposition=disposition,
+        basis="" if disposition == "ACTIVE" else "USER_SELECTION",
+        superseded_by="successor" if disposition in P.SUCCESSOR_REQUIRED else "")]
+    if disposition in P.SUCCESSOR_REQUIRED:
+        rows.append(P.Alternative(alternative_id="successor", parents=("snap-fit",),
+                                  reason="what replaced it"))
+    return tuple(rows)
 
 
 def _digests(directory: Path) -> dict[str, str]:
@@ -255,34 +274,111 @@ class BranchVerbTest(unittest.TestCase):
             self.assertEqual(2, cli.branch([str(directory), "--activate", "magnetic"]))
             self.assertIsNone(P.load(directory).active_alternative)
 
-    def test_only_the_two_honoured_dispositions_may_be_worked_under(self) -> None:
-        """The other five are stored and read by nothing, and say so."""
+    def test_only_a_runnable_disposition_may_be_worked_under(self) -> None:
+        """Three may be worked under; the other four refuse, for two reasons.
+
+        `FALLBACK` is on the runnable side and that is the whole point of it: a
+        retained formulation you may not keep current is a rejection with a
+        kinder word, which is why the vent-ball job had to record one as ACTIVE.
+        `PAUSED` refuses and says to resume; the three concluded states refuse
+        and say to branch, because reopening one in place would rewrite the
+        history it is the record of.
+        """
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw))
             _branch(directory, parent=".", name="snap-fit", reason="no fasteners")
-            for disposition, allowed in (("ACTIVE", True), ("PREFERRED", True),
-                                         ("PAUSED", False), ("REJECTED", False),
-                                         ("SUPERSEDED", False), ("FALLBACK", False),
-                                         ("MERGED", False)):
+            for disposition, runnable in (("ACTIVE", True), ("PREFERRED", True),
+                                          ("FALLBACK", True), ("PAUSED", False),
+                                          ("REJECTED", False), ("SUPERSEDED", False),
+                                          ("MERGED", False)):
                 with self.subTest(disposition=disposition):
                     project = P.load(directory)
-                    project.alternatives = (P.Alternative(
-                        alternative_id="snap-fit", reason="no fasteners",
-                        disposition=disposition),)
+                    project.alternatives = _lifecycle_rows(disposition)
                     project.active_alternative = "snap-fit"
                     project.save(directory)
                     problems = project.validate(directory, require_buildable=False)
-                    self.assertEqual(allowed,
-                                     not any("honoured" in p.message for p in problems),
-                                     problems)
-                    # The disposition a build does not honour is a decision to
-                    # make, not a field to correct, and the code says which.
+                    # Nothing but the runnability rule is under test here: every
+                    # row carries the basis and the successor its state demands.
                     self.assertEqual(
-                        [] if allowed else ["INTENT_UNSUPPORTED@active_alternative"],
-                        [p.id for p in problems if "honoured" in p.message])
-                    self.assertEqual(0 if allowed else 2,
+                        [] if runnable else ["INTENT_UNSUPPORTED@active_alternative"],
+                        [p.id for p in problems], problems)
+                    self.assertEqual(0 if runnable else 2,
                                      cli.branch([str(directory), "--activate",
                                                  "snap-fit"]))
+
+    def test_a_disposition_that_only_labels_is_refused(self) -> None:
+        """ARCHITECTURE.md 14.6 says a disposition includes its basis. It does."""
+        for disposition in P.BASIS_REQUIRED:
+            with self.subTest(disposition=disposition):
+                rows = (P.Alternative(alternative_id="snap-fit", reason="no fasteners",
+                                      disposition=disposition,
+                                      superseded_by=("screw" if disposition
+                                                     in P.SUCCESSOR_REQUIRED else "")),
+                        P.Alternative(alternative_id="screw", reason="fasteners",
+                                      parents=("snap-fit",)))
+                problems = _project(alternatives=rows).validate(require_buildable=False)
+                self.assertIn("SCHEMA_REQUIRED@alternatives[0].basis",
+                              [p.id for p in problems], problems)
+        self.assertEqual(
+            [], _project(alternatives=(P.Alternative(
+                alternative_id="snap-fit", reason="no fasteners"),)).validate(
+                    require_buildable=False),
+            "ACTIVE is the state a formulation starts in; demanding a reason for "
+            "nothing having happened yet would be demanding a reason for nothing")
+
+    def test_two_preferred_formulations_are_two_answers_to_one_question(self) -> None:
+        rows = (P.Alternative(alternative_id="a", reason="one",
+                              disposition="PREFERRED", basis="USER_SELECTION"),
+                P.Alternative(alternative_id="b", reason="two",
+                              disposition="PREFERRED", basis="USER_SELECTION"))
+        problems = _project(alternatives=rows).validate(require_buildable=False)
+        self.assertEqual(["REF_DUPLICATE@alternatives[1].disposition"],
+                         [p.id for p in problems], problems)
+
+    def test_merged_is_refused_until_the_graph_records_the_merge(self) -> None:
+        """The one state this build cannot produce, and will not accept on trust.
+
+        `parents` has been a list since the commit that introduced it, for
+        exactly this: a merge is a revision with *several* contributing parents
+        (ARCHITECTURE.md 13.2), and nothing in this build writes more than one
+        entry. So a merge record is hand-written, and what this slice adds is
+        that `MERGED` is checked against it rather than believed.
+        """
+        first = P.Alternative(alternative_id="screwed", reason="serviceable",
+                              disposition="MERGED", basis="STRONGER_CONCEPT",
+                              superseded_by="hybrid")
+        second = P.Alternative(alternative_id="snap-fit", reason="no fasteners")
+        detached = P.Alternative(alternative_id="hybrid",
+                                 reason="a screw boss inside a snapping shell")
+        self.assertEqual(
+            ["REF_UNDECLARED@alternatives[0].superseded_by"],
+            [p.id for p in _project(
+                alternatives=(first, second, detached)).validate(
+                    require_buildable=False)])
+        joined = dataclasses.replace(detached, parents=("screwed", "snap-fit"))
+        self.assertEqual(
+            [], _project(alternatives=(first, second, joined)).validate(
+                require_buildable=False),
+            "two contributing parents is what a merge record looks like; once "
+            "one exists, MERGED is describing the graph rather than asserting it")
+
+    def test_a_successor_is_refused_where_it_cannot_mean_anything(self) -> None:
+        for row, expected in (
+            (P.Alternative(alternative_id="a", reason="x", disposition="PAUSED",
+                           basis="USER_SELECTION", superseded_by="b"),
+             "INTENT_CONTRADICTION@alternatives[0].superseded_by"),
+            (P.Alternative(alternative_id="a", reason="x", disposition="SUPERSEDED",
+                           basis="STRONGER_CONCEPT", superseded_by="a"),
+             "REF_ORDER@alternatives[0].superseded_by"),
+            (P.Alternative(alternative_id="a", reason="x", disposition="SUPERSEDED",
+                           basis="STRONGER_CONCEPT", superseded_by="nobody"),
+             "REF_UNDECLARED@alternatives[0].superseded_by"),
+        ):
+            with self.subTest(expected=expected):
+                other = P.Alternative(alternative_id="b", reason="y")
+                problems = _project(alternatives=(row, other)).validate(
+                    require_buildable=False)
+                self.assertIn(expected, [p.id for p in problems], problems)
 
     def test_creating_and_switching_are_not_mixed_in_one_invocation(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
