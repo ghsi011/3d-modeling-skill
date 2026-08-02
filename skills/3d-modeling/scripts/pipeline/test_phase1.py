@@ -63,30 +63,30 @@ class ProjectSchemaTest(unittest.TestCase):
         for field in ("printer", "material", "nozzle", "orientation"):
             with self.subTest(missing=field):
                 problems = _complete(**{field: None}).validate()
-                self.assertTrue(any(field.split(".")[0] in p for p in problems),
+                self.assertTrue(any(field.split(".")[0] in p.message for p in problems),
                                 f"{field} was accepted as missing: {problems}")
 
     def test_a_consequence_without_a_rationale_is_refused(self) -> None:
         problems = _complete(consequence_rationale="").validate()
-        self.assertTrue(any("consequence_rationale" in p for p in problems))
+        self.assertTrue(any("consequence_rationale" in p.message for p in problems))
 
     def test_a_nan_parameter_is_refused_before_it_can_size_anything(self) -> None:
         problems = _complete(parameters={**CLIP, "bore_d": float("nan")}).validate()
-        self.assertTrue(any("finite" in p for p in problems), problems)
+        self.assertTrue(any("finite" in p.message for p in problems), problems)
 
     def test_an_inherited_value_must_name_the_artifact_it_came_from(self) -> None:
         """Otherwise it is indistinguishable from a value somebody chose."""
         project = _complete(requirements=(
             P.Requirement(name="bore_d", value=12.0, unit="mm",
                           provenance="INHERITED", source="supplied STEP"),))
-        self.assertTrue(any("artifact_id" in p for p in project.validate()))
+        self.assertTrue(any("artifact_id" in p.message for p in project.validate()))
 
     def test_a_requirement_cannot_cite_an_artifact_that_is_not_declared(self) -> None:
         project = _complete(requirements=(
             P.Requirement(name="bore_d", value=12.0, unit="mm",
                           provenance="INHERITED", source="a STEP",
                           artifact_id="ghost"),))
-        self.assertTrue(any("names no source artifact" in p
+        self.assertTrue(any("names no source artifact" in p.message
                             for p in project.validate()))
 
     def test_modify_without_an_edit_scope_is_refused(self) -> None:
@@ -99,12 +99,12 @@ class ProjectSchemaTest(unittest.TestCase):
                                                    path="source.step",
                                                    format="STEP"),))
             problems = project.validate(root)
-            self.assertTrue(any("edit_scope" in p for p in problems), problems)
+            self.assertTrue(any("edit_scope" in p.message for p in problems), problems)
 
     def test_new_with_a_source_artifact_is_refused_as_a_category_error(self) -> None:
         project = _complete(source_artifacts=(
             P.SourceArtifact(artifact_id="src", path="source.step"),))
-        self.assertTrue(any("MODIFY" in p for p in project.validate()))
+        self.assertTrue(any("MODIFY" in p.message for p in project.validate()))
 
     def test_a_source_artifact_path_cannot_escape_the_project(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -115,13 +115,13 @@ class ProjectSchemaTest(unittest.TestCase):
                 source_artifacts=(P.SourceArtifact(artifact_id="src",
                                                    path="../../secrets.step"),))
             problems = project.validate(Path(raw))
-            self.assertTrue(any("traversal" in p or "project-relative" in p
+            self.assertTrue(any("traversal" in p.message or "project-relative" in p.message
                                 for p in problems), problems)
 
     def test_a_motion_cannot_declare_one_component_both_static_and_moving(self) -> None:
         project = _complete(motion=(P.Motion(motion_id="slide", kind="LINEAR",
                                              static=("rail",), moving=("rail",)),))
-        self.assertTrue(any("both static and moving" in p
+        self.assertTrue(any("both static and moving" in p.message
                             for p in project.validate()))
 
     def test_an_unknown_schema_version_is_refused_rather_than_guessed(self) -> None:
@@ -227,7 +227,7 @@ class TwoArtifactsEditedTogetherTest(unittest.TestCase):
 
     def test_a_scope_cannot_name_an_interface_nobody_declared(self) -> None:
         project = self._pair(interfaces=())
-        self.assertTrue(any("names no declared interface" in p
+        self.assertTrue(any("names no declared interface" in p.message
                             for p in project.validate()), project.validate())
 
     def test_a_bare_string_of_interface_ids_names_the_field_not_its_letters(
@@ -253,7 +253,7 @@ class TwoArtifactsEditedTogetherTest(unittest.TestCase):
         self.assertEqual(
             ["edit_scope 'body': interface_ids must be a list of non-empty "
              "interface ids"],
-            [p for p in project.validate() if "interface_ids" in p])
+            [p.message for p in project.validate() if "interface_ids" in p.message])
 
     def test_two_scopes_over_one_artifact_are_refused(self) -> None:
         """Two answers to 'what may this edit touch' is no answer."""
@@ -264,8 +264,8 @@ class TwoArtifactsEditedTogetherTest(unittest.TestCase):
                         region_box=_box(40.0))))
         self.assertEqual(
             ["edit_scope 'body': this artifact_id is declared twice"],
-            [p.split(" --")[0] for p in project.validate()
-             if "declared twice" in p])
+            [p.message.split(" --")[0] for p in project.validate()
+             if "declared twice" in p.message])
 
     def test_every_scope_must_name_a_declared_source_artifact(self) -> None:
         """Checked on each scope, not only on the first one.
@@ -280,7 +280,7 @@ class TwoArtifactsEditedTogetherTest(unittest.TestCase):
                         region_box=_box(40.0))))
         problems = project.validate()
         self.assertEqual(["edit_scope 'ghost': artifact_id names no source artifact"],
-                         [p for p in problems if "names no source" in p])
+                         [p.message for p in problems if "names no source" in p.message])
 
     def test_a_problem_names_the_scope_it_came_from(self) -> None:
         """With two scopes, 'edit_scope: ...' names neither of them."""
@@ -288,9 +288,15 @@ class TwoArtifactsEditedTogetherTest(unittest.TestCase):
             P.EditScope(artifact_id="body", region="the body pocket",
                         region_box=_box(0.0)),
             P.EditScope(artifact_id="drawer", region="the drawer pocket")))
-        problems = [p for p in project.validate() if "region_box is required" in p]
+        problems = [p for p in project.validate()
+                    if "region_box is required" in p.message]
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("edit_scope 'drawer'", problems[0])
+        self.assertIn("edit_scope 'drawer'", problems[0].message)
+        # And the machine-readable half names the position, not the id: a caller
+        # holding this finding can go straight to the field without searching the
+        # list for the scope whose artifact_id the sentence quotes.
+        self.assertEqual("edit_scopes[1].region_box", problems[0].where)
+        self.assertEqual("SCHEMA_REQUIRED", problems[0].code)
 
     def test_two_scopes_round_trip_through_the_payload(self) -> None:
         original = self._pair()

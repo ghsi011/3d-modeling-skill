@@ -55,6 +55,7 @@ from typing import Any
 from . import acceptance as ACC
 from . import bindings as B
 from . import execution as EX
+from . import findings as F
 from . import isolation as ISO
 from . import project as P
 from . import review as R
@@ -468,21 +469,33 @@ def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
 
 
 def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
-                     problems: list[str], *, stage: str) -> int:
+                     problems: list[F.Issue], *, stage: str) -> int:
+    """Refuse the run, and say what is wrong in both registers at once.
+
+    `unresolved` stays a list of English sentences, unchanged. It is not
+    `validate()`'s field: three other writers fill it from `status.derive`'s
+    reasons, from a stage's message, and from the project's blocking questions,
+    and a field whose element type depends on which of the four wrote it is a
+    field no reader can parse. So the structure goes beside it under `findings`,
+    where every element is an `Issue.to_dict()` -- `code`, `where`, `severity`
+    and a stable `id` -- and a caller asking "why is this alternative not
+    COMMISSIONED" matches on those rather than on a substring of a sentence.
+    """
     _write_next_action(work_dir, project, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "FIX_PROJECT",
         "stage": stage,
         "reason": "the project does not describe a job that can be routed",
-        "unresolved": list(problems),
+        "unresolved": F.messages(problems),
+        "findings": [issue.to_dict() for issue in problems],
         "completion_command": f"design-tool run {project_dir.as_posix()}",
         "updated_utc": project.updated_utc,
     })
     sys.stderr.write(f"design-tool: {P.PROJECT_FILE} is not complete enough to "
                      f"{stage}:\n")
     for problem in problems:
-        sys.stderr.write(f"  - {problem}\n")
+        sys.stderr.write(f"  - {problem.message}\n")
     return 2
 
 
@@ -531,7 +544,7 @@ def init(argv: list[str]) -> int:
     if problems:
         sys.stderr.write("\n  still to supply:\n")
         for problem in problems:
-            sys.stderr.write(f"  - {problem}\n")
+            sys.stderr.write(f"  - {problem.message}\n")
     return 0
 
 
@@ -1148,16 +1161,23 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
     name, which is a job that produced no evidence that it was a different job.
     """
     if project.envelope_mm is None:
-        return _report_problems(project_dir, work_dir, project, [
+        return _report_problems(project_dir, work_dir, project, [F.problem(
+            F.SCHEMA_REQUIRED, "envelope_mm",
             "envelope_mm is required when the geometry is authored: the print "
             "plan is written before the geometry, and it cannot be written "
             "without the envelope the part is allowed to occupy. Declare it as a "
-            "stated or chosen requirement."], stage="run")
+            "stated or chosen requirement.")], stage="run")
 
     print_plan, plan_problems = _print_plan(work_dir, project)
     if plan_problems:
-        return _report_problems(project_dir, work_dir, project, plan_problems,
-                                stage="plan")
+        # `designer_toolkit.validate_plan` still answers in sentences, so the
+        # finding carries the file and the position in that answer rather than a
+        # field path inside the plan. The plan is generated here from the printer
+        # and the envelope, so a problem in it is this pipeline's, not a
+        # designer's -- which is why it names the file and not a declaration.
+        return _report_problems(project_dir, work_dir, project, [
+            F.problem(F.ARTIFACT_REFUSED, f"{PLAN_FILE}[{index}]", text)
+            for index, text in enumerate(plan_problems)], stage="plan")
 
     brief_path = project_dir / project.brief
     brief_hash = S.sha256_text(
@@ -1227,8 +1247,8 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
                             alternative_id=plan.alternative_id,
                             evidence_dir=project_dir)
     except ACC.ProposalError as exc:
-        return _report_problems(project_dir, work_dir, project, [str(exc)],
-                                stage="proposal")
+        return _report_problems(project_dir, work_dir, project, [F.problem(
+            F.ARTIFACT_REFUSED, ACC.PROPOSAL_FILE, str(exc))], stage="proposal")
 
     if frozen.disposition == "SUPERSEDED":
         sys.stderr.write(
@@ -1254,8 +1274,8 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
         # formulation's own.
         built = ISO.build(model_path, dest_dir=work_dir, step=project.step)
     except ISO.BuildRefused as exc:
-        return _report_problems(project_dir, work_dir, project, [str(exc)],
-                                stage="build")
+        return _report_problems(project_dir, work_dir, project, [F.problem(
+            F.ARTIFACT_REFUSED, model_path.name, str(exc))], stage="build")
 
     # After the build rather than before it, and unavoidably so: the parameters a
     # model declares are read by importing it, and importing it is the thing that
@@ -1265,11 +1285,12 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
         key for key in set(declared) | set(proposal.params)
         if declared.get(key) != proposal.params.get(key))
     if divergent:
-        return _report_problems(project_dir, work_dir, project, [
+        return _report_problems(project_dir, work_dir, project, [F.problem(
+            F.INTENT_CONTRADICTION, f"{ACC.PROPOSAL_FILE}.params",
             f"{model_path.name} and {ACC.PROPOSAL_FILE} disagree about "
             f"{', '.join(divergent)}. The proposal is what the part is measured "
             "against and PARAMS is what it is built from; when they differ the "
-            "job is building one part and gating another."], stage="build")
+            "job is building one part and gating another.")], stage="build")
 
     fields = P.to_job_request_fields(project)
     fields["template"] = None
@@ -1536,6 +1557,11 @@ def status(argv: list[str]) -> int:
         alternatives.append({**row.as_dict(),
                              "status": other["derived_status"],
                              "stored_status": other["stored_status"]})
+    # One validate() call, read in two registers: `problems` keeps its shape as
+    # the sentences a person reads, `findings` carries the code, field path and
+    # severity a caller matches on. Calling validate twice would be two answers
+    # to one question and the cheaper of the two ways to make them disagree.
+    problems = project.validate(project_dir, require_buildable=False)
     report = {
         "job_id": project.job_id,
         "source_mode": project.source_mode,
@@ -1545,7 +1571,8 @@ def status(argv: list[str]) -> int:
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
-        "problems": project.validate(project_dir, require_buildable=False),
+        "problems": F.messages(problems),
+        "findings": [issue.to_dict() for issue in problems],
         "waiting_for": next_action,
         # Whether that instruction still describes this project. An instruction
         # is as stale-able as a receipt and used to be the only one of the two
@@ -1698,18 +1725,24 @@ def branch(argv: list[str]) -> int:
         parents=() if args.parent == ROOT_ALTERNATIVE else (args.parent,),
         reason=args.reason,
         disposition="ACTIVE")
-    problems = list(row.problems())
+    # The index this row would occupy once appended, so the finding names the
+    # position a caller would go and edit rather than a row that does not exist
+    # yet.
+    at = f"alternatives[{len(project.alternatives)}]"
+    problems = list(row.problems(len(project.alternatives)))
     if project.alternative(row.alternative_id) is not None:
-        problems.append(
+        problems.append(F.problem(
+            F.REF_DUPLICATE, f"{at}.alternative_id",
             f"alternative {row.alternative_id!r} is already declared. Branching "
             "over it would replace its parents and its reason while its "
             "directory kept the receipts written under the old ones; use "
-            f"--activate {row.alternative_id} to work on it.")
-    for parent in row.parents:
+            f"--activate {row.alternative_id} to work on it."))
+    for position, parent in enumerate(row.parents):
         if project.alternative(parent) is None:
-            problems.append(
+            problems.append(F.problem(
+                F.REF_UNDECLARED, f"{at}.parents[{position}]",
                 f"--from {parent!r} names no declared alternative. Pass "
-                f"{ROOT_ALTERNATIVE!r} to branch from the shared root.")
+                f"{ROOT_ALTERNATIVE!r} to branch from the shared root."))
     if not problems:
         try:
             # The one path guard, and the one every other declared name in this
@@ -1720,10 +1753,11 @@ def branch(argv: list[str]) -> int:
                              f"{P.ALTERNATIVES_DIR}/{row.alternative_id}",
                              what="alternative directory")
         except S.PathEscape as exc:
-            problems.append(str(exc))
+            problems.append(F.problem(F.ARTIFACT_PATH_UNSAFE,
+                                      f"{at}.alternative_id", str(exc)))
     if problems:
         for problem in problems:
-            sys.stderr.write(f"design-tool: {problem}\n")
+            sys.stderr.write(f"design-tool: {problem.message}\n")
         return 2
 
     project.alternatives = tuple(project.alternatives) + (row,)

@@ -34,7 +34,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from . import findings as F
 from . import schemas as S
+from .findings import Issue
 
 PROJECT_SCHEMA = 1
 PROJECT_FILE = "project.json"
@@ -133,28 +135,36 @@ class Requirement:
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
-    def problems(self) -> list[str]:
+    def problems(self, index: int = 0) -> list[Issue]:
         where = f"requirement {self.name!r}"
-        out: list[str] = []
+        path = f"requirements[{index}]"
+        out: list[Issue] = []
         if not self.name.strip():
-            out.append("a requirement with no name cannot be bound to anything")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.name",
+                                 "a requirement with no name cannot be bound to anything"))
         if self.provenance not in PROVENANCE:
-            out.append(f"{where}: provenance {self.provenance!r} is not one of "
-                       f"{list(PROVENANCE)}")
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.provenance",
+                                 f"{where}: provenance {self.provenance!r} is not one of "
+                                 f"{list(PROVENANCE)}"))
         if isinstance(self.value, bool) or self.value is None:
-            out.append(f"{where}: value must be a finite number or a non-empty string")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.value",
+                                 f"{where}: value must be a finite number or a non-empty string"))
         elif isinstance(self.value, (int, float)):
             try:
                 S.require_finite_number(self.value, what=where)
             except S.SchemaError as exc:
-                out.append(str(exc))
+                out.append(F.problem(F.SCHEMA_NON_FINITE, f"{path}.value", str(exc)))
         elif not (isinstance(self.value, str) and self.value.strip()):
-            out.append(f"{where}: value must be a finite number or a non-empty string")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.value",
+                                 f"{where}: value must be a finite number or a non-empty string"))
         if not self.source.strip():
-            out.append(f"{where}: source must name who supplied this value")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.source",
+                                 f"{where}: source must name who supplied this value"))
         if self.provenance == "INHERITED" and not self.artifact_id:
-            out.append(f"{where}: an inherited value must name the artifact_id it was "
-                       "read out of, or it is indistinguishable from a chosen one")
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.artifact_id",
+                f"{where}: an inherited value must name the artifact_id it was "
+                "read out of, or it is indistinguishable from a chosen one"))
         return out
 
 
@@ -173,25 +183,30 @@ class SourceArtifact:
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
-    def problems(self, project_dir: Path | None) -> list[str]:
+    def problems(self, project_dir: Path | None, index: int = 0) -> list[Issue]:
         where = f"source artifact {self.artifact_id!r}"
-        out: list[str] = []
+        path = f"source_artifacts[{index}]"
+        out: list[Issue] = []
         if not self.artifact_id.strip():
-            out.append("a source artifact with no id cannot be referenced")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.artifact_id",
+                                 "a source artifact with no id cannot be referenced"))
         try:
             resolved = (S.resolve_within(project_dir, self.path, what=f"{where}.path")
                         if project_dir is not None else None)
         except S.PathEscape as exc:
-            out.append(str(exc))
+            out.append(F.problem(F.ARTIFACT_PATH_UNSAFE, f"{path}.path", str(exc)))
             resolved = None
         if resolved is not None and not resolved.is_file():
-            out.append(f"{where}: {self.path!r} is not a file in this project")
+            out.append(F.problem(F.ARTIFACT_MISSING, f"{path}.path",
+                                 f"{where}: {self.path!r} is not a file in this project"))
         if self.format is not None and self.format not in ARTIFACT_FORMAT:
-            out.append(f"{where}: format {self.format!r} is not one of "
-                       f"{list(ARTIFACT_FORMAT)}")
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.format",
+                                 f"{where}: format {self.format!r} is not one of "
+                                 f"{list(ARTIFACT_FORMAT)}"))
         if self.classification is not None and self.classification not in ARTIFACT_CLASS:
-            out.append(f"{where}: classification {self.classification!r} is not one of "
-                       f"{list(ARTIFACT_CLASS)}")
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.classification",
+                                 f"{where}: classification {self.classification!r} is not one of "
+                                 f"{list(ARTIFACT_CLASS)}"))
         return out
 
 
@@ -216,16 +231,21 @@ class Interface:
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
-    def problems(self) -> list[str]:
+    def problems(self, index: int = 0) -> list[Issue]:
         where = f"interface {self.interface_id!r}"
-        out: list[str] = []
+        path = f"interfaces[{index}]"
+        out: list[Issue] = []
         if not self.interface_id.strip():
-            out.append("an interface with no id cannot be bound to a fit strategy")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.interface_id",
+                                 "an interface with no id cannot be bound to a fit strategy"))
         if not isinstance(self.external, bool):
-            out.append(f"{where}: external must be true or false; whether the other "
-                       "side is somebody else's geometry is what decides the route")
+            out.append(F.problem(
+                F.SCHEMA_TYPE, f"{path}.external",
+                f"{where}: external must be true or false; whether the other "
+                "side is somebody else's geometry is what decides the route"))
         if not self.owner.strip():
-            out.append(f"{where}: owner must name who owns the mating geometry")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.owner",
+                                 f"{where}: owner must name who owns the mating geometry"))
         return out
 
 
@@ -250,21 +270,29 @@ class Motion:
                 "static": list(self.static), "moving": list(self.moving),
                 "declared": dict(self.declared)}
 
-    def problems(self) -> list[str]:
+    def problems(self, index: int = 0) -> list[Issue]:
         where = f"motion {self.motion_id!r}"
-        out: list[str] = []
+        path = f"motion[{index}]"
+        out: list[Issue] = []
         if not self.motion_id.strip():
-            out.append("a motion with no id cannot be reported against")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.motion_id",
+                                 "a motion with no id cannot be reported against"))
         if self.kind not in MOTION_KIND:
-            out.append(f"{where}: kind {self.kind!r} is not one of {list(MOTION_KIND)}")
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.kind",
+                                 f"{where}: kind {self.kind!r} is not one of {list(MOTION_KIND)}"))
         if not self.static:
-            out.append(f"{where}: name the static component ids")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.static",
+                                 f"{where}: name the static component ids"))
         if not self.moving:
-            out.append(f"{where}: name the moving component ids")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.moving",
+                                 f"{where}: name the moving component ids"))
         overlap = set(self.static) & set(self.moving)
         if overlap:
-            out.append(f"{where}: {sorted(overlap)} are declared both static and "
-                       "moving, so no sweep can be defined")
+            # Not SCHEMA_*: both fields are well-formed lists of ids and the
+            # reader has to decide which body moves, not correct a spelling.
+            out.append(F.problem(F.INTENT_CONTRADICTION, f"{path}.moving",
+                                 f"{where}: {sorted(overlap)} are declared both static and "
+                                 "moving, so no sweep can be defined"))
         return out
 
 
@@ -345,64 +373,85 @@ class EditScope:
 
     @property
     def where(self) -> str:
-        """How a problem names this scope.
+        """How a problem's *sentence* names this scope.
 
         By artifact id, because `Project.validate` refuses two scopes over one
         artifact. With the duplicate refused the id names exactly one scope, and
         a problem nobody can attribute to a scope is a problem nobody can act on
         once there is more than one of them.
+
+        This is the English a user reads. What a *caller* acts on is the finding's
+        `where` field path -- `edit_scopes[1].region_box` -- which is the position
+        in the file rather than the id in it, so a caller does not have to search
+        the list to find the field the sentence is about. Both, for the same
+        reason the scope carries both a named region and a box.
         """
         return f"edit_scope {self.artifact_id!r}"
 
-    def problems(self) -> list[str]:
+    def problems(self, index: int = 0) -> list[Issue]:
         where = self.where
-        out: list[str] = []
+        path = f"edit_scopes[{index}]"
+        out: list[Issue] = []
         if not self.artifact_id.strip():
-            out.append(f"{where}: artifact_id must name the source artifact being "
-                       "modified")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.artifact_id",
+                                 f"{where}: artifact_id must name the source artifact being "
+                                 "modified"))
         if not self.region.strip():
-            out.append(f"{where}: region must name the edit region; the preservation "
-                       "audit measures everything outside it")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.region",
+                                 f"{where}: region must name the edit region; the preservation "
+                                 "audit measures everything outside it"))
         box = self.region_box
         if box is None:
-            out.append(f"{where}: region_box is required -- 'outside the edit "
-                       "region' has no geometric meaning without one, and the "
-                       "preservation audit would have nothing to compare")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.region_box",
+                                 f"{where}: region_box is required -- 'outside the edit "
+                                 "region' has no geometric meaning without one, and the "
+                                 "preservation audit would have nothing to compare"))
         elif (not isinstance(box, dict)
               or not isinstance(box.get("min"), (list, tuple))
               or not isinstance(box.get("max"), (list, tuple))
               or len(box["min"]) != 3 or len(box["max"]) != 3):
-            out.append(f"{where}: region_box must be {{'min': [x, y, z], "
-                       "'max': [x, y, z]}")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.region_box",
+                                 f"{where}: region_box must be {{'min': [x, y, z], "
+                                 "'max': [x, y, z]}"))
         else:
             for axis, (low, high) in enumerate(zip(box["min"], box["max"])):
+                # Per axis, because a box can be empty on two of them at once and
+                # `CODE@where` has to name one finding. `region_box` alone would
+                # give both the same id, and an id two findings share is one a
+                # caller cannot key on -- which is the whole reason for it.
+                axis_path = f"{path}.region_box.{'xyz'[axis]}"
                 try:
                     high_mm = S.require_finite_number(
                         high, what=f"{where}.region_box.max")
                     low_mm = S.require_finite_number(
                         low, what=f"{where}.region_box.min")
                     if high_mm <= low_mm:
-                        out.append(f"{where}: region_box is empty on axis "
-                                   f"{'xyz'[axis]}")
+                        out.append(F.problem(F.SCHEMA_RANGE, axis_path,
+                                             f"{where}: region_box is empty on axis "
+                                             f"{'xyz'[axis]}"))
                 except S.SchemaError as exc:
-                    out.append(str(exc))
+                    out.append(F.problem(F.SCHEMA_NON_FINITE, axis_path, str(exc)))
         if self.preservation_tolerance_mm <= 0:
-            out.append(f"{where}: preservation_tolerance_mm must be positive; a "
-                       "zero band cannot be met by two tessellations of one surface")
+            out.append(F.problem(F.SCHEMA_RANGE, f"{path}.preservation_tolerance_mm",
+                                 f"{where}: preservation_tolerance_mm must be positive; a "
+                                 "zero band cannot be met by two tessellations of one surface"))
         if isinstance(self.expected_body_delta, bool) or \
                 not isinstance(self.expected_body_delta, int):
-            out.append(f"{where}: expected_body_delta must be an integer")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.expected_body_delta",
+                                 f"{where}: expected_body_delta must be an integer"))
         if self.alignment_transform != "identity":
             matrix = self.alignment_transform
             ok = (isinstance(matrix, list) and len(matrix) == 4
                   and all(isinstance(row, list) and len(row) == 4 for row in matrix))
             if not ok:
-                out.append(f"{where}: alignment_transform must be 'identity' or "
-                           "a 4x4 matrix")
+                out.append(F.problem(F.SCHEMA_TYPE, f"{path}.alignment_transform",
+                                     f"{where}: alignment_transform must be 'identity' or "
+                                     "a 4x4 matrix"))
         if any(not isinstance(name, str) or not name.strip()
                for name in self.interface_ids):
-            out.append(f"{where}: interface_ids must be a list of non-empty "
-                       "interface ids")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.interface_ids",
+                                 f"{where}: interface_ids must be a list of non-empty "
+                                 "interface ids"))
         return out
 
 
@@ -418,12 +467,15 @@ class Component:
     def as_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
 
-    def problems(self) -> list[str]:
-        out: list[str] = []
+    def problems(self, index: int = 0) -> list[Issue]:
+        path = f"components[{index}]"
+        out: list[Issue] = []
         if not self.component_id.strip():
-            out.append("a component with no id cannot appear in a manifest")
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.component_id",
+                                 "a component with no id cannot appear in a manifest"))
         if isinstance(self.count, bool) or not isinstance(self.count, int) or self.count < 1:
-            out.append(f"component {self.component_id!r}: count must be at least 1")
+            out.append(F.problem(F.SCHEMA_RANGE, f"{path}.count",
+                                 f"component {self.component_id!r}: count must be at least 1"))
         return out
 
 
@@ -455,26 +507,33 @@ class Alternative:
                 "reason": self.reason,
                 "disposition": self.disposition}
 
-    def problems(self) -> list[str]:
+    def problems(self, index: int = 0) -> list[Issue]:
         where = f"alternative {self.alternative_id!r}"
-        out: list[str] = []
+        path = f"alternatives[{index}]"
+        out: list[Issue] = []
         if not ALTERNATIVE_ID.match(self.alternative_id or ""):
-            out.append(f"{where}: alternative_id must match {ALTERNATIVE_ID.pattern} "
-                       "-- it becomes a directory name and is written into the "
-                       "execution plan and every review envelope, so an id two "
-                       "filesystems spell differently is one two receipts disagree "
-                       "about")
+            out.append(F.problem(
+                F.SCHEMA_TYPE, f"{path}.alternative_id",
+                f"{where}: alternative_id must match {ALTERNATIVE_ID.pattern} "
+                "-- it becomes a directory name and is written into the "
+                "execution plan and every review envelope, so an id two "
+                "filesystems spell differently is one two receipts disagree "
+                "about"))
         if self.disposition not in ALTERNATIVE_DISPOSITION:
-            out.append(f"{where}: disposition {self.disposition!r} is not one of "
-                       f"{list(ALTERNATIVE_DISPOSITION)}")
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.disposition",
+                                 f"{where}: disposition {self.disposition!r} is not one of "
+                                 f"{list(ALTERNATIVE_DISPOSITION)}"))
         if not self.reason.strip():
-            out.append(f"{where}: reason must say why this formulation exists. Two "
-                       "alternatives with no stated difference cannot be compared, "
-                       "and the one nobody can justify is the one that is kept by "
-                       "accident")
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.reason",
+                f"{where}: reason must say why this formulation exists. Two "
+                "alternatives with no stated difference cannot be compared, "
+                "and the one nobody can justify is the one that is kept by "
+                "accident"))
         if any(not isinstance(parent, str) or not parent.strip()
                for parent in self.parents):
-            out.append(f"{where}: parents must be a list of alternative ids")
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.parents",
+                                 f"{where}: parents must be a list of alternative ids"))
         return out
 
 
@@ -708,149 +767,192 @@ class Project:
     # -- validation -------------------------------------------------------
 
     def validate(self, project_dir: Path | None = None, *,
-                 require_buildable: bool = True) -> list[str]:
+                 require_buildable: bool = True) -> list[Issue]:
         """Every reason this project cannot be routed or built, or an empty list.
 
         Deliberately a list rather than an exception: `design-tool init` writes a
         skeleton and prints these as the to-do list, and a caller filling one in
         wants all of them at once rather than one per round trip.
 
+        Deliberately `Issue` rather than `str`, since Release 3 made status
+        derived. "Why is this alternative not COMMISSIONED" is now a question
+        asked of N formulations at once, and the answer has to be matchable: a
+        `code` a caller branches on, a `where` naming the exact field
+        (`edit_scopes[1].region_box`), a `severity`, and an `id` two runs agree
+        on. The English is unchanged and is carried in `message` -- see
+        `findings.problem` for why the sentence and the path are separate.
+
+        The *order* is unchanged too, and is part of the contract: `init` prints
+        this list as a to-do list, and a list that reshuffles between runs reads
+        as a different set of problems.
+
         `require_buildable=False` drops the one problem that is a normal state
         rather than a defect: a `CUSTOM` job has no model until the designer
         commission produces one, and refusing to route it before then would make
         the commission unreachable.
         """
-        problems: list[str] = []
+        problems: list[Issue] = []
 
         if not self.job_id.strip():
-            problems.append("job_id is required and must be a non-empty string")
+            problems.append(F.problem(F.SCHEMA_REQUIRED, "job_id",
+                                      "job_id is required and must be a non-empty string"))
         if not self.updated_utc.strip():
-            problems.append("updated_utc is required; a wall-clock stamp would make "
-                            "two runs of one job differ in their bytes")
+            problems.append(F.problem(F.SCHEMA_REQUIRED, "updated_utc",
+                                      "updated_utc is required; a wall-clock stamp would make "
+                                      "two runs of one job differ in their bytes"))
         if self.source_mode not in SOURCE_MODE:
-            problems.append(f"source_mode {self.source_mode!r} is not one of "
-                            f"{list(SOURCE_MODE)}")
+            problems.append(F.problem(F.SCHEMA_ENUM, "source_mode",
+                                      f"source_mode {self.source_mode!r} is not one of "
+                                      f"{list(SOURCE_MODE)}"))
         if self.consequence not in S.CONSEQUENCE:
-            problems.append(f"consequence {self.consequence!r} is not one of "
-                            f"{list(S.CONSEQUENCE)}")
+            problems.append(F.problem(F.SCHEMA_ENUM, "consequence",
+                                      f"consequence {self.consequence!r} is not one of "
+                                      f"{list(S.CONSEQUENCE)}"))
         elif not self.consequence_rationale.strip():
-            problems.append("consequence_rationale is required: a class with no reason "
-                            "behind it cannot be re-checked when the job changes")
+            problems.append(F.problem(F.SCHEMA_REQUIRED, "consequence_rationale",
+                                      "consequence_rationale is required: a class with no reason "
+                                      "behind it cannot be re-checked when the job changes"))
         if self.route is not None and self.route not in ROUTE:
-            problems.append(f"route {self.route!r} is not one of {list(ROUTE)}")
+            problems.append(F.problem(F.SCHEMA_ENUM, "route",
+                                      f"route {self.route!r} is not one of {list(ROUTE)}"))
         problems.extend(self._alternative_problems())
 
         if not isinstance(self.printer, str) or not self.printer.strip():
-            problems.append("printer is required and must be a non-empty string")
+            problems.append(F.problem(F.SCHEMA_REQUIRED, "printer",
+                                      "printer is required and must be a non-empty string"))
         material = self.material
         if (not isinstance(material, dict)
                 or not isinstance(material.get("process"), str)
                 or not material["process"].strip()
                 or not isinstance(material.get("material"), str)
                 or not material["material"].strip()):
-            problems.append("material must name non-empty process and material strings")
+            problems.append(F.problem(F.SCHEMA_TYPE, "material",
+                                      "material must name non-empty process and material strings"))
         nozzle = self.nozzle
         diameter = nozzle.get("diameter_mm") if isinstance(nozzle, dict) else None
         if (not isinstance(diameter, (int, float)) or isinstance(diameter, bool)
                 or diameter <= 0):
-            problems.append("nozzle.diameter_mm must be a positive number")
+            problems.append(F.problem(F.SCHEMA_RANGE, "nozzle.diameter_mm",
+                                      "nozzle.diameter_mm must be a positive number"))
         problems.extend(_orientation_problems(self.orientation))
 
         for name, value in sorted(self.parameters.items()):
             if not isinstance(name, str):
-                problems.append("parameters keys must be strings")
+                problems.append(F.problem(F.SCHEMA_TYPE, "parameters",
+                                          "parameters keys must be strings"))
                 continue
             try:
                 S.require_finite_number(value, what=f"parameters.{name}")
             except S.SchemaError as exc:
-                problems.append(str(exc))
+                problems.append(F.problem(F.SCHEMA_NON_FINITE, f"parameters.{name}",
+                                          str(exc)))
 
         seen: set[str] = set()
-        for requirement in self.requirements:
+        for index, requirement in enumerate(self.requirements):
             if requirement.name in seen:
-                problems.append(f"requirement {requirement.name!r}: duplicate name -- "
-                                "two provenances for one value is no provenance")
+                problems.append(F.problem(F.REF_DUPLICATE, f"requirements[{index}].name",
+                                          f"requirement {requirement.name!r}: duplicate name -- "
+                                          "two provenances for one value is no provenance"))
             seen.add(requirement.name)
-            problems.extend(requirement.problems())
+            problems.extend(requirement.problems(index))
             if requirement.artifact_id and self.artifact(requirement.artifact_id) is None:
-                problems.append(f"requirement {requirement.name!r}: artifact_id "
-                                f"{requirement.artifact_id!r} names no source artifact")
+                problems.append(F.problem(F.REF_UNDECLARED, f"requirements[{index}].artifact_id",
+                                          f"requirement {requirement.name!r}: artifact_id "
+                                          f"{requirement.artifact_id!r} names no source artifact"))
 
-        for artifact in self.source_artifacts:
-            problems.extend(artifact.problems(project_dir))
-        for interface in self.interfaces:
-            problems.extend(interface.problems())
+        for index, artifact in enumerate(self.source_artifacts):
+            problems.extend(artifact.problems(project_dir, index))
+        for index, interface in enumerate(self.interfaces):
+            problems.extend(interface.problems(index))
             if interface.motion_id and not any(m.motion_id == interface.motion_id
                                                for m in self.motion):
-                problems.append(f"interface {interface.interface_id!r}: motion_id "
-                                f"{interface.motion_id!r} names no declared motion")
-        for motion in self.motion:
-            problems.extend(motion.problems())
-        for component in self.components:
-            problems.extend(component.problems())
+                problems.append(F.problem(F.REF_UNDECLARED, f"interfaces[{index}].motion_id",
+                                          f"interface {interface.interface_id!r}: motion_id "
+                                          f"{interface.motion_id!r} names no declared motion"))
+        for index, motion in enumerate(self.motion):
+            problems.extend(motion.problems(index))
+        for index, component in enumerate(self.components):
+            problems.extend(component.problems(index))
 
         if self.source_mode == "MODIFY":
             if not self.source_artifacts:
-                problems.append("source_mode is MODIFY and no source artifact is "
-                                "declared; there is nothing authoritative to modify")
+                problems.append(F.problem(F.INTENT_CONTRADICTION, "source_artifacts",
+                                          "source_mode is MODIFY and no source artifact is "
+                                          "declared; there is nothing authoritative to modify"))
             if not self.edit_scopes:
-                problems.append("source_mode is MODIFY and edit_scopes is empty; "
-                                "without at least one edit_scope nothing can say "
-                                "what must be preserved")
+                problems.append(F.problem(F.INTENT_CONTRADICTION, "edit_scopes",
+                                          "source_mode is MODIFY and edit_scopes is empty; "
+                                          "without at least one edit_scope nothing can say "
+                                          "what must be preserved"))
         scoped: set[str] = set()
         declared_interfaces = {i.interface_id for i in self.interfaces}
-        for scope in self.edit_scopes:
-            problems.extend(scope.problems())
+        for index, scope in enumerate(self.edit_scopes):
+            problems.extend(scope.problems(index))
             if self.artifact(scope.artifact_id) is None:
-                problems.append(f"{scope.where}: artifact_id names no source "
-                                "artifact")
+                problems.append(F.problem(F.REF_UNDECLARED, f"edit_scopes[{index}].artifact_id",
+                                          f"{scope.where}: artifact_id names no source "
+                                          "artifact"))
             if scope.artifact_id in scoped:
-                problems.append(f"{scope.where}: this artifact_id is declared "
-                                "twice -- two scopes over one artifact are two "
-                                "answers to 'what may this edit touch', and the "
-                                "preservation audit would measure the artifact "
-                                "against whichever region it read last")
+                problems.append(F.problem(F.REF_DUPLICATE, f"edit_scopes[{index}].artifact_id",
+                                          f"{scope.where}: this artifact_id is declared "
+                                          "twice -- two scopes over one artifact are two "
+                                          "answers to 'what may this edit touch', and the "
+                                          "preservation audit would measure the artifact "
+                                          "against whichever region it read last"))
             scoped.add(scope.artifact_id)
-            for interface_id in scope.interface_ids:
+            for position, interface_id in enumerate(scope.interface_ids):
                 if interface_id not in declared_interfaces:
-                    problems.append(f"{scope.where}: interface_id {interface_id!r} "
-                                    "names no declared interface; a datum two edits "
-                                    "have to agree on cannot be one nothing declares")
+                    problems.append(F.problem(
+                        F.REF_UNDECLARED,
+                        f"edit_scopes[{index}].interface_ids[{position}]",
+                        f"{scope.where}: interface_id {interface_id!r} "
+                        "names no declared interface; a datum two edits "
+                        "have to agree on cannot be one nothing declares"))
         if self.source_mode == "NEW" and self.source_artifacts:
-            problems.append("source_mode is NEW but source artifacts are declared; "
-                            "geometry inherited from a supplied file is MODIFY")
+            problems.append(F.problem(F.INTENT_CONTRADICTION, "source_mode",
+                                      "source_mode is NEW but source artifacts are declared; "
+                                      "geometry inherited from a supplied file is MODIFY"))
 
         if self.envelope_mm is not None:
             envelope = self.envelope_mm
             if (not isinstance(envelope, dict) or sorted(envelope) != ["x", "y", "z"]):
-                problems.append("envelope_mm must name x, y and z")
+                problems.append(F.problem(F.SCHEMA_TYPE, "envelope_mm",
+                                          "envelope_mm must name x, y and z"))
             else:
                 for axis, value in sorted(envelope.items()):
                     try:
                         if S.require_finite_number(
                                 value, what=f"envelope_mm.{axis}") <= 0:
-                            problems.append(f"envelope_mm.{axis} must be positive")
+                            problems.append(F.problem(F.SCHEMA_RANGE, f"envelope_mm.{axis}",
+                                                      f"envelope_mm.{axis} must be positive"))
                     except S.SchemaError as exc:
-                        problems.append(str(exc))
+                        problems.append(F.problem(F.SCHEMA_NON_FINITE, f"envelope_mm.{axis}",
+                                                  str(exc)))
 
         if require_buildable and self.template is None and self.model is None:
-            problems.append("neither template nor model is named; nothing can be "
-                            "built until one of them is")
+            # `where` is the first field the sentence names, which is the rule
+            # this file follows wherever one problem constrains a pair: a
+            # caller acting on it may fill in either, and a finding that named
+            # neither would be one nothing could be keyed to.
+            problems.append(F.problem(F.INTENT_INCOMPLETE, "template",
+                                      "neither template nor model is named; nothing can be "
+                                      "built until one of them is"))
         if self.model is not None and project_dir is not None:
             try:
                 S.resolve_within(project_dir, self.model, what="model")
             except S.PathEscape as exc:
-                problems.append(str(exc))
+                problems.append(F.problem(F.ARTIFACT_PATH_UNSAFE, "model", str(exc)))
 
-        for name in self.evidence:
+        for index, name in enumerate(self.evidence):
             if project_dir is not None:
                 try:
                     S.resolve_within(project_dir, name, what="evidence")
                 except S.PathEscape as exc:
-                    problems.append(str(exc))
+                    problems.append(F.problem(F.ARTIFACT_PATH_UNSAFE, f"evidence[{index}]",
+                                              str(exc)))
         return problems
 
-    def _alternative_problems(self) -> list[str]:
+    def _alternative_problems(self) -> list[Issue]:
         """The branching half, refused rather than worked around.
 
         Ancestry order is the whole of the acyclicity rule: a parent must be
@@ -860,43 +962,47 @@ class Project:
         Checking order instead of running a cycle search also refuses a
         self-parent with the same sentence.
         """
-        problems: list[str] = []
+        problems: list[Issue] = []
         declared: set[str] = set()
-        for row in self.alternatives:
-            problems.extend(row.problems())
+        for index, row in enumerate(self.alternatives):
+            problems.extend(row.problems(index))
             if row.alternative_id in declared:
-                problems.append(
+                problems.append(F.problem(
+                    F.REF_DUPLICATE, f"alternatives[{index}].alternative_id",
                     f"alternative {row.alternative_id!r}: declared twice -- two rows "
                     "for one id are two answers to what its parents and disposition "
-                    "are, and both name one directory")
-            for parent in row.parents:
+                    "are, and both name one directory"))
+            for position, parent in enumerate(row.parents):
                 if parent not in declared:
-                    problems.append(
+                    problems.append(F.problem(
+                        F.REF_ORDER, f"alternatives[{index}].parents[{position}]",
                         f"alternative {row.alternative_id!r}: parent {parent!r} is "
                         "not declared before it. Alternatives are recorded in "
                         "ancestry order, which is what makes this list a graph with "
-                        "no cycles rather than one that has to be walked to find out")
+                        "no cycles rather than one that has to be walked to find out"))
             declared.add(row.alternative_id)
 
         if self.active_alternative is not None:
             active = self.alternative(self.active_alternative)
             if active is None:
-                problems.append(
+                problems.append(F.problem(
+                    F.REF_UNDECLARED, "active_alternative",
                     f"active_alternative {self.active_alternative!r} names no declared "
                     "alternative; the job would write its receipts into a directory "
-                    "nothing in the project describes")
+                    "nothing in the project describes"))
             elif active.disposition not in RUNNABLE_DISPOSITION:
-                problems.append(
+                problems.append(F.problem(
+                    F.INTENT_UNSUPPORTED, "active_alternative",
                     f"active_alternative {self.active_alternative!r} is "
                     f"{active.disposition}, and only {list(RUNNABLE_DISPOSITION)} are "
                     "honoured by this build. The other states are recorded and read "
                     "by nothing, so working under one would be working under a "
-                    "lifecycle that does not exist")
+                    "lifecycle that does not exist"))
         return problems
 
 
-def _orientation_problems(orientation: Any) -> list[str]:
-    problems: list[str] = []
+def _orientation_problems(orientation: Any) -> list[Issue]:
+    problems: list[Issue] = []
     matrix = orientation.get("model_to_printer_matrix") if isinstance(orientation, dict) else None
     ok = matrix == "identity" or (
         isinstance(matrix, list) and len(matrix) == 4
@@ -905,11 +1011,13 @@ def _orientation_problems(orientation: Any) -> list[str]:
                         for value in row)
                 for row in matrix))
     if not ok:
-        problems.append("orientation.model_to_printer_matrix must be 'identity' or a "
-                        "4x4 matrix")
+        problems.append(F.problem(F.SCHEMA_TYPE, "orientation.model_to_printer_matrix",
+                                  "orientation.model_to_printer_matrix must be 'identity' or a "
+                                  "4x4 matrix"))
     bed_z = orientation.get("bed_z_mm") if isinstance(orientation, dict) else None
     if not isinstance(bed_z, (int, float)) or isinstance(bed_z, bool):
-        problems.append("orientation.bed_z_mm must be a number")
+        problems.append(F.problem(F.SCHEMA_TYPE, "orientation.bed_z_mm",
+                                  "orientation.bed_z_mm must be a number"))
     return problems
 
 

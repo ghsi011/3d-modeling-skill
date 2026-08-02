@@ -1,7 +1,10 @@
 """team_tools -- deterministic contract-automation package for the 3D team pipeline.
 
-Net-new, self-contained package. Depends only on the Python standard library plus
-the already-installed ``trimesh`` and ``numpy`` (used for artifact mesh checks).
+Depends only on the Python standard library, the already-installed ``trimesh``
+and ``numpy`` (used for artifact mesh checks), and one stdlib-only module of the
+``pipeline`` package: ``pipeline.findings``, which owns the ``Issue`` type both
+packages report through. The dependency points that way and never back --
+``team_tools`` is the older layer and ``pipeline`` is the one being built.
 
 This package does not modify, and never imports, ``team_preflight.py`` -- it is a
 separate, additive layer that operates on the structured-JSON contract

@@ -11,8 +11,30 @@ import json
 import math
 import os
 import re
+import sys
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any
+
+# `Issue` moved to `pipeline.findings` so that `Project.validate()` could answer
+# in findings instead of English. One type, not two: the second copy is the one
+# whose `id` stops matching the first. The dependency points from this package to
+# `pipeline` and never back -- `team_tools` is the older layer and `pipeline` is
+# the one being built, so a shared module owned here would make everything built
+# next depend on what it replaces.
+#
+# The path insert is the compatibility bootstrap `contracts.py` already carries,
+# one level up: the direct-script invocation this package supports puts
+# `team_tools/` on `sys.path` and not the `scripts/` directory that holds
+# `pipeline/`. Under pytest, `python -m team_tools.contracts`, and the installed
+# wheel the entry is already present and the insert is skipped.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+from pipeline.findings import (  # noqa: E402 - import follows the bootstrap above
+    Issue, error, has_errors, sort_issues, warning)
+
+__all__ = ["Issue", "error", "warning", "has_errors", "sort_issues"]
 
 TOOL_NAME = "team_tools.contracts"
 TOOL_VERSION = "1.0"
@@ -34,50 +56,10 @@ class ContractError(ValueError):
     """
 
 
-class Issue:
-    """One validation finding, always naming the exact contract field/id/rule.
-
-    ``where`` is a dotted/bracketed path such as
-    ``dimensions.dimensions[D99].feature_id`` so failures are unambiguous and the
-    resulting ``id`` (``CODE@where``) is stable and deterministic across runs.
-    """
-
-    __slots__ = ("severity", "code", "where", "detail", "message", "id")
-
-    def __init__(self, severity: str, code: str, where: str, detail: str) -> None:
-        if severity not in ("error", "warning"):
-            raise ValueError(f"bad severity {severity!r}")
-        self.severity = severity
-        self.code = code
-        self.where = where
-        self.detail = detail
-        self.message = f"{where}: {detail}"
-        self.id = f"{code}@{where}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "severity": self.severity,
-            "code": self.code,
-            "where": self.where,
-            "message": self.message,
-        }
-
-
-def error(code: str, where: str, detail: str) -> Issue:
-    return Issue("error", code, where, detail)
-
-
-def warning(code: str, where: str, detail: str) -> Issue:
-    return Issue("warning", code, where, detail)
-
-
-def has_errors(issues: Iterable[Issue]) -> bool:
-    return any(issue.severity == "error" for issue in issues)
-
-
-def sort_issues(issues: Iterable[Issue]) -> list[Issue]:
-    return sorted(issues, key=lambda issue: (issue.severity, issue.id))
+# `Issue`, `error`, `warning`, `has_errors` and `sort_issues` are re-exported
+# from `pipeline.findings` at the top of this file. They were defined here; every
+# call site in this package still imports them from `common`, which is why the
+# move is a move and not a rewrite.
 
 
 # ---------------------------------------------------------------------------

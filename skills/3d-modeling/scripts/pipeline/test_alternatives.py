@@ -267,8 +267,14 @@ class BranchVerbTest(unittest.TestCase):
                     project.active_alternative = "snap-fit"
                     project.save(directory)
                     problems = project.validate(directory, require_buildable=False)
-                    self.assertEqual(allowed, not any("honoured" in p for p in problems),
+                    self.assertEqual(allowed,
+                                     not any("honoured" in p.message for p in problems),
                                      problems)
+                    # The disposition a build does not honour is a decision to
+                    # make, not a field to correct, and the code says which.
+                    self.assertEqual(
+                        [] if allowed else ["INTENT_UNSUPPORTED@active_alternative"],
+                        [p.id for p in problems if "honoured" in p.message])
                     self.assertEqual(0 if allowed else 2,
                                      cli.branch([str(directory), "--activate",
                                                  "snap-fit"]))
@@ -290,7 +296,7 @@ class BranchVerbTest(unittest.TestCase):
             with self.subTest(rows=[r.alternative_id for r in rows]):
                 problems = _project(alternatives=rows).validate(
                     require_buildable=False)
-                self.assertTrue(any("ancestry order" in p for p in problems),
+                self.assertTrue(any("ancestry order" in p.message for p in problems),
                                 problems)
 
 

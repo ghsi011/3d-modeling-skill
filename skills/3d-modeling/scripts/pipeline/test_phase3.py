@@ -955,7 +955,7 @@ class ModifyRouteTest(unittest.TestCase):
                 artifact_id="bracket", region="the boss face"),))
             directory = _laid_out(Path(raw), None, project)
             problems = P.load(directory).validate(directory)
-            self.assertTrue(any("region_box" in p for p in problems), problems)
+            self.assertTrue(any("region_box" in p.message for p in problems), problems)
 
 
 class ModifyLaneTest(unittest.TestCase):

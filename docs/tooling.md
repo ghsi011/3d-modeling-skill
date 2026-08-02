@@ -84,7 +84,7 @@ the job finishes:
 
 | kind | meaning |
 | --- | --- |
-| `FIX_PROJECT` | `project.json` is not complete enough to route; `unresolved` names every problem |
+| `FIX_PROJECT` | something has to be corrected before the run can continue; `unresolved` names every problem and `findings` carries the same list as structure. `stage` says what refused: `route`/`run` for an incomplete `project.json`, or `plan`, `proposal` or `build` |
 | `RUN` | the route is decided and the plan is compiled, and nothing has been executed against it |
 | `AGENT_COMMISSION` | a specialist has to produce something — `role`, `authorized_inputs`, `required_outputs`, `bound` hashes, `completion_command` |
 | `REVIEW` | a bounded review is needed — `evidence` is the packet, `respond_with` is where the answer goes |
@@ -93,6 +93,32 @@ the job finishes:
 
 A commission carries no expectation of what the specialist should conclude. That
 is not politeness: a verifier told what to conclude has stopped being a verifier.
+
+A `FIX_PROJECT` instruction also carries `findings`, one entry per `unresolved`
+line and in the same order. Every refusal that stops a run before it can reach a
+claim is one — the incomplete project, and also the missing envelope, the plan
+that does not validate, the refused proposal, the refused build and the model
+that contradicts its proposal, all of which report through the same function and
+carry the stage they came from in `stage`:
+
+| field | meaning |
+| --- | --- |
+| `code` | what kind of problem, from a small closed vocabulary (below) |
+| `where` | the exact field path — `edit_scopes[1].region_box`, not "edit scope" |
+| `severity` | `error` or `warning` |
+| `id` | `CODE@where`; stable across runs, and unique within one instruction |
+| `message` | the same sentence `unresolved` carries and the terminal prints |
+
+The code's prefix says what has to change to clear it, which is the one grouping
+that tells a reader whose problem it is: `SCHEMA_` correct a field, `REF_` add or
+rename a row, `ARTIFACT_` fix a file the project names, `INTENT_` make a
+decision. `pipeline/findings.py` holds the vocabulary and the rule.
+
+`unresolved` is unchanged and stays a list of sentences: four different stages
+write it, from a validator, from a status derivation, from a stage message and
+from the project's open questions, so a reader cannot be asked to work out which
+of the four filled the list it is holding. `design-tool status --json` reports
+the same pair — `problems` and `findings` — for the project it is describing.
 
 Every instruction carries `state` — the acceptance contract, the model contract,
 the execution plan, the three artifact digests and which formulation this is —
@@ -143,6 +169,8 @@ disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derive
 | `stale` | each receipt that no longer binds, and which binding broke |
 | `state` | the binding values the receipts are being checked against |
 | `bindings` | this formulation's own artifact hashes, from its own final status |
+| `problems` | every reason the project cannot be routed, as sentences |
+| `findings` | the same list as structure — `code`, `where`, `severity`, `id` — so "which alternative and which field" is a match rather than a search |
 | `alternatives[].status` | the same derivation, run per alternative in its own directory, so switching branches is not the price of finding out where the other one stands |
 
 Two rules bound it. **It is not a second gate**: nothing is re-run and no

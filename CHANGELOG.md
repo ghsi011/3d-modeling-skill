@@ -6,6 +6,70 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — a project problem is data, not a sentence
+
+Release 3 slice C, and the half of the derived-status work that was left owed.
+Once `design-tool status` answers per alternative, "why is this one not
+`COMMISSIONED`" is a question asked of N formulations at once — and
+`Project.validate()` answered it with a `list[str]` of English. No code to branch
+on, no field path to jump to, no severity, and nothing an instruction written
+today could be compared against one written last week. With one formulation that
+list is readable. With several it is a search.
+
+**A move, not a design.** The type already existed and was complete:
+`team_tools.common.Issue` — severity, code, field path, message, and a stable
+`CODE@where` id — has carried every contract-validation finding since it was
+written. It now lives in `pipeline/findings.py`, and `team_tools.common`
+re-exports it from there, so both packages report through one type rather than
+two that drift. The dependency points from `team_tools` to `pipeline` and never
+back: `team_tools` is the older layer and `pipeline` is the one being built, and
+a shared module owned the other way round would make everything built next depend
+on what it replaces. `pipeline/test_findings.py` holds that direction with an AST
+check over every production module in the package, because the import that
+reverses it is a one-line change nobody would notice in review.
+
+One thing changed on the way. `Issue.message` was always `f"{where}: {detail}"`;
+it can now be supplied instead, and `pipeline` supplies it. Those sentences were
+written before the type existed, they already name their own field
+(`"source_mode is NEW but source artifacts are declared; ..."`), and the suite
+asserts on several of them — so prefixing a path onto them would have changed
+what a user reads to gain nothing a caller could not read off `where` directly.
+The default is untouched, which is what keeps every existing `team_tools` receipt
+byte-identical.
+
+**The codes are grouped by what clears them.** `SCHEMA_` means one field is wrong
+in itself — correct the field. `REF_` means a well-formed id that no row
+declares, or two rows for one id — add, remove or rename a row. `ARTIFACT_` means
+the declaration is fine and a file disagrees: it escapes the project, is not
+there, or was read and refused — fix the file. `INTENT_` means every field and
+every reference is fine and the declarations still describe no one job — make a
+decision. The shape follows `analysis.py`'s existing `BOOLEAN_ENGINE_*` /
+`SECTION_INSTRUMENT_*` codes, and the vocabulary is deliberately small: `id` is
+`CODE@where`, so `SCHEMA_ENUM@source_mode` already names exactly one rule and a
+code per check would be a lookup table rather than something to match on.
+
+**`where` is a position, not a name.** `edit_scopes[1].region_box`, not
+`edit_scope 'drawer'`. With two scopes over two artifacts, the sentence quotes an
+id and a caller still has to search the list for it; the path is the field. The
+box checks name the axis too (`region_box.x`), because a box can be empty on two
+axes at once and an id two findings share is an id nothing can be keyed on.
+
+**Nothing that read the old answer reads a different one.** The terminal prints
+the same sentences in the same order — the skeleton project's six lines are
+pinned literally in a fixture. `next_action.unresolved` is still a list of
+sentences, because four unrelated stages fill it (a validator, a status
+derivation, a stage message, the project's open questions) and a field whose
+element type depends on which of them wrote it is a field no reader can parse.
+The structure arrives beside it under `findings`, one entry per line and in the
+same order, in the refusal instruction and in `design-tool status --json` alike.
+The four stage refusals that reported bare sentences through the same
+function — a missing envelope, a plan that does not validate, a refused proposal
+or build, a model contradicting its proposal — are findings now too, so
+`_report_problems` has one element type whichever stage called it.
+
+Zero-cost is unaffected: `next_action.json` is hashed into nothing, and the five
+pinned contract goldens and `test_frozen.py` are untouched.
+
 ### Changed — the status is computed from the evidence, and invalidation is scoped to it
 
 Release 3 slice B. Three separate ways for a receipt to say something that is no
