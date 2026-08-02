@@ -31,6 +31,7 @@ The current branch already provides important foundations:
 * unchanged dispatch counts across existing routes;
 * fast certified deterministic generation;
 * authored custom geometry support;
+* divergent design alternatives, isolated on disk and in the review bindings, at no cost to a job that declares none;
 * STEP, STL, and modern production-extension 3MF diagnosis;
 * correct 3MF root, unit, component, and build-transform handling;
 * controlled failure for malformed or unsupported geometry;
@@ -64,7 +65,7 @@ The immediate unresolved blockers are:
 
 1. unchanged modification jobs cannot reliably complete review resumption while preservation evidence varies between runs;
 2. custom candidate code can still influence the criteria used to judge its own output;
-3. project history and state are still effectively linear and do not cleanly support divergent design alternatives;
+3. divergent design alternatives are now declarable and isolated, and the graph is not yet complete. `design-tool branch` records an alternative with an id, a **list** of parents, a reason and a disposition, and writes everything belonging to one formulation under `alternatives/<id>/` — proposal, model, artifacts, acceptance revision, reviews, receipts. Sibling isolation is structural rather than checked: each alternative freezes its own acceptance contract, so neither can cut a revision from the other's, and `alternative_id` joins the execution plan and the review envelope so a review answered for one branch is refused by the other even at the instant the two are still byte-identical copies. `candidate_strategy: PARALLEL` is retired in its favour. What is still owed: merge (several contributing parents), alternative comparison and scoring (Release 4 owns both), the full disposition lifecycle — only `ACTIVE` and `PREFERRED` are honoured, the other five states are stored and read by nothing — scoping below job-versus-alternative, run identities, and the dormant tolerance, material and operation fields;
 4. Multi-artifact edit intent is now declarable: `edit_scopes` supports several source artifacts, coordinated scopes may share existing interfaces through `interface_ids`, and the plan and gate preserve one obligation per scope. Multi-source candidate production and preservation measurement remain unavailable.
 5. preservation is not yet strong enough to support successful modification claims;
 6. fitted authored designs and moving assemblies are not yet complete end-to-end capabilities;
@@ -72,7 +73,7 @@ The immediate unresolved blockers are:
 
 Several narrower gaps are carried forward from the completed consolidation work. They are not blockers in the same sense, but they are owed and are easy to mistake for finished work:
 
-* the command surface described by ADR 0001 is only partly built. `doctor`, `selftest`, `init`, `route`, `run`, `status`, `diagnose`, and the deprecated `run-job` exist; `commission`, `audit`, `motion`, `coupon`, and `package` do not. Until they do, the older `dt.py` verbs stay in agent instructions.
+* the command surface described by ADR 0001 is only partly built. `doctor`, `selftest`, `init`, `route`, `run`, `status`, `branch`, `diagnose`, and the deprecated `run-job` exist; `commission`, `audit`, `motion`, `coupon`, and `package` do not. Until they do, the older `dt.py` verbs stay in agent instructions.
 * designer commissions are not yet generated from canonical project state, and the template registry does not yet distinguish a certified template from a starting one.
 * a job that declares motion routes `FULL`, and its motion modifier is reported `DEFERRED` rather than measured. The sweep engine does not exist. Naming it unmeasured is deliberate and is not a substitute for Release 8.
 * there is no resource governor, and the 3MF writers are not versioned adapters.

@@ -45,7 +45,6 @@ class JobRequest:
     nozzle: dict[str, Any]
     orientation: dict[str, Any]
     modifiers: tuple[str, ...] = ()
-    candidate_strategy: str = "SINGLE"
     external_geometry: bool = False
     ambiguities: tuple[str, ...] = ()
     step: bool = False
@@ -61,6 +60,13 @@ class JobRequest:
     # whose route trade is that nobody independent looks.
     verify_call: Callable[[verification.Packet], dict[str, Any]] | None = None
     evidence: tuple[str, ...] = ()
+    # Where the declared evidence files are read from. `out_dir` when absent,
+    # which is every caller that has no alternative: evidence is *shared* job
+    # input -- a photo, a caliper sheet -- and it is declared once against the
+    # project, not copied into each formulation's directory. Once `out_dir` moves
+    # under `alternatives/<id>`, resolving evidence relative to it would look for
+    # the shared file in a place nobody put it.
+    evidence_dir: Path | None = None
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
     # Where build artifacts are reused from. None disables caching entirely,
     # which is the right default for a test: a cache that is on by default makes
@@ -138,6 +144,7 @@ def run(request: JobRequest) -> JobResult:
     timings: dict[str, float] = {}
     out = request.out_dir
     out.mkdir(parents=True, exist_ok=True)
+    evidence_root = request.evidence_dir or out
     written: dict[str, Path] = {}
     llm_calls = 0
     specification: dict[str, Any] | None = None
@@ -166,7 +173,7 @@ def run(request: JobRequest) -> JobResult:
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
         parameters=request.parameters, stated=request.stated,
         consequence=request.consequence, modifiers=request.modifiers,
-        candidate_strategy=request.candidate_strategy, ambiguities=request.ambiguities,
+        ambiguities=request.ambiguities,
         decision=decision, updated_utc=request.updated_utc)
     written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
     timings["intent"] = time.perf_counter() - mark
@@ -239,8 +246,10 @@ def run(request: JobRequest) -> JobResult:
                 template_covers=template.covers, bounds=template.bounds,
                 call=request.spec_call, reviewer=request.reviewer or {},
                 job_id=request.job_id, revision=request.updated_utc,
-                contract_hash=pre_contract.contract_hash(), evidence_dir=out,
-                artifact_hashes=None, execution_plan_sha256=plan.plan_hash())
+                contract_hash=pre_contract.contract_hash(),
+                evidence_dir=evidence_root,
+                artifact_hashes=None, execution_plan_sha256=plan.plan_hash(),
+                alternative_id=plan.alternative_id)
         except ReviewNeeded:
             raise
         except (S.SchemaError, R.ReviewError, ValueError) as exc:
@@ -429,7 +438,12 @@ def run(request: JobRequest) -> JobResult:
                                for i, k in enumerate("xyz")}
 
         mark = time.perf_counter()
-        report = commission.run(ctx, model_contract)
+        # `evidence_root` and not `out`: a declared source artifact is shared job
+        # input, named once against the project. Once the candidate is written
+        # under `alternatives/<id>` the two directories differ, and looking for
+        # the source beside the candidate would report a file that is exactly
+        # where it was declared as missing.
+        report = commission.run(ctx, model_contract, evidence_root)
         timings["commission"] = time.perf_counter() - mark
 
         mark = time.perf_counter()
@@ -497,7 +511,7 @@ def run(request: JobRequest) -> JobResult:
                     "step": artifact.get("step_sha256"),
                 },
                 witness=witness.as_dict(), witness_dir=out / "witness",
-                evidence=request.evidence, evidence_dir=out,
+                evidence=request.evidence, evidence_dir=evidence_root,
                 # The deterministic measurement plans behind the packet's
                 # evidence, named rather than only hashed into it. A MODIFY job's
                 # preservation audit is the reason this exists: its plan is now a
@@ -509,7 +523,12 @@ def run(request: JobRequest) -> JobResult:
                 # decided there and nowhere else the reviewer is shown, and the
                 # plan's digest used to reach `final_status.json` alone -- written
                 # after this call, so it bound nothing anybody answered.
-                execution_plan_sha256=plan.plan_hash())
+                execution_plan_sha256=plan.plan_hash(),
+                # Which formulation was reviewed. Two siblings agree about every
+                # other field in this envelope at the instant one is branched
+                # from the other, so without this a PASS written for one is
+                # `is_bound` for the other.
+                alternative_id=plan.alternative_id)
             safety_report = safety.run(packet, request.reviewer or {}, request.safety_call,
                                        envelope=safety_envelope)
         except ReviewNeeded:
@@ -566,9 +585,10 @@ def run(request: JobRequest) -> JobResult:
                     "step": artifact.get("step_sha256"),
                 },
                 witness=witness.as_dict(), witness_dir=out / "witness",
-                evidence=request.evidence, evidence_dir=out,
+                evidence=request.evidence, evidence_dir=evidence_root,
                 evidence_digests=report.get("evidence_digests"),
-                execution_plan_sha256=plan.plan_hash())
+                execution_plan_sha256=plan.plan_hash(),
+                alternative_id=plan.alternative_id)
             verification_report = verification.run(packet, request.reviewer or {},
                                                    request.verify_call,
                                                    envelope=verification_envelope)

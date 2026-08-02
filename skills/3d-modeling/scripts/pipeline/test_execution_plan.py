@@ -287,11 +287,20 @@ class ReconstructOnACertifiedTemplateTest(unittest.TestCase):
 class FullWithNothingToMeasureTest(unittest.TestCase):
     """The other deadlock: refused for a reviewer the route had not asked for."""
 
-    def _parallel(self) -> P.Project:
-        return _project(candidate_strategy="PARALLEL")
+    def _moving(self) -> P.Project:
+        """FULL for a reason that owes no measurement.
+
+        Declared motion, which used to be one of four such triggers.
+        `candidate_strategy: PARALLEL` was another until it was retired: it
+        produced no second candidate, isolated nothing and compared nothing, and
+        its whole effect was this extra line of route rationale. Competing
+        formulations are `design-tool branch` now.
+        """
+        return _project(motion=(P.Motion(motion_id="hinge", kind="ROTARY",
+                                         static=("body",), moving=("lid",)),))
 
     def test_a_full_job_with_no_evidence_asks_for_no_metrologist(self) -> None:
-        for name, project in (("parallel candidates", self._parallel()),
+        for name, project in (("declared motion", self._moving()),
                               ("two components", _project(components=(
                                   P.Component(component_id="a", role="x"),
                                   P.Component(component_id="b", role="y"))))):
@@ -303,7 +312,7 @@ class FullWithNothingToMeasureTest(unittest.TestCase):
 
     def test_it_runs_to_a_receipt_instead_of_refusing_at_the_routing_stage(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
-            directory = _laid_out(Path(raw), self._parallel())
+            directory = _laid_out(Path(raw), self._moving())
             code = cli.run([str(directory), "--no-render"])
             self.assertEqual(cli.NEEDS_ACTION, code)
             action = _next_action(directory)
@@ -331,7 +340,7 @@ class FullWithNothingToMeasureTest(unittest.TestCase):
             "full by components": _project(components=(
                 P.Component(component_id="a", role="x"),
                 P.Component(component_id="b", role="y"))),
-            "full by parallel candidates": self._parallel(),
+            "full by declared motion": self._moving(),
             "explicit verification": _project(verification_requested=True),
         }
         cases["authored metrology"] = _authored(source_mode="RECONSTRUCT")
@@ -864,7 +873,9 @@ class ADeclaredModelIsNeverDiscardedTest(unittest.TestCase):
             "two components": {"components": (
                 P.Component(component_id="a", role="x"),
                 P.Component(component_id="b", role="y"))},
-            "parallel candidates": {"candidate_strategy": "PARALLEL"},
+            "declared motion": {"motion": (P.Motion(
+                motion_id="hinge", kind="ROTARY", static=("body",),
+                moving=("lid",)),)},
             "new": {},
         }
         for name, over in cases.items():

@@ -36,7 +36,16 @@ MANUFACTURING_SCHEMA = 1
 STATUS_SCHEMA = 2
 
 CONSEQUENCE = ("INCONSEQUENTIAL", "CONSEQUENTIAL")
-CANDIDATE_STRATEGY = ("SINGLE", "PARALLEL")
+# There is deliberately no `CANDIDATE_STRATEGY` here any more. `PARALLEL` was
+# validated, stored in `project.json`, carried into `intent_manifest.json` and
+# hashed -- and its entire behavioural effect was appending one sentence to the
+# route rationale. Nothing produced a second candidate, nothing isolated one, and
+# nothing compared two. A schema field that lets a document claim a capability
+# with nothing behind it is worse than an absent one, because a reader cannot
+# tell the claim from the capability. Competing formulations are declared with
+# `design-tool branch`, which gives each its own directory, its own acceptance
+# revision and its own review bindings; `project.from_payload` refuses the old
+# value by name so an existing document making the claim is told, not ignored.
 # `authored` is the CUSTOM lane: geometry a designer wrote, built through
 # whichever of the two kernels the model itself calls. It is a third *source of
 # geometry*, not a third kernel -- the backend records which kernel actually ran

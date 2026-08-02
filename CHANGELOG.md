@@ -6,6 +6,101 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — a second formulation of the same job, isolated on disk and in the receipts
+
+`design-tool branch <project> --from <alt|.> --id <name> --reason "<text>"` is one
+deterministic verb with no dispatch. It appends an `{alternative_id, parents,
+reason, disposition}` row to `project.json`, points `active_alternative` at it,
+and **copies nothing**: the brief, the requirements, the source artifacts and the
+evidence stay shared and are read by reference. `--activate <alt|.>` switches,
+`.` being the shared root the siblings were branched from. `parents` is a list
+from this first release, because a merge is a revision with several contributing
+parents and widening a scalar later is not additive; nothing here writes more
+than one entry.
+
+When an alternative is active, every file that means something about *one*
+formulation is written under `alternatives/<id>/`. With one shared directory the
+collisions ran worst-first, and none of them announced itself:
+
+* two siblings froze into one `acceptance_contract.json`. The second's `freeze`
+  read the first's contract as `previous`, cut a revision, and `_invalidate`
+  deleted the first's `final_status.json`, `commission_report.json`,
+  `artifact_manifest.json`, `manufacturing_report.json` and both review reports.
+  Re-running the first did it back. Two alternatives destroyed each other on
+  every alternating run, and `acceptance_history.json` recorded the fork as one
+  linear chain of corrections;
+* `_run_authored` skips the designer commission when `design_proposal.json` and
+  `model.py` both exist, so a second alternative was **never commissioned**: it
+  rebuilt the first's geometry and filed the receipts under its own name;
+* `candidate.stl` and `candidate.step` are fixed literals, so the second build
+  overwrote the first;
+* a review is answered by the *presence* of `reviews/<kind>_response.json`, so a
+  sibling picked up the answer written next door and then failed closed on the
+  envelope while reporting the wrong diagnosis.
+
+**Path isolation is necessary and provably not sufficient**, so `alternative_id`
+joins exactly two hashed payloads: `execution_plan.json` and the review envelope
+(`REVIEW_PROTOCOL_VERSION` 3 → 4, so a stored protocol-3 answer is refused by
+name rather than by an unexplained digest mismatch). `ExecutionPlan.as_payload`
+carries no parameters and deliberately omits `candidates`, so two authored
+formulations of one job compile to the same plan hash; the envelope's `revision`
+is `updated_utc`, a timestamp rather than a graph node; and at the instant a
+branch is created its sibling is a copy, so `contract_sha256`, `artifact_hashes`
+and `witness_hashes` are all equal. A safety `PASS` written for one sibling was
+therefore `is_bound` for the other — a false pass of exactly the class the
+authority gate forbids, reachable with nobody doing anything wrong. It does
+**not** join `contract_sha256`: two formulations requiring identical geometry
+legitimately share an acceptance contract.
+
+Invalidation is one rule. A change to the shared half of `project.json`
+invalidates every alternative; a change inside an alternative invalidates that
+one only. Both follow from freezing per alternative root, and
+`acceptance_history.json` now records the alternative on each entry and inside
+`supersedes`, so a correction and a fork are distinguishable rather than
+identical.
+
+**Zero cost when unused, exactly rather than approximately.** A project that has
+never branched serializes, compiles and hashes to the bytes it did before: every
+new field is absent when there is nothing to say and never `null` — the
+`execution_plan_sha256: None` precedent in `review.py` is deliberately not
+followed — no subdirectory appears, and the five pinned certified contract hashes
+and every `test_frozen` golden are unchanged and were not re-pinned.
+
+`pipeline/test_alternatives.py` carries the fixtures; each was verified to fail
+under a targeted mutation of the protection it covers, including the two that
+matter most — remove `alternative_id` from the envelope and one sibling's PASS
+binds the other; emit it as `null` instead of omitting it and the zero-cost
+proof fails.
+
+### Removed — `candidate_strategy`, and `Project.project_hash()`
+
+`candidate_strategy: "PARALLEL"` was validated, stored in `project.json`, carried
+into `intent_manifest.json` and hashed, and its entire behavioural effect was
+appending one sentence to the route escalation list. Nothing generated a second
+candidate, isolated one, or compared two — a schema field that let a document
+claim a capability with nothing behind it. A project or `job.json` carrying it is
+now refused **by name** and pointed at `design-tool branch`; `"SINGLE"` is read
+and dropped, because it claimed nothing and sits in every `project.json` this
+build has written.
+
+`Project.project_hash()` hashed the whole payload including the mutable `status`
+and `bindings` blocks, so it moved on every finished run, and it was read by
+nothing. Its one appearance — `next_action.json`'s `bound.project_sha256` — is
+replaced by `requirement_sha256`, the digest of the half of the job nobody on the
+design side owns, which is what the frozen acceptance contract already carries and
+what shared-half invalidation already keys on. A digest that always differs is one
+its readers learn to ignore, and two digests over one declaration is one authority
+and one bug.
+
+### Fixed — a shared source artifact is found from a branch
+
+`commission` resolved a declared preservation source beside the candidate, which
+stopped being beside the project once the candidate moved under
+`alternatives/<id>`. It takes the shared root explicitly now and defaults to the
+candidate's own directory for every caller that has none, so a `MODIFY` job on a
+branch measures against the artifact where the project declared it rather than
+reporting `SOURCE_MISSING` for a file that is already there.
+
 ### Fixed — the candidate was writing to the party that decides the run (D10)
 
 `model.py` declares `PROVENANCE`. The child returned it in

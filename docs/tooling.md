@@ -29,13 +29,15 @@ uv run design-tool init <project> --job-id J --source-mode NEW|MODIFY|RECONSTRUC
 uv run design-tool route  <project>
 uv run design-tool run    <project> [--no-render]
 uv run design-tool status <project> [--json]
+uv run design-tool branch <project> --from <alternative|.> --id <name> --reason "<text>"
+uv run design-tool branch <project> --activate <alternative|.>
 ```
 
 | exit | meaning |
 | --- | --- |
 | 0 | the job finished; there is nothing outstanding |
 | 1 | a gate failed — the geometry does not match its contract, a review rejected it, or the lane may not claim success (`EXPERIMENTAL_UNAVAILABLE`, `UNSUPPORTED`) |
-| 2 | `project.json` is malformed or incomplete; every missing field is named |
+| 2 | `project.json` is malformed or incomplete and every missing field is named, or a `branch` was refused and the reason is named |
 | 3 | something has to be answered or built before this can continue — read `next_action.json` |
 
 ### `project.json`
@@ -46,7 +48,14 @@ job id, source mode, consequence and rationale, the manufacturing inputs, every
 requirement with its provenance (`STATED` / `INHERITED` / `MEASURED` / `CHOSEN`),
 source artifacts with hashes and classification, interfaces and who owns the other
 side of each, declared motion, edit scope, expected components, open questions,
-required reviews, bindings and status.
+required reviews, bindings, status, and — only once the job has branched — its
+design alternatives and which one is active.
+
+There is no `candidate_strategy`. `PARALLEL` was validated, stored and hashed,
+and its entire behavioural effect was one extra sentence in the route rationale:
+nothing generated a second candidate, isolated one, or compared two. A project
+carrying it is refused by name and pointed at `design-tool branch`; `SINGLE` is
+read and dropped, because it claimed nothing.
 
 Nothing is invented. `init` writes a skeleton in which every field you must supply
 is present and empty, and prints them as a to-do list; `run` refuses with exit 2
@@ -71,6 +80,91 @@ finishes:
 
 A commission carries no expectation of what the specialist should conclude. That
 is not politeness: a verifier told what to conclude has stopped being a verifier.
+
+`bound` carries `requirement_sha256` — the brief, the stated, inherited and
+measured values, the envelope, the interfaces, the components and the modifiers,
+which is the half of the job nobody on the design side owns and the same digest
+the frozen acceptance contract carries. It replaced a digest of the whole
+`project.json`, which covered the mutable `status` and `bindings` blocks and so
+moved every time a run finished, binding nothing to anything.
+
+### `design-tool branch` — competing formulations of one job
+
+```bash
+uv run design-tool branch <project> --from . --id snap-fit --reason "no fasteners to lose"
+uv run design-tool branch <project> --from snap-fit --id snap-fit-thicker --reason "..."
+uv run design-tool branch <project> --activate .          # back to the shared root
+```
+
+Deterministic and free: no dispatch, no build, **and no copy**. It appends one
+row to `project.json`, creates the directory that row names, and makes it active.
+
+| field | meaning |
+| --- | --- |
+| `alternative_id` | lower-case letters, digits and hyphens. It becomes a directory name and appears in the execution plan and every review envelope, so an id two filesystems spell differently is one two receipts disagree about |
+| `parents` | a **list** of ancestor ids, empty for a branch from the shared root. A list from the first release that has one, because a merge is a revision with several contributing parents and a field that has to change shape to record one is a field every reader has to be migrated off. Nothing in this release writes more than one entry |
+| `reason` | why this formulation exists. Required: two alternatives with no stated difference cannot be compared, and the one nobody can justify is the one kept by accident |
+| `disposition` | `ACTIVE`, `PREFERRED`, `PAUSED`, `REJECTED`, `SUPERSEDED`, `FALLBACK` or `MERGED`. Only the first two are **honoured** — an alternative in any other state cannot be made active. The rest are stored, round-tripped and reported, and no transition is implemented |
+
+Ancestry order is the acyclicity rule: a parent must be declared before the child
+that names it. `branch` appends, so it holds by construction, and a hand-edited
+file that breaks it is refused rather than sending a later ancestry walk round a
+loop.
+
+**What moves, and what does not.** When an alternative is active, everything that
+means something about *one* formulation is written under
+`alternatives/<id>/`: `design_proposal.json`, `model.py`, `candidate.stl`,
+`candidate.step`, `candidate_declaration.json`, `acceptance_contract.json`,
+`acceptance_history.json`, `execution_plan.json`, `route_decision.json`,
+`print_plan_checks.json`, `next_action.json`, `reviews/`, `witness/` and all ten
+run receipts. Everything shared stays where it was and is read by reference:
+`project.json`, the brief, source artifacts, evidence and the build cache.
+
+That is not tidiness. With one directory the collisions ran worst-first:
+
+* two siblings froze into one `acceptance_contract.json`, so the second's
+  `freeze` read the first's contract as `previous`, cut a revision, and deleted
+  the first's final status, commissioning report, artifact manifest,
+  manufacturing report and both review reports — which the first then did back,
+  on every alternating run, while the history recorded the fork as one linear
+  chain of corrections;
+* the designer commission is skipped when `design_proposal.json` and `model.py`
+  both exist, so a second alternative was **never commissioned**: it silently
+  rebuilt the first's geometry and filed the receipts under its own name;
+* `candidate.stl` and `candidate.step` are fixed literals, so the second build
+  overwrote the first;
+* a review is answered by the presence of `reviews/<kind>_response.json`, so one
+  sibling picked up the answer written for its neighbour.
+
+**Path isolation is necessary and not sufficient**, which is why `alternative_id`
+also joins two hashed payloads — `execution_plan.json` and the review envelope,
+and deliberately nothing else. `ExecutionPlan` carries no parameters, so two
+authored formulations of one job compile to the same plan; the envelope's
+`revision` is the job's `updated_utc`, a timestamp rather than a graph node; and
+at the instant a branch is created its sibling is still a copy, so
+`contract_sha256`, `artifact_hashes` and `witness_hashes` are equal too. Without
+the id, a safety `PASS` written for one sibling is `is_bound` for the other. The
+review protocol version is therefore `4`, and a stored protocol-3 response is
+refused by name rather than by an unexplained digest mismatch.
+
+It does **not** join `contract_sha256`: two formulations that require identical
+geometry are two ways of getting there, not two parts, and they legitimately
+share an acceptance contract.
+
+**Invalidation, one rule.** A change to the shared half of `project.json`
+invalidates every alternative; a change inside an alternative invalidates that
+one only. Both fall out of the acceptance contract being frozen per alternative
+root: a shared change moves `requirement_sha256`, so each alternative cuts its
+own revision on its next run and removes its own receipts, and a branch-local
+change moves nothing its sibling reads. `acceptance_history.json` records the
+alternative on each entry and inside `supersedes`, so a reader can tell a
+correction (a new revision of the same formulation) from a fork (a revision cut
+from a different one).
+
+**Zero cost when unused.** A project that has never branched serializes,
+compiles and hashes to exactly the bytes it did before branching existed. Every
+new field is *absent* when there is nothing to say and never `null`, no
+subdirectory appears, and `candidate.stl` is still written at the project root.
 
 ### The authored lane: two artifacts, one commission
 
@@ -301,6 +395,10 @@ commissioning report, the manufacturing report, both review reports and the fina
 status. A designer may still change their mind about what the part should be.
 They cannot do it invisibly, and they cannot keep the receipt issued against the
 old expectation.
+
+The contract is frozen into the **work directory**, which is the project root for
+an unbranched job and `alternatives/<id>` once one is active. That scoping is
+what makes the deletion above correct across siblings; see `design-tool branch`.
 
 Editing `model.py` does **not** move the contract. Iterating a build against a
 fixed expectation is the point.

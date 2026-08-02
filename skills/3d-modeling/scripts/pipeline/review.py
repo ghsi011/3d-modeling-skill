@@ -36,7 +36,19 @@ from . import schemas as S
 # answer. Same reasoning as 2: bumped rather than added silently, so a stored
 # protocol-2 response is refused by name rather than by an unexplained digest
 # mismatch.
-REVIEW_PROTOCOL_VERSION = 3
+#
+# 4: the envelope binds `alternative_id` -- which formulation of the job the
+# review was taken on. At the instant a branch is created its sibling is a copy,
+# so `contract_sha256`, `artifact_hashes` and `witness_hashes` are all equal and
+# `revision` is `request.updated_utc`, a timestamp rather than a graph node. A
+# safety PASS written for one sibling was therefore `is_bound` for the other: a
+# false pass of exactly the class the authority gate forbids, reachable without
+# anybody doing anything wrong. Path isolation does not close it either, because
+# `ExecutionPlan.as_payload` carries no parameters, so two alternatives of one
+# template with different numbers share an `execution_plan_sha256`. Bumped rather
+# than added silently, as 2 and 3 were: a stored protocol-3 response is refused
+# by name instead of by an unexplained digest mismatch.
+REVIEW_PROTOCOL_VERSION = 4
 REVIEW_KIND = ("specification", "safety", "verification")
 
 SCHEMA_VERSION_BY_KIND = {
@@ -124,9 +136,26 @@ class ReviewEnvelope:
     # envelope is a general structure and a caller with no plan in hand must be
     # able to say so rather than invent one; the runner is not such a caller.
     execution_plan_sha256: str | None = None
+    # Which alternative this review was taken on, absent at the shared root.
+    #
+    # The second and last payload the id joins. Two siblings at the instant of
+    # branching agree about every other field here, and `revision` is a
+    # timestamp, so without this an answer written for one is bound to the other
+    # by construction.
+    alternative_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        """The envelope as it is handed over, echoed back and hashed.
+
+        `alternative_id` is *omitted* when there is none. That is deliberately
+        not what the line below it does: `execution_plan_sha256` is emitted
+        unconditionally, including as `null`, and following that precedent would
+        move every envelope digest on every unbranched job -- which is the cost
+        this slice is required not to impose. The reader accepts absent and null
+        as the same answer (`_optional_str_field`), so nothing has to be migrated
+        to read it either way.
+        """
+        payload = {
             "protocol_version": self.protocol_version,
             "answer_schema_version": self.answer_schema_version,
             "kind": self.kind,
@@ -145,6 +174,9 @@ class ReviewEnvelope:
                                  else {k: v for k, v in sorted(self.evidence_digests.items())}),
             "execution_plan_sha256": self.execution_plan_sha256,
         }
+        if self.alternative_id is not None:
+            payload["alternative_id"] = self.alternative_id
+        return payload
 
     def digest(self) -> str:
         return S.payload_hash(self.as_dict())
@@ -158,7 +190,8 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
                    evidence: tuple[str, ...] | list[str] = (),
                    evidence_dir: Path | None = None,
                    evidence_digests: dict[str, Any] | None = None,
-                   execution_plan_sha256: str | None = None) -> ReviewEnvelope:
+                   execution_plan_sha256: str | None = None,
+                   alternative_id: str | None = None) -> ReviewEnvelope:
     S.require_enum(kind, REVIEW_KIND, what="review kind")
     if evidence_digests is not None:
         for name, digest in sorted(evidence_digests.items()):
@@ -170,6 +203,9 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
         raise ReviewError(
             "execution_plan_sha256 must be a string or absent, got "
             f"{execution_plan_sha256!r}")
+    if alternative_id is not None and not isinstance(alternative_id, str):
+        raise ReviewError(
+            f"alternative_id must be a string or absent, got {alternative_id!r}")
     return ReviewEnvelope(
         protocol_version=REVIEW_PROTOCOL_VERSION,
         answer_schema_version=SCHEMA_VERSION_BY_KIND[kind],
@@ -185,6 +221,7 @@ def build_envelope(*, kind: str, job_id: str, revision: str, packet_hash: str,
         evidence_digests=(None if evidence_digests is None
                           else dict(evidence_digests)),
         execution_plan_sha256=execution_plan_sha256,
+        alternative_id=alternative_id,
     )
 
 
@@ -287,6 +324,7 @@ def _envelope_from_dict(env: dict[str, Any]) -> ReviewEnvelope:
             evidence_digests=_hash_map_field(env, "evidence_digests",
                                              nullable_values=False),
             execution_plan_sha256=_optional_str_field(env, "execution_plan_sha256"),
+            alternative_id=_optional_str_field(env, "alternative_id"),
         )
     except KeyError as exc:
         raise ReviewError(f"review_envelope is malformed: missing {exc}") from None

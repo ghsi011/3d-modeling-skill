@@ -96,6 +96,31 @@ the same schema an in-process caller is held to, and the safety packet
 deliberately excludes the verification report so the two cannot anchor on each
 other.
 
+### Competing concepts are branches, not one job with two answers
+
+When a job could plausibly be solved two ways — a screw-fastened bracket and a
+snap-fit one — declare each as an **alternative**:
+
+```bash
+uv run design-tool branch project/ --from . --id snap-fit --reason "no fasteners to lose"
+uv run design-tool run project/
+uv run design-tool branch project/ --activate .        # back to the first concept
+```
+
+Branching writes one row in `project.json` and **copies nothing**: the brief, the
+requirements, the source artifacts and the evidence stay shared and are read by
+reference, and only what differs — the proposal, the model, the artifacts, the
+acceptance revision, the reviews and every receipt — lives under
+`alternatives/<id>/`. Selecting one concept does not delete the other, and a
+review answered for one is refused by the other rather than accepted: at the
+instant a branch is created its sibling is a copy, so the contract, the artifacts
+and the witnesses all hash the same, and the alternative's identity is what the
+review envelope binds. Details and the exit contract are in
+[`docs/tooling.md`](docs/tooling.md).
+
+A project that never branches pays nothing for this: no directory appears, no
+payload gains a field, and every frozen contract hash is unchanged.
+
 ### The five-role pipeline
 
 Invoke the skill — in Claude Code, from a project that has a modeling job:

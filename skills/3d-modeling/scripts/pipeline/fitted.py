@@ -370,7 +370,8 @@ def recover(*, brief: str, evidence: list[str], template: str, template_covers: 
             reviewer: dict[str, Any], job_id: str, revision: str,
             contract_hash: str, evidence_dir: Path | None = None,
             artifact_hashes: dict[str, str | None] | None = None,
-            execution_plan_sha256: str | None = None) -> dict[str, Any]:
+            execution_plan_sha256: str | None = None,
+            alternative_id: str | None = None) -> dict[str, Any]:
     """One call, validated, with every deterministic consequence computed here."""
     from . import review as R
 
@@ -384,8 +385,11 @@ def recover(*, brief: str, evidence: list[str], template: str, template_covers: 
         # Bound here as at the other two review boundaries. This review is only
         # asked because the plan routed FITTED, so the plan is one of the things
         # the question is a function of; leaving it out here would be the same
-        # gap in miniature.
-        execution_plan_sha256=execution_plan_sha256)
+        # gap in miniature. Same argument for the alternative: this recovery is a
+        # question about one formulation of the job, and two formulations of one
+        # template can share every other field here.
+        execution_plan_sha256=execution_plan_sha256,
+        alternative_id=alternative_id)
     request["review_envelope"] = envelope.as_dict()
     response = call(request)
     # Validate the payload shape and types first. A malformed but correctly bound

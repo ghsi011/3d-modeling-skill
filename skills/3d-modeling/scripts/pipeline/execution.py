@@ -162,6 +162,19 @@ class ExecutionPlan:
     # keep naming them. Two plans that execute identically must hash identically
     # even if a sixth certified template is added to the registry.
     candidates: tuple[intent.Candidate, ...] = ()
+    # Which formulation of the job this plan executes, or None at the shared root.
+    #
+    # This is one of exactly two payloads the id joins, and it is here because
+    # path isolation alone is provably not sufficient. `as_payload` carries no
+    # parameters and deliberately omits `candidates`, so two alternatives of one
+    # template with *different numbers* compile to the same plan and therefore to
+    # the same `execution_plan_sha256`. A review answered against one would bind
+    # against the other on a digest that could not tell them apart. It joins the
+    # review envelope for the same reason and no others: it must not reach
+    # `contract_sha256`, because two formulations that legitimately require
+    # identical geometry share an acceptance contract, and making the contract
+    # differ would invent a difference the job does not have.
+    alternative_id: str | None = None
 
     def __post_init__(self) -> None:
         """The two things a plan may not say at once.
@@ -232,7 +245,14 @@ class ExecutionPlan:
         return "verification" in self.required_reviews
 
     def as_payload(self) -> dict[str, Any]:
-        return {
+        """The plan as it is written down and hashed.
+
+        `alternative_id` is omitted when there is none, not spelled `null`. A job
+        that has never branched must compile to the plan it compiled to before
+        branching existed, byte for byte, or every `execution_plan_sha256` on
+        every existing receipt moves for a capability the job does not use.
+        """
+        payload: dict[str, Any] = {
             "schema_version": EXECUTION_PLAN_SCHEMA,
             "job_id": self.job_id,
             "route": self.route,
@@ -250,6 +270,9 @@ class ExecutionPlan:
             "lane_status": self.lane_status,
             "lane_note": self.lane_note,
         }
+        if self.alternative_id is not None:
+            payload["alternative_id"] = self.alternative_id
+        return payload
 
     def plan_hash(self) -> str:
         return S.payload_hash(self.as_payload())
@@ -400,7 +423,8 @@ def compile_plan(project: P.Project,
         verification_dispatch=_dispatch(decision.route, reviews),
         preserved_artifact_ids=preserved,
         lane_status=lane_status, lane_note=lane_note,
-        candidates=decision.candidates)
+        candidates=decision.candidates,
+        alternative_id=project.active_alternative or None)
 
 
 def from_job_request(*, job_id: str, template: str | None,

@@ -143,11 +143,17 @@ class ProjectSchemaTest(unittest.TestCase):
             interfaces=(P.Interface(interface_id="ball", kind="socket",
                                     external=True, owner="the vent clip",
                                     motion_id="hinge"),),
-            components=(P.Component(component_id="body", role="housing"),))
+            components=(P.Component(component_id="body", role="housing"),),
+            alternatives=(P.Alternative(alternative_id="screw-fastened",
+                                        reason="the fallback everybody can service"),
+                          P.Alternative(alternative_id="snap-fit",
+                                        parents=("screw-fastened",),
+                                        reason="no fasteners to lose",
+                                        disposition="PREFERRED")),
+            active_alternative="snap-fit")
         again = P.from_payload(original.as_payload())
         self.assertEqual(S.canonical_json(original.as_payload()),
                          S.canonical_json(again.as_payload()))
-        self.assertEqual(original.project_hash(), again.project_hash())
 
 
 def _box(x: float) -> dict[str, list[float]]:
@@ -510,7 +516,11 @@ class CliRunTest(unittest.TestCase):
             self.assertEqual("designer", action["role"])
             self.assertEqual("CUSTOM", action["route"])
             self.assertIn("model.py", action["required_outputs"])
-            self.assertTrue(action["bound"]["project_sha256"])
+            # The half of the job nobody on the design side owns, and the same
+            # digest the frozen acceptance contract carries. It replaced a hash
+            # of the whole project file, which covered `status` and `bindings`
+            # and therefore moved every time a run finished.
+            self.assertTrue(action["bound"]["requirement_sha256"])
 
     def test_the_commission_carries_no_expected_answer(self) -> None:
         """A commission that says what to conclude has stopped commissioning.

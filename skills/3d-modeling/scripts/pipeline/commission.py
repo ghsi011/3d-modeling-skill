@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from pathlib import Path
 from typing import Any
 
 from . import schemas as S
@@ -81,7 +82,8 @@ def _unavailable_check(feature: Feature, title: str, reason: str, code: str,
 
 
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
-                   bed_contact_mm2: float | None) -> Check:
+                   bed_contact_mm2: float | None,
+                   source_dir: Path | None = None) -> Check:
     exp = feature.expectation
     kind = feature.kind
 
@@ -248,12 +250,19 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         region = PR.Region.from_declaration(exp.get("region"))
         tolerance_mm = float(exp.get("tolerance_mm", PR.DEFAULT_TOLERANCE_MM))
         tol = _tol(feature.tolerance, tolerance_mm)
-        source = ctx.path.parent / str(exp.get("source", ""))
+        # The source artifact is a *project* input, and since branching the
+        # candidate is not written beside the project any more -- it is written
+        # under `alternatives/<id>`. Looking beside the candidate is the right
+        # default for every caller that has no separate root (`run-job`, the
+        # frozen fixtures), and wrong for a branch, where it would report
+        # `SOURCE_MISSING` for a file that is exactly where it was declared.
+        root = Path(source_dir) if source_dir is not None else ctx.path.parent
+        source = root / str(exp.get("source", ""))
         if not source.is_file():
             return _unavailable_check(
                 feature, "Preservation outside the edit region",
-                f"the declared source artifact {exp.get('source')!r} is not beside "
-                "the candidate, so there is nothing to compare against",
+                f"the declared source artifact {exp.get('source')!r} is not in "
+                f"{root}, so there is nothing to compare against",
                 "SOURCE_MISSING", tolerance_mm, tol)
         report = PR.audit(source_path=source, candidate_path=ctx.path,
                           region=region, tolerance_mm=tolerance_mm,
@@ -371,7 +380,16 @@ def _fit_acceptance_check(feature: Feature, checks: list[Check]) -> Check:
         result="PASS" if ok else "FAIL")
 
 
-def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
+def run(ctx: MeshAnalysisContext, contract: Contract,
+        source_dir: Path | None = None) -> dict[str, Any]:
+    """Measure the built candidate against its frozen contract.
+
+    `source_dir` is where a declared source artifact is read from, and defaults
+    to the directory holding the candidate. They are the same place for every
+    unbranched job; on an alternative the candidate moves under
+    `alternatives/<id>` and the source artifact does not, because it is shared
+    job input and branching copies nothing.
+    """
     checks: list[Check] = []
 
     watertight = bool(ctx.normalized.is_watertight)
@@ -409,7 +427,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     for feature in contract.features:
         if feature.kind == "fit_acceptance":
             continue
-        checks.append(_feature_check(ctx, feature, bed_contact))
+        checks.append(_feature_check(ctx, feature, bed_contact, source_dir))
 
     for feature in contract.features:
         if feature.kind == "fit_acceptance":

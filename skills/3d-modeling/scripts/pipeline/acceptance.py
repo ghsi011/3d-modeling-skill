@@ -455,13 +455,43 @@ def _invalidate(project_dir: Path) -> dict[str, Any]:
     return removed
 
 
-def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str) -> Frozen:
+def _revision_alternative(history: dict[str, Any], revision: int) -> str | None:
+    """Which alternative wrote a given revision, according to the history itself.
+
+    Read back rather than assumed. The contract payload cannot carry the
+    alternative -- that would put it in `contract_sha256`, and two formulations
+    that legitimately require identical geometry must be able to share one
+    contract -- so the history is the only record of who froze what.
+    """
+    for entry in reversed(history.get("revisions") or []):
+        if isinstance(entry, dict) and entry.get("revision") == revision:
+            value = entry.get("alternative_id")
+            return value if isinstance(value, str) else None
+    return None
+
+
+def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str,
+           alternative_id: str | None = None) -> Frozen:
     """Write the contract if it is new, keep it byte-for-byte if it is not.
 
     Called before the builder, from the CLI, and never from `runner.py` -- the
     module that executes the model has no function that can write an acceptance
     contract, which is what makes "the candidate cannot influence its own
     acceptance criteria" a property of the call graph rather than of a check.
+
+    `project_dir` is the *work* directory: the project root for an unbranched
+    job, and `alternatives/<id>` for a branched one. That scoping is what makes
+    `_invalidate` correct across siblings. It used to be the project root
+    unconditionally, so a second formulation's freeze read the first's contract
+    as `previous`, cut a revision from it, and deleted the first's final status,
+    commissioning report, artifact manifest, manufacturing report and both review
+    reports -- which the first then did to the second on its next run.
+
+    `alternative_id` is recorded in the history, and in `supersedes`, so a reader
+    can tell a *correction* (a new revision of the same formulation) from a
+    *fork* (a revision cut from a different one). With the scoping above a fork
+    cannot happen; the field is what says so, rather than leaving every branch
+    permanently recorded as somebody changing their mind.
     """
     project_dir = Path(project_dir)
     path = project_dir / ACCEPTANCE_FILE
@@ -490,7 +520,8 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str) -> Froz
     payload["contract_sha256"] = S.payload_hash(payload)
 
     invalidated = _invalidate(project_dir) if previous else {}
-    entry = {
+    history = _history(project_dir)
+    entry: dict[str, Any] = {
         "revision": revision,
         "contract_sha256": payload["contract_sha256"],
         "proposal_sha256": body["proposal_sha256"],
@@ -506,7 +537,21 @@ def freeze(project_dir: Path, body: dict[str, Any], *, updated_utc: str) -> Froz
             "invalidated_receipts": invalidated,
         },
     }
-    history = _history(project_dir)
+    if alternative_id is not None:
+        entry["alternative_id"] = alternative_id
+    if entry["supersedes"] is not None:
+        # Whose revision this one replaces. Equal to the entry's own alternative
+        # for every fork-free history, and that equality is the thing worth being
+        # able to read: a revision that superseded a *different* formulation's
+        # contract is a branch recorded as a correction, which is what the
+        # per-alternative work directory now makes impossible. Omitted, not
+        # `null`, when the superseded revision was the shared root's -- the same
+        # rule the plan and the envelope follow, so an unbranched project's
+        # history keeps the bytes it had.
+        superseded_by = _revision_alternative(history,
+                                              int(previous.get("revision", 1)))
+        if superseded_by is not None:
+            entry["supersedes"]["alternative_id"] = superseded_by
     history["revisions"].append(entry)
     (project_dir / HISTORY_FILE).write_text(S.canonical_json(history), encoding="utf-8")
     path.write_text(S.canonical_json(payload), encoding="utf-8")

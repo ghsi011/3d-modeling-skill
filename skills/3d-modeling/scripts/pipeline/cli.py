@@ -5,9 +5,17 @@
     uv run design-tool route <project>
     uv run design-tool run <project>
     uv run design-tool status <project>
+    uv run design-tool branch <project> --from . --id snap-fit --reason "..."
     uv run design-tool diagnose <artifact>
     uv run design-tool doctor
     uv run design-tool selftest
+
+`branch` is the one verb for competing formulations of the same job. It writes a
+row in `project.json` and copies nothing: everything unchanged -- requirements,
+source artifacts, evidence, the brief -- stays shared, and the alternative's own
+directory holds only what differs. Every file that means something about one
+formulation moves under `alternatives/<id>`, which is what stops two siblings
+deleting each other's receipts through the acceptance revision.
 
 `run` is resumable on every route. It validates the project, executes every
 deterministic stage it can, and when agent judgement is genuinely required it
@@ -91,10 +99,17 @@ def _reviewer_of(spec: dict[str, Any]) -> dict[str, Any]:
     return dict(spec.get("reviewer") or {})
 
 
-def _answer(job_dir: Path, kind: str):
-    """A call that reads its answer from disk, or asks for one and stops."""
+def _answer(work_dir: Path, kind: str):
+    """A call that reads its answer from disk, or asks for one and stops.
+
+    `work_dir`, not the project directory: a review answers a question about one
+    formulation, and `reviews/<kind>_response.json` is treated as answered by its
+    mere presence. With one shared `reviews/` a sibling picked up the answer
+    written for its neighbour, and the envelope refusal that followed reported
+    the wrong diagnosis -- a stale review rather than somebody else's.
+    """
     def call(packet: Any) -> dict[str, Any]:
-        room = job_dir / REVIEW_DIR
+        room = work_dir / REVIEW_DIR
         room.mkdir(parents=True, exist_ok=True)
         # Always write the current request packet first. If a stale response from
         # a previous run is already on disk, the runner will reject it, but the
@@ -205,8 +220,12 @@ def _validate_job_contract(spec: dict[str, Any]) -> None:
         _number(value, f"parameters.{key}")
     _string(_required(spec, "updated_utc"), "updated_utc", non_empty=True)
     S.require_enum(_required(spec, "consequence"), S.CONSEQUENCE, what="job.consequence")
-    S.require_enum(spec.get("candidate_strategy", "SINGLE"), S.CANDIDATE_STRATEGY,
-                   what="job.candidate_strategy")
+    if spec.get("candidate_strategy") not in (None, "SINGLE"):
+        raise S.SchemaError(
+            f"job.candidate_strategy {spec['candidate_strategy']!r} is not a field "
+            "this build reads. It never produced a second candidate; competing "
+            "formulations are declared with `design-tool branch` on a canonical "
+            "project.")
 
     _string(_required(spec, "printer"), "printer", non_empty=True)
     material = _object(_required(spec, "material"), "material")
@@ -250,7 +269,6 @@ def _request(job_dir: Path, spec: dict[str, Any], *, render: bool) -> runner.Job
         out_dir=job_dir,
         updated_utc=_required(spec, "updated_utc"),
         modifiers=tuple(spec.get("modifiers", ())),
-        candidate_strategy=spec.get("candidate_strategy", "SINGLE"),
         external_geometry=bool(spec.get("external_geometry", False)),
         ambiguities=tuple(spec.get("ambiguities", ())),
         step=bool(spec.get("step", False)),
@@ -326,22 +344,61 @@ def run_job(argv: list[str]) -> int:
 # The canonical project surface
 # ---------------------------------------------------------------------------
 
-def _write_next_action(project_dir: Path, payload: dict[str, Any]) -> Path:
-    path = project_dir / NEXT_ACTION_FILE
+def _work_dir(project_dir: Path, project: P.Project, *, create: bool = True) -> Path:
+    """Where this run writes, created before anything tries to write into it.
+
+    One call, at the top of every verb that produces files, so that no code path
+    can be the one that still writes to the project root. For an unbranched
+    project this is the project root and the `mkdir` is a no-op on a directory
+    that already exists, so nothing new appears.
+
+    `create=False` for the verbs that only read. `status` reporting on a job it
+    had to create a directory for would be a command that changes what it is
+    describing.
+    """
+    try:
+        work = project.work_dir(project_dir)
+    except S.PathEscape:
+        # A hand-written `active_alternative` that would leave the project.
+        # `validate` names it -- the regex refuses the id and the cross-check
+        # refuses one nothing declares -- and falling back to the project root is
+        # what lets that problem be written down instead of tracebacking on the
+        # way to reporting it.
+        work = Path(project_dir)
+    if create:
+        work.mkdir(parents=True, exist_ok=True)
+    return work
+
+
+def _write_next_action(work_dir: Path, payload: dict[str, Any]) -> Path:
+    path = work_dir / NEXT_ACTION_FILE
     path.write_text(S.canonical_json(payload), encoding="utf-8")
     return path
 
 
-def _clear_next_action(project_dir: Path) -> None:
+def _clear_next_action(work_dir: Path) -> None:
     """A finished run must not leave a stale instruction behind.
 
     `next_action.json` is read as "this is what the job is waiting for". Left on
     disk after the thing was done, it says the opposite of the truth, and the
     reader with the least context is the one most likely to believe it.
     """
-    path = project_dir / NEXT_ACTION_FILE
+    path = work_dir / NEXT_ACTION_FILE
     if path.is_file():
         path.unlink()
+
+
+def _relative(work_dir: Path, project_dir: Path, name: str) -> str:
+    """A file in the work directory, named the way the project sees it.
+
+    `design_proposal.json` at the root, `alternatives/snap-fit/design_proposal.json`
+    on a branch. The commission names paths rather than gaining an alternative
+    field: the designer needs to know where to write, and a bare filename plus an
+    id somewhere else is two things to get right instead of one. It also keeps an
+    unbranched commission byte-identical, because the relative path of a file in
+    the project root is its own name.
+    """
+    return (work_dir / name).relative_to(project_dir).as_posix()
 
 
 def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
@@ -367,9 +424,9 @@ def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
     return project
 
 
-def _report_problems(project_dir: Path, project: P.Project,
+def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
                      problems: list[str], *, stage: str) -> int:
-    _write_next_action(project_dir, {
+    _write_next_action(work_dir, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "FIX_PROJECT",
@@ -435,18 +492,23 @@ def init(argv: list[str]) -> int:
     return 0
 
 
-def _compile(project_dir: Path, project: P.Project,
+def _compile(work_dir: Path, project: P.Project,
              decision: RT.RouteDecision) -> EX.ExecutionPlan:
     """Compile the plan and write both receipts.
 
     Two files, one authority. `route_decision.json` is why this route and not the
     others -- the audit trail of a decision. `execution_plan.json` is what will
     be executed under it, and it is the only one the runner reads.
+
+    Both land in the work directory. A plan compiled for one formulation is not a
+    plan for its sibling even when the two happen to compile identically, and a
+    single shared `execution_plan.json` would be rewritten by whichever
+    alternative ran last.
     """
     plan = EX.compile_plan(project, decision)
-    (project_dir / ROUTE_DECISION_FILE).write_text(
+    (work_dir / ROUTE_DECISION_FILE).write_text(
         S.canonical_json(decision.as_dict()), encoding="utf-8")
-    (project_dir / EXECUTION_PLAN_FILE).write_text(
+    (work_dir / EXECUTION_PLAN_FILE).write_text(
         S.canonical_json(plan.as_payload()), encoding="utf-8")
     return plan
 
@@ -461,15 +523,20 @@ def route(argv: list[str]) -> int:
 
     project_dir = args.project_dir.resolve()
     project = _load_project(project_dir)
+    work_dir = _work_dir(project_dir, project)
     problems = project.validate(project_dir, require_buildable=False)
     if problems:
-        return _report_problems(project_dir, project, problems, stage="route")
+        return _report_problems(project_dir, work_dir, project, problems,
+                                stage="route")
 
     decision = RT.decide(project)
     RT.apply(project, decision)
-    plan = _compile(project_dir, project, decision)
+    plan = _compile(work_dir, project, decision)
     project.save(project_dir)
 
+    if plan.alternative_id:
+        sys.stderr.write(f"\n  alternative {plan.alternative_id} "
+                         f"({_relative(work_dir, project_dir, '')})")
     sys.stderr.write(f"\n  route      {decision.route}\n"
                      f"  because    {decision.condition}\n"
                      f"  source     {decision.source_mode}\n"
@@ -487,7 +554,7 @@ def route(argv: list[str]) -> int:
 
 PLAN_FILE = "print_plan_checks.json"
 
-def _review_calls(project_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
+def _review_calls(work_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
     """Only the reviews the plan actually named.
 
     Supplying a callback the route did not ask for is not harmless: the runner
@@ -509,8 +576,8 @@ def _review_calls(project_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
     """
     required = set(plan.required_reviews)
     return {
-        "safety_call": _answer(project_dir, "safety") if "safety" in required else None,
-        "spec_call": (_answer(project_dir, "spec")
+        "safety_call": _answer(work_dir, "safety") if "safety" in required else None,
+        "spec_call": (_answer(work_dir, "spec")
                       if plan.dispatches_specification else None),
         # `!= "NEVER"`, not `"verification" in required`. Those two conditions
         # were exact complements: the compiler said OPTIONAL precisely when the
@@ -524,14 +591,14 @@ def _review_calls(project_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
         # This does not hand a verifier to a route that traded one away: OPTIONAL
         # is compiled only for FITTED and FULL, and DIRECT and CUSTOM both reach
         # NEVER.
-        "verify_call": (_answer(project_dir, "verification")
+        "verify_call": (_answer(work_dir, "verification")
                         if plan.verification_dispatch != "NEVER" else None),
     }
 
 
 
 
-def _print_plan(project_dir: Path, project: P.Project) -> tuple[dict[str, Any], list[str]]:
+def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], list[str]]:
     """The plan a `CUSTOM` candidate is gated against, written before it exists.
 
     Generated rather than dispatched, and generated *here* rather than by the
@@ -558,7 +625,7 @@ def _print_plan(project_dir: Path, project: P.Project) -> tuple[dict[str, Any], 
         consequence=project.consequence)
     problems = validate_plan(plan)
     if not problems:
-        (project_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
+        (work_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
     return plan, problems
 
 
@@ -798,17 +865,22 @@ PROPOSAL_API = {
 }
 
 
-def _commission_authored(project_dir: Path, project: P.Project,
+def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
                          plan: EX.ExecutionPlan, print_plan: dict[str, Any],
-                         missing: list[str]) -> int:
+                         requirement_sha256: str, missing: list[str]) -> int:
     """One designer commission, for the proposal and the model together.
 
     One, not two. Freeze-proposal-then-build is a deterministic pipeline step and
     must not become a second dispatch: asking the designer to come back and
     confirm a contract generated from their own proposal would buy nothing and
     cost the round trip the `CUSTOM` route exists to avoid.
+
+    Every path here is project-relative rather than a bare filename, which is how
+    a commission for a branch says which branch without carrying an id field. On
+    an unbranched job the relative path of a file in the project root *is* its
+    name, so the commission is unchanged.
     """
-    _write_next_action(project_dir, {
+    _write_next_action(work_dir, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "AGENT_COMMISSION",
@@ -816,11 +888,12 @@ def _commission_authored(project_dir: Path, project: P.Project,
         "stage": "candidate_build",
         "route": plan.route,
         "reason": plan.route_rationale,
-        "authorized_inputs": [project.brief, P.PROJECT_FILE,
-                              ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
-                              PLAN_FILE]
+        "authorized_inputs": [project.brief, P.PROJECT_FILE]
+        + [_relative(work_dir, project_dir, name)
+           for name in (ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE, PLAN_FILE)]
         + [a.path for a in project.source_artifacts],
-        "required_outputs": missing,
+        "required_outputs": [_relative(work_dir, project_dir, name)
+                             for name in missing],
         "proposal_api": dict(PROPOSAL_API),
         "source_api": {
             "PARAMS": "the numbers the shape is built from",
@@ -830,7 +903,15 @@ def _commission_authored(project_dir: Path, project: P.Project,
                         + ACC.PROPOSAL_FILE + ", which is frozen into "
                         + ACC.ACCEPTANCE_FILE + " before this file is executed",
         },
-        "bound": {"project_sha256": project.project_hash(),
+        # `requirement_sha256`, not a digest of the whole project file. This is
+        # the half of the job nobody on the design side owns -- the brief, the
+        # stated, inherited and measured values, the envelope, the interfaces and
+        # the components -- and it is the same digest the frozen acceptance
+        # contract carries, so a designer can check that what they were
+        # commissioned against is what the part was gated against. The digest
+        # that used to be here hashed `status` and `bindings` too, so it moved
+        # every time a run finished and bound nothing to anything.
+        "bound": {"requirement_sha256": requirement_sha256,
                   "execution_plan_sha256": plan.plan_hash(),
                   "print_plan_sha256": S.payload_hash(print_plan),
                   "source_artifacts": {a.artifact_id: a.sha256
@@ -842,9 +923,11 @@ def _commission_authored(project_dir: Path, project: P.Project,
     })
     sys.stderr.write(
         f"\ndesign-tool: this job routes {plan.route} and is missing "
-        f"{', '.join(missing)}.\n"
-        f"  the commission is written to  {NEXT_ACTION_FILE}\n"
-        f"  the print plan it builds against is  {PLAN_FILE}\n"
+        f"{', '.join(_relative(work_dir, project_dir, name) for name in missing)}.\n"
+        f"  the commission is written to  "
+        f"{_relative(work_dir, project_dir, NEXT_ACTION_FILE)}\n"
+        f"  the print plan it builds against is  "
+        f"{_relative(work_dir, project_dir, PLAN_FILE)}\n"
         f"  write both files, in one pass, then run the same command again.\n\n"
         f"  {ACC.PROPOSAL_FILE} is what the part must measure; the model is how it\n"
         "  is built. They are separated so that the second cannot restate the\n"
@@ -854,8 +937,8 @@ def _commission_authored(project_dir: Path, project: P.Project,
     return NEEDS_ACTION
 
 
-def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
-                  *, render: bool) -> int:
+def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
+                  plan: EX.ExecutionPlan, *, render: bool) -> int:
     """The authored builder: freeze the acceptance contract, then build elsewhere.
 
     The ordering is the whole of stage 2. The proposal is validated and frozen,
@@ -880,29 +963,38 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     designer had already written: the run rewrote the same commission every time,
     never looked to see whether the model it had asked for was sitting next to
     the project file, and could not progress by any action the designer took.
+
+    The proposal and the model are looked for in the *work* directory. Shared,
+    they were the sharpest of the sibling collisions: the commission is skipped
+    when both exist, so a second formulation was never commissioned at all -- it
+    silently rebuilt the first one's model and filed the receipts under its own
+    name, which is a job that produced no evidence that it was a different job.
     """
     if project.envelope_mm is None:
-        return _report_problems(project_dir, project, [
+        return _report_problems(project_dir, work_dir, project, [
             "envelope_mm is required when the geometry is authored: the print "
             "plan is written before the geometry, and it cannot be written "
             "without the envelope the part is allowed to occupy. Declare it as a "
             "stated or chosen requirement."], stage="run")
 
-    print_plan, plan_problems = _print_plan(project_dir, project)
+    print_plan, plan_problems = _print_plan(work_dir, project)
     if plan_problems:
-        return _report_problems(project_dir, project, plan_problems, stage="plan")
-
-    model_path = project_dir / (project.model or "model.py")
-    proposal_path = project_dir / ACC.PROPOSAL_FILE
-    missing = [name for name, path in ((ACC.PROPOSAL_FILE, proposal_path),
-                                       (model_path.name, model_path))
-               if not path.is_file()]
-    if missing:
-        return _commission_authored(project_dir, project, plan, print_plan, missing)
+        return _report_problems(project_dir, work_dir, project, plan_problems,
+                                stage="plan")
 
     brief_path = project_dir / project.brief
     brief_hash = S.sha256_text(
         brief_path.read_text(encoding="utf-8") if brief_path.is_file() else "")
+    requirement_sha256 = _requirement_hash(project, brief_hash)
+
+    model_path = work_dir / (project.model or "model.py")
+    proposal_path = work_dir / ACC.PROPOSAL_FILE
+    missing = [name for name, path in ((ACC.PROPOSAL_FILE, proposal_path),
+                                       (model_path.name, model_path))
+               if not path.is_file()]
+    if missing:
+        return _commission_authored(project_dir, work_dir, project, plan,
+                                    print_plan, requirement_sha256, missing)
 
     # ---- validate and freeze, before the builder exists --------------------
     try:
@@ -918,7 +1010,7 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
                 "say it was this one.")
         body = ACC.generate(
             proposal=proposal, job_id=project.job_id, route=plan.route,
-            requirement_sha256=_requirement_hash(project, brief_hash),
+            requirement_sha256=requirement_sha256,
             source_artifact_sha256=_source_artifact_hashes(project_dir, project),
             print_plan_sha256=S.payload_hash(print_plan),
             print_plan_features=_plan_features(print_plan, project_dir=project_dir,
@@ -948,9 +1040,17 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
             # screen without restoring its substance.
             expected_volume_mm3=None,
             expected_volume_basis="NOT_INDEPENDENTLY_SPECIFIED")
-        frozen = ACC.freeze(project_dir, body, updated_utc=project.updated_utc)
+        # Frozen into the work directory. That single argument is what makes
+        # `_invalidate` correct across siblings: it deletes the receipts of the
+        # revision it supersedes, and pointed at a shared directory it deleted
+        # the *other* formulation's final status, commissioning report, artifact
+        # manifest, manufacturing report and both review reports -- which the
+        # other formulation then did back, on every alternating run.
+        frozen = ACC.freeze(work_dir, body, updated_utc=project.updated_utc,
+                            alternative_id=plan.alternative_id)
     except ACC.ProposalError as exc:
-        return _report_problems(project_dir, project, [str(exc)], stage="proposal")
+        return _report_problems(project_dir, work_dir, project, [str(exc)],
+                                stage="proposal")
 
     if frozen.disposition == "SUPERSEDED":
         sys.stderr.write(
@@ -969,9 +1069,15 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     # the parent re-read and re-hashed afterwards, and `isolation.build` has
     # already verified that nothing in this directory moved while it ran.
     try:
-        built = ISO.build(model_path, dest_dir=project_dir, step=project.step)
+        # `dest_dir` is the work directory: `candidate.stl`, `candidate.step` and
+        # `candidate_declaration.json` are fixed literals, so shared they were
+        # simply overwritten by whichever sibling ran last. It is also where the
+        # boundary's canary lives -- `acceptance_contract.json`, which is now this
+        # formulation's own.
+        built = ISO.build(model_path, dest_dir=work_dir, step=project.step)
     except ISO.BuildRefused as exc:
-        return _report_problems(project_dir, project, [str(exc)], stage="build")
+        return _report_problems(project_dir, work_dir, project, [str(exc)],
+                                stage="build")
 
     # After the build rather than before it, and unavoidably so: the parameters a
     # model declares are read by importing it, and importing it is the thing that
@@ -981,7 +1087,7 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         key for key in set(declared) | set(proposal.params)
         if declared.get(key) != proposal.params.get(key))
     if divergent:
-        return _report_problems(project_dir, project, [
+        return _report_problems(project_dir, work_dir, project, [
             f"{model_path.name} and {ACC.PROPOSAL_FILE} disagree about "
             f"{', '.join(divergent)}. The proposal is what the part is measured "
             "against and PARAMS is what it is built from; when they differ the "
@@ -991,7 +1097,12 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     fields["template"] = None
     request = runner.JobRequest(
         brief_path=brief_path,
-        out_dir=project_dir,
+        out_dir=work_dir,
+        # Evidence stays where it was declared. It is a shared job input -- a
+        # photograph, a caliper sheet -- named once against the project, so it is
+        # not copied into each formulation's directory and must not be looked for
+        # there.
+        evidence_dir=project_dir,
         render=render,
         # No `provenance` argument, because `AcceptanceSource` no longer has the
         # field: `as_source()` is handed verbatim to both reviewers, and the
@@ -1009,14 +1120,18 @@ def _run_authored(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         # to the same revision discipline as everything else the part is gated
         # against. Passing them again would append a duplicate id and the
         # preflight would refuse the contract.
+        # Shared across every formulation, and safely so: a cache slot is named
+        # by `key.digest()`, which is a function of the contract and the
+        # toolchain, so two alternatives that build different geometry key
+        # differently and two that build the same geometry legitimately reuse it.
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
-        **_review_calls(project_dir, plan),
+        **_review_calls(work_dir, plan),
         **fields)
-    return _finish(project_dir, project, plan, request)
+    return _finish(project_dir, work_dir, project, plan, request)
 
 
-def _run_project(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
-                 *, render: bool) -> int:
+def _run_project(project_dir: Path, work_dir: Path, project: P.Project,
+                 plan: EX.ExecutionPlan, *, render: bool) -> int:
     """Every deterministic stage this plan can execute right now.
 
     Dispatched on the builder, never on the route. Which lane builds the geometry
@@ -1025,12 +1140,13 @@ def _run_project(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
     template running as though nothing had to be recovered.
     """
     if plan.builder == "AUTHORED":
-        return _run_authored(project_dir, project, plan, render=render)
+        return _run_authored(project_dir, work_dir, project, plan, render=render)
 
     fields = P.to_job_request_fields(project)
     request = runner.JobRequest(
         brief_path=project_dir / project.brief,
-        out_dir=project_dir,
+        out_dir=work_dir,
+        evidence_dir=project_dir,
         render=render,
         plan=plan,
         # The certified builder takes no print plan -- its expectations are the
@@ -1038,19 +1154,22 @@ def _run_project(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         # not of the lane that happens to draw the shape.
         plan_features=_preservation_feature(project),
         cache_dir=(project_dir / project.cache_dir) if project.cache_dir else None,
-        **_review_calls(project_dir, plan),
+        **_review_calls(work_dir, plan),
         **fields)
-    return _finish(project_dir, project, plan, request)
+    return _finish(project_dir, work_dir, project, plan, request)
 
 
-def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
-            request: runner.JobRequest) -> int:
+def _finish(project_dir: Path, work_dir: Path, project: P.Project,
+            plan: EX.ExecutionPlan, request: runner.JobRequest) -> int:
     """Run, then turn whatever came back into a state the next run can resume."""
     try:
         result = runner.run(request)
     except ReviewNeeded as need:
-        rel = need.path.relative_to(project_dir)
-        _write_next_action(project_dir, {
+        # Relative to the work directory, which is where `next_action.json` sits
+        # and where the answer has to be written. On an unbranched job the two
+        # directories are the same and nothing about the instruction changes.
+        rel = need.path.relative_to(work_dir)
+        _write_next_action(work_dir, {
             "schema_version": NEXT_ACTION_SCHEMA,
             "job_id": project.job_id,
             "kind": "REVIEW",
@@ -1063,17 +1182,24 @@ def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
             "completion_command": f"design-tool run {project_dir.as_posix()}",
             "updated_utc": project.updated_utc,
         })
-        _review_needed_message(need, project_dir)
+        _review_needed_message(need, work_dir)
         return NEEDS_ACTION
 
     _report_artifacts(result)
-    project.status = {**project.status,
-                      "stage": result.stage,
-                      "final_status": (result.final_status or {}).get("final_status"),
-                      "allowed_claim": (result.final_status or {}).get("allowed_claim")}
-    project.bindings = {**project.bindings,
-                        **(result.final_status or {}).get("artifact_hashes", {})}
-    project.save(project_dir)
+    if plan.alternative_id is None:
+        # `status` and `bindings` are statements about one run's outcome and the
+        # shared project file has one of each. Stamped from a branch they would
+        # make the project say that whichever sibling finished last is what the
+        # job is -- the same collision as a shared `final_status.json`, in the one
+        # file that cannot move. An alternative's outcome is read from its own
+        # `final_status.json`, which is where `status` already looks for it.
+        project.status = {**project.status,
+                          "stage": result.stage,
+                          "final_status": (result.final_status or {}).get("final_status"),
+                          "allowed_claim": (result.final_status or {}).get("allowed_claim")}
+        project.bindings = {**project.bindings,
+                            **(result.final_status or {}).get("artifact_hashes", {})}
+        project.save(project_dir)
     final = (result.final_status or {}).get("final_status")
     if not result.ok:
         # Rewrite rather than leave: the previous instruction may have been
@@ -1093,7 +1219,7 @@ def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         # against.
         needs_evidence = final == "NEEDS_MORE_EVIDENCE"
         unavailable = final in ("EXPERIMENTAL_UNAVAILABLE", "UNSUPPORTED")
-        _write_next_action(project_dir, {
+        _write_next_action(work_dir, {
             "schema_version": NEXT_ACTION_SCHEMA,
             "job_id": project.job_id,
             "kind": ("LANE_UNAVAILABLE" if unavailable
@@ -1108,7 +1234,7 @@ def _finish(project_dir: Path, project: P.Project, plan: EX.ExecutionPlan,
         })
         sys.stderr.write(f"\ndesign-tool: {result.stage}: {result.message}\n")
         return NEEDS_ACTION if needs_evidence else 1
-    _clear_next_action(project_dir)
+    _clear_next_action(work_dir)
     sys.stderr.write(f"\n  {final}: {result.message}\n")
     return 0
 
@@ -1127,9 +1253,10 @@ def run(argv: list[str]) -> int:
 
     project_dir = args.project_dir.resolve()
     project = _load_project(project_dir)
+    work_dir = _work_dir(project_dir, project)
     problems = project.validate(project_dir, require_buildable=False)
     if problems:
-        return _report_problems(project_dir, project, problems, stage="run")
+        return _report_problems(project_dir, work_dir, project, problems, stage="run")
 
     decision = RT.decide(project)
     previous = project.route
@@ -1141,10 +1268,14 @@ def run(argv: list[str]) -> int:
     # Compiled here, in the same invocation, from state that is already on disk.
     # No round trip and no hand-written file: `design-tool run` is still the one
     # command for a whole job.
-    plan = _compile(project_dir, project, decision)
+    plan = _compile(work_dir, project, decision)
     project.save(project_dir)
+    if plan.alternative_id:
+        sys.stderr.write(f"design-tool: alternative {plan.alternative_id} "
+                         f"({_relative(work_dir, project_dir, '')})\n")
 
-    return _run_project(project_dir, project, plan, render=not args.no_render)
+    return _run_project(project_dir, work_dir, project, plan,
+                        render=not args.no_render)
 
 
 def status(argv: list[str]) -> int:
@@ -1158,7 +1289,11 @@ def status(argv: list[str]) -> int:
 
     project_dir = args.project_dir.resolve()
     project = _load_project(project_dir, adapt=False)
-    pending = project_dir / NEXT_ACTION_FILE
+    # The active formulation's own state, not the root's. Reading the root while
+    # a branch is active would report the sibling's answer as this one's, which
+    # is the whole class of failure the work directory exists to remove.
+    work_dir = _work_dir(project_dir, project, create=False)
+    pending = work_dir / NEXT_ACTION_FILE
     next_action = None
     if pending.is_file():
         try:
@@ -1166,13 +1301,15 @@ def status(argv: list[str]) -> int:
         except json.JSONDecodeError as exc:
             raise SystemExit(f"design-tool: {NEXT_ACTION_FILE} is not valid JSON: {exc}")
 
-    final = project_dir / "final_status.json"
+    final = work_dir / "final_status.json"
     final_payload = (json.loads(final.read_text(encoding="utf-8"))
                      if final.is_file() else None)
     report = {
         "job_id": project.job_id,
         "source_mode": project.source_mode,
         "consequence": project.consequence,
+        "alternative": project.active_alternative,
+        "alternatives": [a.as_dict() for a in project.alternatives],
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
@@ -1182,7 +1319,11 @@ def status(argv: list[str]) -> int:
         "allowed_claim": (final_payload or {}).get("allowed_claim"),
         "lane_status": (final_payload or {}).get("lane_status"),
         "execution_plan_sha256": (final_payload or {}).get("execution_plan_sha256"),
-        "bindings": project.bindings,
+        # A branch's bindings are its own final status's, because the shared
+        # project file is never stamped with one formulation's artifact hashes.
+        # At the root the two are the same dictionary by construction.
+        "bindings": ((final_payload or {}).get("artifact_hashes") or {}
+                     if project.active_alternative else project.bindings),
     }
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -1190,6 +1331,13 @@ def status(argv: list[str]) -> int:
         print(f"  job          {report['job_id']}")
         print(f"  source mode  {report['source_mode']}")
         print(f"  consequence  {report['consequence']}")
+        for row in report["alternatives"]:
+            mark = "*" if row["alternative_id"] == report["alternative"] else " "
+            parents = ", ".join(row["parents"]) or "(the shared root)"
+            print(f"  {mark} alternative {row['alternative_id']} "
+                  f"[{row['disposition']}] from {parents}: {row['reason']}")
+        if report["alternatives"] and report["alternative"] is None:
+            print("  * the shared root")
         print(f"  route        {report['route'] or '(not decided)'}")
         if report["route_rationale"]:
             print(f"  because      {report['route_rationale']}")
@@ -1215,6 +1363,153 @@ def status(argv: list[str]) -> int:
         return 1
     if next_action is not None:
         return NEEDS_ACTION
+    return 0
+
+
+ROOT_ALTERNATIVE = "."
+
+
+def branch(argv: list[str]) -> int:
+    """Declare a second formulation of the same job, or switch to one.
+
+    Deterministic and free. It dispatches nothing, builds nothing and copies
+    nothing: it appends one row to `project.json`, creates the directory that row
+    names, and points `active_alternative` at it. Everything the two formulations
+    share -- the brief, the requirements, the source artifacts, the evidence, the
+    printer -- is still read from the one project file, which is what
+    ARCHITECTURE.md 6.13 means by an alternative inheriting unchanged intent and
+    recording only its differences.
+
+    Two modes, because creating a branch and choosing which branch to work on are
+    different questions and a system that could only answer the first could never
+    return to the first formulation. `--activate .` goes back to the shared root,
+    which is a real place: it has its own proposal, its own contract and its own
+    receipts, and it is what the siblings were branched from.
+    """
+    parser = argparse.ArgumentParser(
+        prog="design-tool branch",
+        description="Declare a competing formulation of this job, or switch to "
+                    "one. Nothing is copied: shared intent stays in project.json "
+                    "and the alternative's directory holds only what differs.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--from", dest="parent", default=None,
+                        help=f"the alternative this one starts from, or "
+                             f"{ROOT_ALTERNATIVE!r} for the shared root")
+    parser.add_argument("--id", dest="alternative_id", default=None,
+                        help="the new alternative's id: lower-case letters, "
+                             "digits and hyphens, because it becomes a directory "
+                             "name and appears in every review envelope")
+    parser.add_argument("--reason", default=None,
+                        help="why this formulation exists; two alternatives with "
+                             "no stated difference cannot be compared")
+    parser.add_argument("--activate", default=None,
+                        help=f"switch to an existing alternative, or "
+                             f"{ROOT_ALTERNATIVE!r} for the shared root, without "
+                             "declaring a new one")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir, adapt=False)
+
+    creating = any(value is not None
+                   for value in (args.parent, args.alternative_id, args.reason))
+    if args.activate is not None and creating:
+        sys.stderr.write(
+            "design-tool: --activate switches to an alternative that already "
+            "exists; --from/--id/--reason declare a new one. Creating and "
+            "switching in one command is the first mode, which activates what it "
+            "creates.\n")
+        return 2
+
+    if args.activate is not None:
+        return _activate(project_dir, project, args.activate)
+
+    missing = [name for name, value in (("--from", args.parent),
+                                        ("--id", args.alternative_id),
+                                        ("--reason", args.reason))
+               if value is None]
+    if missing:
+        sys.stderr.write(
+            f"design-tool: branch needs {', '.join(missing)}. An alternative with "
+            "no recorded parent or no recorded reason is one nothing can be "
+            "compared against later.\n")
+        return 2
+
+    row = P.Alternative(
+        alternative_id=args.alternative_id,
+        parents=() if args.parent == ROOT_ALTERNATIVE else (args.parent,),
+        reason=args.reason,
+        disposition="ACTIVE")
+    problems = list(row.problems())
+    if project.alternative(row.alternative_id) is not None:
+        problems.append(
+            f"alternative {row.alternative_id!r} is already declared. Branching "
+            "over it would replace its parents and its reason while its "
+            "directory kept the receipts written under the old ones; use "
+            f"--activate {row.alternative_id} to work on it.")
+    for parent in row.parents:
+        if project.alternative(parent) is None:
+            problems.append(
+                f"--from {parent!r} names no declared alternative. Pass "
+                f"{ROOT_ALTERNATIVE!r} to branch from the shared root.")
+    if not problems:
+        try:
+            # The one path guard, and the one every other declared name in this
+            # pipeline already goes through. The id is validated text by now, so
+            # this is belt and braces -- and belt and braces is what a directory
+            # name derived from user input gets.
+            S.resolve_within(project_dir,
+                             f"{P.ALTERNATIVES_DIR}/{row.alternative_id}",
+                             what="alternative directory")
+        except S.PathEscape as exc:
+            problems.append(str(exc))
+    if problems:
+        for problem in problems:
+            sys.stderr.write(f"design-tool: {problem}\n")
+        return 2
+
+    project.alternatives = tuple(project.alternatives) + (row,)
+    project.active_alternative = row.alternative_id
+    work_dir = _work_dir(project_dir, project)
+    project.save(project_dir)
+
+    parents = ", ".join(row.parents) or "the shared root"
+    sys.stderr.write(
+        f"\n  alternative  {row.alternative_id}\n"
+        f"  from         {parents}\n"
+        f"  because      {row.reason}\n"
+        f"  directory    {work_dir.relative_to(project_dir).as_posix()}\n"
+        f"  disposition  {row.disposition}\n\n"
+        "  Nothing was copied. Shared requirements, source artifacts and\n"
+        "  evidence stay in project.json; write this formulation's proposal and\n"
+        f"  model into the directory above, then run "
+        f"`design-tool run {project_dir.as_posix()}`.\n")
+    return 0
+
+
+def _activate(project_dir: Path, project: P.Project, wanted: str) -> int:
+    """Point the project at an existing formulation, or back at the shared root."""
+    if wanted != ROOT_ALTERNATIVE:
+        row = project.alternative(wanted)
+        if row is None:
+            sys.stderr.write(
+                f"design-tool: {wanted!r} names no declared alternative; have "
+                f"{[a.alternative_id for a in project.alternatives]}\n")
+            return 2
+        if row.disposition not in P.RUNNABLE_DISPOSITION:
+            sys.stderr.write(
+                f"design-tool: alternative {wanted!r} is {row.disposition}, and "
+                f"only {list(P.RUNNABLE_DISPOSITION)} are honoured by this build. "
+                "The other states are recorded and read by nothing, so working "
+                "under one would be working under a lifecycle that does not "
+                "exist.\n")
+            return 2
+    project.active_alternative = None if wanted == ROOT_ALTERNATIVE else wanted
+    work_dir = _work_dir(project_dir, project)
+    project.save(project_dir)
+    where = work_dir.relative_to(project_dir).as_posix()
+    sys.stderr.write(f"\n  active       {project.active_alternative or 'the shared root'}\n"
+                     f"  directory    {where}\n")
     return 0
 
 
@@ -1252,6 +1547,7 @@ COMMANDS = {
     "route": route,
     "run": run,
     "status": status,
+    "branch": branch,
     "diagnose": diagnose,
     "run-job": run_job,
 }

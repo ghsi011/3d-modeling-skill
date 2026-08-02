@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,32 @@ PROJECT_FILE = "project.json"
 
 SOURCE_MODE = ("NEW", "MODIFY", "RECONSTRUCT")
 ROUTE = ("DIRECT", "CUSTOM", "FITTED", "FULL")
+
+# Where a branched formulation's own work lives, under the project directory. A
+# project that has never branched has no such directory and no path component
+# added to anything it writes.
+ALTERNATIVES_DIR = "alternatives"
+
+# The id becomes a directory name and appears in the execution plan and in every
+# review envelope, so it is restricted to the characters every filesystem agrees
+# about. `schemas.resolve_within` is still the gate that proves the join stays
+# inside the project; this is what stops an id that would need quoting, case
+# folding or percent-encoding to be written down at all.
+ALTERNATIVE_ID = re.compile(r"^[a-z0-9-]+$")
+
+# What an alternative's disposition may say -- the seven states ARCHITECTURE.md
+# 6.13 names. A lifecycle that cannot record "paused" records it as "rejected",
+# so the vocabulary is complete from the start.
+ALTERNATIVE_DISPOSITION = ("ACTIVE", "PREFERRED", "PAUSED", "REJECTED",
+                           "SUPERSEDED", "FALLBACK", "MERGED")
+
+# The two dispositions this build *honours*. The rest are stored, round-tripped
+# and reported, and nothing reads them: no transition is implemented, no
+# comparison exists, and claiming to honour a state whose behaviour is absent is
+# exactly the defect that retired `candidate_strategy`. An alternative in any
+# other state cannot be the active one, which is the only decision a disposition
+# reaches in this slice.
+RUNNABLE_DISPOSITION = ("ACTIVE", "PREFERRED")
 
 # Where a design-driving value came from. Four, not two: collapsing `INHERITED`
 # into `STATED` claims the user said something the supplied artifact did, and
@@ -54,8 +81,6 @@ ARTIFACT_CLASS = ("USABLE_EXACT", "USABLE_MESH", "REPAIR_REQUIRED",
 ARTIFACT_FORMAT = ("STEP", "STL", "3MF", "OBJ", "OTHER")
 
 MOTION_KIND = ("LINEAR", "ROTARY", "PIECEWISE")
-
-CANDIDATE_STRATEGY = S.CANDIDATE_STRATEGY
 
 
 def _rows(value: Any, what: str) -> list[dict[str, Any]]:
@@ -403,6 +428,57 @@ class Component:
 
 
 @dataclasses.dataclass(frozen=True)
+class Alternative:
+    """One competing formulation of the same job, and where it came from.
+
+    A row, not a copy. Branching records that this formulation exists, who its
+    ancestors are and why somebody started it; it duplicates no requirement, no
+    source artifact and no evidence. Everything unchanged is still read from the
+    one shared `project.json`, and what differs is whatever the alternative's own
+    directory contains.
+
+    `parents` is a list from the first commit that has it, and this slice never
+    writes more than one entry. That is deliberate: a merge is a revision with
+    two contributing parents (ARCHITECTURE.md 13.2), and a field that has to
+    change shape to record one is a field every reader of the old shape has to be
+    migrated off. Widening a list later is additive; widening a scalar is not.
+    """
+
+    alternative_id: str
+    parents: tuple[str, ...] = ()
+    reason: str = ""
+    disposition: str = "ACTIVE"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"alternative_id": self.alternative_id,
+                "parents": list(self.parents),
+                "reason": self.reason,
+                "disposition": self.disposition}
+
+    def problems(self) -> list[str]:
+        where = f"alternative {self.alternative_id!r}"
+        out: list[str] = []
+        if not ALTERNATIVE_ID.match(self.alternative_id or ""):
+            out.append(f"{where}: alternative_id must match {ALTERNATIVE_ID.pattern} "
+                       "-- it becomes a directory name and is written into the "
+                       "execution plan and every review envelope, so an id two "
+                       "filesystems spell differently is one two receipts disagree "
+                       "about")
+        if self.disposition not in ALTERNATIVE_DISPOSITION:
+            out.append(f"{where}: disposition {self.disposition!r} is not one of "
+                       f"{list(ALTERNATIVE_DISPOSITION)}")
+        if not self.reason.strip():
+            out.append(f"{where}: reason must say why this formulation exists. Two "
+                       "alternatives with no stated difference cannot be compared, "
+                       "and the one nobody can justify is the one that is kept by "
+                       "accident")
+        if any(not isinstance(parent, str) or not parent.strip()
+               for parent in self.parents):
+            out.append(f"{where}: parents must be a list of alternative ids")
+        return out
+
+
+@dataclasses.dataclass(frozen=True)
 class OpenQuestion:
     """Something nobody has answered, and whether it blocks the build."""
 
@@ -472,7 +548,12 @@ class Project:
     modifiers: tuple[str, ...] = ()
     interface_map: dict[str, str] = dataclasses.field(default_factory=dict)
     reviewer: dict[str, Any] = dataclasses.field(default_factory=dict)
-    candidate_strategy: str = "SINGLE"
+    # The competing formulations of this job, in ancestry order, and which one is
+    # being worked on. Both are absent from `as_payload` while the tuple is empty,
+    # so a project that never branches carries no trace of the capability -- see
+    # `as_payload`.
+    alternatives: tuple[Alternative, ...] = ()
+    active_alternative: str | None = None
     # An explicit ask for an independent look, from the user or the orchestrator.
     # It only ever adds a review; nothing reads it to remove one.
     verification_requested: bool = False
@@ -488,7 +569,17 @@ class Project:
     # -- serialization ----------------------------------------------------
 
     def as_payload(self) -> dict[str, Any]:
-        return {
+        """The canonical document, with the branching keys absent until they mean something.
+
+        Absent, not null. A project that has never branched must serialize to
+        exactly the bytes it serialized to before branching existed -- that is the
+        whole of the zero-cost claim, and `"alternatives": []` beside
+        `"active_alternative": null` would break it on every job in the corpus
+        while saying nothing a reader did not already know. `review.py` had
+        already written the opposite precedent with `execution_plan_sha256: None`;
+        it is not followed here.
+        """
+        payload: dict[str, Any] = {
             "schema_version": PROJECT_SCHEMA,
             "job_id": self.job_id,
             "updated_utc": self.updated_utc,
@@ -520,7 +611,6 @@ class Project:
             "modifiers": list(self.modifiers),
             "interface_map": dict(self.interface_map),
             "reviewer": dict(self.reviewer),
-            "candidate_strategy": self.candidate_strategy,
             "verification_requested": self.verification_requested,
             "step": self.step,
             "cache_dir": self.cache_dir,
@@ -528,9 +618,21 @@ class Project:
             "status": dict(self.status),
             "compat": self.compat,
         }
+        if self.alternatives:
+            payload["alternatives"] = [a.as_dict() for a in self.alternatives]
+            payload["active_alternative"] = self.active_alternative
+        return payload
 
-    def project_hash(self) -> str:
-        return S.payload_hash(self.as_payload())
+    # There is deliberately no `project_hash()`. It hashed this whole payload --
+    # `status` and `bindings` included, both of which every finished run
+    # rewrites -- so it moved on writes that changed nothing anybody was bound
+    # to, and it was read by nothing. A digest that always differs is one its
+    # readers learn to ignore, and the next digest they are asked to check is the
+    # one that mattered. What a designer commission needs to be bound to is the
+    # half of the job nobody on the design side owns, and `cli._requirement_hash`
+    # already computes exactly that and is already what the frozen acceptance
+    # contract carries. Two digests over one declaration is one authority and one
+    # bug, so the unread one is gone rather than repaired.
 
     def save(self, project_dir: Path) -> Path:
         path = Path(project_dir) / PROJECT_FILE
@@ -552,6 +654,36 @@ class Project:
             if row.artifact_id == artifact_id:
                 return row
         return None
+
+    def alternative(self, alternative_id: str | None) -> Alternative | None:
+        for row in self.alternatives:
+            if row.alternative_id == alternative_id:
+                return row
+        return None
+
+    def work_dir(self, project_dir: Path) -> Path:
+        """Where this job writes everything that belongs to one formulation.
+
+        The project directory itself when no alternative is active, which is
+        every project that has never branched: no subdirectory appears, no path
+        component is added, and `candidate.stl` is still written where it always
+        was. Once an alternative is active it is `alternatives/<id>`, and that
+        one move is what makes sibling isolation structural rather than checked.
+        Without it the second sibling's `acceptance.freeze` reads the first's
+        contract as `previous`, cuts a revision, and `_invalidate` deletes the
+        first's final status, commissioning report, artifact manifest,
+        manufacturing report and both review reports -- which the first then does
+        to the second on its next run, forever.
+
+        Routed through `resolve_within` rather than joined: the id is validated
+        text, and the one resolver that proves a name stays under a directory is
+        the one every other declared path in this pipeline already goes through.
+        """
+        if not self.active_alternative:
+            return Path(project_dir)
+        return S.resolve_within(Path(project_dir),
+                                f"{ALTERNATIVES_DIR}/{self.active_alternative}",
+                                what="alternative directory")
 
     # -- validation -------------------------------------------------------
 
@@ -586,9 +718,7 @@ class Project:
                             "behind it cannot be re-checked when the job changes")
         if self.route is not None and self.route not in ROUTE:
             problems.append(f"route {self.route!r} is not one of {list(ROUTE)}")
-        if self.candidate_strategy not in CANDIDATE_STRATEGY:
-            problems.append(f"candidate_strategy {self.candidate_strategy!r} is not one "
-                            f"of {list(CANDIDATE_STRATEGY)}")
+        problems.extend(self._alternative_problems())
 
         if not isinstance(self.printer, str) or not self.printer.strip():
             problems.append("printer is required and must be a non-empty string")
@@ -700,6 +830,50 @@ class Project:
                     problems.append(str(exc))
         return problems
 
+    def _alternative_problems(self) -> list[str]:
+        """The branching half, refused rather than worked around.
+
+        Ancestry order is the whole of the acyclicity rule: a parent must be
+        declared before the child that names it. `design-tool branch` appends, so
+        the property holds by construction, and a hand-edited file that breaks it
+        is refused here rather than sending a later ancestry walk round a loop.
+        Checking order instead of running a cycle search also refuses a
+        self-parent with the same sentence.
+        """
+        problems: list[str] = []
+        declared: set[str] = set()
+        for row in self.alternatives:
+            problems.extend(row.problems())
+            if row.alternative_id in declared:
+                problems.append(
+                    f"alternative {row.alternative_id!r}: declared twice -- two rows "
+                    "for one id are two answers to what its parents and disposition "
+                    "are, and both name one directory")
+            for parent in row.parents:
+                if parent not in declared:
+                    problems.append(
+                        f"alternative {row.alternative_id!r}: parent {parent!r} is "
+                        "not declared before it. Alternatives are recorded in "
+                        "ancestry order, which is what makes this list a graph with "
+                        "no cycles rather than one that has to be walked to find out")
+            declared.add(row.alternative_id)
+
+        if self.active_alternative is not None:
+            active = self.alternative(self.active_alternative)
+            if active is None:
+                problems.append(
+                    f"active_alternative {self.active_alternative!r} names no declared "
+                    "alternative; the job would write its receipts into a directory "
+                    "nothing in the project describes")
+            elif active.disposition not in RUNNABLE_DISPOSITION:
+                problems.append(
+                    f"active_alternative {self.active_alternative!r} is "
+                    f"{active.disposition}, and only {list(RUNNABLE_DISPOSITION)} are "
+                    "honoured by this build. The other states are recorded and read "
+                    "by nothing, so working under one would be working under a "
+                    "lifecycle that does not exist")
+        return problems
+
 
 def _orientation_problems(orientation: Any) -> list[str]:
     problems: list[str] = []
@@ -744,6 +918,24 @@ def from_payload(payload: dict[str, Any]) -> Project:
             "edit_scope is not a field of this schema: a project declares "
             "edit_scopes, a list, so that a job modifying two artifacts has "
             "somewhere to say so. Move the object into a one-element list.")
+
+    # `SINGLE` is read and dropped; it was the only value with no claim in it, it
+    # sits in every project.json this build has ever written, and refusing it
+    # would break every one of them to remove a word. `PARALLEL` is refused by
+    # name, because dropping it in silence is what it did already: it was
+    # validated, stored, hashed, and produced exactly one extra sentence in the
+    # route rationale while nothing generated, isolated or compared a second
+    # candidate.
+    strategy = payload.get("candidate_strategy")
+    if strategy not in (None, "SINGLE"):
+        raise S.SchemaError(
+            f"candidate_strategy {strategy!r} is not a field of this schema. It "
+            "never produced a second candidate -- its whole effect was one more "
+            "line in the route rationale, so a project could declare parallel "
+            "concepts and receive one concept with a longer explanation. Competing "
+            "formulations are declared with `design-tool branch`, which gives each "
+            "one its own directory, its own acceptance revision and its own review "
+            "bindings.")
     edit_scopes = tuple(
         EditScope(
             artifact_id=str(edit.get("artifact_id", "")),
@@ -830,7 +1022,15 @@ def from_payload(payload: dict[str, Any]) -> Project:
         modifiers=tuple(payload.get("modifiers") or ()),
         interface_map=dict(payload.get("interface_map") or {}),
         reviewer=dict(payload.get("reviewer") or {}),
-        candidate_strategy=str(payload.get("candidate_strategy") or "SINGLE"),
+        alternatives=tuple(
+            Alternative(alternative_id=str(row.get("alternative_id", "")),
+                        parents=_ids(row.get("parents"),
+                                     f"alternatives[{index}].parents"),
+                        reason=str(row.get("reason", "")),
+                        disposition=str(row.get("disposition") or "ACTIVE"))
+            for index, row in enumerate(
+                _rows(payload.get("alternatives"), "alternatives"))),
+        active_alternative=payload.get("active_alternative"),
         verification_requested=bool(payload.get("verification_requested", False)),
         step=bool(payload.get("step", False)),
         cache_dir=payload.get("cache_dir"),
@@ -866,6 +1066,12 @@ def from_job_json(spec: dict[str, Any]) -> Project:
     re-route jobs that were routing correctly. `route.decide` sees the mark and
     reproduces `intent.select`'s answers exactly.
     """
+    strategy = spec.get("candidate_strategy")
+    if strategy not in (None, "SINGLE"):
+        raise S.SchemaError(
+            f"job.json candidate_strategy {strategy!r} is not a field this build "
+            "reads. It never produced a second candidate; competing formulations "
+            "are declared with `design-tool branch` on a canonical project.")
     stated = frozenset(spec.get("stated") or ())
     parameters = dict(spec.get("parameters") or {})
     requirements = tuple(
@@ -900,7 +1106,6 @@ def from_job_json(spec: dict[str, Any]) -> Project:
         modifiers=tuple(spec.get("modifiers") or ()),
         interface_map=dict(spec.get("interface_map") or {}),
         reviewer=dict(spec.get("reviewer") or {}),
-        candidate_strategy=str(spec.get("candidate_strategy") or "SINGLE"),
         step=bool(spec.get("step", False)),
         cache_dir=spec.get("cache_dir"),
         compat="job.json@1",
@@ -929,7 +1134,6 @@ def to_job_request_fields(project: Project) -> dict[str, Any]:
         "nozzle": project.nozzle,
         "orientation": project.orientation,
         "modifiers": tuple(project.modifiers),
-        "candidate_strategy": project.candidate_strategy,
         "external_geometry": bool(project.status.get("external_geometry",
                                                      bool(project.external_interfaces))),
         "ambiguities": project.blocking_questions,

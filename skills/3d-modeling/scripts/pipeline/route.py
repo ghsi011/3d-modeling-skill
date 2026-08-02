@@ -78,8 +78,12 @@ def _full_reasons(project: P.Project) -> list[str]:
         moving = ", ".join(sorted(m.motion_id for m in project.motion))
         reasons.append(f"declared motion ({moving}): a static pose cannot answer a "
                        "question about a path")
-    if project.candidate_strategy == "PARALLEL":
-        reasons.append("parallel candidate concepts were requested")
+    # `candidate_strategy == "PARALLEL"` used to add a fifth reason here, and that
+    # sentence was the entire behaviour of the field: no second candidate was
+    # produced, isolated or compared, so a project asking for alternatives got one
+    # candidate and a longer rationale. Competing formulations are branches now,
+    # and a branch is a directory with its own contract rather than a route
+    # escalation on the job that did not get one.
     return reasons
 
 

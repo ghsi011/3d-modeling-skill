@@ -100,10 +100,9 @@ def select(*, requested_template: str | None, parameters: dict[str, Any],
 
 def manifest(*, job_id: str, brief_text: str, brief_hash: str, parameters: dict[str, Any],
              stated: frozenset[str], consequence: str, modifiers: tuple[str, ...],
-             candidate_strategy: str, ambiguities: tuple[str, ...],
+             ambiguities: tuple[str, ...],
              decision: RouteDecision, updated_utc: str) -> dict[str, Any]:
     S.require_enum(consequence, S.CONSEQUENCE, what="consequence")
-    S.require_enum(candidate_strategy, S.CANDIDATE_STRATEGY, what="candidate_strategy")
     return {
         "schema_version": S.INTENT_SCHEMA,
         "job_id": job_id,
@@ -111,7 +110,6 @@ def manifest(*, job_id: str, brief_text: str, brief_hash: str, parameters: dict[
         "brief_chars": len(brief_text),
         "consequence": consequence,
         "modifiers": list(modifiers),
-        "candidate_strategy": candidate_strategy,
         "unresolved_ambiguities": list(ambiguities),
         "requirements": [
             {"name": name, "value": value, "unit": "mm",
