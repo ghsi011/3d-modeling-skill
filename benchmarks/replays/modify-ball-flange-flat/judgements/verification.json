@@ -1,0 +1,10 @@
+{
+  "decision": "NEEDS_MORE_EVIDENCE",
+  "defects": [],
+  "missing_evidence": [
+    "no witness images were produced, so the shape was not looked at -- only the section, envelope, seating and preservation numbers were",
+    "the preservation audit's sample density is a fixed count rather than one derived from a declared smallest detectable defect, so 'nothing outside the region moved' means 'nothing these samples found', and the report says so itself"
+  ],
+  "unmet_requirements": [],
+  "summary": "Every declared expectation is measured and met, the candidate is one watertight body, the envelope and seating agree with the contract, and everything outside the declared edit region sits inside the 0.1 mm band against the supplied artifact. That is enough to say the numbers are consistent and not enough to say the part was independently seen."
+}

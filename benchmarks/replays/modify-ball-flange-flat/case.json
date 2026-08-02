@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case_id": "modify-ball-flange-flat",
+  "use_case": "MODIFY",
+  "source_mode": "MODIFY",
+  "consequence": "CONSEQUENTIAL",
+  "request": "benchmarks/fixtures/vent-ball-combine/public/request.md",
+  "sources": [
+    {
+      "fixture_id": "vent-ball-combine",
+      "index": 1,
+      "as": "ball_male_17mm.stl"
+    }
+  ],
+  "substitutions": {
+    "__SOURCE__": "ball_male_17mm.stl"
+  },
+  "reviews": [
+    "safety",
+    "verification"
+  ],
+  "max_invocations": 4,
+  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "provenance": "REAL_SOURCE_ARTIFACT_AND_REQUEST_AUTHORED_EDIT",
+  "notes": "The supplied artifact is the real one: `ball_male_17mm.stl`, the 17 mm male ball the user had already printed and used, resolved through `tools/fixtures.py` so its size and SHA-256 are verified before the job sees it -- the same bytes the `vent-ball-combine-r1` run consumed. The request is that run's own recorded request. The edit, the proposal and the two recorded review judgements were authored for this replay; the run itself was not replayed, and this module's docstring gives the four reasons. What this case exercises that nothing else in the repository does: a MODIFY job with a declared edit scope, a preservation row inside the frozen acceptance contract, and a two-review round trip answered entirely from a recording -- pause, answer, pause, answer, finish. It runs with `--no-render` so that a machine with pyrender installed and one without record the same witness, which is also why both recorded judgements say they saw no images: on this lane they did not.",
+  "inputs_sha256": {
+    "inputs/design_proposal.json": "259967bed68839a9c678737fd15bebdeb5964e886cb0fe2737584f59f1250ab3",
+    "inputs/model.py": "cac2c92f0e85970e6871b3bbd8e403f5d0ca1eea5a061eb876f3412d549f1a99",
+    "inputs/project.json": "12b1d19ff84d9bc6910189016cc6f3bb3b50fe683a4b3acb26cdb43f3b891fa1",
+    "judgements/safety.json": "4e00398d634a0486dfc249eb5092e2789a64b28ded7bcce0afde1bf2c9239d52",
+    "judgements/verification.json": "b7d5fc8bd4c144331b839c72f3be43687a2ed4834017f9250e702cf9da0bb94e"
+  }
+}

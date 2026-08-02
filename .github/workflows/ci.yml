@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: Ruff (lint)
-        run: uv run ruff check skills tools
+        run: uv run ruff check skills tools benchmarks
 
       # Before Pytest, deliberately. Any test that shells out to the generator
       # writes into the working tree, which would repair the drift this step
@@ -36,7 +36,12 @@ jobs:
       - name: Generated and stale-file scan
         run: uv run python tools/gen_harness.py --check
 
-      - name: Pytest
+      # L0. `testpaths` in pyproject.toml is `skills/3d-modeling/scripts` and
+      # `tools`, so this collects the unit suite and the harness guards and does
+      # not collect `benchmarks/replays`. ROADMAP.md section 4.4 budgets the two
+      # ladders separately and neither number means anything if one suite can run
+      # inside the other.
+      - name: Pytest (L0 — unit and component fixtures)
         run: uv run pytest
 
       - name: Internal markdown links
@@ -47,3 +52,37 @@ jobs:
 
       - name: Build production wheel
         run: uv build --wheel --out-dir dist/wheels
+
+  # L1 — recorded engineering jobs replayed through the current command surface,
+  # with no live AI call. ROADMAP.md section 5.1 puts L1 on pull requests and
+  # before merge, and 4.3 requires at least one relevant replay of every release.
+  #
+  # Its own job rather than a step in `test`, for two reasons. One Python version
+  # is enough: a replay compares a run against a recording of the same pipeline,
+  # so running it twice measures the interpreter and not the job. And a separate
+  # job keeps the wall clock of the L0 gate readable, which is the number section
+  # 4.4 actually budgets.
+  replay:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install all dependencies (core + extras + dev)
+        run: uv sync --frozen --all-extras
+
+      # A case whose supplied artifact is an `ExternalFile` this runner does not
+      # have skips, exactly as the L0 fixture set does. `custom-knob-sleeve`
+      # needs nothing outside the repository and `modify-ball-flange-flat`'s
+      # source is vendored, so both run on a bare checkout -- and a suite that
+      # skipped everything here would be a gate that does not gate.
+      - name: Pytest (L1 — recorded job replays)
+        run: uv run pytest benchmarks/replays -q

@@ -1,0 +1,57 @@
+{
+  "bbox_mm": {
+    "x": 38.0,
+    "y": 38.0,
+    "z": 50.0
+  },
+  "bodies": 1,
+  "design_id": "berlingo-b9-knob-sleeve",
+  "features": [
+    {
+      "at": {
+        "z": 11.0
+      },
+      "feature_id": "grip-section",
+      "kind": "section_area",
+      "note": "the solid grip below the bore floor: a full 38 mm circle",
+      "value_mm2": 1134.1149479459152
+    },
+    {
+      "at": {
+        "z": 17.0
+      },
+      "feature_id": "bore-wall-section",
+      "kind": "section_area",
+      "note": "the wall left around the 17.4 mm bore, below the rail slots",
+      "value_mm2": 896.3277999957039
+    },
+    {
+      "feature_id": "crown-footprint",
+      "kind": "bed_contact",
+      "note": "the crown face, which is what the part is printed on",
+      "value_mm2": 706.8583470577034
+    }
+  ],
+  "job_id": "berlingo-knob-sleeve-replay",
+  "params": {
+    "body_h_mm": 50.0,
+    "bore_d_mm": 17.4,
+    "bore_floor_z_mm": 14.0,
+    "crown_d_mm": 30.0,
+    "crown_h_mm": 8.0,
+    "facets": 96,
+    "grip_d_mm": 38.0,
+    "rail_depth_mm": 1.5,
+    "rail_from_z_mm": 20.0,
+    "rail_w_mm": 5.0
+  },
+  "profile_marks": {
+    "z": [
+      8.0,
+      14.0,
+      20.0
+    ]
+  },
+  "rationale": "a tapered sleeve that slides the full engagement length over the lever, keyed by two opposed rail slots, and seats on the base plate at its mouth. Every stated expectation is the closed form of a circle or an annulus, so none of them is a number read off the mesh being judged.",
+  "schema_version": 1
+}

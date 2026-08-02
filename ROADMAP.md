@@ -38,6 +38,7 @@ The current branch already provides important foundations:
 * correct 3MF root, unit, component, and build-transform handling;
 * controlled failure for malformed or unsupported geometry;
 * deterministic L0 benchmark infrastructure;
+* an L1 replay harness, and two recorded jobs replayed through the command surface with no live AI call;
 * structurally separated public and private fixture material;
 * selected real benchmark artifacts;
 * reproducible packaging and toolchain identity.
@@ -61,7 +62,18 @@ The repository has:
 * public/private answer separation;
 * fixture licensing rules;
 * immutable artifact checks;
-* initial replay structure.
+* an L1 replay harness (`tools/replay.py`) and two recorded cases under `benchmarks/replays/`, run separately from the commit-gating suite.
+
+The replay harness answers the question section 4.3 asks and section 5.1 defines,
+and its own docstring carries the argument for what a replay asserts — the exit
+sequence, the status and the verdicts under it, the per-check verdicts, the
+measured values inside the bands the contract declares for them, the receipt set,
+and four hashes that are equalities between two values from the same run — and
+what it deliberately does not: receipt bytes, any pinned digest, and the prose,
+which is recorded and reported as advisory so that a reworded sentence cannot
+stop a build. Both cases are frozen at the commit that added them, because an
+expectation lifted from a run at an older commit encodes that commit's defects
+along with its behaviour.
 
 The immediate unresolved blockers are:
 
@@ -101,8 +113,8 @@ Three slices of Release 3 are implemented — branching and sibling isolation, d
 
 * **4.1 functional — partial.** `branch`, `run` and `status` work through the normal command surface, refuse actionably, keep producing receipts when the claim is limited, and cannot let one alternative overwrite a sibling's artifacts. But "supported interrupted work resumes correctly" is met only by re-running the identical command; the *explicit resume versus restart* this release scoped does not exist, and neither do run identities.
 * **4.2 authority — pass.** The runner consumes the compiled plan, candidate code cannot reach the criteria that judge it, a review is bound to the evidence *and* the formulation it was answered for, derived status can only ever weaken a claim, and branching copies nothing — so a shared mandatory requirement is shared by construction rather than by a check that could be forgotten.
-* **4.3 regression — fails one clause.** The suite is green, the new behaviour has component-level coverage, and each slice's principal protection has been shown to fail under mutation. There is no L1 replay harness in this repository: `benchmarks/` holds fixtures, real source artifacts and public/private separation, `tools/test_diagnosis_l0.py` replays five artifacts through `diagnose`, and nothing replays a *job* from them. Section 4.3 asks for at least one relevant L1 replay, and Release 3 has none.
-* **4.4 performance — partial, and partly vacuous.** A job that declares no alternative gains no key in `project.json`, the execution plan or the review envelope, and the five pinned contract goldens are unmoved. Dispatch counts are unchanged. The clause about a job declaring no tolerance profile, no per-body material and no operation plan passes only because those fields were never built — it is vacuous rather than satisfied. Shared *intent* is reused across alternatives; shared *computation* is not measured. The section's suite budgets cannot be checked at all: there is no L0/L1 split in the repository or in CI, which runs the whole of `pytest` on every push, so the ladder in section 5.1 is a plan rather than something the build is held to.
+* **4.3 regression — the clause is now met, and not for every slice.** The suite is green, the new behaviour has component-level coverage, and each slice's principal protection has been shown to fail under mutation. An L1 replay harness now exists: `tools/replay.py` drives a recorded job through `design-tool route` and `design-tool run`, answering every review from a recorded judgement and never from a live call, and `benchmarks/replays/` holds two cases — an authored `CUSTOM` job, and a `MODIFY` job over the real vendored `ball_male_17mm.stl` with a declared edit scope, a preservation row inside the frozen contract, and a two-review round trip. Both run on a bare checkout; the suite is 35 s against a two-minute budget. Read the clause as present tense and it is satisfied, for this release and for anything built after it. Read it as a claim about Releases 1 and 2 and it is not, and cannot be made so: those releases shipped with no replay and nothing written now changes that. Read it slice by slice and Release 3 is partly covered — the `MODIFY` case exercises preservation, the acceptance freeze and the review round trip, and *no* replay covers the three slices Release 3 actually shipped: branching and sibling isolation, derived status and `STALE`, and superseded instructions. Those are the next cases to record, and until they are, this clause is met by the lane the harness was built on rather than by the release's own work.
+* **4.4 performance — partial, and partly vacuous.** A job that declares no alternative gains no key in `project.json`, the execution plan or the review envelope, and the five pinned contract goldens are unmoved. Dispatch counts are unchanged. The clause about a job declaring no tolerance profile, no per-body material and no operation plan passes only because those fields were never built — it is vacuous rather than satisfied. Shared *intent* is reused across alternatives; shared *computation* is not measured. Two of the three suite budgets can now be read off a run. The L0/L1 split is structural — `testpaths` names `skills/3d-modeling/scripts` and `tools`, and `benchmarks/replays` is in neither, so a bare `uv run pytest` cannot collect a job replay — and CI runs them as separate jobs, L0 on every push and L1 on pull requests. Measured on the reference machine: the L1 replay suite is **35 s** against a two-minute budget, and the commit-gating suite is **about 990 s** against a five-second budget, which it misses by two orders of magnitude. That number was previously unmeasurable rather than good; it is now measurable and bad, and no part of it is the replay suite. Splitting that 990 s into a fast commit gate and a slower pre-merge tier is the work this measurement now makes possible and does not itself do.
 * **4.5 real job — partial.** The vent-ball combine exercise at `2721ffe` drove the branch half on real geometry and recorded it properly: two formulations, per-alternative acceptance revisions, a review answer accepted by one sibling and refused by the other at the instant the two were still byte-identical, and a materially different solid from each. It is honest evidence and it counts for the branching slice. It does not count for the release: it was run before derived status existed, so nothing in it exercises a stale binding, a `waiting_for_superseded` instruction, or a structured finding — its own `next_action.json` carries no `state_sha256` at all. Two of Release 3's three slices have never been used on a real job.
 * **4.6 documentation — pass.** `docs/tooling.md` describes the command surface as it behaves, and this section names what is missing rather than implying it is present. The Release 3 section further down is still a statement of intended scope and is not a claim about what shipped; the list below is what closes the gap between the two.
 
@@ -1923,6 +1935,14 @@ Protect:
 **L1 — replay**
 
 Run on pull requests and before merge.
+
+Built. `tools/replay.py` is the harness and `benchmarks/replays/` holds the
+cases; each case records the job's inputs, the designer's proposal and model, and
+the reviewer's judgement with no envelope on it, so the harness stamps the
+envelope of the packet the current run issued and a recorded answer survives a
+protocol bump instead of being refused by one. Two of the list below are covered
+today — original design and modification — and the rest are recorded as the
+releases that build them land.
 
 Cover:
 

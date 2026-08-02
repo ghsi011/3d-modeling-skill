@@ -326,6 +326,26 @@ uv run pytest
 The `bambu` extra adds multi-colour 3MF packing, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
 so the suites resolve their bare imports with no install step.
 
+### The replay suite, which `pytest` does not collect
+
+`uv run pytest` collects `testpaths` — `skills/3d-modeling/scripts` and `tools` —
+and `benchmarks/replays` is in neither. That is deliberate: it holds recorded
+engineering jobs replayed end to end through `design-tool` with no live AI call,
+and [`ROADMAP.md`](ROADMAP.md) section 4.4 budgets the two tiers separately.
+Neither number means anything if one suite can run inside the other.
+
+```bash
+uv run pytest benchmarks/replays          # ~35 s, two recorded jobs
+uv run python tools/replay.py --list
+uv run python tools/replay.py --run modify-ball-flange-flat
+uv run python tools/replay.py --record modify-ball-flange-flat   # re-freeze
+```
+
+Re-record only when a change legitimately moves an expectation, and put the diff
+in the review — that diff is the point. The argument for what a replay asserts,
+what it deliberately does not, and why a recorded review judgement is re-bound
+rather than replayed verbatim is in `tools/replay.py`'s module docstring.
+
 The screening corpus is a separate release measurement, not a test assertion — it
 builds every certified template, mutates each one, and reports what screening
 caught:
@@ -341,8 +361,11 @@ It exits non-zero when the measured gate fails. `gate`,
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs that on Python
 3.11 and 3.12 via `uv sync --frozen --all-extras`, then `uv run ruff check`,
 the generated/stale-file scan, internal links, `uv run python tools/build_skill.py`,
-`uv build --wheel`, and `uv run pytest` — one job with all optional dependencies
-so the cross-section tests run rather than skip.
+`uv build --wheel`, and `uv run pytest` — with all optional dependencies
+so the cross-section tests run rather than skip. A second job runs the replay
+suite on pull requests only, on one Python version: a replay compares a run
+against a recording of the same pipeline, so running it twice measures the
+interpreter rather than the job.
 
 ### Release surfaces
 

@@ -1,0 +1,168 @@
+{
+  "acceptance": {
+    "expected_volume_basis": "NOT_INDEPENDENTLY_SPECIFIED",
+    "features": [
+      "ball-equator-section",
+      "plan-support-00",
+      "preservation-ball-17mm"
+    ],
+    "history_entries": 1,
+    "revision": 1,
+    "tolerance_owner": "pipeline"
+  },
+  "allowed_claim": "the safety reviewer needs evidence this run did not produce",
+  "case_id": "modify-ball-flange-flat",
+  "checks": {
+    "bodies": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "envelope": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-ball-equator-section": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-plan-support-00": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-preservation-ball-17mm": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "repair": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "seated": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "unit_scale": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "watertight": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    }
+  },
+  "coverage": {
+    "covered": 3,
+    "declared": 3,
+    "fraction": 1.0,
+    "minimum": 1.0
+  },
+  "exit_codes": [
+    0,
+    3,
+    3,
+    3
+  ],
+  "measured": {
+    "bodies": 1,
+    "envelope": {
+      "x": 20.3,
+      "y": 26.3,
+      "z": 28.611
+    },
+    "feature-ball-equator-section": 205.137,
+    "feature-plan-support-00": 367.361,
+    "feature-preservation-ball-17mm": {
+      "bodies": {
+        "candidate": 1,
+        "changed": false,
+        "source": 1
+      },
+      "evidence_sha256": "17f5cd5efc1fffc9bba7d99c2c38e9a3230152dbf3d9a497430916af4ba64ad1",
+      "max_deviation_mm": 0.0,
+      "method": "sampled bidirectional surface distance",
+      "sample_plan_sha256": "e4ada22f2ca21a5fe923f513298fa1d4a2fe8e1860201784bb82dd77c776900a",
+      "samples_outside_region": 38014,
+      "verdict": "PRESERVED_WITHIN_TOLERANCE"
+    },
+    "repair": "none",
+    "seated": 0.0,
+    "unit_scale": "mm",
+    "watertight": true
+  },
+  "outcome": {
+    "backend": "authored",
+    "commission_verdict": "PASS",
+    "consequence": "CONSEQUENTIAL",
+    "final_status": "NEEDS_MORE_EVIDENCE",
+    "lane_status": "EXPERIMENTAL_UNAVAILABLE",
+    "route": "CUSTOM",
+    "safety_verification": "NEEDS_MORE_EVIDENCE",
+    "screening": "ANOMALY",
+    "screening_calibrated": false,
+    "verification": "NEEDS_MORE_EVIDENCE"
+  },
+  "reasons": [
+    "screening reported an anomaly",
+    "no renders were produced, so the safety reviewer saw numbers and no images",
+    "safety review needs more evidence",
+    "the MODIFY lane's preservation audit no longer samples unseeded: the plan is derived from the source and candidate hashes, so two runs of one unchanged pair produce byte-identical evidence and a review answer stays bound across a rerun. What is still owed is sensitivity, not repeatability -- the sample density is a fixed count rather than one derived from a declared minimum detectable defect size, so a small undeclared addition outside the edit region can still be missed, and is now missed identically on every run. Until that density is derived, this lane may not report a part COMMISSIONED or VERIFIED"
+  ],
+  "receipts": [
+    "acceptance_contract.json",
+    "acceptance_history.json",
+    "artifact_manifest.json",
+    "ball_male_17mm.stl",
+    "brief.md",
+    "candidate.stl",
+    "candidate_declaration.json",
+    "commission_report.json",
+    "design_proposal.json",
+    "execution_plan.json",
+    "final_status.json",
+    "intent_manifest.json",
+    "model.py",
+    "model_contract.json",
+    "next_action.json",
+    "print_plan_checks.json",
+    "project.json",
+    "route_decision.json",
+    "safety_verification_report.json",
+    "verification_report.json"
+  ],
+  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "reviews_answered": [
+    "safety",
+    "verification"
+  ],
+  "schema_version": 1,
+  "screening_detail": {
+    "calibrated": false,
+    "detectors": {
+      "bed-plane": "CLEAR",
+      "components": "CLEAR",
+      "profile-z": "ANOMALY",
+      "volume": "NOT_APPLICABLE"
+    },
+    "overall": "ANOMALY"
+  },
+  "tolerances": {
+    "bodies": null,
+    "envelope": 0.5,
+    "feature-ball-equator-section": 1.0256615,
+    "feature-plan-support-00": 0.0,
+    "feature-preservation-ball-17mm": 0.0,
+    "repair": null,
+    "seated": 0.05,
+    "unit_scale": null,
+    "watertight": null
+  }
+}

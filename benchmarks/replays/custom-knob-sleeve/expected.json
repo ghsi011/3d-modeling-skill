@@ -1,0 +1,153 @@
+{
+  "acceptance": {
+    "expected_volume_basis": "NOT_INDEPENDENTLY_SPECIFIED",
+    "features": [
+      "bore-wall-section",
+      "crown-footprint",
+      "grip-section",
+      "plan-support-00"
+    ],
+    "history_entries": 1,
+    "revision": 1,
+    "tolerance_owner": "pipeline"
+  },
+  "allowed_claim": "screening found geometry the contract does not explain",
+  "case_id": "custom-knob-sleeve",
+  "checks": {
+    "bodies": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "envelope": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-bore-wall-section": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-crown-footprint": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-grip-section": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "feature-plan-support-00": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "repair": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "seated": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "unit_scale": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    },
+    "watertight": {
+      "ran": true,
+      "result": "PASS",
+      "status": "MEASURED"
+    }
+  },
+  "coverage": {
+    "covered": 4,
+    "declared": 4,
+    "fraction": 1.0,
+    "minimum": 1.0
+  },
+  "exit_codes": [
+    0,
+    3
+  ],
+  "measured": {
+    "bodies": 1,
+    "envelope": {
+      "x": 38.0,
+      "y": 38.0,
+      "z": 50.0
+    },
+    "feature-bore-wall-section": 895.709,
+    "feature-crown-footprint": 706.354,
+    "feature-grip-section": 1133.331,
+    "feature-plan-support-00": 0.0,
+    "repair": "none",
+    "seated": 0.0,
+    "unit_scale": "mm",
+    "watertight": true
+  },
+  "outcome": {
+    "backend": "authored",
+    "commission_verdict": "PASS",
+    "consequence": "INCONSEQUENTIAL",
+    "final_status": "NEEDS_MORE_EVIDENCE",
+    "lane_status": "AVAILABLE",
+    "route": "CUSTOM",
+    "safety_verification": null,
+    "screening": "ANOMALY",
+    "screening_calibrated": false,
+    "verification": null
+  },
+  "reasons": [
+    "screening reported an anomaly"
+  ],
+  "receipts": [
+    "acceptance_contract.json",
+    "acceptance_history.json",
+    "artifact_manifest.json",
+    "brief.md",
+    "candidate.stl",
+    "candidate_declaration.json",
+    "commission_report.json",
+    "design_proposal.json",
+    "execution_plan.json",
+    "final_status.json",
+    "intent_manifest.json",
+    "model.py",
+    "model_contract.json",
+    "next_action.json",
+    "print_plan_checks.json",
+    "project.json",
+    "route_decision.json"
+  ],
+  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "reviews_answered": [],
+  "schema_version": 1,
+  "screening_detail": {
+    "calibrated": false,
+    "detectors": {
+      "bed-plane": "CLEAR",
+      "components": "CLEAR",
+      "profile-z": "ANOMALY",
+      "volume": "NOT_APPLICABLE"
+    },
+    "overall": "ANOMALY"
+  },
+  "tolerances": {
+    "bodies": null,
+    "envelope": 0.5,
+    "feature-bore-wall-section": 4.48163899997852,
+    "feature-crown-footprint": 3.5342917352885173,
+    "feature-grip-section": 5.6705747397295765,
+    "feature-plan-support-00": 0.0,
+    "repair": null,
+    "seated": 0.05,
+    "unit_scale": null,
+    "watertight": null
+  }
+}

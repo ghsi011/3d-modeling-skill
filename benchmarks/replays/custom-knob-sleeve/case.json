@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "case_id": "custom-knob-sleeve",
+  "use_case": "FROM_SCRATCH",
+  "source_mode": "NEW",
+  "consequence": "INCONSEQUENTIAL",
+  "request": "benchmarks/fixtures/berlingo-knob/public/request.md",
+  "sources": [],
+  "substitutions": {},
+  "reviews": [],
+  "max_invocations": 2,
+  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "provenance": "AUTHORED_AGAINST_A_RECORDED_REQUEST",
+  "notes": "The request is real and vendored: `berlingo-knob`, evidence class DESIGN_STAGE_UNVERIFIED, a gear-shift knob measured with calipers and photographs and never printed. The proposal and the model beside it were authored for this replay at the commit in `recorded_at`, because no recorded run of that job exists in a form this pipeline can execute. It is a reduction and says so: the request names a clip button on a face 90 degrees from the rails, and this sleeve has no button window. A horizontal through-hole has a downward-facing ceiling, which would make the support ceiling the thing this case measures instead of the chain it is here to exercise. What it does exercise, on the real command surface and with no dispatch at all, is route, proposal load, acceptance freeze at revision 1, the confined build, commissioning of ten checks, the broad screen and the status decision.",
+  "inputs_sha256": {
+    "inputs/design_proposal.json": "f80f204ecfb4152ba2aa427c5afb0a4f6507058b50e2fc86e183da3838301de4",
+    "inputs/model.py": "ed3c136495b537355302b7e36852858f56ee00bc79185fdcd3f513164ffcd7e1",
+    "inputs/project.json": "9bbbf4bb972ba6ee615559a9d598c9ae0a256894a6d29c183086d5ea32f7c51b"
+  }
+}

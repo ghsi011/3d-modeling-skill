@@ -1,0 +1,34 @@
+{
+  "bbox_mm": {
+    "x": 20.3,
+    "y": 26.3,
+    "z": 28.6107
+  },
+  "bodies": 1,
+  "design_id": "ball-17mm-anti-rotation-flat",
+  "features": [
+    {
+      "at": {
+        "z": 20.0
+      },
+      "feature_id": "ball-equator-section",
+      "kind": "section_area",
+      "note": "measured on the supplied artifact before the edit. It is outside the declared edit region, so it is a number the job inherited rather than one the candidate chose, and it must survive the edit unchanged.",
+      "value_mm2": 205.1323
+    }
+  ],
+  "job_id": "ball-flange-flat-replay",
+  "params": {
+    "flat_depth_mm": 2.0,
+    "flat_top_z_mm": 3.5,
+    "source_x_mid_mm": 181.74044799804688,
+    "source_y_max_mm": 174.98655700683594
+  },
+  "profile_marks": {
+    "z": [
+      3.5
+    ]
+  },
+  "rationale": "a 2 mm flat milled off the +y edge of the supplied ball's mounting flange, so the flange keys against the mount's slot instead of turning in it. The ball, its neck and the other three flange edges are the supplied part and are not redrawn.",
+  "schema_version": 1
+}

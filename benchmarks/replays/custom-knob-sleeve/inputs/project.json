@@ -1,0 +1,92 @@
+{
+  "brief": "brief.md",
+  "brief_sha256": null,
+  "cache_dir": null,
+  "compat": null,
+  "components": [],
+  "consequence": "INCONSEQUENTIAL",
+  "consequence_rationale": "a gear-shift knob in the driver's hand. A failure is a knob that will not seat or will not slide, not an injury",
+  "edit_scopes": [],
+  "envelope_mm": {
+    "x": 40.0,
+    "y": 40.0,
+    "z": 52.0
+  },
+  "evidence": [],
+  "expected_artifacts": [],
+  "interface_map": {},
+  "interfaces": [],
+  "job_id": "berlingo-knob-sleeve-replay",
+  "material": {
+    "material": "PETG",
+    "process": "FDM"
+  },
+  "model": "model.py",
+  "modifiers": [],
+  "motion": [],
+  "nozzle": {
+    "diameter_mm": 0.4
+  },
+  "open_questions": [
+    {
+      "blocking": false,
+      "owner": "user",
+      "question": "the base-plate height and the clip-button height are photo estimates the source notes give as +/-2 mm, and the button protrusion was never measured"
+    }
+  ],
+  "orientation": {
+    "bed_z_mm": 0.0,
+    "model_to_printer_matrix": "identity"
+  },
+  "parameters": {},
+  "printer": "Bambu Lab X2D",
+  "required_reviews": [],
+  "requirements": [
+    {
+      "artifact_id": null,
+      "name": "engagement_length_mm",
+      "note": "the lever length the knob has to slide over without a radial obstruction jamming it",
+      "provenance": "STATED",
+      "source": "user",
+      "unit": "mm",
+      "value": 36.0
+    },
+    {
+      "artifact_id": null,
+      "name": "rail_w_mm",
+      "note": "the width of the two opposed lever rails",
+      "provenance": "STATED",
+      "source": "user",
+      "unit": "mm",
+      "value": 5.0
+    },
+    {
+      "artifact_id": null,
+      "name": "grip_d_mm",
+      "note": "a diameter that fills a hand",
+      "provenance": "CHOSEN",
+      "source": "designer",
+      "unit": "mm",
+      "value": 38.0
+    },
+    {
+      "artifact_id": null,
+      "name": "envelope_z_mm",
+      "note": "",
+      "provenance": "CHOSEN",
+      "source": "designer",
+      "unit": "mm",
+      "value": 52.0
+    }
+  ],
+  "reviewer": {},
+  "route": null,
+  "route_rationale": "",
+  "schema_version": 1,
+  "source_artifacts": [],
+  "source_mode": "NEW",
+  "step": false,
+  "template": null,
+  "updated_utc": "2026-08-02T00:00:00Z",
+  "verification_requested": false
+}

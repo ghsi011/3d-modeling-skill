@@ -6,6 +6,92 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — a recorded job, replayed, with nothing asked of a model
+
+`ROADMAP.md` section 5.1 defines three benchmark tiers and this repository
+shipped three releases with two of them. L0 is the unit suite and
+`tools/test_diagnosis_l0.py`. L2 is blind live evaluation, deliberately manual.
+**L1 — a recorded engineering output replayed through the current system with no
+live AI call — did not exist**, and section 4.3 asks for at least one of every
+release. `test_diagnosis_l0.py` replays five artifacts through `diagnose`, which
+is one component; `pipeline/test_frozen.py` calls `runner.run` on parameters a
+test made up, which is the runner without the command surface, without a project,
+without a proposal, without the confined build and without a review round trip.
+Nothing replayed a *job*.
+
+`tools/replay.py` does. It materialises a recorded case into a fresh directory,
+runs `design-tool route` and then `design-tool run` until the job settles, and
+compares what came out against `expected.json`. `benchmarks/replays/` holds two
+cases, which is the number two real lanes need and not one more:
+
+* **`custom-knob-sleeve`** — an authored `CUSTOM` job against the vendored
+  `berlingo-knob` request. Proposal, acceptance freeze at revision 1, the
+  confined build, ten commissioning checks, the broad screen and the status
+  decision. No review at all, so its dispatch count is zero by construction. Two
+  seconds.
+* **`modify-ball-flange-flat`** — a `MODIFY` job over `ball_male_17mm.stl`, the
+  real 17 mm ball the `vent-ball-combine-r1` exercise consumed, resolved through
+  `tools/fixtures.py` so its size and SHA-256 are checked before the job sees it.
+  A declared edit scope, a preservation row inside the frozen contract, and a
+  two-review round trip that pauses for safety, pauses for verification and
+  finishes — preservation, the acceptance revision and the round trip being the
+  three places a regression has actually landed. Thirteen seconds.
+
+**What a replay asserts, and why it is not more.** Almost everything here is
+hash-bound on purpose, so a replay that diffed receipts byte for byte would go
+red on a new field, a protocol bump and a dependency upgrade — every one of them
+legitimate — and would be deleted inside a month. The assertions are layered.
+Binding: the exit codes in sequence; the final status and the verdicts under it;
+the per-check verdicts, exactly, because coverage is a fraction and stays 1.0
+when the declared set shrinks with the covered one; the measured values inside
+the band the *contract itself* declares for them, falling back to the pipeline's
+own 0.5% where a row declares zero; the receipt set by name; the reviews
+answered; and four hashes that are equalities between two values from the same
+run rather than literals in a file. Advisory, reported and never failing:
+`reasons` and `allowed_claim`, which are prose. Not asserted at all: receipt
+bytes, any pinned digest, findings text, timings, witness images.
+
+**The recorded answer is re-bound, not replayed.** A stored review response
+echoes an envelope binding the packet, the contract, the plan, the evidence
+digests and the protocol version — which is why the real vent-ball run carries
+two 164-byte reports whose whole content is `review envelope mismatch`. So a case
+records the reviewer's *judgement* with no envelope, and the harness stamps the
+one the current run just issued. That is what a human reviewer does; only the
+judgement is recorded. It would be a hole if nothing checked the binding still
+bit, so the suite asserts each report's envelope is the packet's, and an
+adversarial case hands the run an answer bound to evidence that moved and
+requires it to refuse, write no final status, and make the comparison go red.
+
+**Zero live dispatches, asserted.** `materialise` creates no `reviews/`, so every
+response on disk is one the harness wrote and it can only write a recorded one; a
+review with no recording raises rather than leaving the job paused; and
+`AGENT_COMMISSION` is fatal, because that instruction *is* the live dispatch on
+the `CUSTOM` lane.
+
+**The two suites are separated structurally.** `testpaths` names
+`skills/3d-modeling/scripts` and `tools`; `benchmarks/replays` is in neither, so
+a bare `uv run pytest` cannot collect a job replay. CI runs L0 on every push and
+L1 on pull requests as its own job. The harness's own guards are L0 —
+`tools/test_replay.py`, 34 tests in 2 s, with every guard shown red under a
+mutation that disables it — because a check nobody checks
+reports all clear just as convincingly when it is broken.
+
+**Where the expectations came from.** Not from the two completed real runs on
+disk. `oneplus8t-magnet-drawer` has no `project.json`, no execution plan and no
+review packets: it was built by hand-rolled scripts and there is nothing to
+replay it *through*. `vent-ball-combine-r1-exercise-2` is a full recording and is
+still not the source, for four reasons: it costs ~876 s and 24 GB of RAM against
+a two-minute budget for the whole tier and died in the allocator once in eleven
+runs; it ran at `2721ffe`, before two later slices; its root `final_status.json`
+was deleted by its own revision-2 bump; and two of the three defects behind its
+terminal `FAILED` are *instrument* failures this repository intends to fix, so
+pinning them would build a fixture that goes red the day the bug is repaired.
+What is taken from it is what survives a change of scale and is real: the
+recorded request, the `MODIFY`-with-an-edit-scope shape, and the source artifact
+itself. Both `expected.json` files are recorded at the current commit
+deliberately; re-record with `--record` when a change legitimately moves one, and
+put the diff in the review.
+
 ### Changed — a project problem is data, not a sentence
 
 Release 3 slice C, and the half of the derived-status work that was left owed.

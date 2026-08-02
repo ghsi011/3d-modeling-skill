@@ -1,0 +1,20 @@
+{
+  "decision": "NEEDS_MORE_EVIDENCE",
+  "failure_modes": [
+    "the ball root snaps under vibration and the phone falls into the footwell of a moving car. The root is supplied geometry this edit does not touch, and there is no coupon, no load test and no layer-orientation analysis of it in this evidence.",
+    "the flat is cut on the wrong edge and the flange no longer keys into the mount. The edit region names the +y edge and the audit confirms the other three survived, which establishes where material went and not that the mount wanted it gone from there."
+  ],
+  "missing_evidence": [
+    "no witness images were produced, so this review saw a section table and a preservation distance and no picture of the part at all",
+    "the ball root's strength in ASA at this orientation is unmeasured. The supplied part was printed once by the user in unrecorded process conditions, and one print with no conditions recorded is not calibration."
+  ],
+  "required_actions": [
+    "render the part and re-run this review before any claim is made about what it looks like",
+    "print a coupon at the root section before this part carries a phone in a vehicle"
+  ],
+  "safety_concerns": [
+    "this is a CONSEQUENTIAL vehicle-mounted part reviewed from numbers alone. Every declared feature is MEASURED and PASS and the preservation audit reports the ball and neck inside a 0.1 mm band, and a clean number set reviewed without an image is not a safety pass.",
+    "the preservation audit's sample density is a fixed count rather than one derived from a declared smallest detectable defect, which its own report states. An undeclared change outside the region smaller than the sample spacing would not appear here."
+  ],
+  "summary": "The edit is confined to the flange and the audit says so. What is missing is not a measurement of the edit; it is any evidence about this part that is not a number, and any evidence at all about the root it hangs from."
+}

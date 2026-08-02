@@ -15,3 +15,11 @@
 # ---------------------------------------------------------------------------
 benchmarks/fixtures/vent-ball-combine/public/sources/** -text
 benchmarks/references/** -text
+
+# The same argument, one tier up. A replay case's `inputs/` and `judgements/` are
+# digested into its own `case.json`, and `replay.load()` refuses a case whose
+# recorded bytes moved -- so a checkout that normalised a newline would raise
+# `CaseMismatch` on a machine that did nothing wrong. `case.json` and
+# `expected.json` are not themselves digested, and are covered anyway rather than
+# leaving a reader to work out which half of one directory is protected.
+benchmarks/replays/** -text
