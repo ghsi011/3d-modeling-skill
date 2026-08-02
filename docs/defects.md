@@ -232,3 +232,85 @@ D10, D11 and D12 were here and are closed; `CHANGELOG.md` has them. D11's
 correction is folded into row 1 above rather than carried as its own entry,
 because what it found was not a second defect — it was that this row was
 describing a property the boundary does not have.
+
+## D13 — `preservation.audit` cannot read a STEP at all
+
+**Where.** `pipeline/preservation.py`, the mesh load path.
+
+**What is wrong.** Loading a STEP raises `ModuleNotFoundError: cascadio`. The
+audit therefore cannot measure preservation against a STEP source under any
+circumstances.
+
+**Evidence.** Found by the first real run of the `vent-ball-combine` fixture
+through `design-tool`. That fixture's primary source is `vent_mount.step`, and it
+is the repository's only `PHYSICALLY_PROVEN` artifact.
+
+**What it can cause.** Every MODIFY or COMBINE job whose base is a STEP is
+unmeasurable, which is most CAD a user would supply. It also means `ROADMAP.md`
+Release 1's authentic exercise cannot complete as written: the job named to prove
+the gate has a source the instrument cannot read.
+
+**Fixture that must fail first.** A MODIFY job declaring a STEP source, asserted
+to produce a preservation verdict rather than an import error.
+
+## D14 — `diagnose` calls a STEP clean that cannot be tessellated
+
+**Where.** `pipeline/diagnose.py`, STEP path.
+
+**What is wrong.** `vent_mount.step` is reported usable. Four cone faces make it
+untessellatable downstream, so the file passes diagnosis and then fails the first
+operation that needs geometry.
+
+**What it can cause.** Diagnosis exists to say whether a source can be worked
+with. A clean verdict on a file nothing can tessellate is the exact failure
+diagnosis is for, and it moves the error to a stage with less context to explain
+it.
+
+**Fixture that must fail first.** That STEP, asserted to report the untessellatable
+faces.
+
+## D15 — `orientation` is declared, validated, frozen, and read by nothing
+
+**Where.** `Contract.orientation`, validated in `contract.preflight`, carried into
+the frozen payload.
+
+**What is wrong.** Third instance of the shape D5 and D6 recorded: a field the
+schema takes seriously and no code consumes. `model_to_printer_matrix` and
+`bed_z_mm` reach no analysis, no screening, no manufacturing check.
+
+**What it can cause.** A job can declare a print orientation, have it validated
+and hashed into the acceptance contract, and have nothing whatsoever depend on
+it. Overhang, bridging and strength direction are all orientation-dependent.
+
+**Fixture that must fail first.** Two contracts differing only in orientation,
+asserted to produce different assessments.
+
+## D16 — the preservation audit peaked at 16.7 GB resident
+
+**Where.** `pipeline/preservation.audit` on real geometry.
+
+**What is wrong.** Measured during the vent-ball run. There is no resource bound
+on the audit; `ROADMAP.md` section 2 already records that no resource governor
+exists, and this is the first measurement of what that costs.
+
+**What it can cause.** A large source can exhaust the machine rather than fail
+controllably. `ARCHITECTURE.md` section 12 requires geometry execution to operate
+under explicit limits and fail diagnosably.
+
+**Fixture that must fail first.** An audit against a declared memory ceiling,
+asserted to refuse rather than allocate past it.
+
+## D17 — a successful `route` leaves a stale `next_action.json`
+
+**Where.** `pipeline/cli.py`, the `route` verb.
+
+**What is wrong.** `route` succeeds without clearing or rewriting the pending
+next action, so the file continues to instruct toward a state the project has
+left.
+
+**What it can cause.** The file exists to tell an agent what to do next. A stale
+one sends it to the wrong step, and nothing detects the staleness — `next_action`
+carries no run id, no sequence and no self-digest.
+
+**Fixture that must fail first.** `init` then `route`, asserting the next action
+names the state after routing.
