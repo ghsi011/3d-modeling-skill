@@ -44,6 +44,23 @@ and is the whole of what this change buys. The density is still a fixed count
 rather than one derived from a declared minimum detectable defect size, real
 B-rep comparison is still not implemented, and both are owed by stage 5 of
 ADR 0002. The receipts say so in the words they use.
+
+**Determinism of the answer is not determinism of completing.** The plan was
+reproducible and the run was not: the same unchanged pair took 23 GiB and died on
+one attempt in eleven, which means a review round trip could still fail to happen.
+So the distance queries run under a declared memory ceiling, and the batch size is
+computed from it against the work about to be done -- a refusal with arithmetic in
+it rather than a race with the allocator. The ceiling changes the peak and not one
+float; it is deliberately outside the plan and the evidence, because a review
+answer must not expire when the job is rerun on a smaller machine.
+
+**A STEP is read by the kernel this runtime already has.** `trimesh.load`
+dispatches STEP to `cascadio`, which is not installed here, so every audit against
+a STEP source used to come back `ModuleNotFoundError`. `mesh_io.read_step` uses
+`build123d`, which `diagnose` already uses, so there is one reading of a supplied
+B-rep and not two that disagree about its units. The tessellation is at a declared
+deflection and is recorded on the report; a B-rep whose faces OCC cannot
+triangulate is refused rather than measured with holes in it.
 """
 from __future__ import annotations
 
@@ -92,6 +109,107 @@ VERDICT = ("PRESERVED_EXACTLY", "PRESERVED_WITHIN_TOLERANCE", "CHANGED",
 
 DIRECTIONS = ("source_to_candidate", "candidate_to_source")
 
+# How much working memory one bidirectional pass may occupy. `ARCHITECTURE.md`
+# section 12 requires geometry execution to run under resource limits and fail
+# diagnosably; until this constant there was no limit, and the failure mode was
+# the allocator's.
+#
+# Reported from the field on the vent-ball pair: 22.4 GB peak working set,
+# 39.74 GB page file, free RAM at 0-1.5 GB throughout, and one invocation in
+# eleven dead of `MemoryError: Unable to allocate 1.57 GiB for an array with
+# shape (210081703,)`. The same unchanged job produced two different outcomes,
+# which is the defect -- determinism of the answer was achieved and determinism
+# of *completing* was not.
+#
+# Re-measured here, unbatched, on the same pair: 23.24 GiB peak working set,
+# 91.18 GiB peak page file, and it does not finish -- 334 s in,
+# `MemoryError: Unable to allocate 2.47 GiB for an array with shape
+# (331606963,)`. Under this ceiling the same audit peaks at 2.16 GiB, pages
+# 3.61 GiB, completes in 200 s, and returns the same numbers.
+#
+# 2 GiB is a working budget, not a guess at the machine's free memory: the point
+# of a declared ceiling is that the same job behaves the same way on every
+# machine, and a limit derived from whatever happened to be free would reproduce
+# exactly the variability this exists to remove.
+DEFAULT_MEMORY_CEILING_BYTES = 2 * 1024 ** 3
+
+# Working bytes one (query point, candidate face) pair costs inside
+# `trimesh.proximity.signed_distance`. It is not one array: the query holds the
+# candidate index list, the tiled query points, the tiled triangles and a dozen
+# per-row temporaries inside `closest_point`, and the r-tree's own results are
+# Python ints in Python lists before any of that.
+#
+# Measured, not derived. Peak working set of one query in a fresh process, over
+# the vent-ball pair, both directions, at 500 / 2,000 / 5,000 query points:
+# 350.3, 350.2, 350.1, 350.2, 350.1 bytes per candidate -- flat to four
+# significant figures across a 70x range and across two meshes of very different
+# size, which is what a per-row cost looks like.
+#
+# Declared above the measurement rather than at it. A ceiling computed from an
+# optimistic cost is not a ceiling, and the number this multiplies is a worst
+# case whose whole job is to be safe.
+WORKING_BYTES_PER_CANDIDATE = 384
+
+
+class MemoryCeilingExceeded(RuntimeError):
+    """The work about to be done does not fit the declared ceiling.
+
+    Raised *before* the allocation, from arithmetic over the query size and the
+    target's face count, rather than caught from the allocator afterwards. A
+    `MemoryError` says the machine ran out; this says the job was too big for the
+    limit the job declared, which is a different sentence and a different fix.
+    """
+
+
+class BrepUnreadable(ValueError):
+    """A supplied exact B-rep cannot be turned into the mesh this audit needs."""
+
+
+def _query_batch(target_faces: int, ceiling_bytes: int) -> int:
+    """How many query points one distance call may carry, under the ceiling.
+
+    The bound is the worst case rather than the expected one: every face of the
+    target is assumed to be a candidate for every point in the batch. That is not
+    a pessimistic abstraction -- it is what actually happens. Measured on the
+    vent-ball pair, `trimesh.proximity.nearby_faces` returned all 7,056 faces for
+    all 20,000 points in one direction and a mean of 16,583 of 19,522 in the
+    other, because its query radius is the distance to the nearest *vertex* and a
+    point 60 mm from a 20 mm part has a 60 mm bounding box around it.
+
+    Splitting the query is exact, not an approximation: `closest_point` computes
+    each point independently -- the candidate lookup, the per-row triangle
+    distance and the two-best tie-break are all per query point -- so a batched
+    run returns the same float64 values as an unbatched one, bit for bit. What
+    changes is the peak, from `points x faces` to `batch x faces`.
+    """
+    per_point = max(1, int(target_faces)) * WORKING_BYTES_PER_CANDIDATE
+    if per_point > ceiling_bytes:
+        raise MemoryCeilingExceeded(
+            f"one query point against a {target_faces}-face target needs about "
+            f"{per_point} working bytes, past the declared ceiling of "
+            f"{ceiling_bytes} bytes. Raise the ceiling or simplify the target; "
+            f"nothing has been allocated.")
+    return max(1, int(ceiling_bytes // per_point))
+
+
+def _distances(target, points: np.ndarray, ceiling_bytes: int) -> np.ndarray:
+    """Unsigned surface distance from each point to `target`, under the ceiling.
+
+    `signed_distance` and not `closest_point` even though the sign is thrown away
+    one line later: the magnitude is the same number either way, and keeping the
+    call the audit has always made is what makes "byte-identical to today" a fact
+    rather than an argument about when `np.sign` returns zero.
+    """
+    import trimesh
+
+    batch = _query_batch(len(target.faces), ceiling_bytes)
+    out = np.empty(len(points), dtype=np.float64)
+    for start in range(0, len(points), batch):
+        stop = min(start + batch, len(points))
+        out[start:stop] = np.abs(
+            trimesh.proximity.signed_distance(target, points[start:stop]))
+    return out
+
 
 @dataclasses.dataclass(frozen=True)
 class Region:
@@ -128,7 +246,7 @@ class Region:
                    float(declared.get("margin_mm", 0.5)))
 
 
-def _load(path: Path):
+def _load(path: Path) -> tuple[Any, dict[str, Any] | None]:
     """Merged, because a triangle soup has no surface to take a distance from.
 
     An STL stores three independent vertices per facet, so an unmerged read is a
@@ -136,10 +254,56 @@ def _load(path: Path):
     needs a closed surface and reports nonsense without one. Merging coincident
     vertices is the parse, not a repair -- `diagnose` reports both reads, and
     that is where the difference between them is a finding.
+
+    A STEP is not handed to `trimesh.load`. That path wants `cascadio`, which is
+    not in this runtime, so every audit against a STEP source raised
+    `ModuleNotFoundError` -- and the repository's only `PHYSICALLY_PROVEN`
+    fixture has a STEP primary source, as does most CAD anybody supplies. It goes
+    through `mesh_io.read_step` instead, which uses the OCC kernel this runtime
+    already carries for diagnosis. See that function for why a second STEP reader
+    was not added.
+
+    Returns the mesh and, for a B-rep, the record of how it was read. Reading a
+    mesh file is a parse and has nothing to record; reading a B-rep is a
+    tessellation at a declared deflection, and a different deflection is a
+    different measurement.
     """
     import trimesh
+
+    # Which suffixes are a STEP is `diagnose`'s answer, not a second one here:
+    # that module owns format recognition for every supplied artifact, and two
+    # spellings of one set is how a file gets diagnosed as a B-rep and read as
+    # something else.
+    from . import diagnose
+
+    if path.suffix.lower() in diagnose.STEP_SUFFIXES:
+        import mesh_io
+        reading = mesh_io.read_step(path)
+        if not reading.complete:
+            # Fail closed rather than measure the part with holes in it. Dropping
+            # the faces OCC could not triangulate would leave a mesh that is not
+            # closed, so `signed_distance` has no inside to sign against and
+            # every sample near a hole reports a distance to geometry that is
+            # missing rather than moved.
+            raise BrepUnreadable(
+                f"{len(reading.failures)} of {reading.faces} face(s) of "
+                f"{path.name} cannot be tessellated, so there is no surface to "
+                f"measure against: " + "; ".join(reading.failures))
+        return reading.mesh(), reading.as_dict()
+
     loaded = trimesh.load(str(path), force="mesh")
-    return loaded if isinstance(loaded, trimesh.Trimesh) else loaded.dump(concatenate=True)
+    mesh = (loaded if isinstance(loaded, trimesh.Trimesh)
+            else loaded.dump(concatenate=True))
+    if len(mesh.faces) == 0:
+        # `trimesh.load` parses a file that is not an STL at all into an empty
+        # mesh rather than raising, and an empty mesh reaches the distance query
+        # as an r-tree over nothing: `ValueError: Bounds must be (n, dimension *
+        # 2)`, raised out of the audit, out of the check, and out of the run as a
+        # stage failure with no row and no receipt. A source with no surface is
+        # unmeasurable, which is a verdict this file already knows how to write.
+        raise ValueError(f"{path.name} parsed to a mesh with no triangles, so "
+                         "there is no surface to sample or to measure against")
+    return mesh, None
 
 
 def _ordered(mesh):
@@ -288,15 +452,20 @@ def _direction_seed(material: dict[str, Any], direction: str) -> str:
 
 
 def _sampled(source, candidate, region: Region, samples: int,
-             tolerance_mm: float, material: dict[str, Any]) -> dict[str, Any]:
+             tolerance_mm: float, material: dict[str, Any],
+             ceiling_bytes: int) -> dict[str, Any]:
     """Bidirectional surface distance outside the region.
 
     Both directions, because one is not enough in either sense: sampling only the
     source misses material the edit *added* outside the region, and sampling only
     the candidate misses material it removed.
-    """
-    import trimesh
 
+    Both batch sizes are settled before either direction runs. The refusal this
+    audit owes is a refusal to *start*, not one discovered halfway through with
+    the first direction's evidence already written -- a job that reports one
+    direction and abandons the other is the partial answer this file exists to
+    avoid.
+    """
     results: dict[str, Any] = {}
     seeds: dict[str, str] = {}
     worst = 0.0
@@ -306,8 +475,11 @@ def _sampled(source, candidate, region: Region, samples: int,
     # Zipped against `DIRECTIONS` rather than re-spelling the names here: the
     # plan descriptor publishes that tuple, and two spellings of one list is how
     # a receipt ends up describing a measurement nobody ran.
-    for name, (a, b) in zip(DIRECTIONS,
-                            ((source, candidate), (candidate, source))):
+    pairs = tuple(zip(DIRECTIONS, ((source, candidate), (candidate, source))))
+    for _, (_, target) in pairs:
+        _query_batch(len(target.faces), ceiling_bytes)     # raises before any query
+
+    for name, (a, b) in pairs:
         seed = _direction_seed(material, name)
         seeds[name] = seed
         points = _plan_points(a, samples, seed)
@@ -318,7 +490,7 @@ def _sampled(source, candidate, region: Region, samples: int,
                              "note": "every planned sample fell inside the declared "
                                      "edit region, so this direction measured nothing"}
             continue
-        distances = np.abs(trimesh.proximity.signed_distance(b, outside))
+        distances = _distances(b, outside, ceiling_bytes)
         index = int(np.argmax(distances))
         peak = float(distances[index])
         results[name] = {"sampled": int(len(outside)),
@@ -365,7 +537,8 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
           tolerance_mm: float = DEFAULT_TOLERANCE_MM,
           samples: int = DEFAULT_SAMPLES,
           exact: bool = False,
-          alignment_transform: Any = "identity") -> dict[str, Any]:
+          alignment_transform: Any = "identity",
+          memory_ceiling_bytes: int = DEFAULT_MEMORY_CEILING_BYTES) -> dict[str, Any]:
     """Compare everything outside the declared edit region.
 
     `exact=True` is a claim about the *inputs*, made by whoever knows they are
@@ -375,6 +548,14 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
     `alignment_transform` is the edit scope's declaration of where the source sits
     in the job's frame. It binds the plan; it is not applied to the meshes. See
     `_seed_material`.
+
+    `memory_ceiling_bytes` bounds the working set of the distance queries and is
+    deliberately **not** part of the plan or the evidence. It changes how the
+    measurement is executed and provably not what it measures -- the batched and
+    unbatched runs return the same float64 values -- so binding a review answer to
+    it would mean a reviewer's answer expiring because the job was rerun on a
+    machine with a different budget. What it *does* change is whether the audit
+    runs at all, and a refusal is a verdict with its arithmetic in the reason.
     """
     source_path, candidate_path = Path(source_path), Path(candidate_path)
     report: dict[str, Any] = {
@@ -397,12 +578,24 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
     try:
         report["source_sha256"] = S.sha256_file(source_path)
         report["candidate_sha256"] = S.sha256_file(candidate_path)
-        source = _ordered(_load(source_path))
-        candidate = _ordered(_load(candidate_path))
+        source_mesh, source_reading = _load(source_path)
+        candidate_mesh, candidate_reading = _load(candidate_path)
+        source = _ordered(source_mesh)
+        candidate = _ordered(candidate_mesh)
     except Exception as exc:                          # noqa: BLE001 - a file that
         report.update({"method": "none", "verdict": "UNMEASURABLE",
                        "reason": f"{type(exc).__name__}: {exc}"})
         return _sealed(report)
+
+    # Only where a side actually had to be tessellated. A mesh file's read is a
+    # parse with nothing to declare, and a key that appeared on every report to
+    # say "not applicable" would move every evidence digest ever taken to record
+    # that nothing happened.
+    tessellation = {name: record for name, record
+                    in (("source", source_reading), ("candidate", candidate_reading))
+                    if record is not None}
+    if tessellation:
+        report["tessellation"] = tessellation
 
     report["bodies"] = {
         "source": int(len(source.split(only_watertight=False))),
@@ -422,7 +615,18 @@ def audit(*, source_path: Path, candidate_path: Path, region: Region | None,
         candidate_sha256=report["candidate_sha256"],
         region=region, tolerance_mm=tolerance_mm, samples=samples,
         alignment_transform=alignment_transform)
-    measured = _sampled(source, candidate, region, samples, tolerance_mm, material)
+    try:
+        measured = _sampled(source, candidate, region, samples, tolerance_mm,
+                            material, memory_ceiling_bytes)
+    except MemoryCeilingExceeded as exc:
+        # A refusal, not a crash, and it names the arithmetic that produced it.
+        # The distinction the receipt has to carry is between "this part changed"
+        # and "this instrument declined to run", and only one of those is about
+        # the part.
+        report.update({"method": "sampled bidirectional surface distance",
+                       "verdict": "UNMEASURABLE",
+                       "reason": f"{type(exc).__name__}: {exc}"})
+        return _sealed(report)
     report.update(measured)
     if exact and report["verdict"] == "PRESERVED_WITHIN_TOLERANCE":
         # Only reachable when the caller has stated both sides are exact

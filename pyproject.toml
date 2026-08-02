@@ -21,6 +21,13 @@ keywords = ["3d-modeling", "3d-printing", "cad", "fdm", "agents", "trimesh", "ve
 # it and the runner must not have to ask whether it is installed. It is imported
 # lazily -- a trimesh-only job never pays its ~1.5 s -- but it is always present.
 #
+# It is also the only STEP reader here, for `diagnose` and for the preservation
+# audit alike. `trimesh.load` would dispatch STEP to `cascadio`; that package is
+# deliberately absent. Measured on `vent_mount.step`, cascadio returns the part
+# in metres where build123d returns millimetres, in 324 disconnected bodies
+# against 10 -- so a second importer would buy a silent unit substitution of the
+# kind ARCHITECTURE.md section 12 forbids, and no capability this one lacks.
+#
 # manifold3d is not an optimization. It is the only boolean engine this pipeline
 # may use, selected explicitly at every call site; automatic engine selection is
 # a commissioning failure.

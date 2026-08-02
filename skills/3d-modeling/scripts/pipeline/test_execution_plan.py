@@ -776,26 +776,30 @@ class TwoEditScopesAreTwoObligationsTest(unittest.TestCase):
                          "a single-artifact edit is measured exactly as before "
                          "and must not carry a caveat that does not apply to it")
 
-    def test_the_inherited_overhang_ceiling_is_the_sum_of_the_artifacts(self) -> None:
-        """The candidate carries both bodies, so it inherits both their overhangs.
-
-        And one unmeasurable artifact drops the whole allowance back to the
-        generated zero: a partial sum is a ceiling nobody measured, and widening
-        a limit on a guess is what this arrangement exists to avoid.
-        """
+    def _overhang_sources(self, directory: Path) -> None:
         import trimesh
 
+        # Both blocks are lifted clear of the bed so their undersides count as
+        # unsupported: `overhang_area` ignores downward faces inside the bed
+        # band, and two boxes sitting at z=0 would each inherit an allowance of
+        # zero -- which passes every assertion below for the wrong reason.
+        for name, extents in (("source.stl", (40.0, 30.0, 10.0)),
+                              ("drawer.stl", (20.0, 10.0, 10.0))):
+            block = trimesh.creation.box(extents=extents)
+            block.apply_translation([extents[0] / 2, extents[1] / 2,
+                                     extents[2] / 2 + 5.0])
+            block.export(directory / name)
+
+    def test_the_inherited_overhang_ceiling_is_the_sum_of_the_artifacts(self) -> None:
+        """The candidate carries both bodies, so it inherits both their overhangs."""
         rule = {"downward_normal_z_max": -0.73, "bed_z_mm": 0.0}
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
-            for name, extents in (("source.stl", (40.0, 30.0, 10.0)),
-                                  ("drawer.stl", (20.0, 10.0, 10.0))):
-                block = trimesh.creation.box(extents=extents)
-                block.apply_translation([e / 2 for e in extents])
-                block.export(directory / name)
+            self._overhang_sources(directory)
 
             both = cli._inherited_overhang(directory, self._pair(), rule)
             self.assertIsNotNone(both)
+            self.assertGreater(both[0], 0.0)
             each = [cli._inherited_overhang(
                 directory,
                 _project(source_mode="MODIFY", source_artifacts=(artifact,),
@@ -803,12 +807,54 @@ class TwoEditScopesAreTwoObligationsTest(unittest.TestCase):
                 for artifact, scope in ((SOURCE_ARTIFACT, EDIT_SCOPE),
                                         (SECOND_ARTIFACT, SECOND_SCOPE))]
             self.assertAlmostEqual(sum(area for area, _ in each), both[0], places=6)
-            self.assertIn("2 supplied artifacts", both[1])
+            self.assertIn("2 of 2 supplied artifacts", both[1])
+
+    def test_one_unreadable_source_does_not_zero_the_readable_one(self) -> None:
+        """D18. The allowance is per source, and the gap is named rather than paid for.
+
+        This returned `None` -- the generated zero -- if *any* declared source
+        could not be read. On the vent-ball run one source was a STEP nothing
+        could open, so the allowance the candidate was entitled to inherit from
+        the readable source went to zero with it, and the job failed
+        `feature-plan-support-00` on 4,582.055 mm2 of overhang it had inherited
+        from the part it was told to preserve. The contract failure was caused
+        entirely by a missing importer and read like a design defect.
+
+        A zero is not more measured than a partial sum. It is less measured, and
+        it is wrong in the direction that fails a correct part.
+        """
+        rule = {"downward_normal_z_max": -0.73, "bed_z_mm": 0.0}
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._overhang_sources(directory)
+            readable = cli._inherited_overhang(
+                directory,
+                _project(source_mode="MODIFY", source_artifacts=(SOURCE_ARTIFACT,),
+                         edit_scopes=(EDIT_SCOPE,)), rule)
+            self.assertIsNotNone(readable)
 
             (directory / "drawer.stl").unlink()
-            self.assertIsNone(cli._inherited_overhang(directory, self._pair(), rule),
-                              "one unreadable artifact must not leave a ceiling "
-                              "credited with only the ones that happened to read")
+            partial = cli._inherited_overhang(directory, self._pair(), rule)
+            self.assertIsNotNone(partial, "one unreadable source must not zero the "
+                                          "allowance measured on the readable one")
+            self.assertAlmostEqual(readable[0], partial[0], places=6)
+            self.assertIn("1 of 2 supplied artifacts", partial[1])
+            self.assertIn("This ceiling is partial", partial[1])
+            self.assertIn("drawer.stl", partial[1],
+                          "the source that could not be measured has to be named, "
+                          "or a reader cannot tell a partial ceiling from a whole one")
+
+    def test_no_readable_source_at_all_still_keeps_the_generated_zero(self) -> None:
+        """`None` means no evidence, and now means only that.
+
+        Crediting a ceiling with nothing measured is the failure the all-or-
+        nothing rule was reaching for, and it is still refused -- what changed is
+        that one measurement no longer counts as none.
+        """
+        rule = {"downward_normal_z_max": -0.73, "bed_z_mm": 0.0}
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self.assertIsNone(cli._inherited_overhang(directory, self._pair(), rule))
 
     def test_a_contract_that_carries_one_row_for_two_scopes_is_refused(self) -> None:
         """The shortfall, not merely the absence.

@@ -120,6 +120,41 @@ def manufacturing(contract: Contract, commission_report: dict[str, Any]) -> dict
     }
 
 
+# How much of a check's own error message the claim string carries. Long enough
+# for a module name and a path, short enough that a summary line stays a summary.
+_REASON_CHARS = 160
+
+
+def _unavailable(commission_report: dict[str, Any]) -> list[dict[str, Any]]:
+    """The declared checks that never ran, with the code that says why.
+
+    `commission_report` keeps the distinction perfectly already -- `ran: false`,
+    `status: UNAVAILABLE`, `measured: null`, `error_code`, and the exception as
+    the reason -- and nothing carried it any further. `final_status.json` said
+    only "rejected by independent verification" and the CLI summary said the
+    same, so a user who did not open `commission_report.json` learned that a
+    reviewer rejected their part rather than that the tool could not read their
+    primary source. Those demand different actions, and only one of them is the
+    user's fault.
+    """
+    rows: list[dict[str, Any]] = []
+    for check in commission_report.get("checks") or []:
+        if not isinstance(check, dict) or check.get("status") != "UNAVAILABLE":
+            continue
+        rows.append({"check_id": check.get("check_id"),
+                     "feature_id": check.get("feature_id"),
+                     "error_code": check.get("error_code"),
+                     "reason": (check.get("error_message") or check.get("reason")
+                                or "")[:_REASON_CHARS],
+                     "result": check.get("result")})
+    return rows
+
+
+def _names(rows: list[dict[str, Any]]) -> str:
+    return "; ".join(f"{r['check_id']} ({r['error_code']}): {r['reason']}"
+                     for r in rows)
+
+
 def decide(*, contract: Contract, commission_report: dict[str, Any],
            screening: dict[str, Any], manufacturing: dict[str, Any] | None,
            safety: dict[str, Any] | None, artifact: dict[str, Any],
@@ -294,6 +329,19 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
             claim = (f"not claimable on this lane {when} -- {lane_note}. What did "
                      f"run is on disk: {claim}.")
 
+    # Last, and after the lane cap, because this is true of every verdict above
+    # and none of them owns it. A rejection, a failure and a capped success can
+    # each sit beside a check that never ran, and the sentence a user reads has to
+    # carry both -- the reason the part was refused, and the fact that one of the
+    # instruments never measured.
+    unavailable = _unavailable(commission_report)
+    if unavailable:
+        named = _names(unavailable)
+        reasons.append(f"{len(unavailable)} declared check(s) could not run: {named}")
+        claim = (f"{claim.rstrip('. ')}. Separately, {len(unavailable)} declared "
+                 f"check(s) never ran and measured nothing: {named}. That is this "
+                 f"tool failing to measure, not a finding about the part.")
+
     S.require_enum(final, S.FINAL_STATUS, what="final_status")
     return {
         "schema_version": S.STATUS_SCHEMA,
@@ -325,6 +373,9 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         "safety_verification": safety.get("decision") if safety else None,
         "final_status": final,
         "allowed_claim": claim,
+        # Structured beside the sentence, so a caller that reads JSON does not
+        # have to parse prose to find out which instrument failed.
+        "unavailable_checks": unavailable,
         "reasons": reasons,
         "artifact_hashes": {"contract": artifact["contract_sha256"],
                             "stl": artifact["stl_sha256"],

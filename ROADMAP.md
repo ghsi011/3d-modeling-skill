@@ -77,6 +77,13 @@ Several narrower gaps are carried forward from the completed consolidation work.
 * designer commissions are not yet generated from canonical project state, and the template registry does not yet distinguish a certified template from a starting one.
 * a job that declares motion routes `FULL`, and its motion modifier is reported `DEFERRED` rather than measured. The sweep engine does not exist. Naming it unmeasured is deliberate and is not a substitute for Release 8.
 * there is no resource governor, and the 3MF writers are not versioned adapters.
+  One stage is bounded and the rest are not: the preservation audit now declares a
+  memory ceiling, derives its query batch from it, and refuses before allocating
+  past it — which took the vent-ball pair from 23.24 GiB peak and a `MemoryError`
+  to 2.16 GiB and a completed run. That is one limit on one instrument, reached
+  because a real job hit it. A governor is the thing that would bound every
+  geometry stage under one policy, account for what a job is allowed to spend, and
+  be declarable per job rather than compiled into a constant; none of that exists.
 * preservation sampling is deterministic but its density is not derived from a declared minimum detectable defect size, and exact STEP comparison is undecided. A real modification job put a number on what that costs: the entire defect the audit had to find was 85 faces of a 93,530-face part, under a tenth of a percent of its surface. Every job that declares an edit scope therefore reports `EXPERIMENTAL_UNAVAILABLE` rather than a successful status.
 * preservation also has one verdict for one box. The same job needed three dispositions over named regions — geometry that must not move, geometry permitted to change, and geometry the edit deliberately consumed — because the deviation its audit reported, an unfiltered global maximum of 1.797 mm, *was* the requested change: material consumed where the two parts now interpenetrate, in a band opened to 2.88 mm by design. One box and one band cannot tell that apart from a defect, so the checker fails a correct part.
 * there is no repair path at all. `design-tool diagnose` classifies an artifact `REPAIR_REQUIRED` and stops, so a supplied file with non-manifold or open geometry cannot be modified through this skill even though `MISSION.md` names repair as a required capability and `ARCHITECTURE.md` §11.4 specifies it.

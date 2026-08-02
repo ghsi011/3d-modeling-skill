@@ -186,6 +186,23 @@ def _diagnose_step(path: Path) -> dict[str, Any]:
         except Exception:                             # noqa: BLE001 - a face whose
             invalid += 1                              # area cannot be taken is one
 
+    # Area is not tessellability, and reading it as one is how a file nothing can
+    # turn into triangles was called `USABLE_EXACT`. `vent_mount.step` has 329
+    # faces, every one of them with a finite positive area -- one is 1.75e-14 mm2,
+    # which is small and is not zero -- and six of them are cones OCC produces no
+    # triangulation for at any deflection tried. Under the area test alone that
+    # file passed diagnosis and then failed the first operation that needed
+    # geometry, which is the failure diagnosis exists to prevent: the error moved
+    # to a stage with less context to explain it.
+    #
+    # So the same probe every consumer of this file will run is run here, and its
+    # answer is a finding. The cost is one tessellation pass -- about 2 s on that
+    # 329-face part, against the 9 s the import itself takes.
+    import mesh_io
+    reading = mesh_io.tessellate_brep(
+        shape, tolerance=mesh_io.BREP_READ_LINEAR_DEFLECTION,
+        angular_tolerance=mesh_io.BREP_READ_ANGULAR_DEFLECTION)
+
     findings: list[str] = []
     if not solids:
         findings.append("no solids: this STEP carries surfaces or wires only, so "
@@ -193,9 +210,18 @@ def _diagnose_step(path: Path) -> dict[str, Any]:
     if invalid:
         findings.append(f"{invalid} face(s) have no usable area, which is what a "
                         "null tessellation looks like from here")
+    if not reading.complete:
+        findings.append(
+            f"{len(reading.failures)} of {reading.faces} face(s) cannot be "
+            f"tessellated at {reading.linear_deflection} mm linear / "
+            f"{reading.angular_deflection} rad angular deflection, so nothing "
+            f"downstream can turn this file into a mesh: "
+            + "; ".join(reading.failures))
 
-    classification = ("RECONSTRUCTION_REQUIRED" if not solids
-                      else "REPAIR_REQUIRED" if invalid else "USABLE_EXACT")
+    classification = (
+        "RECONSTRUCTION_REQUIRED" if not solids
+        else "REPAIR_REQUIRED" if (invalid or not reading.complete)
+        else "USABLE_EXACT")
     return {
         "format": "STEP",
         # STEP declares its units in the file header. build123d converts to
@@ -208,6 +234,8 @@ def _diagnose_step(path: Path) -> dict[str, Any]:
         "faces": len(faces),
         "bbox_mm": extents,
         "invalid_faces": invalid,
+        "untessellatable_faces": len(reading.failures),
+        "tessellation": reading.as_dict(),
         "scale_suspicions": _scale_suspicions(extents),
         "findings": findings,
         "classification": classification,

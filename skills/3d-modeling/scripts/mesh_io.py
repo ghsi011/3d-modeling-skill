@@ -100,25 +100,112 @@ def _require_parsed_mesh(tm: Any, *, label: str = "mesh file") -> None:
         raise ValueError(f"{label} has non-finite vertex coordinates (NaN or inf)")
 
 
-def validate_brep_tessellation(shape: Any, *, tolerance: float,
-                               angular_tolerance: float) -> None:
-    """Fail with face-level diagnostics before a B-rep is exported.
+# How coarsely a *supplied* B-rep is read when a tool downstream needs a mesh of
+# it. Deliberately not shared with the export deflection in
+# `pipeline/backends/build123d_backend.py`: that one decides how fine the part we
+# ship is, this one decides how fine our reading of somebody else's part is. The
+# two happen to agree today and are free to diverge, and a single constant would
+# make one of those decisions silently by making the other.
+#
+# It is a declared constant rather than an argument with a default because a
+# preservation audit's evidence depends on it, and a deflection nobody wrote down
+# is a measurement nobody can reproduce. Callers that record evidence put the
+# values on the receipt.
+BREP_READ_LINEAR_DEFLECTION = 0.01
+BREP_READ_ANGULAR_DEFLECTION = 0.1
 
-    OCC represents a face with no usable triangulation as a null polygon. The
-    later exporter error usually says only ``NoneType has no attribute`` and
-    leaves the author guessing which of many faces is responsible. Probe each
-    face through the same public tessellation API and retain its index, type and
-    centre when available so the defective surface can be repaired.
+
+@dataclass(frozen=True)
+class BrepTessellation:
+    """One reading of a B-rep as triangles, with what it could not read.
+
+    ``failures`` is the point of the type. A B-rep with a face OCC cannot
+    triangulate still yields triangles for every other face, and a caller that
+    took those and said nothing would be measuring a part with holes in it while
+    reporting on the part. So the incomplete reading is *returned* rather than
+    thrown away, and every caller has to decide in the open what to do with a
+    partial one.
+    """
+
+    faces: int
+    tessellated: int
+    failures: tuple[str, ...]
+    linear_deflection: float
+    angular_deflection: float
+    vertices: Any = None
+    triangles: Any = None
+
+    @property
+    def complete(self) -> bool:
+        return not self.failures
+
+    def as_dict(self) -> dict[str, Any]:
+        """Receipt-shaped: what was read and how, never the arrays."""
+        return {
+            "method": "OCC per-face triangulation through build123d",
+            "linear_deflection": self.linear_deflection,
+            "angular_deflection": self.angular_deflection,
+            "faces": self.faces,
+            "tessellated_faces": self.tessellated,
+            "untessellatable_faces": len(self.failures),
+            "failures": list(self.failures),
+        }
+
+    def summary(self) -> str:
+        return ("B-rep tessellation failed for affected face(s): "
+                + "; ".join(self.failures)
+                + ". Repair or remove the named face(s) before export.")
+
+    def mesh(self) -> trimesh.Trimesh:
+        """The triangles as a mesh, coincident vertices merged.
+
+        Per-face tessellation emits its own vertex block per face, so the seams
+        are duplicated points at identical coordinates until they are merged.
+        The merge is the parse, exactly as it is for an STL.
+        """
+        if self.vertices is None or self.triangles is None:
+            raise ValueError("this tessellation kept no geometry")
+        return trimesh.Trimesh(vertices=np.asarray(self.vertices, dtype=np.float64),
+                               faces=np.asarray(self.triangles, dtype=np.int64),
+                               process=True)
+
+
+def tessellate_brep(shape: Any, *, tolerance: float, angular_tolerance: float,
+                    keep_geometry: bool = False) -> BrepTessellation:
+    """Probe every face of a B-rep through the public tessellation API.
+
+    OCC represents a face with no usable triangulation as a null polygon, and
+    ``Shape.tessellate`` over the whole shape dies on the first one with
+    ``NoneType has no attribute NbNodes`` -- which names no face. Going face by
+    face keeps the index, the surface type and the centre of each one that fails,
+    so the defective surface can be found.
+
+    The whole shape is meshed first where the object supports it, because OCC
+    discretizes a shared edge once per shape: meshing each face in isolation
+    gives neighbouring faces different edge polygons and a mesh full of cracks.
+    ``Shape.mesh`` is a no-op when a triangulation of adequate deflection already
+    exists, so the per-face calls below reuse that one pass.
     """
     faces_method = getattr(shape, "faces", None)
     if not callable(faces_method):
-        return
+        return BrepTessellation(0, 0, (), tolerance, angular_tolerance)
+
+    mesh_method = getattr(shape, "mesh", None)
+    if callable(mesh_method):
+        try:
+            mesh_method(tolerance, angular_tolerance)
+        except Exception:  # noqa: BLE001 - a shape-wide pass that fails is not the
+            pass          # finding; the per-face probe below is, and it still runs
+
     try:
         faces = list(faces_method())
     except Exception as exc:  # noqa: BLE001 - converted to actionable geometry error
         raise ValueError(f"B-rep tessellation could not enumerate faces: {exc}") from exc
 
     failures: list[str] = []
+    points: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    tessellated = 0
     for index, face in enumerate(faces):
         label = f"face {index}"
         geom_type = getattr(face, "geom_type", None)
@@ -134,20 +221,58 @@ def validate_brep_tessellation(shape: Any, *, tolerance: float,
         try:
             if not callable(tessellate):
                 raise ValueError("face has no tessellate() method")
-            vertices, triangles = tessellate(tolerance, angular_tolerance)
-            if vertices is None or triangles is None:
+            vertices, faceted = tessellate(tolerance, angular_tolerance)
+            if vertices is None or faceted is None:
                 raise ValueError("null triangulation")
-            if len(vertices) == 0 or len(triangles) == 0:
+            if len(vertices) == 0 or len(faceted) == 0:
                 raise ValueError("empty triangulation")
         except Exception as exc:  # noqa: BLE001 - one report names all bad faces
             failures.append(f"{label}: {exc}")
+            continue
+        tessellated += 1
+        if keep_geometry:
+            offset = len(points)
+            points.extend((float(v.X), float(v.Y), float(v.Z)) for v in vertices)
+            triangles.extend((a + offset, b + offset, c + offset)
+                             for a, b, c in faceted)
 
-    if failures:
-        raise ValueError(
-            "B-rep tessellation failed for affected face(s): "
-            + "; ".join(failures)
-            + ". Repair or remove the named face(s) before export."
-        )
+    return BrepTessellation(
+        faces=len(faces), tessellated=tessellated, failures=tuple(failures),
+        linear_deflection=tolerance, angular_deflection=angular_tolerance,
+        vertices=(np.asarray(points, dtype=np.float64).reshape(-1, 3)
+                  if keep_geometry else None),
+        triangles=(np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+                   if keep_geometry else None))
+
+
+def read_step(path, *, tolerance: float = BREP_READ_LINEAR_DEFLECTION,
+              angular_tolerance: float = BREP_READ_ANGULAR_DEFLECTION,
+              keep_geometry: bool = True) -> BrepTessellation:
+    """Import a STEP through the kernel this runtime already carries.
+
+    `build123d` is a core dependency and already reads STEP for diagnosis, so
+    this adds no packaging surface. The alternative -- letting `trimesh.load`
+    dispatch to `cascadio` -- would put a second OCC build in the process with
+    its own unit convention: measured on `vent_mount.step`, cascadio returns the
+    part in **metres** where this path returns millimetres, which is precisely
+    the silent unit substitution `ARCHITECTURE.md` section 12 forbids.
+
+    The import is function-local: `import build123d` costs about 10 s on this
+    machine, and a job that never touches a STEP must not pay it.
+    """
+    from build123d import import_step
+    return tessellate_brep(import_step(str(path)), tolerance=tolerance,
+                           angular_tolerance=angular_tolerance,
+                           keep_geometry=keep_geometry)
+
+
+def validate_brep_tessellation(shape: Any, *, tolerance: float,
+                               angular_tolerance: float) -> None:
+    """Fail with face-level diagnostics before a B-rep is exported."""
+    reading = tessellate_brep(shape, tolerance=tolerance,
+                              angular_tolerance=angular_tolerance)
+    if not reading.complete:
+        raise ValueError(reading.summary())
 
 
 def _degenerate_face_count(mesh: trimesh.Trimesh) -> int:

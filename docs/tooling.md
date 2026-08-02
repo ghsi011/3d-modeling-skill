@@ -443,7 +443,11 @@ silently fixed what it found would destroy the evidence that it needed fixing.
 | `RECONSTRUCTION_REQUIRED` | nothing here can be built on (exit 1) |
 
 Reported per format: body/component count, bbox, watertightness and winding for
-meshes, faces with no usable area for B-reps, degenerate faces, boundary edges
+meshes, faces with no usable area for B-reps, **faces no mesher can triangulate**
+for B-reps (`untessellatable_faces`, with each one named by index, surface type
+and centre under `tessellation`, at the deflection the probe used — area is not
+tessellability, and a STEP whose every face has a positive area can still be a
+file nothing downstream can turn into a mesh), degenerate faces, boundary edges
 (**read that field with [`docs/defects.md`](defects.md) D1 in hand: it currently
 counts every edge that is not shared by exactly two faces, so a non-manifold edge
 is reported as a boundary edge and a repairer is pointed at hole-filling that
@@ -743,6 +747,12 @@ the receipts are on disk, and the lane is not allowed to certify its own result.
 The two are different — a named stage of ADR 0002 lifts the first and nothing
 lifts the second, so a reader who cannot tell them apart either waits forever or
 gives up too early. `lane_status` and the `reasons` list say which lane and why.
+
+**A refused part and an instrument that never measured are different sentences.**
+`unavailable_checks` lists every declared check that could not run, with its
+`error_code` and the reason, and `allowed_claim` names them in words too — so
+"the audit could not read your primary source" cannot be read as "a reviewer
+rejected your part". Only one of those is anything the user did.
 
 ## `design-tool selftest` — does this installation build what it certifies?
 

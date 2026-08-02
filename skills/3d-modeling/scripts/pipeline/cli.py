@@ -647,44 +647,78 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
 
     A job may modify more than one artifact, and then the ceiling is the sum of
     what each of them already had -- the candidate carries all of them, so the
-    downward-facing area it inherits is all of theirs. One unmeasurable artifact
-    drops the whole allowance back to the generated zero rather than crediting
-    the part with only the artifacts that happened to read: a partial sum is a
-    ceiling nobody measured.
+    downward-facing area it inherits is all of theirs.
+
+    **Per source, not all or nothing.** This used to return `None` -- the
+    generated zero -- if *any* declared source could not be read, on the argument
+    that a partial sum is a ceiling nobody measured. The vent-ball run showed what
+    that costs: one source was a STEP the audit could not open, so the allowance
+    the candidate was entitled to inherit from the *readable* source went to zero
+    too, and the job failed `feature-plan-support-00` on 4,582.055 mm2 of overhang
+    it had inherited from the part it was told to preserve. That reads as a design
+    defect and was a missing importer.
+
+    The argument was also wrong on its own terms. A zero is no more measured than
+    a partial sum is -- it is *less* measured, and it is wrong in the direction
+    that fails a correct part. The sum over the sources that read is a real
+    measurement of real geometry and is a strict lower bound on what the candidate
+    legitimately inherits, so it cannot excuse an overhang the edit added. What it
+    cannot cover is the unread source's own share, and the note says so by name so
+    that a reader knows which part of the ceiling was measured and which was not.
+
+    `None` still means the generated zero, and now means what it says: not one
+    declared source could be measured, so there is no evidence to credit at all.
     """
     if not project.edit_scopes or project.source_mode != "MODIFY":
         return None
 
     measured: list[tuple[str, float]] = []
+    unmeasured: list[tuple[str, str]] = []
     for scope in project.edit_scopes:
         artifact = project.artifact(scope.artifact_id)
         if artifact is None:
-            return None
+            unmeasured.append((scope.artifact_id,
+                               "no source artifact carries this id"))
+            continue
         try:
             source = S.resolve_within(project_dir, artifact.path,
                                       what="edit source")
             if not source.is_file():
-                return None
+                unmeasured.append((artifact.path, "not on disk"))
+                continue
             from designer_toolkit import metrics as M
             area = float(M.overhang_area(
                 str(source),
                 threshold=float(rule.get("downward_normal_z_max", -0.73)),
                 bed_z=float(rule.get("bed_z_mm", 0.0))))
-        except Exception:                             # noqa: BLE001 - an
-            return None                               # unmeasurable source keeps
-                                                      # the generated zero
+        except Exception as exc:                      # noqa: BLE001 - one source
+            unmeasured.append((artifact.path,         # that cannot be read is a
+                               f"{type(exc).__name__}: {exc}"))   # named gap, not
+            continue                                  # the whole job's allowance
         measured.append((artifact.path, area))
 
+    if not measured:
+        return None
+
     total = sum(area for _, area in measured)
-    if len(measured) == 1:
+    if len(measured) == 1 and not unmeasured:
         path, area = measured[0]
         return area, (f"inherited from {path}, measured before the edit: "
                       f"{area:.3f} mm2 of the supplied artifact already faces "
                       "downward. The edit may not add to it.")
+
     detail = ", ".join(f"{path} {area:.3f} mm2" for path, area in measured)
-    return total, (f"inherited from {len(measured)} supplied artifacts, measured "
-                   f"before the edit: {total:.3f} mm2 already faces downward "
-                   f"({detail}). The edit may not add to it.")
+    why = (f"inherited from {len(measured)} of "
+           f"{len(measured) + len(unmeasured)} supplied artifacts, measured "
+           f"before the edit: {total:.3f} mm2 already faces downward "
+           f"({detail}). The edit may not add to it.")
+    if unmeasured:
+        gaps = ", ".join(f"{path} ({why_not})" for path, why_not in unmeasured)
+        why += (f" This ceiling is partial: {len(unmeasured)} declared source(s) "
+                f"could not be measured and contribute nothing to it -- {gaps}. "
+                "Overhang the candidate inherited from those is charged to the "
+                "edit, because nothing here can tell the two apart.")
+    return total, why
 
 
 def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,

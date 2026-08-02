@@ -6,6 +6,139 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — a STEP can be read, by the kernel that was already here (D13, D14)
+
+`preservation.audit` handed every source path to `trimesh.load`, which dispatches
+STEP to `cascadio`. `cascadio` is not in this runtime and is not in `uv.lock`, so
+**every** audit against a STEP source returned `UNMEASURABLE:
+ModuleNotFoundError: cascadio` — most CAD anybody supplies, the base of every
+`MODIFY` and `COMBINE` on one, and the primary source of the repository's only
+`PHYSICALLY_PROVEN` fixture.
+
+**`cascadio` was not added.** It was measured first, which is what settled it.
+`build123d` is already a core dependency and `diagnose` already reads STEP
+through it, so the choice was between one STEP reader and two — and the second
+one disagrees with the first about the file. On `vent_mount.step`, `cascadio`
+returns the part in **metres** where `build123d` returns millimetres, in 324
+disconnected bodies with 8,284 boundary edges against 10 and 1,854, and it still
+produces no triangles for the cone faces. A silent unit substitution is the first
+thing `ARCHITECTURE.md` §12 forbids of a backend swap, so 16 MiB of second OCC
+build would have bought a units defect and no capability.
+
+`mesh_io` gained the reading instead: `tessellate_brep` probes every face through
+the public tessellation API and **returns** what it could not read rather than
+throwing it away, and `read_step` is the one place a supplied B-rep becomes
+triangles. `validate_brep_tessellation` — which already existed and already named
+the faces OCC refuses — is now that function with a raise on the end, so there is
+one probe and not two. The deflection it reads at is a declared constant
+(`BREP_READ_LINEAR_DEFLECTION`, 0.01 mm) and travels onto the preservation
+receipt under `tessellation`, because two deflections are two meshes of one solid
+and therefore two measurements; a mesh file's read is a parse and records nothing,
+so no evidence digest moves for a job that never touched a B-rep.
+
+`diagnose` runs the same probe (D14). `vent_mount.step` was `USABLE_EXACT` with
+no findings and then killed the first operation that needed geometry with
+`'NoneType' object has no attribute 'NbNodes'`. The old test was face *area*, and
+area is not tessellability: all 329 faces have finite positive area — one of them
+is 1.75e-14 mm², which is small and is not zero — so `invalid_faces` was 0 and
+would have stayed 0 however the check was tightened. It now reports
+`untessellatable_faces`, names each one with its surface type and centre, and
+classifies `REPAIR_REQUIRED`.
+
+The file itself is still untessellatable, and that is now [D22](docs/defects.md)
+rather than a clean verdict: **six** cone faces, not the four D14 recorded, plus
+a seventh face that fails when the shape has not been meshed as a whole first.
+The audit refuses on it and names them, rather than measuring a surface with six
+holes in it and reporting a distance to geometry that is missing rather than
+moved.
+
+A source that parses to zero triangles is refused the same way. `trimesh.load`
+turns a file that is not an STL at all into an empty mesh rather than raising, and
+an empty mesh reached the distance query as an r-tree over nothing —
+`ValueError: Bounds must be (n, dimension * 2)`, raised out of the audit, out of
+the check and out of the run as a stage failure with no row and no receipt.
+
+### Fixed — the preservation audit runs under a declared ceiling (D16, D19)
+
+Measured on the vent-ball pair, unbatched, on this machine: **23.24 GiB peak
+working set, 91.18 GiB peak page file, and it does not finish** — 334 s in,
+`MemoryError: Unable to allocate 2.47 GiB for an array with shape
+(331606963,)`. The reported field failure was the same shape at
+`(210081703,)`, and it killed one invocation in eleven while the other ten
+completed. Determinism of the *answer* was achieved in the previous release;
+determinism of *completing* was not, and Release 1 exists so that an unchanged
+job can be rerun and resumed.
+
+The 210 million was never mysterious. `trimesh.proximity.nearby_faces` uses the
+distance to the nearest *vertex* as its query radius, so a sample 60 mm from a
+20 mm part asks the r-tree for everything inside a 60 mm box: all 7,056 faces came
+back for all 20,000 points in one direction, and a mean of 16,583 of 19,522 in the
+other. At a measured 350 bytes of working set per (point, face) pair — flat to
+four significant figures across a 70x range of query sizes and two meshes — that
+is the whole of the 23 GiB.
+
+`audit` now takes `memory_ceiling_bytes`, declared at 2 GiB, and derives the
+query batch from it: `ceiling / (faces x WORKING_BYTES_PER_CANDIDATE)`, with the
+per-candidate cost declared above the measurement at 384 bytes because a ceiling
+computed from an optimistic cost is not a ceiling. Both directions' batches are
+settled before either runs, so a job too big for its ceiling is refused with the
+arithmetic in the reason and nothing allocated — not discovered halfway through
+with one direction's numbers already written.
+
+**The ceiling bounds execution and does not touch the measurement.** Splitting
+the query is exact: `closest_point` computes every point independently — the
+candidate lookup, the per-row triangle distance and the two-best tie-break are all
+per query point — so a batched run returns the same float64 values as an
+unbatched one. `signed_distance` is still the call being made, even though the
+sign is discarded one line later, so that "byte-identical to today" is a fact
+rather than an argument about when `np.sign` returns zero. The ceiling is
+deliberately **not** in the sample plan or the evidence: binding a review answer
+to a machine's memory budget would expire that answer when the job was rerun
+somewhere smaller, having measured the same thing.
+
+Same fixture, same region, under the 2 GiB ceiling: **2.16 GiB peak working set,
+3.61 GiB page file, 200 s, and it completes.** 10.8x less resident, 25x less page
+file, 1.7x faster than the run that died.
+
+### Fixed — an unreadable source no longer zeroes the allowance for the readable one (D18)
+
+`cli._inherited_overhang` returned `None` — the generated zero — if *any*
+declared source could not be measured. On the vent-ball run one source was the
+STEP above, so the allowance the candidate was entitled to inherit from the
+readable source went to zero with it, and the job failed
+`feature-plan-support-00` on 4,582.055 mm² of overhang **it had inherited from the
+part it was told to preserve**. A contract failure caused entirely by a missing
+importer, reading like a design defect.
+
+The old argument was that a partial sum is a ceiling nobody measured. A zero is
+not more measured than a partial sum — it is less measured, and it is wrong in
+the direction that fails a correct part. The sum over the sources that read is a
+strict lower bound on what the candidate legitimately inherits, so it cannot
+excuse an overhang the edit added; what it cannot cover is the unread source's own
+share, and the provenance note now says which sources were measured, which were
+not, why not, and that the ceiling is therefore partial. `None` still means the
+generated zero and now means only what it says: not one declared source could be
+measured.
+
+### Fixed — the verdict a user reads names the check that never ran (D20)
+
+`commission_report.json` kept the distinction perfectly — `ran: false`,
+`status: UNAVAILABLE`, `measured: null`, `result: ESCALATE`,
+`error_code: PRESERVATION_UNMEASURABLE`, the exception as its reason, beside a
+sibling row reading `ran: true / MEASURED` — and carried it nowhere.
+`final_status.json` said "rejected by independent verification" and the CLI
+summary line said the same, so a user who did not open the commission report
+learned that a reviewer had refused their part rather than that the tool had never
+read their primary source. Those call for different actions and only one of them
+is the user's fault.
+
+`status.decide` now collects every `UNAVAILABLE` check into `unavailable_checks`
+and appends them to `allowed_claim`, after the lane cap, because a rejection, a
+failure and a capped success can each sit beside an instrument that never
+measured. `design-tool status` and the end-of-run summary both print
+`allowed_claim`, so the sentence cannot drift from the receipt. A run with nothing
+unavailable is unchanged, and the frozen `DIRECT` claims are untouched.
+
 ### Added — a second formulation of the same job, isolated on disk and in the receipts
 
 `design-tool branch <project> --from <alt|.> --id <name> --reason "<text>"` is one

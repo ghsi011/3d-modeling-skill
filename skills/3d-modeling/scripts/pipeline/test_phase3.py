@@ -583,6 +583,220 @@ class PreservationTest(unittest.TestCase):
                              "the right to read it as a statement about geometry")
 
 
+class StepSourceTest(unittest.TestCase):
+    """D13. A STEP source produces a preservation verdict, not an import error.
+
+    `preservation.audit` handed every path to `trimesh.load`, which dispatches
+    STEP to `cascadio` -- not in this runtime -- so any MODIFY or COMBINE whose
+    base was a STEP came back `UNMEASURABLE: ModuleNotFoundError: cascadio`. That
+    is most CAD anybody supplies, and it is the repository's only
+    `PHYSICALLY_PROVEN` fixture's primary source.
+
+    The build is done here with `build123d` rather than with a checked-in STEP so
+    that the test asserts the reading path end to end -- kernel import,
+    tessellation, canonical ordering, sampling -- on a file this test wrote.
+    """
+
+    def _sound_step(self, root: Path) -> tuple[Path, Path]:
+        from build123d import Box, Cylinder, Location, export_step, export_stl
+
+        source_path = root / "plate.step"
+        block = Box(40.0, 30.0, 10.0)
+        export_step(block, str(source_path))
+
+        candidate_path = root / "candidate.stl"
+        pocket = Cylinder(radius=4.0, height=8.0).moved(Location((0.0, 0.0, 3.0)))
+        export_stl(block - pocket, str(candidate_path),
+                   tolerance=0.01, angular_tolerance=0.1)
+        return source_path, candidate_path
+
+    def _region(self) -> PR.Region:
+        return PR.Region((-6.0, -6.0, -2.0), (6.0, 6.0, 6.0), 0.5)
+
+    def test_a_step_source_is_measured_rather_than_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._sound_step(Path(raw))
+            report = PR.audit(source_path=source_path,
+                              candidate_path=candidate_path, region=self._region())
+            self.assertIn(report["verdict"],
+                          ("PRESERVED_WITHIN_TOLERANCE", "CHANGED"),
+                          f"a readable STEP must reach a measurement: "
+                          f"{report.get('reason')}")
+            self.assertGreater(report["samples_outside_region"], 0)
+            self.assertNotIn("cascadio", json.dumps(report))
+
+    def test_the_report_says_how_the_brep_was_read(self) -> None:
+        """A tessellation is a measurement parameter; a parse is not.
+
+        Two deflections give two different meshes of one solid and therefore two
+        different distances, so the deflection travels on the evidence -- and only
+        for the side that actually had to be tessellated, because a key that
+        appeared on every report to announce that nothing happened would move
+        every evidence digest ever taken.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._sound_step(Path(raw))
+            report = PR.audit(source_path=source_path,
+                              candidate_path=candidate_path, region=self._region())
+            reading = report["tessellation"]["source"]
+            self.assertNotIn("candidate", report["tessellation"],
+                             "the candidate is an STL; reading it is a parse")
+            self.assertEqual(6, reading["faces"])
+            self.assertEqual(6, reading["tessellated_faces"])
+            self.assertEqual(0, reading["untessellatable_faces"])
+            self.assertEqual(0.01, reading["linear_deflection"])
+
+    def test_a_step_no_mesher_can_read_is_named_rather_than_measured(self) -> None:
+        """Fail closed on the file `diagnose` now calls `REPAIR_REQUIRED`.
+
+        Dropping the faces OCC cannot triangulate would leave an open surface,
+        and `signed_distance` against an open surface reports a distance to
+        geometry that is missing rather than to geometry that moved. The audit
+        refuses and names the faces.
+        """
+        import mesh_io
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source_path, candidate_path = self._sound_step(root)
+            broken = root / "broken.step"
+            broken.write_bytes(source_path.read_bytes())
+
+            def unreadable(path, **kwargs):
+                _ = kwargs
+                if Path(path).name == "broken.step":
+                    return mesh_io.BrepTessellation(
+                        faces=329, tessellated=323,
+                        failures=("face 93 (GeomType.CONE): null triangulation",),
+                        linear_deflection=0.01, angular_deflection=0.1)
+                return original(path, **kwargs)
+
+            original = mesh_io.read_step
+            mesh_io.read_step = unreadable
+            try:
+                report = PR.audit(source_path=broken,
+                                  candidate_path=candidate_path,
+                                  region=self._region())
+            finally:
+                mesh_io.read_step = original
+
+            self.assertEqual("UNMEASURABLE", report["verdict"])
+            self.assertIn("BrepUnreadable", report["reason"])
+            self.assertIn("face 93", report["reason"])
+            self.assertIn("CONE", report["reason"])
+
+
+class MemoryCeilingTest(unittest.TestCase):
+    """D19. The audit refuses before allocating rather than racing the allocator.
+
+    Measured on the vent-ball pair: 22.4 GB peak working set, 39.74 GB page file,
+    free RAM at 0-1.5 GB throughout, and **one of eleven identical invocations**
+    died with `MemoryError: Unable to allocate 1.57 GiB for an array with shape
+    (210081703,)`. It failed controllably and the retry succeeded, which is
+    precisely the problem: the same unchanged job produced two different outcomes,
+    and Release 1 exists so that an unchanged job can be rerun and resumed.
+
+    The 210 million is not a mystery. `trimesh.proximity.nearby_faces` uses the
+    distance to the nearest *vertex* as its query radius, so a sample 60 mm from a
+    20 mm part asks the r-tree for everything inside a 60 mm box: measured on that
+    pair, all 7,056 faces came back for all 20,000 points in one direction, and a
+    mean of 16,583 of 19,522 in the other.
+    """
+
+    def _pair(self, root: Path) -> tuple[Path, Path]:
+        source_path = root / "bracket.stl"
+        source = _vent_mount()
+        source.export(source_path)
+        ball = trimesh.creation.icosphere(radius=BALL_D / 2.0, subdivisions=3)
+        ball.apply_translation((*VENT_MOUNT_BOSS, 20.0))
+        candidate_path = root / "candidate.stl"
+        trimesh.boolean.difference([source, ball], engine="manifold").export(
+            candidate_path)
+        return source_path, candidate_path
+
+    def test_a_ceiling_below_one_query_point_refuses_before_allocating(self) -> None:
+        """The property is a refusal, not a survived allocation.
+
+        A ceiling that only ever *bounds* is untestable in the way that matters:
+        the assertion would be about a peak nobody can observe from inside the
+        process. This declares a ceiling that one point against this target cannot
+        fit and asserts the verdict, the arithmetic, and that nothing was
+        allocated.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._pair(Path(raw))
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            report = PR.audit(source_path=source_path,
+                              candidate_path=candidate_path, region=region,
+                              memory_ceiling_bytes=1024)
+            self.assertEqual("UNMEASURABLE", report["verdict"])
+            self.assertIn("MemoryCeilingExceeded", report["reason"])
+            self.assertIn("1024", report["reason"])
+            self.assertIn("nothing has been allocated", report["reason"])
+            self.assertNotIn("max_deviation_mm", report,
+                             "a refusal must not carry half a measurement")
+            self.assertNotIn("directions", report)
+
+    def test_the_refusal_is_taken_before_either_direction_runs(self) -> None:
+        """Both batch sizes are settled first.
+
+        A ceiling checked per direction would let the first direction run, write
+        its numbers, and then refuse -- a partial answer with a verdict attached,
+        which is worse than no answer.
+        """
+        with self.assertRaises(PR.MemoryCeilingExceeded) as caught:
+            PR._query_batch(50_000, 1024)
+        self.assertIn("50000", str(caught.exception))
+
+    def test_the_ceiling_bounds_the_batch_without_moving_the_evidence(self) -> None:
+        """The whole claim: bounded memory, byte-identical answer.
+
+        `closest_point` computes every query point independently -- the candidate
+        lookup, the per-row triangle distance and the two-best tie-break are all
+        per point -- so splitting the query changes the peak and not one float.
+        If this ever fails, the batching has stopped being exact and the fix is
+        not to re-pin the evidence.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            source_path, candidate_path = self._pair(Path(raw))
+            region = PR.Region.from_declaration(_edit_scope().region_box)
+            unbounded = PR.audit(source_path=source_path,
+                                 candidate_path=candidate_path, region=region,
+                                 memory_ceiling_bytes=PR.DEFAULT_MEMORY_CEILING_BYTES)
+            # Small enough to force many batches on a target of this size, and
+            # large enough that one point still fits.
+            bounded = PR.audit(source_path=source_path,
+                               candidate_path=candidate_path, region=region,
+                               memory_ceiling_bytes=8 * 1024 * 1024)
+            self.assertEqual("PRESERVED_WITHIN_TOLERANCE", unbounded["verdict"])
+            self.assertEqual(S.canonical_json(unbounded), S.canonical_json(bounded))
+
+    def test_the_batch_is_derived_from_the_declared_ceiling(self) -> None:
+        """Halve the budget, halve the batch. The ceiling is the input, not a hint."""
+        faces = 10_000
+        big = PR._query_batch(faces, 64 * 1024 * 1024)
+        small = PR._query_batch(faces, 32 * 1024 * 1024)
+        # Floor division, so the halved budget gives the halved batch to within
+        # the one point the truncation costs.
+        self.assertIn(big - 2 * small, (0, 1), f"{big} against 2 x {small}")
+        for batch, budget in ((big, 64 * 1024 * 1024), (small, 32 * 1024 * 1024)):
+            self.assertLessEqual(
+                batch * faces * PR.WORKING_BYTES_PER_CANDIDATE, budget,
+                "the worst case a batch can reach has to fit the budget it "
+                "came from")
+
+    def test_the_default_ceiling_is_declared_rather_than_discovered(self) -> None:
+        """ARCHITECTURE section 12 wants an explicit limit, not the machine's.
+
+        A limit read off whatever happened to be free would reproduce exactly the
+        run-to-run variability this exists to remove.
+        """
+        self.assertEqual(2 * 1024 ** 3, PR.DEFAULT_MEMORY_CEILING_BYTES)
+        self.assertGreater(PR.WORKING_BYTES_PER_CANDIDATE, 350,
+                           "the declared per-candidate cost must not sit below "
+                           "the 350.1-350.3 bytes measured on the vent-ball pair")
+
+
 class DeterministicEvidenceTest(unittest.TestCase):
     """The audit is a function of the pair it compares, and of nothing else.
 
@@ -696,9 +910,11 @@ class DeterministicEvidenceTest(unittest.TestCase):
             reordered = root / "reordered.stl"
             shuffled.export(reordered)
 
-            raw_mesh = PR._load(plain)
+            raw_mesh, record = PR._load(plain)
+            self.assertIsNone(record, "a mesh file's read is a parse and has no "
+                                      "tessellation to declare")
             first = PR._ordered(raw_mesh)
-            second = PR._ordered(PR._load(reordered))
+            second = PR._ordered(PR._load(reordered)[0])
             np.testing.assert_array_equal(first.faces, second.faces)
             np.testing.assert_allclose(first.vertices, second.vertices)
             # Against the mesh as read, not against the other ordered copy: two
@@ -827,6 +1043,109 @@ class ModifyLaneTest(unittest.TestCase):
             self.assertEqual("ESCALATE", check.result)
             self.assertEqual("SOURCE_MISSING", check.error_code)
             self.assertEqual("UNAVAILABLE", check.status)
+
+
+class UnreadableSourceIsNamedInTheVerdictTest(unittest.TestCase):
+    """D20. "Rejected" and "we could not read your file" are different sentences.
+
+    `commission_report.json` kept the distinction perfectly -- `ran: false`,
+    `status: UNAVAILABLE`, `measured: null`, `result: ESCALATE`,
+    `error_code: PRESERVATION_UNMEASURABLE`, the exception as its reason, beside a
+    sibling row reading `ran: true / MEASURED`. Nothing collapsed them in that
+    JSON, and nothing carried them out of it: `final_status.json` and the CLI
+    summary line each said only what the verdict was. A user who did not open the
+    commission report learned that their part had been refused, not that the tool
+    had never read their primary source. Only one of those is their fault, and
+    they call for different actions.
+
+    A second declared source that is on disk and is not geometry is the whole
+    setup. `_load` raises, the audit reports `UNMEASURABLE`, and the row escalates
+    exactly as an unreadable STEP did.
+    """
+
+    def _project(self) -> P.Project:
+        return _modify_project(
+            source_artifacts=(
+                P.SourceArtifact(artifact_id="bracket", path="bracket.stl",
+                                 format="STL", classification="USABLE_MESH"),
+                P.SourceArtifact(artifact_id="rail", path="rail.stl",
+                                 format="STL", classification="USABLE_MESH")),
+            edit_scopes=(
+                _edit_scope(),
+                P.EditScope(artifact_id="rail", region="the rail seat",
+                            region_box={"min": [0.0, 0.0, 0.0],
+                                        "max": [4.0, 4.0, 4.0]},
+                            preserve=("the rail",))))
+
+    def _run(self, root: Path) -> tuple[Path, dict]:
+        directory = _laid_out(root, MODIFIER, self._project())
+        # On disk, declared, and not geometry. The audit finds the file where the
+        # scope said it would be and then cannot make a surface out of it, which
+        # is the shape an unreadable STEP had.
+        (directory / "rail.stl").write_bytes(b"this is not a mesh\n" * 8)
+        cli.run([str(directory), "--no-render"])
+        return directory, json.loads(
+            (directory / "final_status.json").read_text(encoding="utf-8"))
+
+    def test_the_check_row_still_records_it_precisely(self) -> None:
+        """The half that already worked, asserted so the fix cannot cost it."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory, _ = self._run(Path(raw))
+            checks = {c["check_id"]: c for c in json.loads(
+                (directory / "commission_report.json").read_text(encoding="utf-8")
+            )["checks"]}
+            unreadable = checks["feature-preservation-rail"]
+            self.assertFalse(unreadable["ran"])
+            self.assertEqual("UNAVAILABLE", unreadable["status"])
+            self.assertIsNone(unreadable["measured"])
+            self.assertEqual("PRESERVATION_UNMEASURABLE", unreadable["error_code"])
+            self.assertEqual("ESCALATE", unreadable["result"])
+            self.assertTrue(checks["feature-preservation-bracket"]["ran"],
+                            "the readable source must still be measured; one "
+                            "unreadable sibling is not a reason to stop")
+
+    def test_the_final_status_names_the_check_that_never_ran(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            _, final = self._run(Path(raw))
+            self.assertIn("feature-preservation-rail", final["allowed_claim"])
+            self.assertIn("PRESERVATION_UNMEASURABLE", final["allowed_claim"])
+            self.assertIn("not a finding about the part", final["allowed_claim"],
+                          "the claim has to separate an instrument that failed "
+                          "from a part that did")
+
+    def test_the_structured_field_is_there_for_a_caller_that_reads_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            _, final = self._run(Path(raw))
+            rows = {row["check_id"]: row for row in final["unavailable_checks"]}
+            self.assertIn("feature-preservation-rail", rows)
+            self.assertEqual("PRESERVATION_UNMEASURABLE",
+                             rows["feature-preservation-rail"]["error_code"])
+            self.assertEqual("rail", rows["feature-preservation-rail"]["feature_id"]
+                             .removeprefix("preservation-"))
+
+    def test_the_summary_line_a_user_reads_carries_it_too(self) -> None:
+        """`design-tool` prints `allowed_claim`, so the two cannot drift apart."""
+        import io
+        import contextlib
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory, final = self._run(Path(raw))
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                cli.status([str(directory)])
+            printed = captured.getvalue()
+            self.assertIn("feature-preservation-rail", printed)
+            self.assertIn(final["allowed_claim"], printed)
+
+    def test_a_run_with_nothing_unavailable_says_nothing_extra(self) -> None:
+        """The sentence appears because a check failed, not on every receipt."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw), MODIFIER, _modify_project())
+            cli.run([str(directory), "--no-render"])
+            final = json.loads(
+                (directory / "final_status.json").read_text(encoding="utf-8"))
+            self.assertEqual([], final["unavailable_checks"])
+            self.assertNotIn("never ran", final["allowed_claim"])
 
 
 class ModifyReviewRoundTripTest(unittest.TestCase):

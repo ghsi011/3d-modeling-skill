@@ -233,41 +233,13 @@ correction is folded into row 1 above rather than carried as its own entry,
 because what it found was not a second defect — it was that this row was
 describing a property the boundary does not have.
 
-## D13 — `preservation.audit` cannot read a STEP at all
-
-**Where.** `pipeline/preservation.py`, the mesh load path.
-
-**What is wrong.** Loading a STEP raises `ModuleNotFoundError: cascadio`. The
-audit therefore cannot measure preservation against a STEP source under any
-circumstances.
-
-**Evidence.** Found by the first real run of the `vent-ball-combine` fixture
-through `design-tool`. That fixture's primary source is `vent_mount.step`, and it
-is the repository's only `PHYSICALLY_PROVEN` artifact.
-
-**What it can cause.** Every MODIFY or COMBINE job whose base is a STEP is
-unmeasurable, which is most CAD a user would supply. It also means `ROADMAP.md`
-Release 1's authentic exercise cannot complete as written: the job named to prove
-the gate has a source the instrument cannot read.
-
-**Fixture that must fail first.** A MODIFY job declaring a STEP source, asserted
-to produce a preservation verdict rather than an import error.
-
-## D14 — `diagnose` calls a STEP clean that cannot be tessellated
-
-**Where.** `pipeline/diagnose.py`, STEP path.
-
-**What is wrong.** `vent_mount.step` is reported usable. Four cone faces make it
-untessellatable downstream, so the file passes diagnosis and then fails the first
-operation that needs geometry.
-
-**What it can cause.** Diagnosis exists to say whether a source can be worked
-with. A clean verdict on a file nothing can tessellate is the exact failure
-diagnosis is for, and it moves the error to a stage with less context to explain
-it.
-
-**Fixture that must fail first.** That STEP, asserted to report the untessellatable
-faces.
+D13 and D14 were here and are closed, and so are D16, D18, D19 and D20;
+`CHANGELOG.md` has all six. D14 leaves one thing behind that is worth writing
+down: its own description was wrong about the file. `vent_mount.step` has **six**
+cone faces OCC cannot triangulate, not four, plus a seventh — a plane of
+1.75e-14 mm² — that fails the same way when the shape has not been meshed as a
+whole first. The diagnosis was right and the count was not, and the artifact is
+still untessellatable, which is [D22](#d22--the-vent-mounts-cone-faces-are-still-untessellatable).
 
 ## D15 — `orientation` is declared, validated, frozen, and read by nothing
 
@@ -285,21 +257,6 @@ it. Overhang, bridging and strength direction are all orientation-dependent.
 **Fixture that must fail first.** Two contracts differing only in orientation,
 asserted to produce different assessments.
 
-## D16 — the preservation audit peaked at 16.7 GB resident
-
-**Where.** `pipeline/preservation.audit` on real geometry.
-
-**What is wrong.** Measured during the vent-ball run. There is no resource bound
-on the audit; `ROADMAP.md` section 2 already records that no resource governor
-exists, and this is the first measurement of what that costs.
-
-**What it can cause.** A large source can exhaust the machine rather than fail
-controllably. `ARCHITECTURE.md` section 12 requires geometry execution to operate
-under explicit limits and fail diagnosably.
-
-**Fixture that must fail first.** An audit against a declared memory ceiling,
-asserted to refuse rather than allocate past it.
-
 ## D17 — a successful `route` leaves a stale `next_action.json`
 
 **Where.** `pipeline/cli.py`, the `route` verb.
@@ -314,69 +271,6 @@ carries no run id, no sequence and no self-digest.
 
 **Fixture that must fail first.** `init` then `route`, asserting the next action
 names the state after routing.
-
-## D18 — one unreadable source zeroes the inherited-overhang allowance for all of them
-
-**Where.** `cli._inherited_overhang`.
-
-**What is wrong.** It returns `None` if *any* source cannot be measured. On a
-two-source job where one source is a STEP (D13), the allowance the candidate is
-entitled to inherit from the *readable* source is zeroed too.
-
-**Evidence.** The vent-ball run: the candidate failed
-`feature-plan-support-00` with 4582.055 mm² of overhang **it inherited from the
-source it was told to preserve**. That is a contract failure caused entirely by a
-missing importer, and it reads like a design defect.
-
-**What it can cause.** D13 produces a second, misattributed failure. A user
-debugging the overhang would be debugging geometry that was never wrong.
-
-**Fixture that must fail first.** A two-source job with one unreadable source,
-asserted to inherit the readable source's allowance and to report the other as
-unmeasured.
-
-## D19 — the audit is not reliably completable on real geometry
-
-**Where.** `pipeline/preservation.audit`. Supersedes D16's severity.
-
-**What is wrong.** Measured on the vent-ball fixture: 22.4 GB peak working set,
-23.49 GB across processes, 39.74 GB page file, free RAM at 0–1.5 GB throughout.
-**One of eleven identical invocations died** with
-`MemoryError: Unable to allocate 1.57 GiB for an array with shape (210081703,)`.
-
-It failed controllably — `BLOCKED`, receipt written — and the retry succeeded.
-That is the problem: the same unchanged job produced two different outcomes.
-Determinism of the *answer* is achieved; determinism of *completing* is not.
-
-**What it can cause.** A liveness defect, not a rigor one. Release 1 exists so
-that an unchanged job can be rerun and resumed; a job that completes on ten
-attempts out of eleven cannot be relied on to do that, and the failure rate
-scales with source size.
-
-**Fixture that must fail first.** An audit under a declared memory ceiling,
-asserted to refuse before allocating past it rather than to race the allocator.
-
-## D20 — the user-facing verdict does not say the source was unreadable
-
-**Where.** `final_status.json` and the CLI summary line.
-
-**What is wrong.** The check row keeps the distinction cleanly —
-`ran: false`, `status: UNAVAILABLE`, `measured: null`, `result: ESCALATE`,
-`error_code: PRESERVATION_UNMEASURABLE`, with the `ModuleNotFoundError` as its
-reason, beside a sibling row reading `ran: true / MEASURED / FAIL / CHANGED`.
-Nothing collapses them **in that JSON**.
-
-The distinction stops there. `final_status.json` says only "rejected by
-independent verification", and the CLI summary says the same. A user who does not
-open `commission_report.json` learns that a reviewer rejected their part, not
-that the tool could not read their primary source.
-
-**What it can cause.** "Your part changed" and "the instrument cannot read your
-primary source" demand different actions from the user, and only one of them is
-their fault.
-
-**Fixture that must fail first.** A run with an unmeasurable source, asserted to
-name that in the final status and in the summary line.
 
 ## D21 — a lane cap that only downgrades a passing verdict
 
@@ -396,3 +290,33 @@ qualifier.
 **Fixture that must fail first.** An edit-scope job that fails commissioning,
 asserted to report both the failure and the lane's unavailability rather than one
 of them.
+
+## D22 — the vent mount's cone faces are still untessellatable
+
+**Where.** `benchmarks/fixtures/vent-ball-combine/public/sources/vent_mount.step`,
+and therefore `ROADMAP.md` Release 1's authentic exercise.
+
+**What is wrong.** Not a code defect — a source-artifact one, recorded here
+because D13's closure does not close it and a reader would otherwise assume it
+did. `preservation.audit` and `diagnose` can both read a STEP now, and this
+particular STEP still has six `GeomAbs_Cone` faces that OCC produces no
+triangulation for at any deflection tried (0.001 to 0.5 mm linear, 0.1 to 0.5 rad
+angular, relative and absolute). `diagnose` reports it `REPAIR_REQUIRED` and names
+the faces; the audit refuses and names them.
+
+**Evidence.** `tools/test_diagnosis_l0.py::L0UntessellatableStep`, which runs
+against the committed file. Also measured against `cascadio`, the alternative
+importer: it produces triangles for the file, in 324 disconnected bodies with
+8,284 boundary edges, and in **metres** — so it does not close this either.
+
+**What it can cause.** The repository's only `PHYSICALLY_PROVEN` fixture cannot
+be preserved against until this file is repaired or replaced. That is now a
+stated limitation with a named cause rather than a clean verdict followed by a
+crash, but Release 1's exercise still cannot use this source as its base.
+
+**What would close it.** A repair path (`ROADMAP.md` section 2 already records
+that there is none), or a re-export of the source from the CAD it came from. Both
+are outside a defect fix.
+
+**Fixture that must fail first.** `L0UntessellatableStep`, inverted: the same
+file asserted to tessellate completely.
