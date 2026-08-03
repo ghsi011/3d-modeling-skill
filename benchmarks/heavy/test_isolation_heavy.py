@@ -61,6 +61,7 @@ from pipeline.test_isolation import (  # noqa: E402
     _substitute,
     _unlink_quietly,
     requires_confinement,
+    requires_windows_confinement,
 )
 
 
@@ -553,6 +554,7 @@ class NoCandidateProseReachesAReviewerTest(_AttackTest):
                                  "quarantined declaration is one attribute away")
 
 @requires_confinement
+@requires_windows_confinement
 class WhatTheConfinementEnforcesTest(_AttackTest):
     """Every property this boundary claims, measured by the candidate itself.
 
@@ -769,6 +771,7 @@ class TheOutputsAreValidatedTest(unittest.TestCase):
             self._accept(f"../{isolation.STL_NAME}")
         self.assertFalse((self.dest / isolation.STL_NAME).is_file())
 
+    @requires_windows_confinement
     def test_an_alternate_data_stream_on_the_artifact_is_refused(self) -> None:
         target = self.build_dir / isolation.STL_NAME
         with open(f"{target}:payload", "w", encoding="utf-8") as handle:
@@ -880,8 +883,14 @@ class TheChildContractTest(unittest.TestCase):
         command = isolation.child_command(Path("C:/a project/in/build_input.json"))
         self.assertIsInstance(command, list)
         self.assertEqual(["-m", isolation.CHILD_MODULE], command[1:3])
-        self.assertTrue(command[0].endswith(("python.exe", "python", "python3",
-                                             "pythonw.exe")), command[0])
+        # A versioned name is a real interpreter name: `sys._base_executable`
+        # is `/usr/bin/python3.11` on this Linux runtime and `python.exe` on
+        # Windows. The property under test is that the *base* interpreter is
+        # named rather than the virtual environment's trampoline (D12), and a
+        # suffix list that only knew Windows spellings asserted the platform
+        # instead of the property.
+        self.assertRegex(Path(command[0]).name,
+                         r"^python(w)?(\d+(\.\d+)*)?(\.exe)?$", command[0])
         # D12: never the virtual environment's `python.exe`, which is a launcher
         # that spawns the base interpreter -- and a child forbidden to create
         # processes cannot be started through one. Asserted against `sys.prefix`

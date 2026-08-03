@@ -86,6 +86,22 @@ requires_confinement = unittest.skipIf(
     f"the confined build boundary is not available here: "
     f"{confine.unavailable_reason()}")
 
+# A second gate, and the distinction it draws is the one that broke when the
+# boundary gained a second implementation. `requires_confinement` asks "is there
+# a boundary here", which is the right question for a test about what the
+# boundary *achieves* -- those run on both platforms and should. This one asks
+# "is this the Windows boundary", which is the right question for a test that
+# probes a restricted token, an integrity label or an NTFS stream: those measure
+# one implementation's mechanism, and on Linux they were skipping only because
+# no boundary existed at all. The moment one did they ran and failed against
+# `advapi32` being None. The Linux mechanisms have their own measurements in
+# `benchmarks/heavy/test_confine_posix_heavy.py`.
+requires_windows_confinement = unittest.skipUnless(
+    confine.WINDOWS and confine.available(),
+    "this measures a Windows confinement mechanism (restricted tokens, "
+    "integrity labels, NTFS streams); the Linux boundary's own mechanisms are "
+    "measured in benchmarks/heavy/test_confine_posix_heavy.py")
+
 # Every attack begins by reaching for the module it wants to rewrite. Written to
 # survive not finding one: in the child there is no reason for the acceptance
 # machinery to be imported at all, and a model that raised on a missing module

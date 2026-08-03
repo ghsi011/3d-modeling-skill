@@ -283,6 +283,44 @@ class TheSyscallFilterTest(unittest.TestCase):
                         "the syscall filter must be installed before the "
                         "candidate module is imported")
 
+@unittest.skipIf(REASON is not None, f"the Linux boundary is unavailable: {REASON}")
+class BytesAttachedToAnArtifactAreRefusedTest(unittest.TestCase):
+    """The Linux member of the class NTFS alternate data streams belong to.
+
+    `isolation._accept_artifact` refuses an artifact carrying a data stream,
+    because a stream is bytes that travel with the file and that no digest of
+    its *contents* can see. Windows has `candidate.stl:payload`; here the way to
+    hang bytes off a file invisibly is an extended attribute, and
+    `confine_posix.data_streams` reports them for the same reason.
+
+    Worth its own test rather than assumed from the Windows one: the claim in
+    `confine_posix`'s docstring is that xattrs are the honest analogue, and an
+    analogue nobody measured is exactly what D11 was.
+    """
+
+    def test_an_extended_attribute_on_the_artifact_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "candidate.stl"
+            target.write_bytes(b"solid candidate\nendsolid\n")
+            digest_before = target.read_bytes()
+
+            os.setxattr(target, "user.payload",
+                        b"a second stream a digest cannot see")
+
+            self.assertIn("user.payload", confine.data_streams(target),
+                          "the boundary must be able to see bytes attached to "
+                          "a file that reading the file does not reveal")
+            # And the point of the refusal: the contents are unchanged, so
+            # nothing that hashes the file would notice.
+            self.assertEqual(digest_before, target.read_bytes())
+
+    def test_a_clean_artifact_reports_none(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "candidate.stl"
+            target.write_bytes(b"solid candidate\nendsolid\n")
+            self.assertEqual([], confine.data_streams(target))
+
+
 
 if __name__ == "__main__":
     unittest.main()
