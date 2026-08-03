@@ -226,6 +226,8 @@ For all such work:
 
 A job that declares none of these things must cost exactly what it cost before the capability existed. That is a measurable claim, and the performance gate measures it.
 
+The same rule decides when an assessment gets a trigger, and it is written here because the alternative was tried and struck. Assessment today is 62–64% of a certified run and the confined build boundary is ten to twenty times that, so a registry that defers assessments would be optimising the wrong term; and the assessments worth deferring are *already* deferred, by the contract declaring the feature that requires them. So: the first release that introduces an assessment costing more than the build boundary builds its trigger then — and builds it **as** the contract, by declaring the feature that requires the assessment, rather than beside it as a second table of what to run. A separate registry is a second planning authority, which is the thing Release 10 exists to remove.
+
 ### 3.8 Separate architectural learning from project peculiarities
 
 After each release, classify discoveries as follows.
@@ -315,7 +317,17 @@ A test that only confirms a nominal verdict is insufficient when the underlying 
 * A job that declares no tolerance profile, no per-body material, and no operation plan shows no measured cost change.
 * Cold and warm costs are measured separately where imports dominate.
 * Cache behavior is measured rather than assumed.
-* Shared work is reused across alternatives.
+* Shared work is reused across alternatives. **This clause now fails, measured.**
+  On the recorded three-formulation `berlingo-knob` job, the fallback formulation
+  builds a candidate **byte-identical to its parent's** and costs 2.91 s against
+  the parent's 2.96 s — 98% of a solo job for the same bytes, with
+  `builds_avoided` zero. The cause is not the branching: `cache.key_for` is
+  content-addressed and the slot is `key.digest()`, so siblings collide on
+  nothing and share correctly *in principle*. It is that `runner.run` calls
+  `backend.build` **before** it looks the key up and never returns early, so a
+  hit confirms the bytes and saves nothing. Fixing it changes what every authored
+  job executes, so it wants its own slice rather than a patch here; recorded so
+  the clause is not read as unassessed.
 
 Provisional suite budgets on the reference machine:
 
@@ -351,6 +363,35 @@ A minute is a number a commit gate can hold and a person will wait for; five was
 a number this work could only have met by protecting nothing. What the heavy half
 costs is not thereby forgiven — it is 16 minutes, it runs before merge, and
 bringing it down is real work this does not do.
+
+**Read every wall-clock number here as a band, because this machine drifts.**
+Within a single session the same 867 tests at the same commit measured **43.3 s
+and then 76.9 s**, a factor of 1.78, and one change measured **+7.2 s, +10.5 s
+and +0.1 s** on three honest attempts minutes apart. The drift lands on sustained
+geometry and mesh computation and never touches import-bound work, which is
+consistent with clock throttling under vectorised load. So the gate figure is
+"about 45 s fast, about 90 s slow", and a timing that disagrees with a published
+one is not by itself evidence of a regression.
+
+Publish `design-tool selftest` beside any timing that matters, as a calibration
+figure: it moved 4.11 s → 5.80 s (1.41×) across the same drift that moved the
+suite 1.78×. It is already shipped, already run, already 11/11, so it costs
+nothing to record — but it **under-reports rather than cancels**, and a reader
+must not treat it as a correction factor.
+
+Two normalisers were tried and rejected on evidence, which is worth keeping so
+they are not tried again. A ratio to collection time **inverts** the answer:
+`--collect-only` went 2.5 s → 2.2 s across the same drift, so it would have
+reported a 1.78× slowdown as a 0.9× improvement. And a count of tests over a
+duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
+the slow regime and fewer do in the fast one.
+
+**So the enforceable half of this budget is not wall clock at all.** It is
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1050 against the 890 the gate
+collects — the aggregate a slow machine cannot move, beside the two guards that
+already bound the mechanisms which take a gate from 43 s to 997 s. The minute
+above stays as the *product* statement, because a person waits seconds and no
+ratio changes that.
 
 ### 4.5 Real-job gate
 
@@ -734,49 +775,64 @@ A change to any of the following invalidates its dependent results and nothing e
 
 Reassigning one body's material must not invalidate an assessment of an interface whose two sides are unchanged.
 
-*Capability-based execution*
+*Capability-based execution — moved to Release 10*
 
-Compile required capabilities such as:
+Compiling required work from declared capabilities rather than from a route name
+now belongs to Release 10, whose outcome already names "route-specific
+implementations replaced by capability composition" and "one planning authority".
 
-* source diagnosis;
-* original design;
-* alternative exploration;
-* imported modification;
-* combination;
-* external-object fitting;
-* evidence recovery;
-* motion;
-* manufacturing preparation;
-* independent judgment.
+The reason it moved is that the duplicate it was scoped to remove is not there.
+`route.py` answers what evidence and review obligations a job carries;
+`execution.py` answers what will be executed and what it may claim. That split
+was *created* by [ADR 0002](docs/adr/0002-route-and-contract-authority.md) to
+remove a real duplicate — the runner re-deriving the route, which once cost a
+`RECONSTRUCT` job routing `FITTED` and executing `DIRECT` with no metrologist and
+no verifier. After slices A–C there is one compiler and one consumer,
+`ExecutionPlan.__post_init__` makes a self-contradicting plan unrepresentable,
+and `dispatches_specification` is one compiled predicate that both the runner and
+the CLI's review wiring read. This is one authority in two stages, and it works.
 
-Existing route names may remain useful summaries, but required work is derived from capabilities.
+The cost of moving it is churn rather than seconds: planning is inside
+`timings["intent"]` at roughly 1–2% of a certified run, while
+`execution_plan_sha256` appears in 26 non-test lines across 8 production modules,
+is bound into every review envelope and into run identity
+([ADR 0004](docs/adr/0004-run-identity-is-content-derived.md)), 97 test
+assertions name a route literal, and all four replay cases pin `route` and
+`backend`. Release 1's proof list requires responses bound to "the relevant
+execution-plan identity"; Release 2's requires `DIRECT`'s dispatch count and
+runtime unchanged, which is a claim about a route by name.
 
-*Lazy assessment*
+Release 3 needs nothing from it: its exclusions already say route labels stay.
 
-Create one capability-triggered assessment registry.
+*Lazy assessment — struck, and not rescheduled*
 
-The inexpensive baseline covers:
+There is no capability-triggered assessment registry in this roadmap any more,
+and deliberately no release owns one.
 
-* parseability;
-* finite geometry;
-* units;
-* transforms;
-* non-empty output;
-* component structure;
-* bounding box;
-* build envelope;
-* topology characterization.
+The conditional half is **already deferred, through the right authority — the
+contract.** Of eleven checks, six are unconditional and five exist only because a
+feature was declared: a preservation row only with a declared edit scope, an
+overhang row only with a self-support rule, `fit_acceptance` only with a mapped
+interface — and `runner.run` refuses a contract carrying fewer preservation rows
+than the plan names. The one genuinely expensive conditional assessment, the
+preservation audit at about two seconds, is already triggered exactly that way.
 
-Additional assessments run only when triggered by:
+The largest unconditional item is the broad anomaly screen, whose entire purpose
+is to ask what no declared check asks. Putting it behind a trigger would defer
+the one assessment that is *not* conditioned on a declaration, which is backwards.
 
-* an interface;
-* edit intent;
-* motion;
-* manufacturing constraints;
-* evidence uncertainty;
-* consequence;
-* alternative comparison;
-* explicit user request.
+And the seconds are somewhere else. Assessment is 62–64% of a certified run —
+0.12 s of 0.19 s. The confined build boundary is 1.37–2.73 s per authored
+invocation, and repeated builds are 2 of 3 on the `MODIFY` round trip and 3 of 6
+on the branched job. Neither is an assessment, and a registry would not touch
+either.
+
+Building one now would **create** the duplicate planning authority Release 10 is
+scoped to remove, over a set of assessments that mostly do not exist, to save a
+fraction of 0.12 s. Section 3.7's rule covers what happens instead: the first
+release that introduces an assessment costing more than the build boundary —
+realistically Release 8's sweep engine or Release 4's comparative assessment —
+builds the trigger then, and builds it *as* the contract rather than beside it.
 
 *Context budget foundation*
 
