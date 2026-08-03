@@ -1453,7 +1453,7 @@ A supplied artifact classified `REPAIR_REQUIRED` currently ends the job: diagnos
 * an assessment resting on repaired geometry says so and says which region, per architecture sections 6.2 and 8.4;
 * a defect the available methods cannot fix is reported as a limitation, never narrowed until it passes.
 
-Repair also depends on diagnosis naming the right defect class, which is not free: a report that calls nine three-face edges and one four-face edge "boundary edges" points a repairer at hole-filling, which cannot work on any of them ([`docs/defects.md`](docs/defects.md) D1).
+Repair also depends on diagnosis naming the right defect class, which is not free: a report that calls nine three-face edges and one four-face edge "boundary edges" points a repairer at hole-filling, which cannot work on any of them ([`docs/defects.md`](docs/defects.md) D1). **That prerequisite is now met** — `diagnose` reports `boundary_edges`, `nonmanifold_edges`, `max_faces_per_edge` and the full per-edge distribution, and raises a separate finding for the class hole-filling cannot touch — so this release inherits a diagnosis it can dispatch on rather than one it would have to re-derive.
 
 *Certified export*
 
