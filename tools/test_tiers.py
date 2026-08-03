@@ -154,3 +154,36 @@ class TheHeavyTierIsRunBySomebodyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheAggregateCeilingTest(unittest.TestCase):
+    """The one tier guard a slow machine cannot move.
+
+    Wall clock cannot carry section 4.4's budget as a regression control: the
+    same 867 tests at one commit measured 43.3 s and 76.9 s in a single session.
+    Neither can a ratio to collection time -- collection went 2.5 s to 2.2 s
+    across that same drift, so it would have called a 1.78x slowdown a 0.9x
+    improvement. Nor a count of tests over a duration threshold, which counts
+    the machine: 40 tests exceed 0.5 s slow and fewer do fast. What is left is
+    how many tests there are.
+    """
+
+    def test_a_gate_inside_its_ceiling_is_not_complained_about(self) -> None:
+        self.assertIsNone(GATE.over_ceiling(GATE.L0_COLLECTED_CEILING))
+        self.assertIsNone(GATE.over_ceiling(1))
+
+    def test_a_gate_over_its_ceiling_says_what_to_do(self) -> None:
+        complaint = GATE.over_ceiling(GATE.L0_COLLECTED_CEILING + 1)
+        self.assertIsNotNone(complaint)
+        assert complaint is not None
+        self.assertIn(str(GATE.L0_COLLECTED_CEILING), complaint)
+        self.assertIn(GATE.HEAVY_ROOT, complaint)
+        self.assertIn("L0_COLLECTED_CEILING", complaint)
+
+    def test_the_ceiling_leaves_room_and_is_not_a_blank_cheque(self) -> None:
+        # Guards the number itself. Too tight and an ordinary release trips it;
+        # too loose and the mechanism that took the gate to 997 s returns unseen.
+        collected = 890  # what the gate held when the ceiling was set
+        headroom = GATE.L0_COLLECTED_CEILING - collected
+        self.assertGreater(headroom, 100, "no room for a release of fixtures")
+        self.assertLess(headroom, collected // 2, "that is not a ceiling")

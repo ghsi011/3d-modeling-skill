@@ -32,9 +32,29 @@ somebody remembers to apply. It is measured while the suite runs:
   screening corpus was 19 s a test without leaving the process. The slowest test
   left in L0 is 1.7 s, so the ceiling has better than four times the headroom a
   loaded CI runner needs, and it still catches anything of that order.
+* `L0_COLLECTED_CEILING` -- the aggregate, and the only one of the three that a
+  slow machine cannot move.
 
-Neither guard is a correctness limit. Both exist because a budget nobody checks
-reports all clear exactly as convincingly as one that holds.
+**Why the aggregate is counted rather than timed.** Section 4.4's budget is wall
+clock, and wall clock on this machine is not stable enough to regress against:
+the same 867 tests at the same commit measured 43.3 s and then 76.9 s within one
+session, and one change measured +7.2 s, +10.5 s and +0.1 s on three honest
+attempts. Two normalisers were considered and both were rejected on evidence.
+A ratio to collection time inverts the answer -- `--collect-only` went 2.5 s to
+2.2 s across the same drift, so it would have reported a 1.78x slowdown as a 0.9x
+improvement, because the drift lands on sustained geometry and mesh work and
+never touches an import burst. And a count of tests *over a duration threshold*
+is not machine-independent either: 40 tests exceed 0.5 s in the slow regime and
+fewer do in the fast one, so the threshold counts the machine.
+
+What does not move is how many tests there are. The gate grows by tests being
+added, so the ceiling counts tests -- and it is the regression control, while
+section 4.4 keeps its wall-clock number as the product statement, because a
+person waits seconds and no ratio changes that.
+
+Neither of the first two guards is a correctness limit, and nor is this one. All
+three exist because a budget nobody checks reports all clear exactly as
+convincingly as one that holds.
 """
 from __future__ import annotations
 
@@ -56,6 +76,13 @@ HEAVY_ROOT = "benchmarks/heavy"
 _SPAWN_ALLOWED = frozenset({"git"})
 
 L0_TEST_CEILING_S = 5.0
+
+# The gate collected 890 when this was set. 1050 is about 18% headroom -- room
+# for a release's worth of ordinary fixtures without a conversation, and not so
+# much that the mechanism that took the gate to 997 s could return unnoticed.
+# Raising it is allowed and is meant to be deliberate: a raise is a line in a
+# diff saying the gate got bigger, which is the whole point.
+L0_COLLECTED_CEILING = 1050
 
 # Set by CI (or by hand) to profile without the gate refusing; the value is
 # printed in the failure text so a run that was let through says so.
@@ -165,3 +192,34 @@ def pytest_runtest_call(item: pytest.Item):
 
 def pytest_runtest_logfinish(nodeid: str, location) -> None:  # noqa: ANN001
     _running["nodeid"] = None
+
+
+def over_ceiling(collected: int) -> str | None:
+    """The complaint for a gate that has grown past its ceiling, or None.
+
+    Split out from the hook so `tools/test_tiers.py` can test the decision
+    without collecting 890 tests to do it.
+    """
+    if collected <= L0_COLLECTED_CEILING:
+        return None
+    return (
+        f"the L0 gate collected {collected} tests, over the ceiling of "
+        f"{L0_COLLECTED_CEILING}. This is the aggregate guard: a slow machine "
+        f"cannot move it and a wall-clock budget cannot hold it. Either move the "
+        f"new tests to {HEAVY_ROOT}/, or raise L0_COLLECTED_CEILING in "
+        f"conftest.py deliberately and say in the commit what the gate now costs."
+    )
+
+
+def pytest_collection_modifyitems(session, config, items) -> None:  # noqa: ANN001
+    """Count what the gate collected, once, after collection settles."""
+    if _OFF:
+        return
+    # Only when the gate itself is being run. A targeted `pytest path::Test` or a
+    # heavy/replay invocation collects a subset, and a ceiling applied to a subset
+    # would fire on nothing and pass on everything.
+    if config.args and set(config.args) != set(L0_ROOTS):
+        return
+    complaint = over_ceiling(sum(1 for item in items if _is_l0(item.nodeid)))
+    if complaint:
+        raise pytest.UsageError(complaint)
