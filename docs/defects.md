@@ -276,7 +276,7 @@ qualifier.
 asserted to report both the failure and the lane's unavailability rather than one
 of them.
 
-## D22 — OCC cannot mesh five legal cone faces in the vent mount
+## D22 — OCC cannot mesh six legal cone faces in the vent mount
 
 **Where.** `benchmarks/fixtures/vent-ball-combine/public/sources/vent_mount.step`,
 and therefore `ROADMAP.md` Release 1's authentic exercise.
@@ -287,6 +287,27 @@ the honest statement is about the user's data or about our toolchain.
 `BRepMesh_IncrementalMesh` returns `IsDone() = True` with
 `GetStatusFlags() = 4` (`IMeshData_Failure`) on five cone faces of the
 hinge-pivot bore.
+
+**Two instruments, two counts, and the larger one is the one to fix against.**
+The five above are what the mesher's own status flags report. The per-face
+probe `mesh_io.tessellate_brep` runs — the one every consumer of this file
+actually goes through — reports **six**, measured at `0cb4302`:
+
+```
+face 93  (GeomType.CONE) at (19.150, 28.865, 53.305)
+face 107 (GeomType.CONE) at (-5.850, 28.865, 53.305)
+face 225 (GeomType.CONE) at (19.023, 28.744, 53.351)
+face 227 (GeomType.CONE) at (21.941, 28.744, 53.351)
+face 233 (GeomType.CONE) at (-5.977, 28.744, 53.351)
+face 235 (GeomType.CONE) at (-3.059, 28.744, 53.351)
+```
+
+All six are cones, all six raise `'NoneType' object has no attribute NbNodes`,
+and `design-tool diagnose` classifies the file `REPAIR_REQUIRED` on them. The
+discrepancy is not a regression — it is two different questions, one asked of
+the shape-wide mesher and one asked face by face — and it is recorded because a
+bounded repair will be measured against a count, and six is the number a repair
+has to clear.
 
 **Evidence that the faces are legal.** Every structural hypothesis was measured
 and refuted: `BRepCheck_Analyzer(face).IsValid()` is True for all of them;
@@ -323,7 +344,7 @@ triangles, in **metres**.
 (`BRepCheck_UnorientableShape`, wire `BRepCheck_SelfIntersectingWire`), and it is
 why the whole-shape check fails. gmsh independently refuses three surfaces — a
 BSpline patch and two planes 0.0066 mm and 0.0028 mm thick. Those slivers are
-real defects. They are not the five cones.
+real defects. They are not the six cones.
 
 **What it can cause.** Preservation cannot be measured against the repository's
 only `PHYSICALLY_PROVEN` source. Release 1's exercise completes with that row
@@ -347,22 +368,55 @@ file asserted to tessellate completely.
 
 ## D23 — the function built to prevent a false clean verdict returns one
 
+**FIXED.** The enumeration half, at `0cb4302`+1. The zero-volume half is
+restated below as what it actually is, and is not this defect.
+
 **Where.** `mesh_io.tessellate_brep`, and `validate_brep_tessellation` behind it.
 
-**What is wrong.** It returns `complete=True` for input whose faces it cannot
-enumerate. A shape it cannot walk produces no failures, and no failures reads as
-success.
+**What was wrong.** `BrepTessellation.complete` was `not self.failures`, and a
+shape the function cannot walk produces an empty failure list — so it returned
+`complete=True` for input whose faces it cannot enumerate. There are three
+answers, not two: every face read, some face failed, and *nobody looked*. The
+third is not a weaker version of the first.
 
 **Evidence.** Hit twice by accident while investigating D22:
-`build123d.Shape.cast` returns `None` for a `ShapeFix_Shape` result, and a
-zero-volume shape reported `complete=True` with 33,683 triangles.
+`build123d.Shape.cast` returns `None` for a `ShapeFix_Shape` result, and that
+`None` arrived here — `getattr(None, "faces", None)` is not callable, so the
+early return produced a clean reading of nothing.
 
-**What it can cause.** This is the exact function added in `a792b67` to stop
-`diagnose` calling an untessellatable STEP clean — a false clean in the
-false-clean detector.
+**What it could cause.** This is the exact function added in `a792b67` to stop
+`diagnose` calling an untessellatable STEP clean, so it was a false clean in the
+false-clean detector, and it reached all three consumers:
+`diagnose` classified such a file `USABLE_EXACT`; `validate_brep_tessellation`
+let it through the gate in front of every B-rep export; `preservation` proceeded
+to measure against it and died one line later on an empty vertex array. Two of
+those three are silent.
 
-**Fixture that must fail first.** A shape whose faces cannot be enumerated,
-asserted to report unknown rather than complete.
+**The fix.** `BrepTessellation` gains `enumerated`, and `complete` becomes
+`enumerated and faces > 0 and not failures` — three conjuncts, each of which was
+a false clean that reached a caller. `summary()` distinguishes all three states,
+and the receipt carries `enumerated` so a reader of the evidence can tell "this
+shape has no faces" from "this shape was never walked". `diagnose` and
+`preservation` stopped printing "0 of 0 face(s) cannot be tessellated".
+
+**Fixtures.** `test_mesh_io.BrepTessellationDiagnosticTest` — a `None` shape, a
+shape with no `faces()`, a shape whose `faces` is not callable, a shape
+enumerating zero faces, and the positive case that must still report complete.
+Seven mutations of the protection attempted, seven caught. Verified against real
+geometry: `vent_mount.step` still reports `REPAIR_REQUIRED` over 329 enumerated
+faces, and `design-tool selftest` still exports all five certified templates
+through `validate_brep_tessellation`.
+
+**Not fixed, and not this defect: a zero-volume shape reported `complete=True`
+with 33,683 triangles.** That reading is *correct* about tessellation — every
+face was walked and triangulated. What was wrong is a caller reading "every face
+tessellated" as "this is a usable solid". `complete` is a statement about
+coverage of the enumeration, and widening it to mean fitness would put a
+solidity judgement inside a function whose whole job is to report what it could
+read. Whatever gate should refuse a zero-volume export belongs beside the other
+integrity checks in `compute_integrity`, and nothing has yet established that
+this shape can reach an export path — so it is recorded here rather than
+promoted to a defect nobody has reproduced deliberately.
 
 ## D24 — coverage is a ratio against the contract that declared it
 

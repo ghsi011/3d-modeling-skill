@@ -210,13 +210,19 @@ def _diagnose_step(path: Path) -> dict[str, Any]:
     if invalid:
         findings.append(f"{invalid} face(s) have no usable area, which is what a "
                         "null tessellation looks like from here")
-    if not reading.complete:
+    if reading.failures:
         findings.append(
             f"{len(reading.failures)} of {reading.faces} face(s) cannot be "
             f"tessellated at {reading.linear_deflection} mm linear / "
             f"{reading.angular_deflection} rad angular deflection, so nothing "
             f"downstream can turn this file into a mesh: "
             + "; ".join(reading.failures))
+    elif not reading.complete:
+        # No named faces to blame, and not clean either: the probe could not
+        # walk the shape, or walked it and found nothing. "0 of 0 face(s) cannot
+        # be tessellated" is the sentence this branch exists to stop being
+        # printed. See `docs/defects.md` D23.
+        findings.append(reading.summary())
 
     classification = (
         "RECONSTRUCTION_REQUIRED" if not solids

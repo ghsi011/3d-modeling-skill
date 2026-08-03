@@ -125,6 +125,14 @@ class BrepTessellation:
     reporting on the part. So the incomplete reading is *returned* rather than
     thrown away, and every caller has to decide in the open what to do with a
     partial one.
+
+    ``enumerated`` is the second thing this type has to be able to say, and it
+    was missing (`docs/defects.md` D23). ``complete`` was ``not failures``, and a
+    shape that cannot be walked at all produces an empty failure list -- so the
+    probe added to stop `diagnose` calling an untessellatable STEP clean
+    returned clean for the one input it can learn least about. There are three
+    answers here, not two: every face read, some face failed, and *nobody
+    looked*. The third is not a weaker version of the first.
     """
 
     faces: int
@@ -134,10 +142,21 @@ class BrepTessellation:
     angular_deflection: float
     vertices: Any = None
     triangles: Any = None
+    # False where the shape exposed no face enumeration this function could
+    # call. Defaulted True so that every construction site that *did* walk the
+    # shape keeps its meaning without restating it.
+    enumerated: bool = True
 
     @property
     def complete(self) -> bool:
-        return not self.failures
+        """Every face of a shape that had faces was read.
+
+        Three conjuncts, and each one is a false clean that reached a caller.
+        A shape nobody could walk is unknown. A shape with zero faces is not a
+        solid, and tessellating none of none is not a success. Only then does
+        the absence of failures mean what it says.
+        """
+        return self.enumerated and self.faces > 0 and not self.failures
 
     def as_dict(self) -> dict[str, Any]:
         """Receipt-shaped: what was read and how, never the arrays."""
@@ -145,6 +164,11 @@ class BrepTessellation:
             "method": "OCC per-face triangulation through build123d",
             "linear_deflection": self.linear_deflection,
             "angular_deflection": self.angular_deflection,
+            # On the receipt rather than inferred from `faces == 0`, so that a
+            # reader of the evidence can tell "this shape has no faces" from
+            # "this shape was never walked" without knowing which of the two
+            # produces a zero here.
+            "enumerated": self.enumerated,
             "faces": self.faces,
             "tessellated_faces": self.tessellated,
             "untessellatable_faces": len(self.failures),
@@ -152,6 +176,15 @@ class BrepTessellation:
         }
 
     def summary(self) -> str:
+        if not self.enumerated:
+            return ("B-rep faces could not be enumerated: the shape exposes no "
+                    "callable faces(), so nothing here has looked at it. This is "
+                    "not a clean reading -- it is no reading. A null shape from "
+                    "an OCC repair step arrives exactly like this.")
+        if self.faces == 0:
+            return ("B-rep tessellation found no faces to read. A shape with no "
+                    "faces is not a solid, and tessellating none of none is not "
+                    "a successful export.")
         return ("B-rep tessellation failed for affected face(s): "
                 + "; ".join(self.failures)
                 + ". Repair or remove the named face(s) before export.")
@@ -188,7 +221,13 @@ def tessellate_brep(shape: Any, *, tolerance: float, angular_tolerance: float,
     """
     faces_method = getattr(shape, "faces", None)
     if not callable(faces_method):
-        return BrepTessellation(0, 0, (), tolerance, angular_tolerance)
+        # Not a clean reading. `enumerated=False` is what stops the empty
+        # failure list below reading as success -- see `BrepTessellation` and
+        # `docs/defects.md` D23. Returned rather than raised because the shape
+        # -- including `None`, which is what an OCC repair step hands back when
+        # it could not produce one -- is the caller's to explain.
+        return BrepTessellation(0, 0, (), tolerance, angular_tolerance,
+                                enumerated=False)
 
     mesh_method = getattr(shape, "mesh", None)
     if callable(mesh_method):

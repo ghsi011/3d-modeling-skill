@@ -286,9 +286,14 @@ def _load(path: Path) -> tuple[Any, dict[str, Any] | None]:
             # every sample near a hole reports a distance to geometry that is
             # missing rather than moved.
             raise BrepUnreadable(
-                f"{len(reading.failures)} of {reading.faces} face(s) of "
-                f"{path.name} cannot be tessellated, so there is no surface to "
-                f"measure against: " + "; ".join(reading.failures))
+                (f"{len(reading.failures)} of {reading.faces} face(s) of "
+                 f"{path.name} cannot be tessellated, so there is no surface to "
+                 f"measure against: " + "; ".join(reading.failures))
+                if reading.failures else
+                # No named faces to blame. Naming none and claiming a count
+                # would be the false clean one layer up. See `docs/defects.md`
+                # D23.
+                f"{path.name}: {reading.summary()}")
         return reading.mesh(), reading.as_dict()
 
     loaded = trimesh.load(str(path), force="mesh")

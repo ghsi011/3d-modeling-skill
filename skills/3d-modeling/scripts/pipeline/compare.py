@@ -559,7 +559,7 @@ def not_compared(project: P.Project,
                       "the axis a comparison of these formulations turns on -- "
                       "and it fails twice. On the only PHYSICALLY_PROVEN source "
                       "in this repository the audit cannot run at all "
-                      "(docs/defects.md D22: five legal cone faces OCC cannot "
+                      "(docs/defects.md D22: legal cone faces OCC cannot "
                       "mesh). Where it can run, its sample density is a fixed "
                       "count rather than one derived from a declared minimum "
                       "detectable defect size, so the lane refuses a success "
