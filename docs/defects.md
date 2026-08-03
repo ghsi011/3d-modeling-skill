@@ -50,6 +50,26 @@ three-face edge and one four-face edge, asserted as three separate counts. A
 fixture asserting only the classification passes today and would pass after a
 wrong fix.
 
+**FIXED** at `4adbf11`. `diagnose.edge_manifold_counts` counts faces per edge
+off `edges_unique_inverse` — the face-use count directly, rather than anything
+inferred from an adjacency table's shape — and the report carries
+`boundary_edges` (now only edges used by exactly one face), `nonmanifold_edges`,
+`max_faces_per_edge` and the whole `faces_per_edge` distribution. Both branches
+that carried the expression are fixed: the mesh branch and the per-object 3MF
+branch. A non-manifold edge now raises its own finding, worded so a repairer is
+not sent at hole-filling: *"not a hole and cannot be closed by filling one"*. It
+fires whether or not the mesh is also open, because a closed mesh can carry a
+three-face edge — and that is precisely the case the old code was silent on, since
+`watertight` was true, the boundary finding never printed, and the wrong number
+was the only trace.
+
+Fixture: `pipeline/test_phase3.py::EdgeManifoldCountsTest`, two fans sharing no
+vertex — 16 unique edges, 14 used once, one used three times, one used four —
+so the arithmetic is checkable by hand, and the old expression's 16 is asserted
+to be exactly `boundary_edges + nonmanifold_edges`. Six mutations attempted, six
+caught. Verified on the real vendored `ball_male_17mm.stl`: 10,584 edges, all
+used by exactly two faces, `USABLE_MESH` unchanged.
+
 ## D2 — `make_3mf.py` writes vertices at `%.6g`
 
 **Where.** [`make_3mf.py`](../skills/3d-modeling/scripts/make_3mf.py), `mesh_xml`.
