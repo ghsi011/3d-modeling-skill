@@ -1020,7 +1020,15 @@ RECEIPT_SUFFIXES = (".json", ".stl", ".step", ".py", ".md")
 # identity". A receipt set that contained it would still be stable, but listing a
 # file the pipeline declares non-identifying alongside the ones that are is how a
 # reader stops trusting the list.
-NOT_A_RECEIPT = frozenset({"timings.json"})
+#
+# `cost.json` is here for the same reason and a stronger one. It is a journal --
+# one entry per invocation, appended -- so it is not stable across two plays of
+# one case by construction, and nothing binds it: no receipt carries its digest
+# and `bindings.RECEIPTS` does not name it. What a job *spent* is not part of
+# what a job *concluded*, and a recording that pinned it would go red on a faster
+# machine. `pipeline/cost.py` carries the argument; the L1 suite reads the ledger
+# directly, where the numbers can be asserted as shapes rather than as literals.
+NOT_A_RECEIPT = frozenset({"timings.json", "cost.json"})
 
 
 def _read(project_dir: Path, name: str) -> dict[str, Any] | None:

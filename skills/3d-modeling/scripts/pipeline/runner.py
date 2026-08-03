@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, cache as K, commission, contract as C, execution as EX
+from . import analysis, cache as K, commission, contract as C, cost as COST
+from . import execution as EX
 from . import fitted, intent, review as R
 from . import safety
 from . import schemas as S
@@ -140,8 +141,76 @@ def _write(path: Path, payload: dict[str, Any]) -> Path:
 
 
 def run(request: JobRequest) -> JobResult:
+    """One invocation, and the ledger of what it spent.
+
+    A thin wrapper around `_run`, and thin deliberately: the body below returns
+    from fifteen places and raises `ReviewNeeded` from three, and an accounting
+    line repeated at every one of them is an accounting line that will be
+    forgotten at the sixteenth. Everything the ledger needs is filled in as the
+    run goes; this is where it is written down, on every exit including the ones
+    that produced no claim -- a run that spent two seconds and stopped for a
+    review is exactly the failed-and-repeated work ARCHITECTURE.md 15.6 asks to
+    be visible, and it is the half a receipt-shaped record cannot hold.
+
+    The budget check is here for the same reason. `budget()` is what the compiled
+    plan authorises this invocation to dispatch; a run that went past it did work
+    the plan did not name, and the authority gate says runtime execution follows
+    the compiled plan. It cannot fire on any path in this build -- the ceiling is
+    derived from the same predicates the dispatch sites read -- which is the
+    point: it is the guard that makes the next release's accidental round trip
+    fail a test instead of quietly costing money.
+    """
+    ledger = COST.Ledger(job_id=request.job_id)
+    try:
+        result = _run(request, ledger)
+    except ReviewNeeded as need:
+        # The invocation that wrote the packet and stopped. Two things are
+        # recorded here and neither was recorded anywhere before. Its
+        # deterministic work is real and is paid again by the invocation that
+        # resumes. And the question it stopped on *is* the dispatch on this
+        # path: the packet is on disk, an agent will answer it before the next
+        # invocation, and the run that reads that answer back must not be
+        # charged for asking it a second time (`cost.Ledger.dispatched`).
+        #
+        # Guarded, and only on this path. `ReviewNeeded` is a control signal --
+        # it is how the CLI is told to write an instruction and stop -- and
+        # accounting that could replace it with its own exception would turn
+        # "answer this review" into a traceback. On the ordinary return path an
+        # accounting failure is allowed to raise, the way `lifecycle.record`
+        # does, because there is no signal there for it to destroy.
+        try:
+            ledger.asked(need.kind)
+            COST.append(request.out_dir, ledger,
+                        ledger.invocation(ok=False, stage="review-pause"))
+        except Exception:                               # noqa: BLE001 - see above
+            pass
+        raise
+    breaches = COST.overruns(ledger.allowed, ledger.spent())
+    COST.append(request.out_dir, ledger,
+                ledger.invocation(ok=result.ok and not breaches,
+                                  stage="cost" if breaches else result.stage,
+                                  overruns=breaches))
+    if breaches:
+        return dataclasses.replace(
+            result, ok=False, stage="cost",
+            message="\n  - ".join(["this run cost more than its plan budgets:"]
+                                  + breaches))
+    return result
+
+
+def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
     started = time.perf_counter()
     timings: dict[str, float] = {}
+    # By reference: an invocation that stops for a review still reports the
+    # stages it did reach, and it reaches them by filling in this dict.
+    ledger.seconds = timings
+    # The confined child ran before this function was called, so none of its cost
+    # is inside `started`. Recorded at the top rather than at the bottom, because
+    # an authored job that stops for a review has already paid it and an
+    # invocation that reported zero would be the one hiding the biggest number on
+    # the lane.
+    ledger.boundary_seconds = float(
+        getattr(request.authored_build, "boundary_seconds", 0.0) or 0.0)
     out = request.out_dir
     out.mkdir(parents=True, exist_ok=True)
     evidence_root = request.evidence_dir or out
@@ -168,6 +237,12 @@ def run(request: JobRequest) -> JobResult:
         parameters=request.parameters, external_geometry=request.external_geometry,
         ambiguities=request.ambiguities, consequence=request.consequence,
         authored=request.acceptance is not None)
+    # The plan is the cost authority as well as the route authority: what this
+    # invocation may dispatch is derived from it here, once, and checked against
+    # what was spent when the run ends.
+    ledger.route, ledger.builder = plan.route, plan.builder
+    ledger.alternative = plan.alternative_id or COST.ROOT_ALTERNATIVE
+    ledger.allowed = COST.budget(plan)
     decision = plan.as_intent_decision()
     manifest = intent.manifest(
         job_id=request.job_id, brief_text=brief_text, brief_hash=brief_hash,
@@ -244,7 +319,8 @@ def run(request: JobRequest) -> JobResult:
             spec = fitted.recover(
                 brief=brief_text, evidence=list(request.evidence), template=template.name,
                 template_covers=template.covers, bounds=template.bounds,
-                call=request.spec_call, reviewer=request.reviewer or {},
+                call=ledger.watch("spec", request.spec_call),
+                reviewer=request.reviewer or {},
                 job_id=request.job_id, revision=request.updated_utc,
                 contract_hash=pre_contract.contract_hash(),
                 evidence_dir=evidence_root,
@@ -264,6 +340,7 @@ def run(request: JobRequest) -> JobResult:
                              f"{type(exc).__name__}: {exc}",
                              written, timings, llm_calls, None)
         llm_calls += 1
+        ledger.dispatched("spec")
         timings["specification"] = time.perf_counter() - mark
         specification = spec
         written["specification"] = _write(out / "specification.json", spec)
@@ -383,6 +460,12 @@ def run(request: JobRequest) -> JobResult:
         return JobResult(False, "build", f"{type(exc).__name__}: {exc}",   # receipt, not a crash
                          written, timings, llm_calls, None)
     timings["build"] = time.perf_counter() - mark
+    # Counted here and not at the cache block below, and the order is the whole
+    # finding: the geometry has already been built by the time anything looks in
+    # the cache, so a hit confirms the bytes rather than saving the work. The
+    # ledger records both numbers so that "cache reuse" is a measurement and not
+    # a status string a reader has to interpret.
+    ledger.builds += 1
 
     if request.cache_dir is not None:
         cache_key = K.key_for(model_contract, backend_version=built.backend_version,
@@ -406,6 +489,7 @@ def run(request: JobRequest) -> JobResult:
             store.store(cache_key, files=files,
                         payloads={"contract": model_contract.as_payload()})
             cache_status = "stored"
+    ledger.cache = cache_status
 
     artifact = {
         "schema_version": S.ARTIFACT_SCHEMA,
@@ -529,7 +613,8 @@ def run(request: JobRequest) -> JobResult:
                 # from the other, so without this a PASS written for one is
                 # `is_bound` for the other.
                 alternative_id=plan.alternative_id)
-            safety_report = safety.run(packet, request.reviewer or {}, request.safety_call,
+            safety_report = safety.run(packet, request.reviewer or {},
+                                       ledger.watch("safety", request.safety_call),
                                        envelope=safety_envelope)
         except ReviewNeeded:
             raise
@@ -546,6 +631,7 @@ def run(request: JobRequest) -> JobResult:
                              f"{type(exc).__name__}: {exc}",
                              written, timings, llm_calls, None)
         llm_calls += 1
+        ledger.dispatched("safety")
         timings["safety"] = time.perf_counter() - mark
         written["safety_verification_report"] = _write(
             out / "safety_verification_report.json", safety_report)
@@ -589,9 +675,10 @@ def run(request: JobRequest) -> JobResult:
                 evidence_digests=report.get("evidence_digests"),
                 execution_plan_sha256=plan.plan_hash(),
                 alternative_id=plan.alternative_id)
-            verification_report = verification.run(packet, request.reviewer or {},
-                                                   request.verify_call,
-                                                   envelope=verification_envelope)
+            verification_report = verification.run(
+                packet, request.reviewer or {},
+                ledger.watch("verification", request.verify_call),
+                envelope=verification_envelope)
         except ReviewNeeded:
             raise
         except (S.SchemaError, R.ReviewError, ValueError) as exc:
@@ -606,6 +693,7 @@ def run(request: JobRequest) -> JobResult:
                              f"{type(exc).__name__}: {exc}",
                              written, timings, llm_calls, None)
         llm_calls += 1
+        ledger.dispatched("verification")
         timings["verification"] = time.perf_counter() - mark
         written["verification_report"] = _write(
             out / "verification_report.json", verification_report)

@@ -214,6 +214,166 @@ trimesh` alone is 1.8 s of that — which is the floor a commit gate on this
 dependency set cannot go below, and the reason section 4.4's five-second budget
 is amended to a minute rather than met.
 
+## What a job costs, measured by the job rather than by a person
+
+Every figure above was taken by hand. From Release 3's context-budget foundation
+the pipeline takes them itself: `pipeline/cost.py` writes `cost.json` beside a
+formulation's receipts, one entry per invocation of `design-tool run`, and
+`design-tool status --json` reports it per alternative under `cost`. Regenerate
+any row below by running the job and reading that file.
+
+### Per route, warm interpreter, `render=False`, in process
+
+`ctx` is the canonical size of the payload each reviewer was actually handed;
+there is no tokenizer here and a token count would be invented. `budget` is the
+ceiling `cost.budget()` derives from the compiled plan, which the run is refused
+for exceeding.
+
+| route | budget | dispatches | ctx | deterministic | builds |
+|---|---|---|---|---|---|
+| `DIRECT` `c_clip` `INCONSEQUENTIAL` | 0 | 0 | 0 B | 0.183 s | 1 |
+| `DIRECT` `c_clip` `CONSEQUENTIAL` | 1 | 1 safety | 22.0 kB | 0.177 s | 1 |
+| `DIRECT` `trim_ring` (cold build123d) | 0 | 0 | 0 B | 3.361 s | 1 |
+| `FITTED` `c_clip` | 2 | spec + verification | 29.1 kB | 0.192 s | 1 |
+| `FULL` `c_clip`, `bore_d=60` | 2 | spec + verification | 29.1 kB | 0.181 s | 1 |
+
+The `trim_ring` row is the cold/warm distinction section 4.4 asks to be kept
+separate, and it is why the ledger records `warm_kernel` per invocation: the same
+work costs 0.18 s in a process that has already imported the geometry kernel and
+3.36 s in one that has not. Import cost is **not** decomposed further — that
+needs an import hook in the confined child, which is machinery nothing has asked
+for; what is recorded is which regime the seconds were measured in.
+
+### The dispatch the counter never counted
+
+`llm_calls` counts safety, specification and verification. It does not count the
+**designer commission** — `next_action.json` kind `AGENT_COMMISSION` — because
+that is written by `cli.py` and returns before the runner is reached, and
+`tools/replay.py` calls it "the live dispatch on the `CUSTOM` lane" in as many
+words. The `CUSTOM` riser priced at "1 llm call" in the table above is that
+commission, counted by a person. It is a ledger entry now, and its context is the
+instruction **plus every file `authorized_inputs` tells the agent to read**,
+because those are the context.
+
+### Where a resumable command surface over-counts
+
+`design-tool run` continues by re-running, and the invocation that finishes a job
+re-reads every answer written for it — incrementing `llm_calls` again each time.
+On the recorded `modify-ball-flange-flat` replay, three invocations report
+`llm_calls` 0, 1 and 2. Two questions were ever asked. The ledger counts the
+question at the pause that wrote the packet and records the re-reads as
+`reviews_reused`, so the dispatch count is the number of times somebody was
+actually asked something:
+
+| | invocations | questions | stored answers re-read | builds | of which repeated |
+|---|---|---|---|---|---|
+| `modify-ball-flange-flat` | 3 | 2 | 3 | 3 | 2 |
+
+**A two-review round trip costs three builds of one part.** That is what
+resumption costs on this design and nothing measured it before.
+
+### Per-alternative incremental cost
+
+Measured on the recorded `branch-knob-seat-fallback` replay: three formulations
+of one job on the real `berlingo-knob` request, driven through `design-tool
+branch`, `route`, `run` and `status`.
+
+| formulation | dispatches | ctx | deterministic | builds | shared |
+|---|---|---|---|---|---|
+| `.` (the shared root) | 1 | 23.8 kB | 2.96 s | 2 | — |
+| `plate-seated` | 1 | 23.8 kB | 2.90 s | 2 | 0 builds, 0 reviews |
+| `as-drawn` (the fallback) | 1 | 23.8 kB | 2.91 s | 2 | 0 builds, 0 reviews |
+| **project** | **3** | **71.5 kB** | **8.78 s** | **6** | |
+
+The vent-ball branch exercise reached this conclusion with a stopwatch: a sibling
+costs a full build and a full audit, and nothing is shared. The sharpest row is
+`as-drawn`, which builds a candidate **byte-identical to its parent's** and costs
+2.91 s against the parent's 2.96 s — 98% of a solo job for the same bytes.
+
+What *is* shared is intent, and intent is free: the brief, the requirements, the
+engagement length and the printer are read from one `project.json` no formulation
+rewrites. What is not shared is anything computational, and the two mechanisms
+that could change that are reported separately because they are zero for
+different reasons. `builds_avoided` is **measured** and is zero because
+`runner.run` consults the content cache *after* `backend.build` returns — a hit
+confirms the bytes and saves nothing. `reviews_from_a_sibling` is zero **by
+construction**: the review envelope carries `alternative_id`, and
+`benchmarks/replays` carries the adversarial case that proves it still bites.
+
+### Where the assessment seconds actually are
+
+Measured on the same runs, from `timings.json` and the commissioning report,
+because "assessment is expensive" is the assumption a lazy assessment registry
+would be built on and nobody had checked it:
+
+| | `DIRECT` `c_clip` | `FULL` `c_clip` `bore_d=60` |
+|---|---|---|
+| whole run | 0.192 s | 0.187 s |
+| build | 0.018 s | 0.014 s |
+| mesh load | 0.007 s | 0.005 s |
+| commissioning | 0.044 s | 0.044 s |
+| screening | 0.075 s | 0.076 s |
+| witness | 0.030 s | 0.028 s |
+| **assessment share** | **62%** | **64%** |
+| checks | 11: 6 unconditional, 5 per declared feature | 12: 6 unconditional, 6 per declared feature |
+
+Assessment is indeed most of a certified run — and the half that a capability
+trigger could defer is *already* deferred by the contract: a check exists for a
+feature only because the job declared it, and the expensive conditional
+assessment this build has (the preservation audit, ~2 s) runs only when an edit
+scope is declared. What is left is the unconditional baseline, and the largest
+item in it is the broad anomaly screen, whose entire purpose is to ask the
+question no declared check asks.
+
+The seconds that are not in this table are the ones worth chasing: the confined
+build boundary at 1.37-2.73 s per authored invocation, and the repeated builds a
+review round trip pays for. Neither is an assessment.
+
+### The commit gate after the slice, and why its wall clock cannot be read
+
+Every figure below is the same commit on the same workstation within one working
+session. The suite did not change between them; the box did.
+
+| tier | tests | subtests | measured |
+|---|---|---|---|
+| L0 before this slice | 867 | 477 | 43.3 s, then 74.4 s, then 76.9 s |
+| L0 after | 890 | 488 | 44.6 s, 50.5 s, then 77.0 / 84.6 / 84.9 / 88.4 / 110.1 s |
+| L1 before | 55 | 38 | 62.1 s |
+| L1 after | 57 | 43 | 61.9 s, then 76.3 s |
+| L0-heavy before | 353 | 190 | 889 s |
+| L0-heavy after | 357 | 194 | 1046 s, summed over five foreground chunks |
+
+**Paired deltas for the same 23 added tests, taken minutes apart, range from
+0.1 s to 10.5 s.** 50.5 − 43.3 = 7.2 s early; 84.9 − 74.4 = 10.5 s in the
+middle; 77.0 − 76.9 = 0.1 s late. Three honest measurements of one change, and
+they do not agree well enough to hold a budget to.
+
+What *is* stable about the slice, on any box: **+23 tests, +11 subtests, zero
+child processes, slowest test 0.73 s** measured in the fast regime and ~1.4 s in
+the slow one, against `conftest.py`'s 5 s ceiling. The file measured 6.07 s on
+its own in the fast regime. The four tests that need the confined boundary are in
+`benchmarks/heavy/test_cost_heavy.py`. L1 gained no wall time at all: the
+assertions were added to classes that already play their case once.
+
+**Collection time is not a usable normaliser, and this is the measurement that
+says so.** `pytest --collect-only` was 2.5 s at `79244ae` and is **2.2 s** today,
+while the same 867-test suite went from 43.3 s to 76.9 s. A ratio-to-collection
+budget would have reported a 1.8x slowdown as a 0.9x *improvement*. The drift
+does not touch import-bound work; it lands on sustained geometry and mesh
+computation, which is what the suite is made of and what a two-second import
+burst is not.
+
+`design-tool selftest` does track it, partially: the five certified builds
+measured 4.11 s and 5.80 s in the two regimes (1.41x) against the suite's 1.78x.
+It is already shipped, already run and already 11/11, so it is the natural
+calibration figure to record beside any published timing here — while being
+honest that it under-reports the drift rather than cancelling it.
+
+**Where the remaining seconds are.** Profiled in the slow regime: of 482 timed
+calls totalling 81.8 s, **40 tests over 0.5 s hold 35.8 s** — 44% of the gate in
+8% of the tests, the same shape as the 997 s finding one order down. Nothing
+exceeds 2.1 s and nothing comes near the 5 s ceiling.
+
 ## The DIRECT status finding
 
 A clean certified `INCONSEQUENTIAL` `DIRECT` job finishes `NEEDS_MORE_EVIDENCE`,

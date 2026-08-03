@@ -55,6 +55,7 @@ from typing import Any
 
 from . import acceptance as ACC
 from . import bindings as B
+from . import cost as COST
 from . import execution as EX
 from . import findings as F
 from . import isolation as ISO
@@ -123,6 +124,12 @@ def _answer(work_dir: Path, kind: str):
         request.write_text(S.canonical_json(_payload_of(packet)), encoding="utf-8")
         response = room / f"{kind}_response.json"
         if response.is_file():
+            # Nothing was asked here. The answer was written by an agent between
+            # two invocations, and a resumable command surface re-reads it on
+            # every run that follows. `cost.Ledger.watch` reads this flag so the
+            # ledger charges the job for the question once instead of once per
+            # re-run -- which is what summing `llm_calls` over a round trip does.
+            call.answered_from_disk = True
             try:
                 return json.loads(response.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
@@ -131,6 +138,8 @@ def _answer(work_dir: Path, kind: str):
                 raise R.ReviewError(
                     f"{response.name} is not valid JSON: {exc}") from exc
         raise ReviewNeeded(kind, packet, response)
+
+    call.answered_from_disk = False
     return call
 
 
@@ -304,11 +313,18 @@ def _review_needed_message(need: ReviewNeeded, job_dir: Path) -> None:
         "  and a deterministic tool that returned one would be inventing it.\n")
 
 
-def _report_artifacts(result: runner.JobResult) -> None:
+def _report_artifacts(result: runner.JobResult, work_dir: Path | None = None) -> None:
     for name, path in sorted(result.artifacts.items()):
         sys.stderr.write(f"  {name:28s} {path.name}\n")
     timings = "  ".join(f"{k} {v:.2f}s" for k, v in result.timings.items())
     sys.stderr.write(f"\n  {timings}\n  llm calls: {result.llm_calls}\n")
+    if work_dir is not None:
+        # What this formulation has spent in total, not only what this
+        # invocation did. `llm calls` above is one run's dispatches; the line
+        # below is the job's, and on a job that paused for a review the two are
+        # deliberately different numbers.
+        sys.stderr.write(f"  cost so far: "
+                         f"{COST.one_line(COST.totals_at(work_dir))}\n")
 
 
 def run_job(argv: list[str]) -> int:
@@ -336,7 +352,7 @@ def run_job(argv: list[str]) -> int:
         _review_needed_message(need, job_dir)
         return NEEDS_REVIEW
 
-    _report_artifacts(result)
+    _report_artifacts(result, job_dir)
 
     if not result.ok:
         sys.stderr.write(f"\ndesign-tool: {result.stage}: {result.message}\n")
@@ -1207,8 +1223,20 @@ def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
     a commission for a branch says which branch without carrying an id field. On
     an unbranched job the relative path of a file in the project root *is* its
     name, so the commission is unchanged.
+
+    **This is the dispatch `llm_calls` never counted.** `tools/replay.py` calls
+    an `AGENT_COMMISSION` "the live dispatch on the `CUSTOM` lane" and refuses to
+    replay a case that provokes one; `runner.py`'s counter cannot see it, because
+    this function returns before the runner is reached. `docs/baseline.md` prices
+    the `CUSTOM` riser at one call, and that one is this -- counted by a person,
+    because nothing in the build counted it. It is a ledger entry now.
     """
-    _write_next_action(work_dir, project, {
+    authorized = ([project.brief, P.PROJECT_FILE]
+                  + [_relative(work_dir, project_dir, name)
+                     for name in (ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
+                                  PLAN_FILE)]
+                  + [a.path for a in project.source_artifacts])
+    instruction = _write_next_action(work_dir, project, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "AGENT_COMMISSION",
@@ -1216,10 +1244,7 @@ def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
         "stage": "candidate_build",
         "route": plan.route,
         "reason": plan.route_rationale,
-        "authorized_inputs": [project.brief, P.PROJECT_FILE]
-        + [_relative(work_dir, project_dir, name)
-           for name in (ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE, PLAN_FILE)]
-        + [a.path for a in project.source_artifacts],
+        "authorized_inputs": list(authorized),
         "required_outputs": [_relative(work_dir, project_dir, name)
                              for name in missing],
         "proposal_api": dict(PROPOSAL_API),
@@ -1249,6 +1274,24 @@ def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
         "completion_command": f"design-tool run {project_dir.as_posix()}",
         "updated_utc": project.updated_utc,
     })
+    ledger = COST.Ledger(job_id=project.job_id,
+                         alternative=plan.alternative_id or COST.ROOT_ALTERNATIVE,
+                         route=plan.route, builder=plan.builder,
+                         allowed=COST.budget(plan))
+    ledger.commissioned(instruction, project_dir=project_dir, named=authorized)
+    breaches = COST.overruns(ledger.allowed, ledger.spent())
+    COST.append(work_dir, ledger,
+                ledger.invocation(ok=False, stage="candidate_build",
+                                  overruns=breaches))
+    if breaches:
+        # A commission written for a plan that does not build authored geometry
+        # is a round trip nothing asked for. Unreachable as the compiler stands
+        # -- this function is only called from the authored lane -- and refused
+        # rather than trusted, because "unreachable" is a property of today's
+        # compiler and this is the guard that notices when it stops holding.
+        for text in breaches:
+            sys.stderr.write(f"design-tool: {text}\n")
+        return 1
     sys.stderr.write(
         f"\ndesign-tool: this job routes {plan.route} and is missing "
         f"{', '.join(_relative(work_dir, project_dir, name) for name in missing)}.\n"
@@ -1545,7 +1588,7 @@ def _finish(project_dir: Path, work_dir: Path, project: P.Project,
         _review_needed_message(need, work_dir)
         return NEEDS_ACTION
 
-    _report_artifacts(result)
+    _report_artifacts(result, work_dir)
     # Nothing is stamped back into `project.json`. `status` and `bindings` were a
     # copy of one run's outcome in the one file that has to be shared, so the
     # project said the job was whatever finished last -- and Slice A had already
@@ -1728,6 +1771,22 @@ def status(argv: list[str]) -> int:
     fallbacks = [{"alternative_id": row["alternative_id"], "status": row["status"],
                   "reason": row["reason"]}
                  for row in alternatives if row["disposition"] == "FALLBACK"]
+    # What each formulation has spent, and what each one beyond the root added.
+    # Per alternative for the same reason the status is: a cost read only for
+    # whichever branch happens to be active is a number that cannot answer "what
+    # did exploring the second concept cost", which is the question
+    # ARCHITECTURE.md 15.2 asks and the one the vent-ball exercise had to answer
+    # with a stopwatch.
+    events = LC.read(project_dir)
+    costs = {}
+    for key in [ROOT_ALTERNATIVE] + [row.alternative_id
+                                     for row in project.alternatives]:
+        where = _alternative_dir(project_dir,
+                                 None if key == ROOT_ALTERNATIVE else key)
+        if where is not None and where.is_dir():
+            costs[key] = COST.totals_at(where)
+    cost_report = COST.compare(costs,
+                               restarts=COST.restarts_by_alternative(events))
     # One validate() call, read in two registers: `problems` keeps its shape as
     # the sentences a person reads, `findings` carries the code, field path and
     # severity a caller matches on. Calling validate twice would be two answers
@@ -1748,7 +1807,11 @@ def status(argv: list[str]) -> int:
         # What was deliberately done to this job's formulations, oldest first.
         # Bound by nothing: appending to it cannot make a receipt stale, which
         # is what lets it record the one thing scoped invalidation cannot.
-        "lifecycle": LC.read(project_dir),
+        "lifecycle": events,
+        # What the job spent, per formulation and in total, and what each
+        # formulation beyond the root added. Bound by nothing, for the same
+        # reason `lifecycle` is: see `pipeline/cost.py`.
+        "cost": cost_report,
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
@@ -1812,6 +1875,15 @@ def status(argv: list[str]) -> int:
                       f"({row['status']}) and {standing}: {row['reason']}")
         for name, rows in sorted(report["stale"].items()):
             print(f"  stale        {name}: {'; '.join(rows)}")
+        if report["cost"]["project"]["invocations"]:
+            print(f"  cost         {COST.one_line(report['cost']['project'])}")
+            for key, row in sorted(report["cost"]["incremental"].items()):
+                # What this formulation added, and what it inherited for free.
+                # Both, because the second is the claim branching makes and the
+                # first is what it costs to make it.
+                print(f"  + {key:10s} {COST.one_line(row)}; shared "
+                      f"{row['shared']['builds_avoided']} build(s), "
+                      f"{row['shared']['reviews_reused']} review(s)")
         if report["lifecycle"]:
             event = report["lifecycle"][-1]
             print(f"  last change  {event.get('event')} on "

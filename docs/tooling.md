@@ -179,6 +179,7 @@ disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derive
 | `run_id` | which run this formulation currently is — the digest of `state`, content-derived; see *Run identity* below |
 | `fallbacks` | every formulation the user declared `FALLBACK`, with its own derived status. The terminal names them only when `final_status` is not a claim, which is when the question is live |
 | `lifecycle` | `lifecycle.json`'s events, oldest first: the restarts and the disposition transitions |
+| `cost` | what each formulation spent, the project total, and `incremental` — what each formulation beyond the shared root *added*, with `shared` naming what it inherited. Branching shares intent, which is free; the build, the audit and the reviews are paid again per formulation, and the figure is read off the ledgers rather than asserted. See *`cost.json`* below |
 
 Two rules bound it. **It is not a second gate**: nothing is re-run and no
 threshold is re-applied, so a job whose bindings all hold derives exactly what it
@@ -289,6 +290,47 @@ the project's caller-supplied `updated_utc` rather than a clock.
 | --- | --- |
 | `RESTART` | the formulation, the run identity, the stored verdict discarded, and every discarded file with its digest |
 | `DISPOSITION` | the formulation, the state it left, the state it entered, the basis, any successor, and a note — including the automatic demotion when a new formulation is preferred |
+
+### `cost.json` — what the job spent, and what it was allowed to spend
+
+In each formulation's own directory, appended to, and **bound by nothing** for
+`lifecycle.json`'s reason: no receipt carries its digest, `bindings.RECEIPTS`
+does not name it, and writing to it cannot make anything stale. A rerun on
+unchanged inputs still moves no receipt and no run identity; what it moves is
+this file, which is the honest record that the rerun happened and cost something.
+
+One entry per invocation of `design-tool run`, including the ones that concluded
+nothing — a run that spent two seconds and then stopped to ask for a review is
+exactly the failed and repeated work `ARCHITECTURE.md` 15.6 asks to be visible,
+and a file describing only the last invocation reports a third of what a review
+round trip costs.
+
+| total | what it is |
+| --- | --- |
+| `dispatches` / `reviews` / `commissions` | questions actually put to a model. The **commission** is counted here and is not in `llm_calls`: `AGENT_COMMISSION` is written by `cli.py` before the runner is reached |
+| `reviews_reused` | stored answers a resumed run read back. `llm_calls` counts each of these as a fresh dispatch; this is the number that says how many were not |
+| `context_bytes` | the canonical size of each payload handed over, at the moment it was handed over. For a commission, the instruction plus every file `authorized_inputs` names. Bytes, not tokens — there is no tokenizer here |
+| `deterministic_seconds` / `build_boundary_seconds` | wall time inside the runner, and the confined child that ran before it |
+| `builds` / `repeated_builds` | builds, and builds beyond the first. A two-review round trip is three builds of one part |
+| `builds_avoided` / `cache` | the cache status per invocation, and the builds a hit actually saved — zero, because the cache is consulted *after* `backend.build` returns |
+| `failed_invocations` | invocations that produced no claim: a pause, a refusal, or a capped lane |
+| `budget` / `overruns` | the ceiling the compiled plan authorises, and anything spent past it |
+
+**The budget is declared by the plan and checked against the ledger.**
+`cost.budget(plan)` derives what one invocation may dispatch from the compiled
+plan and nothing else: one safety review when the plan requires it, one
+specification when the plan can actually run it, one verification unless the
+route traded it away, one commission when the geometry is authored. A run that
+spends past it is refused with stage `cost` — runtime execution follows the
+compiled plan, which is the authority gate rather than a cost footnote. The
+route-level numbers are frozen in `pipeline/cost.py` beside the code that ships,
+the way `selftest.FROZEN_CONTRACTS` freezes a certified contract, so
+`ROADMAP.md` 3.4's "no release may add an AI round trip to an existing path as an
+accidental side effect" fails a test instead of going unnoticed.
+
+`design-tool status --json` reports it per formulation under `cost`, with
+`incremental` naming what each formulation beyond the shared root added and
+`shared` naming what it inherited — see the next section.
 
 ### `design-tool branch --disposition` — the alternative lifecycle
 
@@ -973,8 +1015,13 @@ second opinion.
 `model_contract.json`, `intent_manifest.json`, `candidate.stl` (and
 `candidate.step` when the contract asks), `commission_report.json`,
 `manufacturing_report.json`, `witness/`, `artifact_manifest.json`,
-`timings.json`, and `final_status.json`. On the `AUTHORED` builder,
+`timings.json`, `cost.json`, and `final_status.json`. On the `AUTHORED` builder,
 `acceptance_contract.json` and `acceptance_history.json` as well.
+
+`timings.json` and `cost.json` are the two files a rerun on unchanged inputs is
+allowed to move, and neither is hashed into anything: durations are not part of
+any artifact's identity, and what a job *spent* is not part of what it
+*concluded*.
 
 **Read `final_status.json`, and read `allowed_claim` before repeating anything
 about the part.** `COMMISSIONED` is not `VERIFIED`, and neither one is "safe".

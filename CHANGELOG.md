@@ -6,6 +6,79 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — Release 3's context-budget foundation: what a job cost, and what it was allowed to cost
+
+`MISSION.md` makes efficiency a first-class objective and `ARCHITECTURE.md` 15.6
+lists the eight things that have to be visible before any of it can be held to.
+The build measured one of them — `JobResult.llm_calls`, printed to stderr and
+written down nowhere — and `docs/baseline.md` held four wall-clock figures a
+person had taken by hand. You cannot hold a budget you do not measure.
+
+**`cost.json`, per formulation, one entry per invocation.** `pipeline/cost.py`
+writes it beside the receipts, and it is a *journal* rather than a snapshot for
+one reason: a review round trip is three invocations of `design-tool run`, each
+of which rebuilds the geometry from scratch, and a file describing only the last
+one reports a third of what the job spent. It is bound by nothing, for
+`lifecycle.json`'s reason — no receipt carries its digest, `bindings.RECEIPTS`
+does not name it, and appending to it cannot make anything stale. A rerun on
+unchanged inputs still moves no receipt and no run identity; what it moves is
+this file, which is the honest record that the rerun happened and cost something.
+
+Seven of the eight are recorded: dispatch count, context size, deterministic
+runtime, cache reuse, repeated work, failed work, per-alternative incremental
+cost. **Import cost is deliberately not decomposed** — separating a fresh
+interpreter's `import trimesh` from the build inside it needs an import hook in
+the confined child, which is machinery nothing has asked for and which
+`docs/baseline.md` already decomposes by hand. What is recorded instead is
+`warm_kernel`, one `sys.modules` lookup, which says which regime a measurement
+was taken in: the same certified job is 0.18 s warm and 3.36 s cold.
+
+**Two things the existing counter had wrong, now visible.** `llm_calls` is
+reused rather than replaced — one counter, not two — and measuring around it
+found both. It never counted the **designer commission**: `AGENT_COMMISSION` is
+written by `cli.py` and returns before the runner is reached, `tools/replay.py`
+already called it "the live dispatch on the `CUSTOM` lane", and the "1 llm call"
+`docs/baseline.md` prices the `CUSTOM` riser at is that commission, counted by a
+person. And summed across a resumable job it over-counts: the invocation that
+finishes a job re-reads every answer written for it and increments again, so the
+recorded `modify-ball-flange-flat` replay reports `llm_calls` 0, 1, 2 for two
+questions ever asked. The ledger counts the question at the pause that wrote the
+packet and records the re-reads as `reviews_reused`.
+
+**Per-alternative incremental cost**, which `ARCHITECTURE.md` 15.2 asks for and
+the vent-ball branch exercise had to take with a stopwatch. On the recorded
+three-formulation `berlingo-knob` replay each sibling costs one dispatch, 23.8 kB
+of context, ~2.9 s and two builds; the project pays six builds and three
+dispatches; and `as-drawn`, which builds a candidate **byte-identical to its
+parent's**, costs 2.91 s against the parent's 2.96 s. What is shared is intent,
+and intent is free. The two mechanisms that could make that untrue are reported
+separately because they are zero for different reasons: `builds_avoided` is
+*measured* and is zero because the content cache is consulted **after**
+`backend.build` returns — a hit confirms the bytes and saves nothing — and
+`reviews_from_a_sibling` is zero *by construction*, because the review envelope
+carries `alternative_id`.
+
+**A budget that is declared and checked.** `cost.budget(plan)` is what one
+invocation of a compiled plan may dispatch, derived from the plan and nothing
+else; `runner.run` refuses a run that spends past it with stage `cost`, because a
+dispatch the plan did not name is work done outside the plan and that is the
+authority gate rather than a cost footnote. The per-route numbers are frozen in
+`pipeline/cost.py` — in the shipped module, imported by the test, the way
+`selftest.FROZEN_CONTRACTS` freezes a certified contract — so `ROADMAP.md` 3.4's
+"no release may add an AI round trip to an existing path as an accidental side
+effect" fails a test instead of going unnoticed.
+
+Read by `design-tool status --json` under `cost`, by the terminal summary after
+every run, and by the budget check itself. 23 gating fixtures, four in
+`benchmarks/heavy` for the costs only the confined boundary has, two L1
+assertions on recorded jobs, and eight mutations of the protections — the
+ceiling, the counter, the commission, the journal, the build count, the cache
+status, the incremental figure — each shown to turn a passing fixture red.
+
+Not built, deliberately: context **packages**. Task-specific context assembly is
+`ARCHITECTURE.md` 10 and nothing has asked for one; building it now would be the
+broad unfinished framework 3.1 forbids. This is the measurement and the budget.
+
 ### Added — Release 3's lifecycle group: run identity, resume versus restart, seven honoured dispositions
 
 Three items that belong together: what a run *is*, what continuing one means, and

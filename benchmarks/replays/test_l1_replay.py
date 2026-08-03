@@ -333,6 +333,44 @@ class ModifyBallFlangeFlatTest(_CaseChecks, unittest.TestCase):
         self.assertEqual([0, RP.NEEDS_ACTION, RP.NEEDS_ACTION, RP.NEEDS_ACTION],
                          self.play.exit_codes)
 
+    def test_a_two_review_round_trip_cost_three_builds_of_one_part(self) -> None:
+        """What resumption costs, on a real job, measured rather than estimated.
+
+        `design-tool run` is resumable by re-running, and every re-run re-executes
+        every deterministic stage before the point it stopped at. This case pauses
+        twice, so the candidate is built three times and two of those builds are
+        work the job had already done. Nothing in this repository reported that
+        number before `pipeline/cost.py`; the exit sequence above shows the three
+        invocations and says nothing about what they cost.
+
+        Asserted as an equality against the recorded exit codes rather than as a
+        literal, so a case that stops pausing moves both together.
+        """
+        from pipeline import cost as COST
+
+        totals = COST.totals_at(self.project)
+        runs = sum(1 for code in self.play.exit_codes[1:])
+        self.assertEqual(runs, totals["invocations"],
+                         "one ledger entry per `design-tool run`, including the "
+                         "two that concluded nothing")
+        self.assertEqual(3, totals["builds"])
+        self.assertEqual(2, totals["repeated_builds"])
+        self.assertEqual(2, totals["reviews"],
+                         "two questions were asked: one safety, one verification")
+        self.assertEqual(3, totals["reviews_reused"],
+                         "and three stored answers were read back by later "
+                         "invocations. Summing `llm_calls` over the three runs "
+                         "gives 0 + 1 + 2 = 3 dispatches where two questions "
+                         "were ever put to anybody, which is the accounting the "
+                         "ledger corrects.")
+        self.assertEqual(3, totals["failed_invocations"],
+                         "15.6's `failed work`: not one of the three invocations "
+                         "produced a claim. Two stopped to ask a question and "
+                         "the third finished on a lane that may not certify its "
+                         "own result, so the whole 40-odd seconds this case "
+                         "costs bought receipts to iterate against and no "
+                         "claimable outcome.")
+
     def test_the_rerun_did_not_move_the_evidence_under_the_answer(self) -> None:
         """Why a `MODIFY` round trip is possible at all.
 
@@ -498,6 +536,70 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
                          "with the id taken out -- of the envelope and of the "
                          "plan it binds -- the two reviews are one review, and "
                          "the first answer settles the second")
+
+    def test_each_formulation_paid_in_full_and_nothing_computational_was_shared(self) -> None:
+        """ARCHITECTURE.md 15.2's incremental cost per alternative, on a real fork.
+
+        The vent-ball branch exercise produced this number with a stopwatch: a
+        sibling costs a full build and a full audit, and nothing is shared. Here
+        the pipeline produces it. What *is* shared is intent -- the brief, the
+        requirements, the engagement length, the printer, all read from one
+        `project.json` no formulation rewrites -- and intent is free. Everything
+        that costs anything is paid again, per formulation, and the ledgers say
+        so rather than a comment claiming it.
+
+        `as-drawn` is the sharpest case in the repository for this: it builds a
+        candidate byte-identical to its parent's, so if anything anywhere reused a
+        sibling's work this is where it would show, and it costs exactly what the
+        parent cost.
+        """
+        from pipeline import cost as COST
+
+        costs = {key: COST.totals_at(work)
+                 for key, work in self.play.work_dirs.items()}
+        for key, totals in sorted(costs.items()):
+            with self.subTest(formulation=key):
+                self.assertEqual(2, totals["invocations"],
+                                 "one run to ask for the verification, one to "
+                                 "consume the answer")
+                self.assertEqual(2, totals["builds"])
+                self.assertEqual(1, totals["repeated_builds"])
+                self.assertEqual(1, totals["reviews"],
+                                 "one question, asked once and answered once")
+                self.assertEqual(1, totals["reviews_reused"],
+                                 "and read back once by the run that finished")
+                self.assertEqual(0, totals["builds_avoided"])
+                self.assertGreater(totals["context_bytes"], 0)
+
+        report = COST.compare(costs)
+        self.assertEqual(6, report["project"]["builds"],
+                         "three formulations of one job, two builds each: "
+                         "branching multiplies the deterministic cost and shares "
+                         "the declaration")
+        self.assertEqual(3, report["project"]["reviews"])
+        self.assertEqual(sorted(["plate-seated", "as-drawn"]),
+                         sorted(report["incremental"]),
+                         "the shared root is what the others were branched from, "
+                         "so it is not an increment over anything")
+        for key, added in sorted(report["incremental"].items()):
+            with self.subTest(formulation=key):
+                self.assertEqual(2, added["builds"])
+                self.assertEqual(1, added["reviews"])
+                self.assertGreater(added["deterministic_seconds"], 0.0)
+                self.assertEqual(
+                    {"builds_avoided": 0, "reviews_from_a_sibling": 0},
+                    added["shared"],
+                    "the first is measured off the ledger and the second is zero "
+                    "by construction -- `TheSiblingRefusesTheAnswerWrittenNextDoor"
+                    "Test` is the proof that it still bites")
+
+        fallback = costs["as-drawn"]["deterministic_seconds"]
+        ancestor = costs[RP.ROOT_ALTERNATIVE]["deterministic_seconds"]
+        self.assertGreater(fallback, ancestor / 2,
+                           "the fallback builds the same solid as its parent and "
+                           "pays for it again; a figure far below the parent's "
+                           "would mean something was reusing a sibling's work, "
+                           "which nothing here does")
 
     def test_the_revised_formulation_can_no_longer_claim_what_it_concluded(self) -> None:
         """Slice B, on a job: a verdict read after the evidence under it moved.

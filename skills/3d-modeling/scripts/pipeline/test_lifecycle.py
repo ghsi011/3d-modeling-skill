@@ -53,6 +53,7 @@ from pathlib import Path
 
 from . import bindings as B
 from . import cli
+from . import cost as COST
 from . import lifecycle as LC
 from . import project as P
 from . import schemas as S
@@ -594,7 +595,16 @@ class RestartOnARealRunTest(unittest.TestCase):
         return directory
 
     def test_a_rerun_on_unchanged_inputs_moves_no_receipt_and_no_identity(self) -> None:
-        """The constraint the run-identity decision turns on, asserted end to end."""
+        """The constraint the run-identity decision turns on, asserted end to end.
+
+        Two files move and neither is a receipt. `timings.json` is one run's
+        durations, rewritten. `cost.json` is the ledger, appended to -- and the
+        entry it gains is the point rather than an exception to the rule: the
+        rerun really did happen, really did build the geometry a second time, and
+        before the ledger existed that cost was recorded nowhere at all. Both are
+        bound by nothing: no receipt carries either digest, `bindings.RECEIPTS`
+        names neither, and the run identity below is unmoved.
+        """
         with tempfile.TemporaryDirectory() as raw:
             directory = self._certified(Path(raw))
             _quiet(cli.run, str(directory), "--no-render")
@@ -603,10 +613,21 @@ class RestartOnARealRunTest(unittest.TestCase):
             second = _digests(directory)
             moved = {name for name in first
                      if first[name] != second.get(name)}
-            self.assertEqual({"timings.json"}, moved,
-                             "durations are the one thing a rerun is allowed to "
-                             "move, and they are hashed into nothing")
+            self.assertEqual({"timings.json", "cost.json"}, moved,
+                             "durations and what the job spent are the only two "
+                             "things a rerun is allowed to move, and neither is "
+                             "hashed into anything")
             self.assertEqual(identity, _status(directory)["run_id"])
+            # And the rerun is *recorded* as repeated work rather than absorbed.
+            totals = COST.totals_at(directory)
+            self.assertEqual(2, totals["invocations"])
+            self.assertEqual(2, totals["builds"])
+            self.assertEqual(1, totals["repeated_builds"],
+                             "the second run rebuilt geometry the first run had "
+                             "already built, and that is what a rerun costs")
+            self.assertEqual(0, totals["dispatches"],
+                             "a certified INCONSEQUENTIAL job dispatches nothing, "
+                             "however many times it is run")
 
     def test_a_restart_returns_the_job_to_not_run_and_a_rerun_rebuilds_it(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

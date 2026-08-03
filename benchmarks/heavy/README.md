@@ -26,7 +26,9 @@ unit suite beside the module it tests. Nothing was deleted and nothing was
 weakened: 830 tests stayed, 333 moved, and 830 + 333 is the 1163 that were there
 before. Written *since* the split rather than moved by it: three cases in
 `test_lifecycle_heavy.py`, which restart a job whose review answer had to survive
-the confined build boundary to exist.
+the confined build boundary to exist, and four in `test_cost_heavy.py`, which
+measure the two costs only the authored lane has — the confined boundary itself,
+and the second build a bounded review round trip pays for.
 
 A handful of tests moved without starting anything, because they do the
 expensive work themselves: the screening corpus (19 s a test), the STEP reads
