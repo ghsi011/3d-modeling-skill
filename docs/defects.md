@@ -363,3 +363,44 @@ false-clean detector.
 
 **Fixture that must fail first.** A shape whose faces cannot be enumerated,
 asserted to report unknown rather than complete.
+
+## D24 — coverage is a ratio against the contract that declared it
+
+**Where.** [`pipeline/commission.py`](../skills/3d-modeling/scripts/pipeline/commission.py):435-437.
+
+```python
+declared = [f for f in contract.features if f.mandatory]
+covered  = [c for c in checks if c.feature_id and c.ran]
+coverage = len(covered) / len(declared) if declared else 1.0
+```
+
+**What is wrong.** Nothing, for the job it was written for: within one run,
+coverage answers "was the contract this job froze actually checked", and
+`minimum_coverage` refuses a run that measured less of its own contract than it
+promised to.
+
+It becomes a defect the moment two formulations are set beside each other. A
+formulation declaring three mandatory features and covering all three scores
+1.0. A sibling declaring eight and covering all eight also scores 1.0. The number
+is a ratio to a denominator each formulation chose for itself, so it says nothing
+about which contract was more demanding — and a designer who declares less scores
+exactly as well as one who declares more.
+
+**Evidence.** Found by scoping Release 4 (`docs/release-4-scope.md`), by asking
+what a comparison could honestly report rather than by building one. Both
+formulations of the recorded `branch-knob-seat-fallback` case reach coverage 1.0
+against separately authored proposals.
+
+**What it can cause.** Any comparison that ranks or scores formulations on
+coverage rewards declaring fewer obligations. `ARCHITECTURE.md` 8.5 forbids a
+weighted total hiding a mandatory failure; this is the same failure one level
+down, where the *set* of mandatory checks differs and the ratio conceals it.
+
+**What would close it.** Release 4's scoping proposes the structural answer
+rather than a scoring fix: a comparison refuses to rank formulations whose
+mandatory check sets differ, and says so — `INCOMPARABLE_CHECK_SETS` — instead of
+producing a number that reads as comparable. Coverage itself needs no change.
+
+**Fixture that must fail first.** Two formulations of one job with different
+mandatory feature sets, both at coverage 1.0, asserted to be reported as
+incomparable rather than equal.
