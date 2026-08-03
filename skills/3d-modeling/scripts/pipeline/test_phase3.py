@@ -664,3 +664,81 @@ def _two_scopes_laid_out(root: Path) -> Path:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EdgeManifoldCountsTest(unittest.TestCase):
+    """docs/defects.md D1: one number was carrying three conditions.
+
+    `len(edges_unique) - len(face_adjacency)` counts every edge that is not
+    two-manifold -- open edges and edges shared by three or more faces alike --
+    and reported the total under a name that means only the first. A real source
+    artifact reported `boundary_edges: 332` whose actual condition was 322 open
+    edges, 9 edges shared by three faces and 1 shared by four. The number is what
+    a reader acts on, and "332 boundary edges" points a repairer at hole-filling,
+    which cannot close either of the other two.
+    """
+
+    @staticmethod
+    def _three_conditions() -> trimesh.Trimesh:
+        """One edge used by three faces, one by four, and open edges elsewhere.
+
+        Two fans that share no vertex, so the arithmetic is checkable by hand:
+        the three-fan contributes edge (0,1) used three times plus six edges used
+        once; the four-fan contributes edge (5,6) used four times plus eight used
+        once. 16 unique edges, none of them two-manifold.
+        """
+        vertices = np.array(
+            [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, -10, 0], [5, 0, 9],
+             [50, 0, 0], [60, 0, 0], [50, 10, 0], [50, -10, 0], [55, 0, 9],
+             [55, 0, -9]], dtype=float)
+        faces = np.array([[0, 1, 2], [0, 1, 3], [0, 1, 4],
+                          [5, 6, 7], [5, 6, 8], [5, 6, 9], [5, 6, 10]],
+                         dtype=np.int64)
+        return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+
+    def test_the_three_conditions_are_counted_separately(self) -> None:
+        mesh = self._three_conditions()
+        counts = D.edge_manifold_counts(mesh)
+
+        self.assertEqual(14, counts["boundary_edges"],
+                         "edges used by exactly one face")
+        self.assertEqual(2, counts["nonmanifold_edges"],
+                         "edges used by three or more faces")
+        self.assertEqual(4, counts["max_faces_per_edge"])
+        self.assertEqual({"1": 14, "3": 1, "4": 1}, counts["faces_per_edge"])
+
+        # The number the old expression produced, kept as the arithmetic that
+        # makes the defect legible: it is the sum of two different conditions.
+        self.assertEqual(
+            counts["boundary_edges"] + counts["nonmanifold_edges"],
+            len(mesh.edges_unique) - len(mesh.face_adjacency))
+
+    def test_a_sound_mesh_reports_no_edges_of_either_kind(self) -> None:
+        """The counter must be able to say zero, or it says nothing."""
+        counts = D.edge_manifold_counts(trimesh.creation.box(extents=(10, 10, 10)))
+        self.assertEqual(0, counts["boundary_edges"])
+        self.assertEqual(0, counts["nonmanifold_edges"])
+        self.assertEqual(2, counts["max_faces_per_edge"])
+
+    def test_an_open_mesh_reports_only_boundary_edges(self) -> None:
+        """A hole is a hole, and must not be inflated by the other condition."""
+        box = trimesh.creation.box(extents=(10, 10, 10))
+        box.update_faces(np.arange(len(box.faces)) != 0)
+        counts = D.edge_manifold_counts(box)
+        self.assertEqual(3, counts["boundary_edges"])
+        self.assertEqual(0, counts["nonmanifold_edges"])
+
+    def test_diagnose_reports_the_two_conditions_and_names_the_second(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "three-conditions.stl"
+            self._three_conditions().export(path)
+
+            report = D.diagnose(path)
+            self.assertEqual("REPAIR_REQUIRED", report["classification"])
+            self.assertEqual(14, report["boundary_edges"])
+            self.assertEqual(2, report["nonmanifold_edges"])
+            # A repairer told only about holes would reach for hole-filling,
+            # which cannot close an edge shared by three faces.
+            self.assertTrue(
+                any("3 or more face" in finding for finding in report["findings"]),
+                f"no finding named the non-manifold edges: {report['findings']}")
