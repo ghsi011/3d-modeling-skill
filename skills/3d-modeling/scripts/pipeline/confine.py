@@ -145,8 +145,15 @@ class Confined:
 if WINDOWS:                                       # pragma: no branch - platform
     _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _posix = None
 else:                                             # pragma: no cover - platform
     _advapi32 = _kernel32 = None
+    # The other implementation of the same boundary. Imported rather than
+    # inlined because the two share no primitive: one is restricted tokens,
+    # integrity levels and job objects, the other is namespaces, mount
+    # attributes and seccomp. What they share is this module's surface and the
+    # rule that neither may degrade into an ordinary subprocess.
+    from . import confine_posix as _posix
 
 TOKEN_ALL_ACCESS = 0xF01FF
 TOKEN_INTEGRITY_LEVEL = 25
@@ -461,11 +468,7 @@ def unavailable_reason() -> str | None:
     be established is a refusal and never a downgrade.
     """
     if not WINDOWS:
-        return (f"the confined build boundary is implemented with Windows "
-                f"restricted tokens, mandatory integrity levels and job objects, "
-                f"and this is {sys.platform}. There is no unconfined path: "
-                f"candidate code is not executed at all where it cannot be "
-                f"confined.")
+        return _posix.unavailable_reason()
     return None
 
 
@@ -704,6 +707,8 @@ def seal_read_only(path: Path) -> None:
     is not granted here, because a boundary whose inputs are writable by the
     process that also promotes the outputs is one edit away from not being one.
     """
+    if not WINDOWS:                               # pragma: no cover - platform
+        return _posix.seal_read_only(path)
     _apply_sddl(path,
                 f"D:P(A;;FA;;;SY)(A;OICI;FRFX;;;{user_sid()})"
                 f"(A;OICI;FRFX;;;{SDDL_RESTRICTED_CODE})",
@@ -717,6 +722,8 @@ def seal_writable(path: Path) -> None:
     the system is implicitly Medium and therefore cannot be. Nobody is granted
     `WRITE_DAC` or `WRITE_OWNER` by ACE; the parent holds both as owner.
     """
+    if not WINDOWS:                               # pragma: no cover - platform
+        return _posix.seal_writable(path)
     _apply_sddl(path,
                 f"D:P(A;;FA;;;SY)(A;OICI;FRFWFXSD;;;{user_sid()})"
                 f"(A;OICI;FRFWFXSD;;;{SDDL_RESTRICTED_CODE})"
@@ -726,6 +733,8 @@ def seal_writable(path: Path) -> None:
 
 def unseal(path: Path) -> None:
     """Give the parent write access back, so the sandbox can be deleted."""
+    if not WINDOWS:                               # pragma: no cover - platform
+        return _posix.unseal(path)
     _apply_sddl(path, f"D:P(A;;FA;;;SY)(A;OICI;FA;;;{user_sid()})", with_label=False)
 
 
@@ -744,6 +753,8 @@ def data_streams(path: Path) -> list[str]:
     so the boundary refuses any that does rather than promoting a file whose
     receipt describes part of it.
     """
+    if not WINDOWS:                               # pragma: no cover - platform
+        return _posix.data_streams(path)
     if not WINDOWS:                               # pragma: no cover - platform
         return []
     data = _FIND_STREAM_DATA()
@@ -767,6 +778,8 @@ def is_reparse_point(path: Path) -> bool:
     `os.path.islink` answers for symlinks; a directory junction is not a symlink
     and is the one a candidate can create with no privilege at all.
     """
+    if not WINDOWS:                               # pragma: no cover - platform
+        return _posix.is_reparse_point(path)
     try:
         return bool(path.lstat().st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
     except (OSError, AttributeError):
@@ -899,6 +912,8 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
     `final_status.json` 25 s after the run reported `FAILED` did so because
     `subprocess.run`'s timeout bounds one process and this bounds all of them.
     """
+    if not WINDOWS:                                   # pragma: no cover - platform
+        return _posix.run(argv, cwd=cwd, env=env, timeout=timeout)
     reason = unavailable_reason()
     if reason:
         raise ConfinementUnavailable(reason)
@@ -1075,3 +1090,22 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
         seconds=time.perf_counter() - started,
         pid=int(child_pid),
         survivors=survivors)
+
+
+def seal_syscalls() -> None:
+    """Refuse `execve` for the rest of this process's life, where that is a
+    separate act from building the boundary.
+
+    On Windows it is not: `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` is set on
+    the process before it starts, so by the time any candidate byte runs the
+    process already cannot spawn. On Linux the parent's last act is itself an
+    `execve`, so the filter cannot be installed until after it -- which means the
+    child installs it, immediately before the first candidate import.
+
+    Called by `build_child.py`. A no-op on Windows rather than absent, so that
+    the child has one thing to call and neither platform's child has a branch in
+    it about which boundary it is inside.
+    """
+    if WINDOWS:                                   # pragma: no cover - platform
+        return
+    _posix.seal_syscalls()

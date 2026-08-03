@@ -45,37 +45,39 @@ The current branch already provides important foundations:
 * reproducible packaging and toolchain identity;
 * a comparison of a job's formulations that refuses to rank them, and says which of their verdicts are not comparable and why.
 
-### Where this can be developed, and where it can only be read
+### Where this can be developed
 
-**The confined build boundary is Windows-only, by design, and there is no
-unconfined path.** `AGENTS.md` requires candidate code to be executed only
-through a boundary that reduces its authority *by the operating system*;
-`pipeline/confine.py` implements that with restricted tokens, mandatory
-integrity levels and job objects, and on any other platform it refuses rather
-than degrading (`confine.py:464`). That refusal is correct — a fallback that ran
-untrusted authored geometry as an ordinary peer would be worse than no boundary
-— and it has a consequence worth writing down once, because it was rediscovered
-the hard way:
+**The confined build boundary now has two implementations, and neither degrades.**
+`AGENTS.md` requires candidate code to be executed only through a boundary that
+reduces its authority *by the operating system* and bounds its lifetime. That
+was implemented for Windows only, so on any other platform the pipeline refused
+to execute a candidate at all — correctly, but it meant a Linux checkout could
+not run a single replay, could not record one, and could not touch the cache
+slice or anything else on the build path.
 
-* **on Linux, no candidate geometry can be built at all.** Every replay that
-  builds fails: measured at `5c6ef9e`, all four cases in `benchmarks/replays`
-  plus both adversarial cases, 19 tests. `modify-ball-scope-refused` passes,
-  because it is refused before it builds.
-* **the L0 gate is 13 tests short of green on Linux**, and all 13 are Windows
-  assumptions rather than defects: 11 subtests in
-  `tools/test_fixtures.py::TheWallBetweenRequestAndAnswer` whose absolute-path
-  detector is looking for `C:\...`, and two in
-  `tools/test_tiers.py::TheSpawnGuardTest` that construct a Windows command
-  line. 894 pass.
-* **so a Linux session may write and gate any code whose tests do not build
-  geometry**, and may not record, re-record or verify anything in
-  `benchmarks/replays` or `benchmarks/heavy`. Work that needs a recording is a
-  Windows-host follow-up, and saying which is part of shipping it.
+`pipeline/confine_posix.py` is the second implementation. Four properties, each
+re-measured by `benchmarks/heavy/test_confine_posix_heavy.py` rather than
+asserted:
 
-`design-tool compare` was built under exactly that constraint: it reads
-receipts, builds nothing, and its whole fixture set lays down the receipts a run
-would have written, so it gates on every platform. What it still owes is in
-Release 4.
+| property | Windows | Linux |
+|---|---|---|
+| filesystem authority | restricted token + Low integrity label | mount namespace, `mount_setattr(AT_RECURSIVE, RDONLY)` over `/`, one read-write bind for the build directory |
+| network | **open** — `docs/defects.md` D11 | **closed** — network namespace with no interfaces; `ENETUNREACH` |
+| bounded lifetime | job object, `KILL_ON_JOB_CLOSE` | PID namespace; init exits and the kernel kills the rest, with no breakaway flag to attempt |
+| no child processes | `CHILD_PROCESS_RESTRICTED` before the process starts | seccomp-BPF refusing `execve`, installed by the child immediately before the first candidate import |
+| authority reduction | restricted token, same user | empty capability bounding set, same user |
+
+The strongest evidence that the Linux boundary is not the weaker one is not any
+of those rows: it is that **the L1 replay suite produces byte-identical goldens
+through it**. 57 passed, 43 subtests, ~80 s against a two-minute budget — the
+same numbers the reference Windows machine reports, against recordings frozen on
+Windows and not re-recorded. A boundary that leaked would not reproduce a digest.
+
+Two things are still platform-bound and both are Windows assumptions in tests
+rather than defects: 13 L0 tests fail on Linux — 11 subtests in
+`tools/test_fixtures.py::TheWallBetweenRequestAndAnswer`, whose absolute-path
+detector looks for `C:\...`, and two in `tools/test_tiers.py::TheSpawnGuardTest`
+that construct a Windows command line. 907 pass.
 
 The following work is already complete and is treated as the protected baseline.
 

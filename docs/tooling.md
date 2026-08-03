@@ -674,6 +674,14 @@ the parent half of the protocol, and
 [`pipeline/build_child.py`](../skills/3d-modeling/scripts/pipeline/build_child.py)
 is the child.
 
+**There are two implementations, chosen by platform, and neither degrades.**
+`confine.py` is the Windows one and dispatches to
+[`pipeline/confine_posix.py`](../skills/3d-modeling/scripts/pipeline/confine_posix.py)
+everywhere else. A platform with neither refuses to execute the candidate at
+all; there is no unconfined path, and a boundary that quietly became an ordinary
+subprocess would be worse than none because the receipts would not say which one
+ran.
+
 **The confinement**, on Windows, with no new dependency (`ctypes` against
 `advapi32`/`kernel32`):
 
@@ -696,6 +704,30 @@ failing on purpose.
 Every privilege is deleted except `SeChangeNotifyPrivilege`, which is
 bypass-traverse-checking: `Everyone` holds it by default and it grants access to
 no object.
+
+**The confinement**, on Linux, also with no new dependency (`ctypes` against
+`libc`). Every row is re-measured by
+`benchmarks/heavy/test_confine_posix_heavy.py`, which runs a real confined child
+and has it try the thing:
+
+| mechanism | what it is | what it buys, measured |
+|---|---|---|
+| mount namespace | `MS_REC\|MS_PRIVATE` off the host's propagation, then `mount_setattr(AT_RECURSIVE, MOUNT_ATTR_RDONLY)` over `/`, then one read-write bind for the build directory | every write outside the build directory fails `EROFS` — the repository, `site-packages`, `/tmp`, `/etc`, `/root`. An allow-list of exactly one hole, so a mount nobody thought of is read-only because it is under `/` rather than because somebody remembered it |
+| network namespace | created with no interfaces, loopback never brought up | `connect()` answers `ENETUNREACH` and DNS does not resolve. **The Windows boundary cannot say this** — see D11 |
+| PID namespace | the boundary's supervisor is init | a grandchild that calls `setsid()` and sleeps is dead before the parent reads one output byte. There is no `CREATE_BREAKAWAY_FROM_JOB` to attempt: the namespace is a property of the process tree, not a handle |
+| empty capability set | bounding set cleared first, then effective/permitted/inheritable, plus `SECBIT_NOROOT` and `PR_SET_NO_NEW_PRIVS` | `CapEff` is `0000000000000000`; `mount(MS_REMOUNT)` over `/` answers `EPERM`, so the candidate cannot unmake the read-only tree from inside. A candidate that reaches a new user namespace still cannot: inherited mounts are locked, and that is measured rather than assumed |
+| seccomp-BPF | `EPERM` for `execve`/`execveat`, architecture-checked, installed by `build_child` immediately before the first candidate import | the candidate creates no process. Later than the other three by one function call, because the parent's last act is itself an `execve` — the honest statement is that it covers candidate code rather than the whole child process |
+
+The identity is **not** dropped, and that is deliberate: a `MODIFY` job's model
+legitimately reads the supplied artifact out of the project directory the parent
+owns. Becoming another user does not confine that read — the read-only mount
+already did — it only breaks it. Authority goes; identity stays; the same shape
+the Windows child has under a restricted token.
+
+The evidence that this is not the weaker boundary is not any single row: the L1
+replay suite produces **byte-identical goldens** through it, 57 passed and 43
+subtests against recordings frozen on Windows. A boundary that leaked would not
+reproduce a digest.
 
 **The workspace.** Two directories under a fresh sandbox, both with a protected
 DACL that inherits nothing:
