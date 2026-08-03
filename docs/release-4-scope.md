@@ -1,5 +1,49 @@
 # Release 4 — scope
 
+> **Status: judged and acted on, 2026-08-03. Superseded in three places — read
+> this header before the argument below.**
+>
+> This document was written by one agent in one pass and was never reviewed. Its
+> citations have since been checked one by one. Most held. What did not:
+>
+> * **§4(C)'s material-use table is unsourced.** The two solid volumes
+>   (47,526.263 mm³ and 49,792.874 mm³) and the +4.77% derived from them appear
+>   nowhere in this repository. `tools/replay.py`'s `_observe_dir` records the
+>   volume detector's *result* and discards its `measured_mm3`, so nothing
+>   committed can reproduce them. They are the whole of §5's second argument,
+>   and they should be treated as unverified until a recording freezes the
+>   number.
+> * **§1's "`cli.py:1754` builds a table over *every* formulation" is false.**
+>   The loop is over `project.alternatives`, and `branch` writes no row for the
+>   shared root — so `status` reports two formulations where `cost.compare` in
+>   the same report reports three. That is now `docs/defects.md` D26, and it
+>   means §1's argument that a comparison is already reachable from
+>   `design-tool status --json` is weaker than it reads.
+> * **§6's "`docs/adr/0001` lists the unbuilt verbs … and does not name
+>   `compare`" understates it.** That list is a code block rather than a table,
+>   and it had already drifted: `branch` and `selftest` shipped in Release 3
+>   without reaching it. Fixed, with a test that refuses the drift in future.
+>
+> And two of its judgements were **overruled** on evidence, in
+> [ADR 0005](adr/0005-a-comparison-refuses-rather-than-scores.md):
+>
+> * **§4(F) proposed deferring `MODIFY` pairs.** They are in. Settling nothing
+>   is the correct output when the deciding axis cannot be measured, provided
+>   the comparison names that axis and refuses preference on those grounds.
+>   Deferring the case that is hard to answer is what "Release 4 waiting on
+>   Release 6 in disguise" would actually look like.
+> * **§1 and §6 make `INCOMPARABLE_CHECK_SETS` the whole of the structural
+>   answer.** It is one of three faces. The check *set* is one way a formulation
+>   grades itself; the frozen *expectation* and the *band* are the other two,
+>   and the expectation face is live on the recorded knob with nothing
+>   constructed — the root declares `bbox_mm.z = 50.0`, `plate-seated` declares
+>   `52.0`, and both are recorded `PASS` on `envelope`. See `docs/defects.md`
+>   D25.
+>
+> Its four re-scoping recommendations in §6 were **accepted**, three as written
+> and one enlarged, and are recorded at the bullets they change in
+> `ROADMAP.md`. What shipped is in `ROADMAP.md` Release 4, slice 1.
+
 What Release 4 should build first, what it should not build at all, and what it
 may honestly compare with the instruments that exist.
 

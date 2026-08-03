@@ -444,6 +444,132 @@ compiles and hashes to exactly the bytes it did before branching existed. Every
 new field is *absent* when there is nothing to say and never `null`, no
 subdirectory appears, and `candidate.stl` is still written at the project root.
 
+### `design-tool compare` — what setting them side by side settles
+
+```bash
+uv run design-tool compare <project>
+uv run design-tool compare <project> --against .,plate-seated --json
+```
+
+Deterministic and free. It reads the receipts each formulation already wrote,
+writes `comparison.json` at the project root and prints a table. Zero dispatch,
+zero build, no new project field. Every number in it was measured by a run that
+had the part in front of it; the only thing added is the act of putting two of
+them side by side and being explicit about what that does and does not settle.
+
+**It has no score, no weight and no order, and it never selects.** `ranking` and
+`score` are fields in the output and both are always `null`; formulations are a
+JSON object keyed by id and never an array, because an array has an order and an
+order reads as a ranking. Choosing is `design-tool branch --disposition`, which
+records who chose and on what basis. See
+[ADR 0005](adr/0005-a-comparison-refuses-rather-than-scores.md).
+
+The default set is every formulation that may be worked under
+(`ACTIVE`, `PREFERRED`, `FALLBACK`) **plus the shared root**, which is a
+formulation with its own proposal, contract and receipts even though `branch`
+writes no row for it. `--against` names an explicit set, including concluded
+formulations — 6.14 keeps a rejected alternative available for reconsideration,
+it is just not what "compare this job" means by default.
+
+#### The first thing it reports: whether the verdicts are comparable at all
+
+The mandatory axis carries one of three verdicts, and the reason it is three
+rather than a boolean is [`docs/defects.md` D25](defects.md): on the authored
+lane a formulation's own `design_proposal.json` sets the rubric it will be
+graded against.
+
+| verdict | when | what it means |
+| --- | --- | --- |
+| `COMPARABLE` | same mandatory feature ids, same expectations, same bands | these verdicts may be read beside each other |
+| `INCOMPARABLE_CHECK_SETS` | the declared mandatory feature id sets differ | coverage is a ratio to a denominator each formulation chose, so 3-of-3 and 8-of-8 are both 1.0 and mean nothing against each other. The shared set is named, and so is what only one of them declared |
+| `INCOMPARABLE_EXPECTATIONS` | same ids, different frozen expectation or band | each `PASS` is a pass against a value that formulation declared for itself |
+
+The third is not hypothetical. On the recorded three-formulation knob, the root
+declares `bbox_mm.z = 50.0` and `plate-seated` declares `52.0`, each is checked
+against its own declaration to a band of `0.5`, and **both are `PASS`**. A report
+that printed `envelope PASS` beside `envelope PASS` would tell a reader they are
+equal on size. They are 2 mm apart by design, and that is the fork.
+
+The comparand is the feature-id **set** from `model_contract.json`, and
+deliberately never `coverage.fraction`: `covered` is not filtered to mandatory
+features (`commission.py:437`) so the fraction is not bounded by 1.0, and a
+fraction cannot say *which* check differs. Each formulation's own coverage is
+reported inside its own block, under the name `self_coverage`.
+
+The verdict scopes to the mandatory axis and not to the whole comparison. An
+unusable rubric must not delete the evidence axis, which is computable however
+badly two contracts disagree and is where a stale sibling is reported.
+
+#### `preference.admissible`
+
+False, with the reason named, when any of these holds:
+
+* a formulation did not pass its own mandatory checks, or has no current verdict
+  — 8.5, a preference criterion may not be weighed against a mandatory failure;
+* the rubrics disagree, per the table above;
+* a dimension this job *turns on* cannot be measured by this build at all.
+
+The measurements are printed in full in every one of those cases. Withholding a
+number somebody took would be its own dishonesty; what is withheld is the licence
+to read it as a reason.
+
+#### `not_compared` — the half that matters more
+
+One row per dimension this job exercises and this build cannot measure, each
+naming why and which release owns it. A comparison that silently omits the
+dimension nobody can measure is worse than none: it leaves a reader concluding
+two formulations are equivalent on an axis nothing looked at.
+
+Rows carry a `standing`. `CONTEXT` is true of any two solids — geometric
+difference between formulations (Release 6), print time and support toolpaths
+(no slicer adapter, permanently absent rather than pending), and the
+engineering-judgment dimensions that may only ever appear as a stated row
+attributed to whoever stated it. `DECIDING` means this job turns on it, and a
+`DECIDING` row that cannot be measured makes `preference.admissible` false.
+
+Criteria a job does not exercise are **absent**, not zero and not "1 vs 1"
+(6.14). A single-material one-piece pair emits no material-count, sequence,
+assembly or tooling row at all; a pair with more than one body emits one, marked
+`DECIDING`, owned by Release 8.
+
+On a `MODIFY` pair, `not_compared` is the entire finding: both formulations
+report `EXPERIMENTAL_UNAVAILABLE`, the axis that decides between them is
+preservation, and preservation fails twice — see [`docs/defects.md` D22](defects.md)
+and the undeclared sample density. The comparison says so and refuses preference.
+That output is correct and complete, not a failure to compare.
+
+#### The sentence it will not say
+
+The shared requirements are bound as a *digest* (`cli._requirement_hash`) and
+are never individually checked, and the contract's rows are geometric proxies a
+designer chose. So `shared.requirement_digest` is reported as a **binding**:
+
+> each formulation met the contract it froze, and all of them bind the same
+> requirement digest
+
+and never *"all of them meet the requirement"*. Where the digests differ, the
+formulations were frozen against different states of the shared job, and the
+report says that instead.
+
+#### What it records about its own evidence
+
+`comparison.json` is recomputable from disk at any moment, so there is nothing
+to resume and nothing to invalidate. It records, per formulation, the whole
+binding map, `bindings.identity` over it, the sha256 of every receipt it read,
+and `bindings.broken` verbatim. The identity covers *inputs*, so a corrected
+`commission_report.json` would move the comparison with no binding broken — which
+is why the receipt digests are there too.
+
+Two byte-identical siblings are grouped under `identical_designs` and named as
+one design under several ids. On the recorded knob the root and `as-drawn` share
+a source digest; without that block a reader takes their agreement for two
+independent designs reaching the same answer, and it corroborates nothing.
+
+Exit code is `0` whenever the report ran, and `2` for a project with fewer than
+two formulations or an unknown `--against` name. A comparison is never *waiting*
+for anything, so it never returns the needs-action code: a stale sibling is a
+finding in the output, not a state to resolve here.
+
 ### The authored lane: two artifacts, one commission
 
 A job whose plan names the `AUTHORED` builder -- every `CUSTOM` job, and any

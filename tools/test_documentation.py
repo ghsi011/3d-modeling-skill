@@ -185,3 +185,43 @@ def test_imported_solids_have_explicit_provenance_guidance() -> None:
 def test_changelog_does_not_claim_risk_class_survives() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "risk_class" not in changelog
+
+
+def _documented_verbs(text: str) -> set[str]:
+    """The verbs ADR 0001's command block names."""
+    block = re.search(r"```\n(design-tool .*?)```", text, re.DOTALL)
+    assert block, "ADR 0001 no longer contains a design-tool command block"
+    return {line.split()[1] for line in block.group(1).splitlines()
+            if line.startswith("design-tool ")}
+
+
+def test_every_built_verb_is_named_by_the_adr_that_owns_the_command_surface() -> None:
+    """One command surface, one place that says what is on it.
+
+    ADR 0001 decided `design-tool` is the single agent-facing interface and
+    listed its verbs. `pipeline/cli.py::COMMANDS` is what the interpreter
+    actually dispatches. Two lists that can disagree are two authorities over
+    one question, and this one had already drifted: `branch` and `selftest`
+    shipped in Release 3 without reaching the ADR, so the block a reader trusts
+    was describing a surface that no longer existed.
+
+    Verbs the ADR lists and the build does not have are *not* a failure. They
+    are the decided command surface, and the gap between them and `COMMANDS` is
+    the roadmap. What may never happen is the reverse: a verb an agent can
+    actually run that the ADR does not name.
+
+    `run-job` is exempt because the ADR names it in prose, deliberately and
+    with its deprecation, rather than in the block of verbs to reach for.
+    """
+    import sys
+    sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
+    from pipeline import cli
+
+    documented = _documented_verbs(
+        (ROOT / "docs" / "adr" / "0001-one-project-one-cli.md").read_text(
+            encoding="utf-8"))
+    built = set(cli.COMMANDS) - set(cli.DEPRECATED)
+    assert built <= documented, (
+        f"{sorted(built - documented)} can be run and are not named in "
+        "ADR 0001's command block. Add them there in the same commit that adds "
+        "them to COMMANDS, or the command surface has two authorities.")

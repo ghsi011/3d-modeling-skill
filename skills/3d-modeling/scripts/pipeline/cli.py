@@ -50,11 +50,13 @@ import dataclasses
 import json
 import math
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
 from . import acceptance as ACC
 from . import bindings as B
+from . import compare as CMP
 from . import cost as COST
 from . import execution as EX
 from . import findings as F
@@ -2227,6 +2229,174 @@ def _activate(project_dir: Path, project: P.Project, wanted: str) -> int:
     return 0
 
 
+def compare(argv: list[str]) -> int:
+    """Set this job's formulations beside each other, on the receipts on disk.
+
+    Deterministic and free. It dispatches nothing, builds nothing and writes
+    nothing but its own report: every number in it was measured by a run that
+    had the part in front of it, and the only thing added here is the act of
+    putting two of them side by side.
+
+    It does not choose. `design-tool branch --disposition` does, and it records
+    who chose and on what basis; a comparison that also chose would be a second
+    authority over one decision, and the one with no person's name on it. So
+    there is no total, no weight and no order in the output -- see
+    `pipeline/compare.py` for why that is a structural guarantee rather than a
+    convention, and for the three ways a formulation's own proposal can set the
+    rubric it will be graded against.
+    """
+    parser = argparse.ArgumentParser(
+        prog="design-tool compare",
+        description="What setting this job's formulations beside each other "
+                    "establishes, and -- the more important half -- what it does "
+                    "not. No score, no ranking, no selection.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--against", default=None,
+                        help="a comma-separated list of formulations to compare, "
+                             f"{ROOT_ALTERNATIVE!r} for the shared root. The "
+                             "default is every formulation that may be worked "
+                             f"under ({list(P.RUNNABLE_DISPOSITION)}) plus the "
+                             "root, which is a formulation with its own "
+                             "proposal, contract and receipts even though it has "
+                             "no declared row")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir, adapt=False)
+
+    # The root plus every declared alternative, which is not the set
+    # `report["alternatives"]` in `status` carries: that loop is over
+    # `project.alternatives`, and `branch` never writes a row for the shared
+    # root. A comparison that took its formulation set from there would silently
+    # drop one of the knob's three. See `docs/defects.md` D26.
+    declared = {ROOT_ALTERNATIVE: None}
+    for row in project.alternatives:
+        declared[row.alternative_id] = row
+
+    if args.against is not None:
+        wanted = [name.strip() for name in args.against.split(",") if name.strip()]
+        unknown = [name for name in wanted if name not in declared]
+        if unknown:
+            sys.stderr.write(
+                f"design-tool: {', '.join(unknown)} names no formulation of this "
+                f"job; have {', '.join(declared)}\n")
+            return 2
+    else:
+        # Runnable, because a comparison is a thing you do before deciding, and
+        # REJECTED or SUPERSEDED formulations are ones the job has already
+        # finished with. They stay on disk and stay nameable with --against --
+        # 6.14 requires a rejected alternative to remain available for
+        # reconsideration -- they are just not what "compare this job" means.
+        wanted = [key for key, row in declared.items()
+                  if row is None or row.disposition in P.RUNNABLE_DISPOSITION]
+
+    readings: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    for key in wanted:
+        alternative_id = None if key == ROOT_ALTERNATIVE else key
+        where = _alternative_dir(project_dir, alternative_id)
+        if where is None or not where.is_dir():
+            missing.append(key)
+            continue
+        readings[key] = CMP.read(where, project_dir=project_dir,
+                                 alternative_id=alternative_id,
+                                 model_name=project.model)
+    for key in missing:
+        sys.stderr.write(f"design-tool: {key} has no directory on disk and is "
+                         "not compared\n")
+
+    events = LC.read(project_dir)
+    restarts = COST.restarts_by_alternative(events)
+    costs = {}
+    for key in readings:
+        totals = COST.totals_at(readings[key]["dir"])
+        costs[key] = {**totals, "restarts": restarts.get(key, 0)}
+
+    try:
+        payload = CMP.report(project, readings, costs)
+    except CMP.CompareError as exc:
+        sys.stderr.write(f"design-tool: {exc}\n")
+        return 2
+
+    # Written before it is printed, and at the project root: a comparison is
+    # about several formulations, so it belongs to none of their directories,
+    # and writing it into one would put a sibling's artifact under another's
+    # work directory -- which is the scoping rule the work directory exists for.
+    (project_dir / CMP.COMPARISON_FILE).write_text(
+        S.canonical_json(payload) + "\n", encoding="utf-8")
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _compare_table(payload)
+    # Always zero on a report that ran. A comparison is never *waiting* for
+    # anything -- there is no answer a caller could write that changes it -- and
+    # a non-zero code would send a script round a loop that cannot terminate.
+    # A stale sibling is a finding in the output, not a state to resolve here.
+    return 0
+
+
+def _compare_table(payload: dict[str, Any]) -> None:
+    """The same report a person reads, in the shape `status` prints."""
+    axes = payload["axes"]
+    mandatory = axes["mandatory"]
+    print(f"  job          {payload['job_id']}")
+    print(f"  compared     {len(payload['compared'])} formulations, from receipts "
+          "alone -- nothing was built and nothing re-adjudicated")
+    print(f"  rubric       {mandatory['verdict']}")
+    for line in _wrapped(mandatory["note"]):
+        print(f"               {line}")
+    for check_id, row in sorted(mandatory.get("expectations", {}).items()):
+        print(f"               {check_id} was measured against")
+        for key in sorted(row["expected"]):
+            print(f"                 {key:14s} {json.dumps(row['expected'][key])}"
+                  f"  band {json.dumps(row['tolerance'][key])}"
+                  f"  {row['result'][key]}")
+    for key, rows in sorted(mandatory.get("only_in", {}).items()):
+        print(f"               only {key} declared {', '.join(rows)}")
+    # No marker on any row. `status` marks the active formulation because one of
+    # them is where work is happening; here, marking one would be the ordering
+    # this command exists not to imply.
+    for key in payload["compared"]:
+        own = mandatory["per_formulation"][key]
+        claim = axes["claim"]["per_formulation"][key]
+        print(f"  formulation  {key:14s} {claim['status'] or 'NOT_RUN':10s} "
+              f"mandatory {own['verdict']}"
+              + (f" ({own['stored_verdict']} when it ran)"
+                 if own["verdict"] == CMP.MANDATORY_UNKNOWN_STALE else ""))
+    for group in payload["identical_designs"]:
+        print(f"  same design  {', '.join(group['members'])} share source "
+              f"{str(group['source_sha256'])[:12]}; their agreement corroborates "
+              "nothing")
+    for key, row in sorted(axes["evidence"]["per_formulation"].items()):
+        if row["stale_receipts"]:
+            print(f"  stale        {key}: {', '.join(row['stale_receipts'])}")
+    print("  requirements bound as one digest"
+          + (", identical across all of them" if payload["shared"]["same_requirement_digest"]
+             else ", AND THEY DIFFER -- these formulations were frozen against "
+                  "different job states")
+          + ", and not checked row by row:")
+    print("               each formulation met the contract it froze, which is "
+          "not 'they meet the requirement'")
+    for row in payload["not_compared"]:
+        # The deciding ones are marked, because a dimension this build cannot
+        # measure and this job turns on is the finding rather than a footnote.
+        label = ("not compared!" if row["standing"] == CMP.DECIDING
+                 else "not compared")
+        print(f"  {label:12s} {row['dimension']} -- {row['owner']}")
+    print(f"  preference   {'admissible' if payload['preference']['admissible'] else 'none'}")
+    for line in _wrapped(payload["preference"]["because"]):
+        print(f"               {line}")
+    print("               this command compares and does not select; use "
+          "`design-tool branch --disposition`")
+
+
+def _wrapped(text: str, width: int = 62) -> list[str]:
+    """Prose at the width the rest of this surface prints at."""
+    return textwrap.wrap(text, width=width) or [""]
+
+
 def diagnose(argv: list[str]) -> int:
     from . import diagnose as _diagnose
     return _diagnose.main(argv)
@@ -2262,6 +2432,7 @@ COMMANDS = {
     "run": run,
     "status": status,
     "branch": branch,
+    "compare": compare,
     "diagnose": diagnose,
     "run-job": run_job,
 }

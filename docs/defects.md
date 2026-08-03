@@ -404,3 +404,108 @@ producing a number that reads as comparable. Coverage itself needs no change.
 **Fixture that must fail first.** Two formulations of one job with different
 mandatory feature sets, both at coverage 1.0, asserted to be reported as
 incomparable rather than equal.
+
+## D25 — a formulation is graded against the rubric its own proposal wrote
+
+**Where.** [`pipeline/acceptance.py`](../skills/3d-modeling/scripts/pipeline/acceptance.py):316-325
+and :357-359, reaching [`pipeline/runner.py`](../skills/3d-modeling/scripts/pipeline/runner.py):766-802.
+
+**What is wrong.** Nothing, within one run: an authored job has to get its
+expectations from somewhere, and the designer's proposal is the only thing that
+knows what the part is supposed to be. The proposal is frozen before any
+geometry exists, and the pipeline owns every band, so a formulation cannot
+loosen a gate after seeing its own result.
+
+It becomes a defect the moment two formulations are set beside each other. On
+the authored lane the proposal sets **three** things that the checks are then
+measured against, and all three are per-formulation while everything a reader
+assumes is shared is shared:
+
+1. **the check set.** `declared` is that formulation's own mandatory features
+   (`commission.py:436`). This is D24, and it is the face that needs a fixture
+   constructed — no committed case exercises it.
+2. **the expectation.** `expected_bbox_mm` and `expected_bodies` come from the
+   proposal (`acceptance.py:358-359`) and are what the always-present
+   `envelope`, `bodies` and `unit_scale` checks measure against.
+3. **the band.** A feature's tolerance is computed from the magnitude the
+   proposal declared — `contract.area_tolerance` is 0.5% of it, floored at
+   1 mm² — so declaring a larger number buys a looser band.
+
+**Evidence.** Face 2 is live in the only recorded branched case, with nothing
+constructed. In `benchmarks/replays/branch-knob-seat-fallback`, the root
+formulation's `design_proposal.json` declares `bbox_mm.z = 50.0` and
+`plate-seated`'s declares `52.0`. Each was checked against its own declaration
+to a band of 0.5, and `expected.json` records `envelope` as `PASS` for both.
+Face 3 is arithmetic on `contract.area_tolerance`: a row declaring 881.33 mm² is
+graded to ±4.41 and one declaring 2000.0 mm² to ±10.0. Both faces were found by
+building `design-tool compare` and asking what two PASSes actually assert.
+
+**What it can cause.** Any report that prints one formulation's verdicts beside
+another's asserts an equality nobody measured. "Both passed" is two separate
+self-assessments printed adjacently, and on the recorded knob it would tell a
+reader the two formulations are equal on envelope when one is 2 mm taller by
+design. It is `ARCHITECTURE.md` 8.5's rule one level down, in the place a
+weighted total is not needed to hide a mandatory difference — adjacency does it
+unaided.
+
+**What would close it.** Not a scoring fix and not a schema change. The
+comparison refuses: `INCOMPARABLE_CHECK_SETS` where the sets differ,
+`INCOMPARABLE_EXPECTATIONS` where the same check was measured against different
+expectations or bands, and it names which. Shipped for the comparison path in
+`pipeline/compare.py`. What is **not** closed is every other reader: nothing
+stops a person or an agent reading two `commission_report.json` files side by
+side and drawing the equality themselves, and no receipt says on its face that
+its expectations were self-declared. Closing that needs the requirement-to-check
+edge Release 4 has not built.
+
+**Fixture that must fail first.** Two formulations declaring different
+`bbox_mm`, both PASS on `envelope`, asserted to be reported
+`INCOMPARABLE_EXPECTATIONS` rather than equal —
+`pipeline/test_compare.py::TheRubricIsNotSharedTest`. Fifteen mutations of the
+protections in that file were attempted and fifteen were caught.
+
+## D26 — `status` reports two formulation counts for one job, and drops the root
+
+**Where.** [`pipeline/cli.py`](../skills/3d-modeling/scripts/pipeline/cli.py):1759
+against :1783.
+
+```python
+for row in project.alternatives:            # :1759 -- no row exists for the root
+for key in [ROOT_ALTERNATIVE] + [row.alternative_id
+                                 for row in project.alternatives]:   # :1783
+```
+
+**What is wrong.** `design-tool branch` never writes an `alternatives` row for
+the shared root (`cli.py:2026-2029`) — the root is a formulation by having a
+directory, a proposal, a contract and its own receipts, not by being declared.
+So the `alternatives` block in one `status --json` report iterates two
+formulations on the recorded knob while the `cost` block in the same report
+iterates three. The two disagree about what the job is.
+
+A second, quieter half: the loop calls `_derived_at` per sibling, which returns
+`derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons`, and
+keeps two of the five. `tools/replay.py:958-987` is the proof it is missed —
+to read per-formulation staleness the harness has to issue `branch --activate`
+and `status` once per formulation.
+
+**Evidence.** Found while building `design-tool compare`, by asking where a
+comparison should get its formulation set from. `compare` takes the union
+(`cli.py`, `compare`) rather than reading `report["alternatives"]`, and
+`pipeline/test_compare.py::TheCommandSurfaceTest::test_the_shared_root_is_one_of_the_formulations`
+asserts the root is compared.
+
+**What it can cause.** Any caller that takes its formulation set from
+`status --json`'s `alternatives` silently omits the shared root — which on the
+knob is one of the two designs. A comparison built that way would drop a
+formulation and report the remainder as the whole.
+
+**What would close it.** Iterate the union in `status` as `cost` already does,
+and stop discarding the three derived fields. Deliberately **not** done in the
+commit that found it: `status --json` is read by `tools/replay.py`, the L1
+replay suite cannot execute on Linux (`confine.py:464`), and changing a
+golden-feeding command on a platform that cannot run the goldens is how a
+recording gets broken. It is a Windows-host follow-up, and small.
+
+**Fixture that must fail first.** A branched project where
+`len(status_report["alternatives"]) + 1 == len(status_report["cost"]["by_alternative"])`,
+asserted to become equal.

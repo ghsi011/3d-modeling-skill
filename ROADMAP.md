@@ -42,7 +42,40 @@ The current branch already provides important foundations:
 * an L1 replay harness, and four recorded jobs — one authored, one modification, one branched three ways, one correctly refused — replayed through the command surface with no live AI call;
 * structurally separated public and private fixture material;
 * selected real benchmark artifacts;
-* reproducible packaging and toolchain identity.
+* reproducible packaging and toolchain identity;
+* a comparison of a job's formulations that refuses to rank them, and says which of their verdicts are not comparable and why.
+
+### Where this can be developed, and where it can only be read
+
+**The confined build boundary is Windows-only, by design, and there is no
+unconfined path.** `AGENTS.md` requires candidate code to be executed only
+through a boundary that reduces its authority *by the operating system*;
+`pipeline/confine.py` implements that with restricted tokens, mandatory
+integrity levels and job objects, and on any other platform it refuses rather
+than degrading (`confine.py:464`). That refusal is correct — a fallback that ran
+untrusted authored geometry as an ordinary peer would be worse than no boundary
+— and it has a consequence worth writing down once, because it was rediscovered
+the hard way:
+
+* **on Linux, no candidate geometry can be built at all.** Every replay that
+  builds fails: measured at `5c6ef9e`, all four cases in `benchmarks/replays`
+  plus both adversarial cases, 19 tests. `modify-ball-scope-refused` passes,
+  because it is refused before it builds.
+* **the L0 gate is 13 tests short of green on Linux**, and all 13 are Windows
+  assumptions rather than defects: 11 subtests in
+  `tools/test_fixtures.py::TheWallBetweenRequestAndAnswer` whose absolute-path
+  detector is looking for `C:\...`, and two in
+  `tools/test_tiers.py::TheSpawnGuardTest` that construct a Windows command
+  line. 894 pass.
+* **so a Linux session may write and gate any code whose tests do not build
+  geometry**, and may not record, re-record or verify anything in
+  `benchmarks/replays` or `benchmarks/heavy`. Work that needs a recording is a
+  Windows-host follow-up, and saying which is part of shipping it.
+
+`design-tool compare` was built under exactly that constraint: it reads
+receipts, builds nothing, and its whole fixture set lays down the receipts a run
+would have written, so it gates on every platform. What it still owes is in
+Release 4.
 
 The following work is already complete and is treated as the protected baseline.
 
@@ -920,6 +953,95 @@ Confirm that:
 
 The skill can intentionally generate, develop, compare, select, pause, and revisit materially different design concepts.
 
+### Slice 1 — shipped, and what it changed about the release
+
+`design-tool compare <project>` reads the receipts each formulation already
+writes, emits `comparison.json` at the project root and a table, dispatches
+nothing, builds nothing, and adds no project field. [ADR 0005](docs/adr/0005-a-comparison-refuses-rather-than-scores.md)
+carries the decision and its reasoning; what follows is what the work *found*,
+because two of the three findings were not in anybody's plan.
+
+**The scoping document was judged, not adopted.** `docs/release-4-scope.md` was
+written by one agent in one pass and never reviewed. Its citations were checked
+one by one. Most held. Three did not survive as written, and they are recorded
+because a reader of that document needs them:
+
+* its §4(C) material-use table — 47,526.263 mm³ against 49,792.874, the single
+  most load-bearing number in the document and the whole of its §5 argument —
+  **exists nowhere in the repository.** `expected.json` records the volume
+  detector's *result* and discards its measurement, so the figure was measured
+  ad hoc and cannot be reproduced from anything committed;
+* its claim that `cli.py:1754` "builds a table over *every* formulation" is
+  false in a way that matters: the loop is over `project.alternatives` and
+  `branch` never writes a row for the shared root, so `status` reports two
+  formulations where `cost.compare` in the same report reports three. That is
+  now `docs/defects.md` D26;
+* it treats `docs/adr/0001`'s command list as an authority on the built surface.
+  It is a code block, and it had already drifted: `branch` and `selftest`
+  shipped in Release 3 without reaching it. Fixed, with a test that refuses the
+  drift in future.
+
+Its four re-scoping recommendations were **accepted**, three as written and one
+enlarged; each is recorded inline above, at the bullet it changes.
+
+**The measured case for building nothing was taken seriously and overruled.** An
+independent reading found that 44 of about 46 frozen per-formulation fields are
+identical across all three formulations of the recorded knob, that
+`INCOMPARABLE_CHECK_SETS` cannot fire on any committed fixture, and that eleven
+of the facts a comparison would print are already side by side in `status
+--json`. Its conclusion — thirty lines in an existing loop, no verb — is right
+about every fact and wrong about what they mean.
+
+The 44-of-46 is not evidence that the formulations are equivalent. It is the
+signature of self-grading. `docs/defects.md` **D25**: on the authored lane a
+formulation's own proposal sets its declared feature set, the `expected_bbox_mm`
+and `expected_bodies` its always-present checks are measured against, and —
+through the declared magnitude — each feature's tolerance band. On the recorded
+knob the root declares `bbox_mm.z = 50.0`, `plate-seated` declares `52.0`, and
+**both are recorded `PASS` on `envelope`**. Printing those two verdicts adjacent
+asserts an equality nobody measured, and the difference it conceals is the
+entire point of the fork. So the first thing `compare` reports is
+`INCOMPARABLE_EXPECTATIONS` — which, unlike `INCOMPARABLE_CHECK_SETS`, fires on
+the authentic case with nothing constructed.
+
+**`MODIFY` pairs are in, overruling the scoping.** It proposed comparing only
+from-scratch formulations because two modifications both report
+`EXPERIMENTAL_UNAVAILABLE` and discriminate nothing. Deferring the case that is
+hard to answer is Release 6 in disguise. Settling nothing *is* the correct
+output when the deciding axis cannot be measured, provided the comparison names
+that axis and refuses preference on those grounds — so `not_compared` rows carry
+`DECIDING` or `CONTEXT`, a `DECIDING` row makes `preference.admissible` false,
+and a fixture asserts it. That turns a paragraph into a mechanism.
+
+**Evidence.** 22 fixtures, all L0, none of which builds geometry — every
+formulation is laid down as the receipts a run would have written, so the set
+gates on a platform where the confined build boundary cannot run. 15 mutations
+of the protections were attempted and 15 were caught. The gate is 894 passing at
+`5c6ef9e` + this slice, up from 872, against a ceiling of 1050.
+
+**Still owed by slice 1, and blocked rather than skipped.** Both need a Windows
+host, for the reason in §2:
+
+* the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
+  and its output frozen in `expected.json`. Note what the recording must gain
+  first: `_observe_dir` records the volume detector's *result* and throws away
+  its `measured_mm3`, so the one measurement that discriminates between the two
+  designs is frozen nowhere. Freeze `volume_mm3` and `bbox_mm` in the same
+  change, or the material figure stays unverifiable prose;
+* the two `design-tool branch --disposition` calls that prefer one formulation
+  and retain the other as `FALLBACK`. That is what gate 4.5 says Release 3 still
+  owes — nobody has used derived status to decide about a real part — and it is
+  one command each, on a case that already exists.
+
+`docs/defects.md` D26 is deliberately **not** fixed here for the same reason:
+`status --json` is read by the replay harness, and changing a golden-feeding
+command on a platform that cannot run the goldens is how a recording breaks.
+
+**Not touched by this slice**, and recorded so it is not read as improved: 4.4's
+"shared work is reused across alternatives — this clause now fails, measured".
+Comparison shares nothing because it builds nothing, and `builds_avoided` stays
+zero.
+
 **Scope**
 
 *Alternative formulation*
@@ -961,10 +1083,21 @@ Alternative generation is triggered only when:
 
 The planner limits:
 
-* number of active alternatives;
 * AI calls per alternative;
 * context duplication;
 * repeated deterministic work.
+
+**Re-scoped 2026-08-03, and three-quarters of it already shipped.** AI calls per
+alternative and context duplication are measured per formulation and *capped per
+invocation* by a ceiling the compiled plan declares (`cost.py:121`, frozen at
+`cost.py:114`); repeated deterministic work is measured (`repeated_builds`). So
+the honest statement of what this bullet asks for is **"exploration cost is
+measured per formulation and bounded per invocation"**, and it is done. A cap on
+the *number* of active alternatives is struck from Release 4 and moves to
+whichever release builds a generator: nothing in this build generates a branch —
+`design-tool branch` requires `--from`, `--id` and `--reason` and is refused
+without them (`cli.py:2015`) — so a numeric cap here would limit how much a
+person may type.
 
 *Comparative assessment*
 
@@ -1052,9 +1185,24 @@ The system can execute that without flattening the work into one linear sequence
 Required tests include:
 
 * materially different alternatives inherit the same mandatory intent;
-* cosmetic-only variants are not automatically treated as concept branches;
+* cosmetic-only variants are not automatically treated as concept branches
+  — **vacuous today, kept and marked rather than implemented.** Nothing in this
+  build generates a branch (`cli.py:2015`), so a cosmetic-variant classifier
+  would guard a mechanism that does not exist and would second-guess a decision
+  a person makes by typing `--reason`. It becomes real work in the same release
+  that builds a generator, and not before;
 * alternative-specific requirements remain scoped;
-* an alternative cannot loosen a shared mandatory tolerance to pass;
+* ~~an alternative cannot loosen a shared mandatory tolerance to pass~~
+  — **already structurally true; replaced by the proof that is not.** A proposal
+  may not declare a tolerance *at all* (`acceptance.py:246`); every band is
+  computed by the pipeline from the row's own magnitude and every frozen
+  contract records `tolerance_owner: "pipeline"` (`acceptance.py:364`). The
+  proof that was *not* true, and is now the first fixture of slice 1: **two
+  formulations measured against different mandatory check sets are reported
+  incomparable on those checks, not equal** (`docs/defects.md` D24). And its
+  larger sibling, found while building the slice and live on the recorded knob:
+  **two formulations measured against different expectations or bands for the
+  same check are reported incomparable, not equal** (`docs/defects.md` D25);
 * a comparison over single-material alternatives reports no material or sequence dimensions;
 * mandatory failure cannot be outweighed by preference scoring;
 * comparison reports unequal evidence;
@@ -1065,19 +1213,42 @@ Required tests include:
 
 **Authentic exercise**
 
-Use the bracket alternatives from Release 3.
+~~Use the bracket alternatives from Release 3.~~ **Struck 2026-08-03: it names a
+project that does not exist.** `benchmarks/fixtures/` holds `berlingo-knob`,
+`component-cycle`, `oneplus-case-x2d-asa`, `oneplus-drawer-dropin`,
+`pixel9-card-case` and `vent-ball-combine`. The bracket is a *proposed* exercise
+at `:665` and `:904` that was never built; Release 3's branching was actually
+exercised on `vent-ball-combine` and recorded on `berlingo-knob`. Its comparison
+list also named four dimensions this build has no instrument for — hardware
+requirements, assembly, adjustability, strength uncertainty — which
+`ARCHITECTURE.md` 8.5 says must be distinguishable from measurements and which
+this build can only ever carry as a stated row.
 
-Compare snap-fit and M3 concepts for:
+Use `benchmarks/replays/branch-knob-seat-fallback` instead. It is three
+formulations of one job on a real vendored request, its fork is the request's
+own recorded uncertainty rather than an invented preference — the base-plate
+height is a photo estimate its notes give as ±2 mm — and its comparison has a
+non-obvious answer that a score would destroy: every mandatory check passes on
+all three, they are measured against *different envelope expectations*, and the
+thing that actually decides is whether the mouth seats, which nobody has
+measured.
 
-* mandatory mounting compatibility;
-* hardware requirements;
-* printability;
-* assembly;
-* adjustability;
-* strength uncertainty;
-* material use.
+Compare them on the dimensions this build has an instrument for:
 
-Select one as preferred while retaining the other as fallback.
+* mandatory check-set and expectation agreement (the rubric question);
+* evidence completeness and inequality — derived status, staleness, screening
+  calibration, whether anybody looked at an image;
+* material use, as solid volume;
+* support burden, against the print plan's own ceiling;
+* component count and envelope;
+* exploration cost per formulation, labelled as a fact about the process.
+
+Everything else the old list named goes in `not_compared` with its owner.
+
+Select one as preferred while retaining the other as fallback. **Still owed:**
+the two `design-tool branch --disposition` calls that do it, and the `compare`
+step in the replay recording. Both are blocked on a Windows host — see §2's
+platform note.
 
 ## Release 5 — Multi-source edit and combination model
 
