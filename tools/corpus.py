@@ -15,12 +15,37 @@ is a loud failure rather than a quietly different answer. The one property a
 blind benchmark cannot do without is that the reference is the reference.
 
 **What this module deliberately does not do.** It does not read geometry, does
-not measure anything, and does not know what any entry is *for*. The wall
-between benchmark request material and reference answers lives in
-`tools/fixtures.py`, which keeps its answers in a private mapping a design agent
-has no reason to have called. Putting a fetcher on the same object would put the
-answer one attribute away from the request, which is the failure that module's
-docstring already describes at length.
+not measure anything, and does not grade. The reference *answer* is the bytes on
+disk, and the only door to them is `resolve`, which a grader calls and a design
+agent has no reason to have written -- the same shape `tools/fixtures.py` keeps
+for its own answers, for the reason its docstring gives at length.
+
+**What it does do, and what took two attempts to get right.** A blind benchmark
+also has a *question*, and the question is written from this manifest. So the
+manifest can leak the answer without anybody touching an STL: a note reading
+"supports a three-millimetre panel, twenty by fourteen point five by five point
+eight" hands over the reconstruction. The first defence was a regular expression
+in a test, matching a number next to a unit. An independent review broke it in a
+dozen ways in one pass, and a second review broke its replacement in nineteen --
+by putting the measurement in a JSON number, in a dict *key*, in an exempt field,
+in a fullwidth digit, in a Roman numeral, and in the entry id.
+
+Both failures have one shape: a rule that lives in a test can only ever describe
+the committed text, and the leak happens in the *data path* -- whatever a request
+generator is handed. So the rule lives here now, `request_view` is the only
+sanctioned door to question material, and it is a whitelist twice over. Two keys
+are permitted and their types are pinned, so a number, a nested dict, a dict key
+and an unknown field have nowhere to be. `purpose` is free prose and may carry no
+numeric character, numeral or number-word at all. `interfaces` may carry
+measurements -- "3 mm flat panel" is what makes the task answerable -- but only
+terms on the manifest's own `request_vocabulary`, which is a **declared
+disclosure**: the list of dimensions the benchmark gives away, written down where
+a reader can see the whole of it, rather than an exemption nobody can enumerate.
+
+The claim this supports, exactly: *no numeric character, numeral or number-word
+reaches question material except through a term on a committed list.* Not "no
+measurement can leak" -- a purpose could still describe a shape in words. A
+weaker method may not issue a stronger claim.
 
 **Absence is not failure.** A checkout with none of this fetched is a normal
 checkout: `resolve` raises `CorpusUnavailable`, and a fixture that names an entry
@@ -33,9 +58,10 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
-import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -62,8 +88,133 @@ class CorpusCorrupt(ValueError):
     """
 
 
+class CorpusLeak(ValueError):
+    """Question material carries something only the reference can answer.
+
+    A hard failure and never a warning. The whole value of a blind benchmark is
+    that the candidate did not have the answer, and a benchmark that leaked it
+    reports a number indistinguishable from one that did not -- the same
+    argument `CorpusCorrupt` makes about a drifted reference, one layer up.
+    """
+
+
 def manifest() -> dict[str, Any]:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------
+# The wall between the question and the answer
+# --------------------------------------------------------------------------
+
+# The only keys a request generator may be handed. Adding one is an edit here
+# and an edit to the test that pins this tuple -- which is the point. The
+# previous design had an *exemption* list instead, and an exemption list grows
+# silently every time an ordinary field needs a digit in it: a sparse-checkout
+# path, a second corpus root, a licence name. Each such growth reopened the hole,
+# and nobody reviewing the one-line diff could see that it had.
+REQUEST_KEYS = ("purpose", "interfaces")
+
+# `Nd` is what `\d` means and it is not enough on its own: superscripts and
+# vulgar fractions are `No`, and Roman-numeral letters are `Nl` only when they
+# are the dedicated Unicode codepoints rather than ASCII `X`. So all three
+# categories, plus the two things Unicode does not classify as numeric at all.
+_NUMERIC_CATEGORIES = frozenset({"Nd", "Nl", "No"})
+
+# ASCII Roman numerals of two characters or more. `I` alone is excluded: it is
+# the English pronoun, and a rule that refuses it refuses ordinary prose.
+_ROMAN = re.compile(
+    r"^(?=[IVXLCDM]{2,}$)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})"
+    r"(?:IX|IV|V?I{0,3})$")
+
+# Spelled-out numbers, which every digit-scanning rule misses. `Twenty by
+# fourteen` defeated the previous guard and is the reason this set exists.
+# Count words are here too -- "single body" states the `bodies` check's result,
+# which is a measurement the run makes and therefore an answer.
+_NUMBER_WORDS = frozenset("""
+    zero one two three four five six seven eight nine ten eleven twelve
+    thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty
+    thirty forty fifty sixty seventy eighty ninety hundred thousand million
+    first second third fourth fifth sixth seventh eighth ninth tenth
+    half quarter third dozen pair single double triple twice thrice once
+    """.split())
+
+
+def leaks(text: str) -> tuple[str, ...]:
+    """Every token in `text` that states a quantity. Empty means it states none.
+
+    One function, called by `request_view` at runtime and by the tests that
+    claim it bites. The previous version had the rule written out twice -- once
+    in the enforcing test and once in the test that proved it enforced -- so the
+    proof was a tautology over its own literals, and the enforcing rule could be
+    deleted outright with the suite green. Mutating this function now fails both.
+    """
+    found: list[str] = []
+    found += [ch for ch in text
+              if unicodedata.category(ch) in _NUMERIC_CATEGORIES]
+    for token in re.findall(r"[A-Za-z]+", text):
+        if _ROMAN.match(token) or token.casefold() in _NUMBER_WORDS:
+            found.append(token)
+    return tuple(dict.fromkeys(found))
+
+
+def request_view(entry_id: str,
+                 payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One entry's question material, and nothing else about it.
+
+    Carries no id, no path, no digest and no source: an identifier is a place a
+    measurement hides -- the first version of this manifest called an entry
+    `voron-deck-support-3mm` -- and a path is one `ls` away from the answer,
+    which is the failure `tools/fixtures.py` records at its line 30.
+    """
+    payload = payload if payload is not None else manifest()
+    row = entries(payload).get(entry_id)
+    if row is None:
+        raise KeyError(f"{entry_id!r} names no corpus entry; have "
+                       f"{sorted(entries(payload))}")
+
+    block = row.get("request")
+    if not isinstance(block, dict):
+        raise CorpusLeak(
+            f"{entry_id} declares no request block. An entry with no question "
+            "material is not usable blind, and falling back to its other fields "
+            "is how the id and the path got read out loud.")
+    unknown = sorted(set(block) - set(REQUEST_KEYS))
+    if unknown:
+        raise CorpusLeak(
+            f"{entry_id}: request carries {', '.join(unknown)}, and only "
+            f"{', '.join(REQUEST_KEYS)} may be handed to a generator. A key "
+            "nobody vetted is a key nobody scanned.")
+    missing = sorted(set(REQUEST_KEYS) - set(block))
+    if missing:
+        raise CorpusLeak(f"{entry_id}: request is missing {', '.join(missing)}")
+
+    purpose = block["purpose"]
+    if not isinstance(purpose, str):
+        raise CorpusLeak(
+            f"{entry_id}: purpose is {type(purpose).__name__}, not prose. A "
+            "number needs no digit character to be a number.")
+    stated = leaks(purpose)
+    if stated:
+        raise CorpusLeak(
+            f"{entry_id}: purpose states {', '.join(map(repr, stated))}. A "
+            "purpose names what a part is for; what size it is, is the answer. "
+            f"A measurement belongs in interfaces, on the declared disclosure.")
+
+    interfaces = block["interfaces"]
+    if not isinstance(interfaces, list) or \
+            not all(isinstance(term, str) for term in interfaces):
+        raise CorpusLeak(f"{entry_id}: interfaces must be a list of strings")
+    vocabulary = payload.get("request_vocabulary") or ()
+    outside = [term for term in interfaces if term not in vocabulary]
+    if outside:
+        raise CorpusLeak(
+            f"{entry_id}: {', '.join(map(repr, outside))} is not on this "
+            "manifest's request_vocabulary. Interfaces may carry measurements "
+            "-- that is what makes the task answerable -- but only ones the "
+            "manifest declares it is giving away, so the disclosure can be read "
+            "in one place instead of inferred from every entry.")
+
+    return {"purpose": purpose, "interfaces": list(interfaces)}
 
 
 def corpus_root(payload: dict[str, Any] | None = None) -> Path:

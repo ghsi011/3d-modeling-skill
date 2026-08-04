@@ -103,6 +103,14 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside `run`
+    # Imported inside `run` at runtime, because importing the Windows module at
+    # module scope would make this file's importability depend on it. The
+    # annotation still has to resolve for a checker, and an unresolvable one is
+    # a name a reader cannot follow.
+    from .confine import Confined
 
 LINUX = sys.platform.startswith("linux")
 

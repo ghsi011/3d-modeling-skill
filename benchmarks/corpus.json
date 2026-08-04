@@ -1,6 +1,15 @@
 {
   "schema_version": 1,
-  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md section sixteen point six is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest.\n\nNO PROSE FIELD HERE MAY CONTAIN A DIGIT. An entry names what a part is *for*; measurements are the answer a blind benchmark withholds. The first version of this file put each reference's bounding box in its note. The second scrubbed those and added a guard that matched a number next to a unit -- which a review broke by rewriting one separator as a word, and by dropping units, and by spelling the numbers out. A guard with a pattern to evade is a guard; a rule with nothing to evade is a wall. So the rule is the crude one, and `tools/test_corpus.py` enforces it over every string in this file except the identifier fields, which name a part rather than measure it.",
+  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest.\n\nQUESTION MATERIAL LIVES IN `request` AND NOWHERE ELSE. Everything outside a `request` block -- this note, an id, a path, a url, a source's `why` -- is for a maintainer and a grader, and may say whatever it needs to. Everything inside one is handed to a generator that writes the benchmark question, and `corpus.request_view()` is the only door to it: two keys, types pinned, `purpose` scanned for any numeral or number-word, `interfaces` restricted to `request_vocabulary` below. Two earlier versions put that rule in a test instead, as a pattern over the committed text; the first was broken twelve ways in one review pass and the second nineteen, including by moving the measurement into a JSON number, into a dict key, and into the entry id.\n\nThe interface claims are read off the vendor's own filenames and Voron 2's published hardware list. They are not measured, and no benchmark scores them.",
+  "request_vocabulary": [
+    "2020 aluminium extrusion",
+    "3 mm flat panel",
+    "M3 fastener",
+    "MGN9 linear rail",
+    "flat panel",
+    "toothed belt"
+  ],
+  "request_vocabulary_note": "The declared disclosure: every dimension this corpus gives away in a question, listed in one place. A term here is admissible because it is on this list, not because it looks harmless -- that is the difference between a whitelist and the exemption list this replaced. Growing it means editing this file and the test that pins it, so a dimension cannot start being disclosed without somebody saying so.",
   "roots": {
     "default": "/home/user/3d-references"
   },
@@ -17,17 +26,24 @@
       "license": "GPL-3.0-only",
       "attribution": "Voron Design, Voron 2 (https://github.com/VoronDesign/Voron-2)",
       "redistribution": "EXTERNAL_ONLY",
-      "why": "Real functional printed parts designed around standard hardware -- metric fasteners, aluminium extrusion, linear rails, toothed belts. That matters for a blind benchmark: the request can state what the part has to interface with, in the vocabulary a person would actually use, without stating any geometry. The measurements are the answer and are never in the request."
+      "why": "Real functional printed parts designed around standard hardware -- M3 fasteners, 2020 aluminium extrusion, MGN9 linear rails, GT2 belts. That matters for a blind benchmark: the question can state what the part has to interface with, in the vocabulary a person would actually use, without stating the part's own geometry. This field is not question material and is never handed to a generator; the vocabulary a question may use is `request_vocabulary`, above."
     }
   },
   "entries": [
     {
-      "id": "voron-deck-support-3mm",
+      "id": "voron-deck-support",
       "source": "voron2",
       "path": "STLs/Panel_Mounting/deck_support_3mm_x8.stl",
       "sha256": "ab0d69dc18da1516ace18da5be493a82099a332e0767082467b25c9d935a3f03",
       "role": "REFERENCE",
-      "note": "Supports a deck panel against extrusion. Single body, watertight."
+      "request": {
+        "purpose": "Holds a deck panel against an extrusion so the panel cannot lift.",
+        "interfaces": [
+          "2020 aluminium extrusion",
+          "3 mm flat panel",
+          "M3 fastener"
+        ]
+      }
     },
     {
       "id": "voron-mgn9-rail-guide",
@@ -35,7 +51,13 @@
       "path": "STLs/Tools/MGN9_rail_guide_x2.stl",
       "sha256": "bbd4cf6fc1ef3d50a0e1faacc7b5123db79ff4b8ce31f31d677df95bf49dad8d",
       "role": "REFERENCE",
-      "note": "Holds a linear rail true to an extrusion while it is bolted down. Single body, watertight."
+      "request": {
+        "purpose": "Holds a linear rail true to an extrusion while it is bolted down.",
+        "interfaces": [
+          "2020 aluminium extrusion",
+          "MGN9 linear rail"
+        ]
+      }
     },
     {
       "id": "voron-bottom-panel-clip",
@@ -43,7 +65,13 @@
       "path": "STLs/Panel_Mounting/bottom_panel_clip_x4.stl",
       "sha256": "57843c92364b0a651b12e9e658063e8deedca22f9c7e0fa174bbc9e20a186c26",
       "role": "REFERENCE",
-      "note": "Retains a bottom panel in the extrusion slot. Single body, watertight."
+      "request": {
+        "purpose": "Retains a bottom panel in the slot of an extrusion.",
+        "interfaces": [
+          "2020 aluminium extrusion",
+          "flat panel"
+        ]
+      }
     },
     {
       "id": "voron-z-belt-clip-upper",
@@ -51,7 +79,13 @@
       "path": "STLs/Gantry/[a]_z_belt_clip_upper_x4.stl",
       "sha256": "8732d1f2cc023beffc70ef8239df52d76a776bd3101b8ed6524122ce1c490b3a",
       "role": "REFERENCE",
-      "note": "Clamps a toothed belt end. Single body, watertight."
+      "request": {
+        "purpose": "Clamps the end of a toothed belt so it cannot pull through.",
+        "interfaces": [
+          "toothed belt",
+          "M3 fastener"
+        ]
+      }
     }
   ]
 }
