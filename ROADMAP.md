@@ -434,7 +434,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1096 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1110 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -1526,6 +1526,22 @@ The scope is checked against what the job declares, and against everything the e
 
 **Evidence.** 37 L0 fixtures, none of which builds geometry. 37 mutations of the protections were attempted and 37 were killed, including the `EXPERIMENTAL_UNAVAILABLE` cap the paragraph above rests on. One mutation survived the first sweep — `is_assumption` carried a `not self.derived_from` clause no test could distinguish from its absence, because a `CHOSEN` datum naming a revision is already refused elsewhere — and the redundant clause was deleted rather than given a fixture, on the grounds that a second copy of a rule is a second authority over one question. The gate is 1066 passing at this slice, up from 1014, against the 13 pre-existing Linux platform failures which are unmoved: HEAD was run in a separate worktree in the same session and fails the identical 13. L0-heavy is 357 passed and 9 skipped in 680 s, which is where `test_the_shipped_goldens_are_untouched` proves the five pinned certified contracts did not move for the new contract key — the absent-when-empty rule holding, measured rather than argued. L1 replay is 66 passed and 47 subtests in 55 s, unchanged.
 
+**Delivered slice: output-component inheritance.** This section asks for "output-component inheritance" and for imported intent to survive the edit, in unusually blunt terms: *"A job that prints in one material does not thereby erase the two materials its donor declared. Discarding imported multi-material intent is a defect, not a simplification — the intent is recorded even when this release cannot act on it."* `ARCHITECTURE.md` 6.8 says the same, and its own bullet list names *"output components that inherit from the source"*.
+
+`Component` carried `component_id`, `role`, `count`, `material` and nothing else, so a two-source combination produced output bodies with no record of which donor each came from, and a donor that declared two materials was indistinguishable afterwards from one that declared none. The discard was not a decision anybody took — there was nowhere to write it down, so it happened by omission, which is precisely why the ROADMAP calls it a defect rather than a simplification.
+
+A component now names `inherited_from` (a declared source artifact; one naming nothing declared is `REF_UNDECLARED`, because an inheritance nobody can resolve is none wearing the appearance of provenance) and `inherited_materials` (what the donor said, still readable after an edit that does not use it; a material list with no donor is `INTENT_CONTRADICTION` — inherited from *what?*). **This records and does not act**: `material` is still what the job will print, and a fixture asserts that carrying two inherited materials is not a claim to print two, because a weaker method may not issue a stronger claim.
+
+The absent-when-empty rule is load-bearing here in a way it was not one slice earlier, and the difference is worth stating because the same sentence was wrong last time. `cli._requirement_hash` feeds `Component.as_dict()` straight into `S.payload_hash`, so an always-present key — even null — moves the requirement hash of every job declaring a component, and that hash is what the acceptance contract binds. `SourceArtifact.as_dict` reaches only `project.json`, which is deliberately unhashed. One serializer feeds a hash and the other does not, so the claim has to be checked per field rather than assumed from the shape — and here it is a fixture rather than a comment.
+
+**An independent review returned UNSAFE TO SHIP, and the findings landed on the sentence above.** Three blocking, all of them the citation defect: `ARCHITECTURE.md` 6.11 was cited four times for a sentence that lives in 6.8 — 6.11 is "Manufacturing, assembly, and service operations" and does not contain the word "inherit", while 6.8's own bullets say *"output components that inherit from the source"*, so the right citation was also the better one. `cli._request_hash` was cited three times and does not exist; the function is `_requirement_hash`, and `project.py` names it correctly 330 lines further down in the same file. And the paragraph claiming *"here it is a fixture rather than a comment"* pointed at a fixture whose first assertion compared `sorted(plain.as_dict())` to the same expression again — a tautology — with its other two assertions duplicating the test above it. The review severed the link entirely, deleting `"components"` from `_requirement_hash`, and the whole gate stayed green: nothing guarded the claim. The claim itself is true, measured both ways, which is exactly why it needed a test that computes a hash rather than a sentence asserting one.
+
+A fourth, non-blocking: `as_dict` tested truthiness where `problems` and `validate` tested `.strip()`, so `"   "` was emitted into `project.json` and into the requirement hash while both checks skipped it — a fail-open in the gap between two guards that disagreed about what empty means. `SourceArtifact.role` had inherited the same shape one slice earlier and is fixed with it.
+
+`tools/test_documentation.py` now resolves `ARCHITECTURE.md <n>.<m>` citations against the document's own headings. It is a floor, not a ceiling — it cannot check that a section says what a comment claims, only that the section exists — and it was itself wrong first: the pattern required the literal `ARCHITECTURE.md` while most comments here write `ARCHITECTURE 6.8`, so a deliberately broken citation passed. It is verified by mutation now, which is the point.
+
+11 L0 fixtures; 10 mutations attempted and 10 killed. One survived first: dropping the `.strip()` guard makes `artifact("")` return None, so every component in every recorded project — all of which inherit from nothing — would report `REF_UNDECLARED`. Every fixture that reached `validate` declared an inheritance, and the one that declared none never got there, which is the same gap shape the role slice's silence-stays-silence test closed.
+
 **Delivered slice: source-artifact roles.** This section asks for "source-specific roles" and names five; `ARCHITECTURE.md` 6.2 names eight and calls them typical. Neither was implemented, so every supplied file was the same kind of thing: geometry this job may do as it likes with.
 
 The fail-open, measured before the fixture was written, on a constructed case — no fixture here yet supplies a third-party mating object. A vent mount clips into a car's air vent; the vent is supplied so the mount can be fitted to it, and it is not ours to change. `Project.validate` on that job reported nothing at `edit_scopes[0].artifact_id`. That is not a tidy-declaration complaint — an edit scope compiles a preservation row, so the run would have gone on to measure *whether the car's vent survived our edit*: deterministic, reproducible, and about an object the job does not own. A receipt like that is worse than no receipt, because it reads as evidence.
@@ -2467,7 +2483,7 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 1096 tests in about 57 s on this
+Run on every commit: `uv run pytest`, 1110 tests in about 55 s on this
 machine. The count moves with every slice; what is enforced is
 `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240.
 

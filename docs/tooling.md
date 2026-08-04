@@ -70,6 +70,13 @@ fields with different vocabularies: the first says what a supplied file is *for*
 and is one of the eight above; the second is free text naming what a printed
 body *is*.
 
+A component may name `inherited_from` — the declared source artifact this output
+body came out of — and `inherited_materials`, what the donor declared. The second
+is recorded and not acted on: `material` remains what this job will print, and a
+component honestly carries both without the receipt reading as a multi-material
+capability. `ARCHITECTURE.md` 6.8 is the obligation: imported intent the current
+job does not use is preserved rather than discarded.
+
 It also carries `datums` where a job declares any: a shared geometric reference
 with an identity, a value, a provenance, the artifact **revision** it was read on
 where it was read off geometry, and the artifacts, components or interfaces it is

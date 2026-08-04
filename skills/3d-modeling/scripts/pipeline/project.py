@@ -283,7 +283,7 @@ class SourceArtifact:
         # `Alternative.basis` follow -- not `minimum_detectable_defect_mm`,
         # which `EditScope.as_dict` emits always, as null, and whose
         # absent-when-empty lives in `cli.py`'s contract row instead.
-        if not payload["role"]:
+        if not payload["role"].strip():
             del payload["role"]
         return payload
 
@@ -856,12 +856,48 @@ class Component:
     """One printed body the job expects to produce."""
 
     component_id: str
+    # Free text, and a different field from `SourceArtifact.role`: that one says
+    # what a *supplied* file is for and is one of `SOURCE_ROLE`; this says what a
+    # printed body is.
     role: str
     count: int = 1
     material: str | None = None
+    # Which declared source artifact this body came out of, where it came out of
+    # one. ROADMAP Release 5's "output-component inheritance".
+    inherited_from: str = ""
+    # What the donor declared, kept readable after an edit that does not use it.
+    # ARCHITECTURE 6.8: "Imported intent that the current job does not use is
+    # preserved rather than discarded. A donor assembly that names two materials
+    # still names them after the edit, even when the target job prints in one."
+    #
+    # This records. It does not act: `material` above is still what this job will
+    # print, and a job printing in one material still prints in one. The reason
+    # the field exists at all is that there was nowhere to write the donor's
+    # intent down, so discarding it was not a decision anybody took -- it
+    # happened by omission, which is what the ROADMAP calls a defect rather than
+    # a simplification.
+    inherited_materials: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        payload = dataclasses.asdict(self)
+        # Absent until it means something, and here that rule is load-bearing
+        # rather than tidy: `cli._requirement_hash` feeds this dict straight into
+        # `S.payload_hash`, so an always-present key -- even null -- moves the
+        # requirement hash of every job that declares a component, and the request
+        # hash is what the acceptance contract is bound to.
+        #
+        # Worth being exact about, because the same sentence was written about
+        # `SourceArtifact.role` and was wrong there: that field reaches only
+        # `project.json`, which is deliberately unhashed. One serializer feeds a
+        # hash and the other does not, so the claim has to be checked per field
+        # rather than assumed from the shape.
+        if not payload["inherited_from"].strip():
+            del payload["inherited_from"]
+        if payload["inherited_materials"]:
+            payload["inherited_materials"] = list(self.inherited_materials)
+        else:
+            del payload["inherited_materials"]
+        return payload
 
     def problems(self, index: int = 0) -> list[Issue]:
         path = f"components[{index}]"
@@ -872,6 +908,15 @@ class Component:
         if isinstance(self.count, bool) or not isinstance(self.count, int) or self.count < 1:
             out.append(F.problem(F.SCHEMA_RANGE, f"{path}.count",
                                  f"component {self.component_id!r}: count must be at least 1"))
+        # Inherited from *what*? A material list with no donor is a claim about
+        # an import the row does not say happened, which is provenance with
+        # nothing behind it.
+        if self.inherited_materials and not self.inherited_from.strip():
+            out.append(F.problem(
+                F.INTENT_CONTRADICTION, f"{path}.inherited_materials",
+                f"component {self.component_id!r} carries inherited materials "
+                f"{list(self.inherited_materials)} and names no source to have "
+                "inherited them from"))
         return out
 
 
@@ -1394,6 +1439,15 @@ class Project:
             problems.extend(motion.problems(index))
         for index, component in enumerate(self.components):
             problems.extend(component.problems(index))
+            # An inheritance nobody can resolve is no inheritance with the
+            # appearance of provenance, which is worse than declaring none.
+            if (component.inherited_from.strip()
+                    and self.artifact(component.inherited_from) is None):
+                problems.append(F.problem(
+                    F.REF_UNDECLARED, f"components[{index}].inherited_from",
+                    f"component {component.component_id!r} was inherited from "
+                    f"{component.inherited_from!r}, which names no declared "
+                    "source artifact"))
 
         if self.source_mode == "MODIFY":
             if not self.source_artifacts:
@@ -1745,7 +1799,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
                            # this row's other optionals spell "not stated", and
                            # `str(None)` is the string "None", which was then
                            # refused as a role nobody wrote.
-                           role=str(row.get("role") or ""),
+                           role=str(row.get("role") or "").strip(),
                            note=str(row.get("note", "")))
             for row in _rows(payload.get("source_artifacts"), "source_artifacts")),
         interfaces=tuple(
@@ -1783,8 +1837,13 @@ def from_payload(payload: dict[str, Any]) -> Project:
         components=tuple(
             Component(component_id=str(row.get("component_id", "")),
                       role=str(row.get("role", "")),
-                      count=row.get("count", 1), material=row.get("material"))
-            for row in _rows(payload.get("components"), "components")),
+                      count=row.get("count", 1), material=row.get("material"),
+                      inherited_from=str(row.get("inherited_from") or "").strip(),
+                      inherited_materials=_ids(
+                          row.get("inherited_materials"),
+                          f"components[{index}].inherited_materials"))
+            for index, row in enumerate(
+                _rows(payload.get("components"), "components"))),
         open_questions=tuple(
             OpenQuestion(question=str(row.get("question", "")),
                          blocking=bool(row.get("blocking", True)),
