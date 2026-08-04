@@ -1154,6 +1154,12 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             # digest of a measurement they cannot change.
             "alignment_transform": scope.canonical_alignment_transform(),
             "preserve": list(scope.preserve),
+            # Absent where the job declares none, for the reason
+            # `minimum_detectable_defect_mm` gives above: the five pinned
+            # certified contracts declare no permitted-change region, and an
+            # always-present key would move all five for a field they do not use.
+            **({"may_change": list(scope.may_change)}
+               if scope.may_change else {}),
             "may_remove": list(scope.may_remove),
             "add": list(scope.add),
             # Which declared datum this edit was placed against (ADR 0003), by

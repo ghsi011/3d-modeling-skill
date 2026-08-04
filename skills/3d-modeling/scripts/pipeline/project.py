@@ -540,8 +540,26 @@ class EditScope:
     # audit measures against. Both, because a name alone cannot be compared and a
     # box alone cannot be argued with.
     region_box: dict[str, Any] | None = None
+    # The three dispositions a named region may carry, and it carries exactly
+    # one. `ROADMAP.md` Release 5: *"named regions, each carrying exactly one
+    # declared disposition -- must-preserve, permitted-change, or
+    # consumed-by-intent"*, because a region with no disposition is one of the
+    # two ways a job reaches Release 6 with nothing to judge it by.
+    #
+    # `may_change` is the one that had no field. `preserve` is must-preserve and
+    # `may_remove` is consumed-by-intent, so a job meaning "this may be reshaped
+    # but must not disappear" had to say either nothing or something false.
+    #
+    # They are checked against each other in `problems` rather than merged into
+    # one map: all three already reach the frozen acceptance contract under these
+    # names, and renaming them would move every contract hash that predates this
+    # for a job whose declaration did not change.
     preserve: tuple[str, ...] = ()
+    may_change: tuple[str, ...] = ()
     may_remove: tuple[str, ...] = ()
+    # Not a disposition. `add` is geometry that does not exist yet, where the
+    # other three say what happens to geometry that does -- so a name in `add`
+    # and in any of them is a contradiction rather than a second disposition.
     add: tuple[str, ...] = ()
     expected_body_delta: int = 0
     mesh_fallback_allowed: bool = False
@@ -597,8 +615,8 @@ class EditScope:
 
     def as_dict(self) -> dict[str, Any]:
         payload = dataclasses.asdict(self)
-        for key in ("preserve", "may_remove", "add", "interface_ids",
-                    "datum_ids"):
+        for key in ("preserve", "may_change", "may_remove", "add",
+                    "interface_ids", "datum_ids"):
             payload[key] = list(getattr(self, key))
         return payload
 
@@ -684,6 +702,29 @@ class EditScope:
                                              f"{'xyz'[axis]}"))
                 except S.SchemaError as exc:
                     out.append(F.problem(F.SCHEMA_NON_FINITE, axis_path, str(exc)))
+
+        # Exactly one disposition per named region. Every pair is reported, not
+        # the first: fixing whichever collision a run happened to name would
+        # leave the job still contradicting itself, and the next run would
+        # report the next pair, which reads as a new defect rather than the rest
+        # of the old one.
+        #
+        # `add` is in the comparison and is not one of the three. It says the
+        # geometry does not exist yet, so a name it shares with any disposition
+        # is a job claiming a region both does and does not exist.
+        lists = (("preserve", self.preserve), ("may_change", self.may_change),
+                 ("may_remove", self.may_remove), ("add", self.add))
+        for position, (name, regions) in enumerate(lists):
+            for other, others in lists[position + 1:]:
+                for region in sorted(set(regions) & set(others)):
+                    out.append(F.problem(
+                        F.INTENT_CONTRADICTION, f"{path}.{name}",
+                        f"{where}: region {region!r} is declared in both "
+                        f"{name!r} and {other!r}. A named region carries exactly "
+                        "one disposition -- two are two authorities over one "
+                        "region, and the second to be corrected is the one that "
+                        "ships"))
+
         if self.preservation_tolerance_mm <= 0:
             out.append(F.problem(F.SCHEMA_RANGE, f"{path}.preservation_tolerance_mm",
                                  f"{where}: preservation_tolerance_mm must be positive; a "
@@ -1531,6 +1572,15 @@ def from_payload(payload: dict[str, Any]) -> Project:
                 edit.get("preservation_tolerance_mm", 0.05)),
             minimum_detectable_defect_mm=edit.get("minimum_detectable_defect_mm"),
             preserve=tuple(edit.get("preserve") or ()),
+            # `_ids`, unlike its two siblings, and the asymmetry is scope rather
+            # than risk: `modify-ball-flange-flat` and `modify-ball-scope-refused`
+            # both record `preserve` and `may_remove` as proper lists, so
+            # tightening those two would not break a recorded replay -- it would
+            # just be a second change riding along in a slice about dispositions.
+            # A field being added now starts right; the other two are a one-line
+            # slice of their own.
+            may_change=_ids(edit.get("may_change"),
+                            f"edit_scopes[{index}].may_change"),
             may_remove=tuple(edit.get("may_remove") or ()),
             add=tuple(edit.get("add") or ()),
             expected_body_delta=edit.get("expected_body_delta", 0),

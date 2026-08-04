@@ -82,7 +82,8 @@ L0_TEST_CEILING_S = 5.0
 # conversation. That headroom is spent: ADR 0003's datum fixtures took the gate
 # past it and this guard refused them, which is the guard working.
 #
-# Raised to 1240 on the same rule -- about 16% over the 1066 the gate now holds.
+# Raised to 1240 on the same rule -- about 16% over the 1066 the gate held
+# when it was raised.
 # What that costs, measured in one session so the machine's own drift is common
 # to every reading: 56.0 s at 1066, against 56.4 s at 1033 on the commit before
 # this slice. An intermediate state of the same slice measured 55.4 s and 56.4 s
