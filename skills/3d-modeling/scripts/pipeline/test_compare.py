@@ -628,7 +628,7 @@ class TheCommandSurfaceTest(unittest.TestCase):
             self.assertFalse((directory / CMP.COMPARISON_FILE).exists())
 
     def test_the_shared_root_is_one_of_the_formulations(self) -> None:
-        """`status`'s alternatives table drops it; a comparison may not.
+        """`status` dropped it until D26 was fixed; a comparison never may.
 
         `branch` never writes a row for the root, so a set taken from
         `project.alternatives` is one short on every branched job. See

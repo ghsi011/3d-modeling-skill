@@ -242,7 +242,19 @@ class TwoSiblingsTest(unittest.TestCase):
                     branch = _read(_alt(directory, name) / "final_status.json")
                     self.assertNotEqual(branch["artifact_hashes"], root)
 
-    def test_status_reports_the_active_formulation_and_its_own_bindings(self) -> None:
+    def test_status_reports_every_formulation_and_the_active_ones_bindings(self) -> None:
+        """The set is the union: the shared root and every declared alternative.
+
+        This asserted `{"screw-fastened", "snap-fit"}` until `docs/defects.md`
+        D26 -- which is the defect written down as the expectation, so it had to
+        move, and it is moved deliberately rather than relaxed. The root is a
+        formulation: it has a directory, a proposal, a contract and its own
+        receipts, and a caller taking its formulation set from this block was
+        silently dropping one of the two designs on the recorded knob.
+
+        `bindings` is unchanged and still scoped to whichever formulation is
+        active, which is the other half of what this test is for.
+        """
         import contextlib
         import io
 
@@ -257,8 +269,10 @@ class TwoSiblingsTest(unittest.TestCase):
                     report = json.loads(stream.getvalue())
                     self.assertEqual(name, report["alternative"])
                     self.assertEqual(
-                        {"screw-fastened", "snap-fit"},
-                        {row["alternative_id"] for row in report["alternatives"]})
+                        {cli.ROOT_ALTERNATIVE, "screw-fastened", "snap-fit"},
+                        {row["alternative_id"] for row in report["alternatives"]},
+                        "the union -- D26. The root has no declared row in "
+                        "project.json and is a formulation nonetheless")
                     final = _read(_alt(directory, name) / "final_status.json")
                     self.assertEqual(final["artifact_hashes"], report["bindings"])
 

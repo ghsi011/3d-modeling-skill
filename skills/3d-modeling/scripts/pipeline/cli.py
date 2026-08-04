@@ -1778,8 +1778,7 @@ def status(argv: list[str]) -> int:
     # would make it a thing a user could reject or supersede, and would move
     # what every existing project deserialises to.
     root_row = P.Alternative(alternative_id=ROOT_ALTERNATIVE,
-                             reason="the shared root: what the alternatives "
-                                    "were branched from")
+                             reason="what the alternatives were branched from")
     for row in (root_row, *project.alternatives):
         at = None if row.alternative_id == ROOT_ALTERNATIVE else row.alternative_id
         other = (derived if at == project.active_alternative
@@ -1873,19 +1872,33 @@ def status(argv: list[str]) -> int:
         print(f"  job          {report['job_id']}")
         print(f"  source mode  {report['source_mode']}")
         print(f"  consequence  {report['consequence']}")
-        for row in report["alternatives"]:
-            mark = "*" if row["alternative_id"] == report["alternative"] else " "
-            parents = ", ".join(row["parents"]) or "(the shared root)"
-            state_of = row["disposition"]
-            if row.get("basis"):
-                state_of += f" on {row['basis']}"
-            if row.get("superseded_by"):
-                state_of += f" by {row['superseded_by']}"
-            print(f"  {mark} alternative {row['alternative_id']} "
-                  f"[{state_of}] {row['status']} "
-                  f"from {parents}: {row['reason']}")
-        if report["alternatives"] and report["alternative"] is None:
-            print("  * the shared root")
+        # Only a job that branched prints a formulation block. The JSON carries
+        # the root as a row -- D26, and a caller reading the set needs it -- but
+        # a person running `status` on a job with one formulation should see
+        # what they saw before branching existed, which is nothing here.
+        # ROADMAP.md 3.4: a job that declares no alternatives costs exactly what
+        # it cost before. The first version of the D26 fix printed
+        # `alternative . [ACTIVE] NOT_RUN from (the shared root)` on every
+        # unbranched job.
+        if project.alternatives:
+            for row in report["alternatives"]:
+                at = (None if row["alternative_id"] == ROOT_ALTERNATIVE
+                      else row["alternative_id"])
+                mark = "*" if at == report["alternative"] else " "
+                # The root has no parents and is not "from" anything; every
+                # other row names what it was branched from.
+                origin = (", ".join(row["parents"]) or "the shared root"
+                          if at is not None else None)
+                state_of = row["disposition"]
+                if row.get("basis"):
+                    state_of += f" on {row['basis']}"
+                if row.get("superseded_by"):
+                    state_of += f" by {row['superseded_by']}"
+                label = (f"alternative {row['alternative_id']}"
+                         if at is not None else "the shared root")
+                print(f"  {mark} {label} [{state_of}] {row['status']}"
+                      + (f" from {origin}" if origin else "")
+                      + f": {row['reason']}")
         print(f"  run          {report['run_id'][:12]}")
         print(f"  route        {report['route'] or '(not decided)'}")
         if report["route_rationale"]:
@@ -2296,11 +2309,12 @@ def compare(argv: list[str]) -> int:
     project_dir = args.project_dir.resolve()
     project = _load_project(project_dir, adapt=False)
 
-    # The root plus every declared alternative, which is not the set
-    # `report["alternatives"]` in `status` carries: that loop is over
-    # `project.alternatives`, and `branch` never writes a row for the shared
-    # root. A comparison that took its formulation set from there would silently
-    # drop one of the knob's three. See `docs/defects.md` D26.
+    # The root plus every declared alternative. `status` carries the same union
+    # now -- it did not when this was written, and a comparison taking its
+    # formulation set from `report["alternatives"]` would have silently dropped
+    # one of the knob's three. That was `docs/defects.md` D26, fixed; this set
+    # is still built here rather than read from a report, because a comparison
+    # must not depend on another command's shape.
     declared = {ROOT_ALTERNATIVE: None}
     for row in project.alternatives:
         declared[row.alternative_id] = row

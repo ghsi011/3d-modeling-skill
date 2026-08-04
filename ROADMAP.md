@@ -434,7 +434,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1050 against the 890 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1050 against the 997 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -2461,7 +2461,7 @@ Protect:
 **L0-heavy — the component fixtures that cost a process**
 
 Run on pull requests and before merge, on the same trigger as L1:
-`uv run pytest benchmarks/heavy`, 357 tests in about 13 minutes.
+`uv run pytest benchmarks/heavy`, 357 tests and 9 skipped. Four runs of this tier in one session took 11 m 40 s, 13 m 21 s, 15 m 39 s and 17 m 19 s on the same commit range, so the honest figure is a band of roughly 12-17 minutes rather than a number -- wall clock on this hardware drifts by about 1.8x within a session, which is why the enforceable budget is a collected-test ceiling and not a duration.
 
 Not a fourth rung. It is the part of L0 that cannot be paid on every commit — the
 two command surfaces, the confined build boundary, the packaging and bundle

@@ -518,6 +518,83 @@ class OneJobHasOneFormulationCountTest(unittest.TestCase):
                         self.assertIn(field, row)
                     self.assertIsInstance(row["stale"], list)
 
+    def test_each_row_carries_its_own_formulations_status_and_not_the_active_ones(self) -> None:
+        """The mutation that produces a false claim, and survived everything.
+
+        A review changed one line -- `derived if at is None or at ==
+        project.active_alternative` -- so the synthesised root row reported the
+        *active branch's* status, stored status, staleness and allowed claim.
+        That survived this test class and the entire L0 suite, because the
+        fixture above never runs anything: every formulation is `NOT_RUN`, so
+        every row's values are trivially equal and no assertion could tell one
+        formulation's status from another's.
+
+        `status --json` reporting the root as `VERIFIED` when no run ever
+        concluded there is the false-claim class, in the block this slice exists
+        to widen. So the receipts here are unequal on purpose: the root
+        concluded and the branch did not.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            _author(directory, "ancestor", **SCREW)
+            self.assertEqual(0, _branch(directory, parent=".", name="snap-fit",
+                                        reason="no fasteners"))
+            # The root has a concluded run; the branch has nothing. `branch`
+            # left `snap-fit` active, so a row that echoed the active
+            # formulation would report the root as NOT_RUN and the m3 mutation
+            # would report it as whatever the branch says.
+            (directory / "final_status.json").write_text(
+                S.canonical_json({"schema_version": 1, "final_status": "VERIFIED",
+                                  "allowed_claim": "the root concluded",
+                                  "artifact_hashes": {}}),
+                encoding="utf-8")
+
+            report = self._status(directory)
+            rows = {row["alternative_id"]: row for row in report["alternatives"]}
+            self.assertEqual("snap-fit", report["alternative"],
+                             "the branch is active, so an echoing row would "
+                             "carry its values")
+            self.assertEqual("VERIFIED", rows[cli.ROOT_ALTERNATIVE]["stored_status"],
+                             "the root reports what the root's own receipts say")
+            self.assertIsNone(rows["snap-fit"]["stored_status"],
+                              "and the branch reports that nothing concluded "
+                              "in its directory")
+
+    def test_an_unbranched_job_still_agrees_with_itself(self) -> None:
+        """D26's arithmetic on the case the fix changes most visibly.
+
+        The class above only ever builds a *branched* job. A review pointed out
+        that emitting the root row only when alternatives exist would pass every
+        test here while leaving `cost.by_alternative == ['.']` against
+        `alternatives == []` -- the same two-counts defect, on the job shape
+        nobody was asserting.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            _author(directory, "ancestor", **SCREW)
+            report = self._status(directory)
+            self.assertEqual(
+                set(report["cost"]["by_alternative"]),
+                {row["alternative_id"] for row in report["alternatives"]})
+
+    def test_the_synthesised_root_row_says_only_true_things(self) -> None:
+        """It is built here rather than read, so every field is an assertion.
+
+        `parents` and `reason` were unasserted: a review synthesised the root
+        with `parents=("snap-fit",)` and an empty reason and watched the whole
+        L0 suite stay green.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+            root = next(row for row in report["alternatives"]
+                        if row["alternative_id"] == cli.ROOT_ALTERNATIVE)
+            self.assertEqual([], root["parents"],
+                             "the root was branched from nothing")
+            self.assertTrue(root["reason"].strip(),
+                            "and it says what it is, because every other row "
+                            "must and a blank one reads as a missing field")
+            self.assertNotIn("superseded_by", root)
+
 
 if __name__ == "__main__":
     unittest.main()
