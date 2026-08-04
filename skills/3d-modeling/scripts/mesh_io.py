@@ -331,6 +331,97 @@ def _duplicate_vertex_count(vertices: np.ndarray) -> int:
     return int((duplicated_groups - 1).sum())
 
 
+def canonical_order(mesh):
+    """The same geometry, with vertex and face order made a function of it.
+
+    A seeded plan is only reproducible if the thing it indexes into is. Face
+    order decides which face each sample lands on, and nothing guarantees that
+    two reads of one file -- through a different loader path, a scene rather than
+    a mesh, a concatenation whose order came from a dict -- present the faces in
+    the same order. Sorting them here removes the question rather than assuming
+    the answer.
+
+    Winding is preserved: each triangle is rolled so its lowest vertex index
+    leads, which is a cyclic shift, and `signed_distance` reads winding for its
+    sign. This is defined up to exactly coincident vertices, which the merge in
+    `_load` is what removes.
+    """
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    if len(vertices) == 0 or len(faces) == 0:
+        return mesh
+
+    vertex_order = np.lexsort((vertices[:, 2], vertices[:, 1], vertices[:, 0]))
+    rank = np.empty(len(vertex_order), dtype=np.int64)
+    rank[vertex_order] = np.arange(len(vertex_order), dtype=np.int64)
+    faces = rank[faces]
+
+    roll = np.argmin(faces, axis=1)
+    columns = (np.arange(3, dtype=np.int64)[None, :] + roll[:, None]) % 3
+    faces = np.take_along_axis(faces, columns, axis=1)
+    face_order = np.lexsort((faces[:, 2], faces[:, 1], faces[:, 0]))
+
+    return trimesh.Trimesh(vertices=vertices[vertex_order],
+                           faces=faces[face_order], process=False)
+
+
+def body_identities(mesh: trimesh.Trimesh, *,
+                    bodies: Any = None) -> list[dict[str, Any]]:
+    """Every disconnected body, with a handle that is a function of its shape.
+
+    `diagnose` reported `bodies` as a count, and a count cannot be referenced:
+    a declaration selecting "the third body" resolves to whatever `split`
+    returned that run. The handle here is a digest over the body's own geometry
+    in canonical form, so it does not move when load order, vertex order or the
+    loader path does -- which is the property that lets a receipt name a body
+    and mean the same one next time.
+
+    Rows are ordered by handle rather than by split order, for the same reason:
+    two reads of one file must present the bodies in one order, or "the first"
+    is not a thing anybody can say. `bbox_mm` and `volume_mm3` ride along
+    because a list of digests is unreadable, and a person choosing which body
+    to keep would have to re-open the file to make the choice.
+    """
+    # No empty-mesh guard: `split` returns nothing for a mesh with no faces, so
+    # a guard here would be a second copy of that rule, and a mutation removing
+    # it survived because it could not change an answer.
+    # `bodies` lets a caller that has already split hand the result over:
+    # `diagnose` computes exactly this split one line above, and splitting
+    # twice was over half the cost this function added to an intake step.
+    rows: list[dict[str, Any]] = []
+    for body in (mesh.split(only_watertight=False)
+                 if bodies is None else bodies):
+        # Rounded and sign-normalised BEFORE canonicalising, which is the whole
+        # of the fix and not a detail. Rounding only the hash input left the
+        # sort reading unrounded coordinates, so noise of 1e-9 could flip a
+        # near-tie and permute the entire array before the rounding happened --
+        # and near-ties are the normal case, since every axis-aligned box has
+        # four vertices sharing an x. `+ 0.0` maps -0.0 to 0.0: the two are
+        # equal by every numeric test and differ in `tobytes`, and exporters
+        # really do write `v -0.0 -0.0 -0.0`.
+        #
+        # 6 places is a nanometre on a part measured in millimetres, far below
+        # anything this pipeline claims to resolve. It is applied here and never
+        # inside `canonical_order`, because that function's ordering is what
+        # every frozen sample plan was built on.
+        settled = np.round(np.asarray(body.vertices, dtype=np.float64), 6) + 0.0
+        ordered = canonical_order(trimesh.Trimesh(
+            vertices=settled, faces=body.faces, process=False))
+        digest = hashlib.sha256()
+        digest.update(np.asarray(ordered.vertices, dtype=np.float64).tobytes())
+        digest.update(np.asarray(ordered.faces, dtype=np.int64).tobytes())
+        low, high = ordered.bounds
+        rows.append({
+            "body_sha256": digest.hexdigest(),
+            "bbox_mm": [round(float(high[axis] - low[axis]), 4)
+                        for axis in range(3)],
+            "volume_mm3": (round(float(ordered.volume), 4)
+                           if ordered.is_watertight else None),
+            "faces": int(len(ordered.faces)),
+        })
+    return sorted(rows, key=lambda row: row["body_sha256"])
+
+
 def connected_component_count(mesh: trimesh.Trimesh) -> int:
     """Number of connected components of ``mesh``, counted on face adjacency
     (two faces are connected when they share an edge), matching what

@@ -421,38 +421,23 @@ def _load(path: Path) -> tuple[Any, dict[str, Any] | None]:
 
 
 def _ordered(mesh):
-    """The same geometry, with vertex and face order made a function of it.
+    """The canonical ordering, which lives in `mesh_io` now.
 
-    A seeded plan is only reproducible if the thing it indexes into is. Face
-    order decides which face each sample lands on, and nothing guarantees that
-    two reads of one file -- through a different loader path, a scene rather than
-    a mesh, a concatenation whose order came from a dict -- present the faces in
-    the same order. Sorting them here removes the question rather than assuming
-    the answer.
+    Moved there because `diagnose` needs the same ordering to give a body a
+    stable handle, and a second ordering rule would be two authorities over one
+    question. The move is pure -- the function is byte-identical to the one that
+    was here -- and `test_body_identity.py` pins the ordering to a value,
+    because neither the plan digest nor the replay bands can see an ordering
+    change: `_seed_material` carries a sentence describing the rule rather than
+    the rule's output, and `tools/replay.py` excludes the plan digest from
+    comparison by design.
 
-    Winding is preserved: each triangle is rolled so its lowest vertex index
-    leads, which is a cyclic shift, and `signed_distance` reads winding for its
-    sign. This is defined up to exactly coincident vertices, which the merge in
-    `_load` is what removes.
+    Delegating rather than importing at module scope: `mesh_io` pulls in
+    `trimesh`, and an eager import here made `import pipeline.preservation` cost
+    0.60 s against 0.07 s. `commission` imports this module to read one integer.
     """
-    import trimesh
-    vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    faces = np.asarray(mesh.faces, dtype=np.int64)
-    if len(vertices) == 0 or len(faces) == 0:
-        return mesh
-
-    vertex_order = np.lexsort((vertices[:, 2], vertices[:, 1], vertices[:, 0]))
-    rank = np.empty(len(vertex_order), dtype=np.int64)
-    rank[vertex_order] = np.arange(len(vertex_order), dtype=np.int64)
-    faces = rank[faces]
-
-    roll = np.argmin(faces, axis=1)
-    columns = (np.arange(3, dtype=np.int64)[None, :] + roll[:, None]) % 3
-    faces = np.take_along_axis(faces, columns, axis=1)
-    face_order = np.lexsort((faces[:, 2], faces[:, 1], faces[:, 0]))
-
-    return trimesh.Trimesh(vertices=vertices[vertex_order],
-                           faces=faces[face_order], process=False)
+    import mesh_io
+    return mesh_io.canonical_order(mesh)
 
 
 def _generalized_golden(dimensions: int) -> float:

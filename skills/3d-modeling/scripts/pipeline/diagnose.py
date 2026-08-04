@@ -147,6 +147,8 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
     open), so both are reported and the merge is named.
     """
     raw = _load_mesh(path, process=False)
+    import mesh_io
+
     mesh = _load_mesh(path, process=True)
 
     faces = int(len(mesh.faces))
@@ -189,6 +191,12 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
         "units_note": "the format carries no units; the bbox is reported as "
                       "authored and nothing has been converted",
         "bodies": int(len(components)),
+        # Every body it counted, by a handle that is a function of that
+        # body's geometry. A count cannot be referenced: a declaration
+        # selecting "the third body" resolves to whatever `split`
+        # returned that run, which is ADR 0003's unstable reference
+        # moved from datums to bodies.
+        "body_identities": mesh_io.body_identities(mesh, bodies=components),
         "faces": faces,
         "vertices": int(len(mesh.vertices)),
         "bbox_mm": extents,
