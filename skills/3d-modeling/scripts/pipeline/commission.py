@@ -81,6 +81,33 @@ def _unavailable_check(feature: Feature, title: str, reason: str, code: str,
         status="UNAVAILABLE", error_code=code, error_message=reason)
 
 
+def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int:
+    """How many points this row's plan gets, and where the number came from.
+
+    A declared `minimum_detectable_defect_mm` derives the count from the source's
+    own surface area, so the plan is as fine as the job asked for on the part the
+    job actually has. Without one the fixed fallback stands -- unchanged, so a
+    contract written before this field existed plans exactly the points it always
+    did.
+
+    An explicit `samples` on the row still wins, because the frozen fixtures set
+    it and a contract's own number must not be quietly recomputed under a receipt
+    that already names it.
+    """
+    if "samples" in expectation:
+        return int(expectation["samples"])
+    declared = expectation.get("minimum_detectable_defect_mm")
+    from . import preservation as PR          # noqa: PLC0415 - kernel is lazy
+    if declared is None:
+        return PR.DEFAULT_SAMPLES
+    from . import analysis                      # noqa: PLC0415
+    # The *normalized* mesh, which is the one the plan is laid out over --
+    # `preservation._ordered` canonicalizes the same geometry, and measuring the
+    # density against the raw parse would describe a surface the plan never saw.
+    source = analysis.load(Path(source_path))
+    return PR.derive_sample_count(float(source.normalized.area), float(declared))
+
+
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                    bed_contact_mm2: float | None,
                    source_dir: Path | None = None) -> Check:
@@ -264,9 +291,20 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                 f"the declared source artifact {exp.get('source')!r} is not in "
                 f"{root}, so there is nothing to compare against",
                 "SOURCE_MISSING", tolerance_mm, tol)
+        # Derived where the job declared a size, fixed where it did not, and the
+        # receipt says which. `SampleBudgetExceeded` becomes an unavailable
+        # check rather than an exception: a job that asked for a sensitivity
+        # this audit cannot reach has made a declaration it cannot keep, and
+        # that is a finding about the job, not a crash.
+        try:
+            planned = _preservation_samples(exp, source)
+        except PR.SampleBudgetExceeded as exc:
+            return _unavailable_check(
+                feature, "Preservation outside the edit region", str(exc),
+                "PRESERVATION_DENSITY_UNREACHABLE", tolerance_mm, tol)
         report = PR.audit(source_path=source, candidate_path=ctx.path,
                           region=region, tolerance_mm=tolerance_mm,
-                          samples=int(exp.get("samples", PR.DEFAULT_SAMPLES)),
+                          samples=planned,
                           exact=bool(exp.get("exact", False)),
                           # Where the edit scope declared this source sits in the
                           # job's frame. Read off the frozen contract row rather

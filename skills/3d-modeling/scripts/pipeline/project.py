@@ -374,6 +374,19 @@ class EditScope:
     # surface disagree by the chord error of whichever is coarser, so this is not
     # zero -- and it is declared before the edit, like everything else here.
     preservation_tolerance_mm: float = 0.05
+    # The smallest undeclared change this edit undertakes to find outside its
+    # region. `preservation_tolerance_mm` is how far a sampled point may move
+    # before it counts as movement; this is how *small a patch* the plan can see
+    # at all, and the two are independent: a 0.05 mm band measured by a plan that
+    # can only resolve 0.8 mm is a tight tolerance on a coarse detector, which is
+    # exactly the combination that reads as a strong result and is not one.
+    #
+    # `None` means the job declared nothing and the audit falls back to its fixed
+    # count, saying so. Optional rather than defaulted to a number because a
+    # default here would be this file inventing a sensitivity on the job's behalf
+    # -- and because a key that is always present would move every frozen
+    # contract hash that predates it, for jobs that declare nothing new.
+    minimum_detectable_defect_mm: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = dataclasses.asdict(self)
@@ -467,6 +480,21 @@ class EditScope:
             out.append(F.problem(F.SCHEMA_RANGE, f"{path}.preservation_tolerance_mm",
                                  f"{where}: preservation_tolerance_mm must be positive; a "
                                  "zero band cannot be met by two tessellations of one surface"))
+        if self.minimum_detectable_defect_mm is not None:
+            size = self.minimum_detectable_defect_mm
+            try:
+                usable = (not isinstance(size, bool)
+                          and S.require_finite_number(size, what="size") > 0)
+            except (S.SchemaError, TypeError, ValueError):
+                usable = False
+            if not usable:
+                out.append(F.problem(
+                    F.SCHEMA_RANGE, f"{path}.minimum_detectable_defect_mm",
+                    f"{where}: minimum_detectable_defect_mm must be a positive "
+                    "finite length. It is the smallest undeclared change the "
+                    "audit undertakes to find; a zero or absent size is a "
+                    "sensitivity nobody declared, which is what the fallback "
+                    "count already is."))
         if isinstance(self.expected_body_delta, bool) or \
                 not isinstance(self.expected_body_delta, int):
             out.append(F.problem(F.SCHEMA_TYPE, f"{path}.expected_body_delta",
@@ -1209,6 +1237,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
             region_box=edit.get("region_box"),
             preservation_tolerance_mm=float(
                 edit.get("preservation_tolerance_mm", 0.05)),
+            minimum_detectable_defect_mm=edit.get("minimum_detectable_defect_mm"),
             preserve=tuple(edit.get("preserve") or ()),
             may_remove=tuple(edit.get("may_remove") or ()),
             add=tuple(edit.get("add") or ()),

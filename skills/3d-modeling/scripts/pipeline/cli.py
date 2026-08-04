@@ -1127,10 +1127,18 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
                      "and the audit compares one source against the whole "
                      "candidate, so a coordinated multi-artifact edit is declared "
                      "here but not yet measurable by it)")
+        declared_size = scope.minimum_detectable_defect_mm
         rows.append({
             "feature_id": f"preservation-{scope.artifact_id}",
             "kind": "preservation",
             "source": artifact.path,
+            # Present only where the job declared one. An added key that is
+            # always there -- even as null -- is still an added key, and it would
+            # move the frozen contract hash of every job that predates this field
+            # and declares nothing new. Same rule `contract.Contract.source`
+            # follows for the same reason.
+            **({"minimum_detectable_defect_mm": float(declared_size)}
+               if declared_size is not None else {}),
             "region": scope.region_box,
             "tolerance_mm": scope.preservation_tolerance_mm,
             "exact": exact,

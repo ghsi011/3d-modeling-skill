@@ -25,6 +25,7 @@ moved rather than weakened; `conftest.py` carries the rule and
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import textwrap
@@ -846,3 +847,100 @@ class DerivedSampleDensityTest(unittest.TestCase):
                   for d in (4.0, 2.0, 1.0, 0.8, 0.5, 0.3)]
         self.assertEqual(counts, sorted(counts),
                          "asking for a smaller defect must never reduce the plan")
+
+
+class ADeclaredDefectSizeReachesThePlanTest(unittest.TestCase):
+    """The declaration end of the derivation, and the silence at the other end.
+
+    `derive_sample_count` is arithmetic; this is the part that decides whether a
+    job can reach it. Two properties matter and they pull opposite ways: a job
+    that declares a size must get a plan derived from it, and a job that declares
+    nothing must produce byte-identical bytes to the ones it produced before this
+    field existed -- otherwise every frozen contract hash in the repository moves
+    for jobs that gained nothing.
+    """
+
+    def test_a_declared_size_reaches_the_contract_row(self) -> None:
+        scope = P.EditScope(artifact_id="ball", region="the flange",
+                            minimum_detectable_defect_mm=0.3)
+        self.assertEqual(0.3, scope.minimum_detectable_defect_mm)
+        self.assertEqual([], [i for i in scope.problems(0)
+                              if "minimum_detectable" in i.where])
+
+    def test_a_size_that_cannot_be_a_length_is_refused(self) -> None:
+        """The refusal side, which the accept side cannot stand in for.
+
+        Written because a mutation that deleted the whole validation branch went
+        uncaught: every other test here declares a *valid* size, so removing the
+        check that rejects an invalid one changed nothing any of them could see.
+        """
+        for value in (0.0, -1.0, "0.3", True, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                scope = P.EditScope(artifact_id="ball", region="r",
+                                    minimum_detectable_defect_mm=value)
+                codes = [i.code for i in scope.problems(0)
+                         if "minimum_detectable" in i.where]
+                self.assertEqual(["SCHEMA_RANGE"], codes,
+                                 f"{value!r} is not a length this audit can "
+                                 "undertake to find, and must be refused before "
+                                 "a plan is derived from it")
+
+    def test_an_undeclared_size_puts_no_key_in_the_row(self) -> None:
+        """Absent, not null. A key that is always there moves every old hash."""
+        from . import cli
+        project = P.Project(
+            job_id="j", updated_utc=UTC, source_mode="MODIFY",
+            consequence="INCONSEQUENTIAL", consequence_rationale="a test",
+            printer="p", material={"process": "FDM", "material": "PLA"},
+            nozzle={"diameter_mm": 0.4},
+            orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+            template=None, parameters={}, model="model.py",
+            envelope_mm={"x": 50.0, "y": 50.0, "z": 50.0},
+            reviewer={"model_snapshot": "t"},
+            source_artifacts=(P.SourceArtifact(artifact_id="ball",
+                                               path="ball.stl"),),
+            edit_scopes=(P.EditScope(artifact_id="ball", region="the flange"),))
+        rows = cli._preservation_feature(project)
+        self.assertEqual(1, len(rows))
+        self.assertNotIn("minimum_detectable_defect_mm", rows[0],
+                         "an undeclared size must leave the contract row exactly "
+                         "as it was, or every frozen hash moves for nothing")
+
+        declared = dataclasses.replace(project.edit_scopes[0],
+                                       minimum_detectable_defect_mm=0.25)
+        project.edit_scopes = (declared,)
+        rows = cli._preservation_feature(project)
+        self.assertEqual(0.25, rows[0]["minimum_detectable_defect_mm"])
+
+    def test_the_planner_prefers_declared_size_over_the_fixed_fallback(self) -> None:
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            area = float(trimesh.load(str(source), force="mesh",
+                                      process=True).area)
+
+            # Nothing declared: the fixed fallback, unchanged.
+            self.assertEqual(PR.DEFAULT_SAMPLES,
+                             commission._preservation_samples({}, source))
+            # An explicit count still wins -- the frozen fixtures set one.
+            self.assertEqual(4242,
+                             commission._preservation_samples({"samples": 4242},
+                                                              source))
+            # Declared: derived from this part's own surface.
+            planned = commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, source)
+            self.assertEqual(PR.derive_sample_count(area, 0.3), planned)
+            self.assertGreater(planned, PR.DEFAULT_SAMPLES,
+                               "0.3 mm on a 17 mm ball is finer than the fixed "
+                               "count, so the declaration must cost something")
+            self.assertLessEqual(PR.detectable_defect_mm(area, planned), 0.3)
+
+    def test_an_unreachable_declared_size_is_a_finding_not_a_crash(self) -> None:
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            with self.assertRaises(PR.SampleBudgetExceeded):
+                commission._preservation_samples(
+                    {"minimum_detectable_defect_mm": 0.0005}, source)
