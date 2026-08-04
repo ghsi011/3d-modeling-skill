@@ -820,3 +820,52 @@ rather than a repair:
 axis the score compares is constrained by something the request states — which
 fails today on `voron-deck-support`'s x, and would fail on its y for a different
 reason.
+
+**Partly closed, and the second run is why the rest is still open.** The first
+option is built: an entry may declare, in writing, which of the reference's own
+measurements the question gives away and why (`benchmarks/corpus.json`
+`discloses`, enforced in `corpus.request_view`). Declared coincidences are
+permitted, undeclared ones still refused, a disclosure that gives away nothing
+is refused as an exemption in disguise, and `blind.score` marks a disclosed axis
+`given` and reports how many axes were actually reconstructed.
+
+A second blind run — a fresh designer, the improved brief now stating
+`extrusion_series: 2020` — measured what that bought:
+
+```
+OFF smallest    10.000 against   5.800  (+4.200)     run 1: +2.400
+OFF middle      20.000 against  14.495  (+5.505)     run 1: -2.495
+giv largest     20.000 against  20.000  (+0.000)     given, not earned
+OFF volume    2826.376 against 1068.534              run 1: 1023.190
+```
+
+Two things follow, and the second is the finding.
+
+**The disclosure mechanism earns its place on first use.** The given axis came
+back exact. Without the `giv` mark that reads as a perfect row and an
+improvement over run 1; it is the question's own number reflected back, and
+crediting it would have been the flattering score the mark exists to refuse.
+
+**Stating the interface did not make the question answerable.** The two
+genuinely reconstructed axes got *worse*, and both designers — independently,
+with no shared context — named the same cause. Run 1: *"the depth along the
+extrusion is unconstrained by the brief. A reference at 8 or at 20 is equally
+consistent with the brief."* Run 2: *"the brief constrains the part's
+cross-section well and its plan size barely at all. A scorer weighting bbox
+extents is largely scoring whether I guessed the same lip overlap and foot
+length as the original author, which no amount of engineering recovers from the
+four stated numbers."*
+
+So the bounding box is mostly free parameters. What the brief does pin is the
+cross-section — rebate depth from `panel_stock`, bore from `fastener_thread`,
+key width from `extrusion_slot_opening` — and those are the dimensions a person
+means by *critical*. The benchmark currently scores the ones the question cannot
+constrain and cannot score the ones it can, because measuring a rebate depth on
+an arbitrary mesh is feature recognition and that is Release 6/7.
+
+**What remains open, restated.** Not "which of three options", but: the score
+compares an envelope the question does not determine. Until it can compare a
+feature, a low score on these entries is substantially a fact about the
+question. The honest interim is what the report now says — how many axes were
+reconstructed rather than given — and not a claim that the number measures a
+designer.

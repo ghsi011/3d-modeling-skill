@@ -114,10 +114,15 @@ class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
                     scanned.append(payload)
                 else:
                     scanned.append(path.read_text("utf-8"))
+            declared = {row["measurement"] for row
+                        in corpus.request_view(ENTRY)["discloses"]}
+            undeclared = [(value, name) for value, name
+                          in corpus.coincidences(corpus.numbers_in(scanned), truth)
+                          if name not in declared]
             self.assertEqual(
-                (), corpus.coincidences(corpus.numbers_in(scanned), truth),
-                "a number in the generated job is one of the reference's own "
-                "measurements")
+                [], undeclared,
+                "a number in the generated job measures the reference and is "
+                "not one the entry declares giving away")
 
     ASKING = ("request", "_project", "_brief", "write_request", "handle", "main")
     MAY_CALL = frozenset({"question_ids", "request_view", "CorpusLeak",
@@ -281,6 +286,71 @@ class TheScoreDiscriminatesTest(unittest.TestCase):
         self.assertIsNone(report["volume"]["agrees"])
         self.assertIsNone(report["volume"]["candidate_mm3"])
         self.assertIn("not a closed solid", report["volume"]["why"])
+
+    def test_a_disclosed_axis_is_reported_as_given_not_reconstructed(self) -> None:
+        """`docs/defects.md` D30: some interfaces *are* the answer.
+
+        The deck support bolts flat to a 20 mm extrusion face, so its width is
+        the face width. Stating the profile is what lets a designer derive
+        anything, and it hands over one of three axes. The score may not then
+        count that axis as a reconstruction.
+        """
+        view = corpus.request_view(ENTRY)
+        self.assertEqual(["extent_x"],
+                         [d["measurement"] for d in view["discloses"]])
+        report = blind.score(corpus.resolve(ENTRY), ENTRY)
+        self.assertEqual(["extent_x"], report["given_extents"])
+        self.assertFalse(report["given_volume"])
+        self.assertEqual(2, report["reconstructed_axes"])
+        given = [row for row in report["extents"] if row["given"]]
+        self.assertEqual(1, len(given))
+        self.assertEqual(20.0, given[0]["reference_mm"],
+                         "the disclosure names an axis of the reference and the "
+                         "score sorts its extents, so it has to be mapped "
+                         "through the same sort -- by value, not by index")
+
+    def test_an_entry_disclosing_nothing_reconstructs_every_axis(self) -> None:
+        """A disclosure is a cost, so an entry that pays none keeps all three."""
+        report = blind.score(corpus.resolve(OTHER), OTHER)
+        self.assertEqual([], report["given_extents"])
+        self.assertFalse(report["given_volume"])
+        self.assertEqual(3, report["reconstructed_axes"])
+        self.assertFalse(any(row["given"] for row in report["extents"]))
+
+    def test_extents_and_volume_are_counted_apart(self) -> None:
+        """They were one list, so the summary could say four axes out of three.
+
+        `given_axes` mixed `extent_x` with `volume_mm3`, and a disclosed volume
+        marked no row at all -- the volume printed `ok` on a number the question
+        had handed over.
+        """
+        report = blind.score(corpus.resolve(ENTRY), ENTRY)
+        self.assertNotIn("volume_mm3", report["given_extents"])
+        self.assertIn("given", report["volume"])
+        self.assertLessEqual(len(report["given_extents"]), 3)
+        self.assertEqual(3 - len(report["given_extents"]),
+                         report["reconstructed_axes"])
+
+    def test_a_disclosed_volume_marks_the_volume_row_and_no_extent(self) -> None:
+        """No committed entry discloses a volume, so nothing exercised this.
+
+        With extents and volume in one list the summary could report four axes
+        out of three, and the volume row printed `ok` on a number the question
+        had handed over.
+        """
+        import unittest.mock as mock
+
+        view = dict(corpus.request_view(ENTRY))
+        view["discloses"] = [{"requirement": "panel_stock",
+                              "measurement": "volume_mm3", "why": "constructed"}]
+        with mock.patch.object(corpus, "request_view", return_value=view):
+            report = blind.score(corpus.resolve(ENTRY), ENTRY)
+        self.assertEqual([], report["given_extents"],
+                         "a volume is not an extent and may not be counted as one")
+        self.assertTrue(report["given_volume"])
+        self.assertTrue(report["volume"]["given"])
+        self.assertEqual(3, report["reconstructed_axes"])
+        self.assertFalse(any(row["given"] for row in report["extents"]))
 
     def test_agreement_is_never_looser_than_the_coincidence_check(self) -> None:
         """The invariant that makes a score mean anything, stated at last.

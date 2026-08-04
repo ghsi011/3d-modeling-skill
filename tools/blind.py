@@ -185,12 +185,32 @@ def measure(path: Path) -> dict[str, Any]:
 
     mesh = trimesh.load(str(path), force="mesh")
     extents = sorted(float(v) for v in mesh.bounding_box.extents)
+    raw = [float(v) for v in mesh.bounding_box.extents]
     return {
         "sorted_extents_mm": extents,
+        "extent_x": raw[0], "extent_y": raw[1], "extent_z": raw[2],
         "volume_mm3": float(mesh.volume),
         "bodies": int(mesh.body_count),
         "watertight": bool(mesh.is_watertight),
     }
+
+
+def _given_positions(disclosed: set[str], want: dict[str, Any]) -> set[int]:
+    """Where a disclosed extent lands once the extents are sorted.
+
+    The manifest names an axis of the reference -- `extent_x` -- and the score
+    compares a *sorted* triple, so the disclosure has to be mapped through the
+    same sort. Done by value rather than by index: `extent_x` is whichever
+    position the reference's x measurement occupies after sorting, and on a part
+    with two equal extents it marks both, which is the safe direction.
+    """
+    order = want["sorted_extents_mm"]
+    positions: set[int] = set()
+    for name in disclosed:
+        value = want[name]
+        positions |= {index for index, extent in enumerate(order)
+                      if abs(extent - value) <= 1e-6}
+    return positions
 
 
 def score(candidate: Path, entry_id: str,
@@ -208,6 +228,20 @@ def score(candidate: Path, entry_id: str,
     got = measure(candidate)
     want = measure(corpus.resolve(entry_id, payload))
 
+    # Which of the reference's own measurements the question gave away. A
+    # disclosed axis is compared and reported like any other, and marked
+    # `given` -- a benchmark cannot claim to have measured a reconstruction of
+    # a number it handed over. `docs/defects.md` D30 is why any of them are.
+    disclosed = {row["measurement"] for row
+                 in corpus.request_view(entry_id, payload).get("discloses", ())}
+    # Extents and volume counted apart. Mixing them made the summary say "2 of 3
+    # extents were given away (extent_x, volume_mm3), so 2 were reconstructed"
+    # -- four axes out of three -- and left a disclosed volume marked by
+    # nothing at all, on a number the question handed over.
+    given_extents = sorted(disclosed & {"extent_x", "extent_y", "extent_z"})
+    volume_given = "volume_mm3" in disclosed
+    given = _given_positions(set(given_extents), want)
+
     axes = []
     for index, (a, b) in enumerate(zip(got["sorted_extents_mm"],
                                        want["sorted_extents_mm"])):
@@ -215,7 +249,8 @@ def score(candidate: Path, entry_id: str,
         axes.append({"axis": "smallest middle largest".split()[index],
                      "candidate_mm": round(a, 4), "reference_mm": round(b, 4),
                      "delta_mm": round(a - b, 4), "band_mm": round(band, 4),
-                     "agrees": abs(a - b) <= band})
+                     "agrees": abs(a - b) <= band,
+                     "given": index in given})
     # A volume read off a surface that is not closed is a divergence sum over
     # an open boundary, not a volume. Reporting it as a measurement with a
     # verdict put three `ok` rows on something that is not a solid, and a reader
@@ -229,6 +264,7 @@ def score(candidate: Path, entry_id: str,
         "band_mm3": round(volume_band, 3),
         "agrees": (abs(got["volume_mm3"] - want["volume_mm3"]) <= volume_band
                    if closed else None),
+        "given": volume_given,
         "why": None if closed else (
             "the candidate is not a closed solid, so it has no volume to "
             "compare -- what trimesh returns for an open surface is a sum over "
@@ -245,6 +281,9 @@ def score(candidate: Path, entry_id: str,
                        "reference": want["watertight"],
                        "agrees": got["watertight"] == want["watertight"]},
         "score": None,
+        "reconstructed_axes": sum(1 for row in axes if not row["given"]),
+        "given_extents": given_extents,
+        "given_volume": volume_given,
         "what_this_is_not": (
             "dimensional agreement on four measurements, and nothing about "
             "shape. Measured rather than asserted: a plain slab with one "
@@ -257,23 +296,41 @@ def score(candidate: Path, entry_id: str,
             "whether a correct reconstruction passes the volume row can turn on "
             "a feature the brief never dimensioned. Deterministic geometric "
             "difference is ROADMAP.md's Release 6 and needs the registration "
-            "this deliberately avoids."),
+            "this deliberately avoids. And where `given_extents` is non-empty "
+            "the question handed those axes over: they are compared and "
+            "reported, and they are not evidence of a reconstruction. Two "
+            "blind runs found the rest of the envelope is mostly free "
+            "parameters the brief never constrains, so a low score here is "
+            "substantially a fact about the question -- docs/defects.md D30."),
     }
 
 
 def _table(report: dict[str, Any]) -> None:
     print(f"\n  blind score  {report['entry_id']}\n")
     for row in report["extents"]:
-        mark = "ok " if row["agrees"] else "OFF"
+        mark = ("giv" if row["given"] else "ok ") if row["agrees"] else \
+               ("GIV" if row["given"] else "OFF")
         print(f"  {mark} {row['axis']:8s} {row['candidate_mm']:9.3f} against "
               f"{row['reference_mm']:9.3f}  ({row['delta_mm']:+.3f}, band "
               f"{row['band_mm']:.3f})")
     for name in ("volume", "bodies", "watertight"):
         row = report[name]
         mark = {True: "ok ", False: "OFF", None: "-- "}[row["agrees"]]
+        if row.get("given"):
+            mark = "giv" if row["agrees"] else "GIV"
         keys = [k for k in row if k.startswith("candidate")]
         ref = [k for k in row if k.startswith("reference")]
         print(f"  {mark} {name:8s} {row[keys[0]]!s:>9} against {row[ref[0]]!s:>9}")
+    if report["given_extents"] or report["given_volume"]:
+        parts = []
+        if report["given_extents"]:
+            parts.append(f"{len(report['given_extents'])} of 3 extents "
+                         f"({', '.join(report['given_extents'])})")
+        if report["given_volume"]:
+            parts.append("the volume")
+        print(f"\n  The question gave away {' and '.join(parts)}, so "
+              f"{report['reconstructed_axes']} of 3 extents were "
+              "reconstructed. Rows marked giv/GIV were not earned.")
     print(f"\n  {report['what_this_is_not']}\n")
 
 
@@ -318,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--score needs --against <entry>")
     try:
         report = score(args.score, args.against)
-    except (BlindError, KeyError, corpus.CorpusUnavailable,
+    except (BlindError, KeyError, corpus.CorpusLeak, corpus.CorpusUnavailable,
             corpus.CorpusCorrupt) as exc:
         sys.stderr.write(f"blind: {exc}\n")
         return 2

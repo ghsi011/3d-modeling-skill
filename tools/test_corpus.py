@@ -234,7 +234,7 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
             with self.subTest(entry=entry_id):
                 view = corpus.request_view(entry_id, self.payload)
                 self.assertEqual({"purpose", "requirements",
-                                  "build_envelope_mm",
+                                  "build_envelope_mm", "discloses",
                                   "checked_against_reference"}, set(view))
                 self.assertTrue(view["requirements"])
 
@@ -268,8 +268,16 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
                 if not view["checked_against_reference"]:
                     self.skipTest(f"{entry_id} is not on this machine")
                 measured = corpus.reference_measurements(entry_id, self.payload)
+                declared = {row["measurement"] for row in view["discloses"]}
+                undeclared = [(value, name) for value, name
+                              in corpus.coincidences(corpus.numbers_in(view),
+                                                     measured)
+                              if name not in declared]
                 self.assertEqual(
-                    (), corpus.coincidences(corpus.numbers_in(view), measured))
+                    [], undeclared,
+                    "every coincidence the shipped corpus states is one it "
+                    "declares in writing, with a reason -- see D30. An "
+                    "undeclared one is the leak.")
 
     def test_the_question_names_no_identifier_path_or_digest(self) -> None:
         for entry_id, row in sorted(corpus._entries(self.payload).items()):
@@ -312,38 +320,53 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
 
     # -- the coincidence check -------------------------------------------
 
-    def test_the_leak_this_manifest_actually_shipped_is_refused(self) -> None:
+    def test_the_leak_this_manifest_shipped_is_refused_unless_declared(self) -> None:
         """`extrusion_series: "2020"` on a part exactly 20.0 mm across.
 
         A correctly named counterpart, a true statement about the hardware, and
         one of the three answers. Found by a review measuring the STL, not by
         any rule about words -- and no rule about words could have found it.
+
+        It is *stated* now, and declared: `docs/defects.md` D30 records why. The
+        part bolts flat to the extrusion face, so refusing the coincidence
+        refuses the one thing a designer needs to derive the width. Both halves
+        are asserted here, because the mechanism is only honest if the second
+        one holds: declared, it passes and the score reports that axis as given;
+        undeclared, it is refused exactly as before.
         """
         if not corpus.request_view("voron-deck-support",
                                    self.payload)["checked_against_reference"]:
             self.skipTest("the reference is not on this machine")
-        # The note deliberately carries no number. The first version of this
-        # test wrote "aluminium T-slot, 20 mm face", which states a bare 20 and
-        # so passed even with the multiple-of-ten matching removed -- the test
-        # was green for a reason that had nothing to do with what it names.
+
+        declared = corpus.request_view("voron-deck-support", self.payload)
+        self.assertEqual(["extent_x"],
+                         [row["measurement"] for row in declared["discloses"]])
+        self.assertIn("2020", [str(row["value"])
+                               for row in declared["requirements"]])
+
+        payload = copy.deepcopy(self.payload)
+        for row in payload["entries"]:
+            row.pop("discloses", None)
         with self.assertRaises(corpus.CorpusLeak) as caught:
-            corpus.request_view("voron-deck-support", self._entry(
-                extra=self._req(name="extrusion_series", value="2020", unit="",
-                                note="aluminium T-slot extrusion")))
-        self.assertIn("extent_x", str(caught.exception),
-                      "2020 is 20.20 in centimetres of nothing -- what makes it "
-                      "a leak is that a 2020 extrusion is 20 mm across and so "
-                      "is this part")
+            corpus.request_view("voron-deck-support", payload)
+        self.assertIn("extent_x", str(caught.exception))
 
     def test_a_measurement_smuggled_into_any_field_is_refused(self) -> None:
         """`names_the_part` scanned two fields of six. This scans the question."""
         if not corpus.request_view("voron-deck-support",
                                    self.payload)["checked_against_reference"]:
             self.skipTest("the reference is not on this machine")
-        self._refused(extra=self._req(
-            source="calipers; the part measures 20.0 across"))
-        self._refused(extra=self._req(note="about 20.0 wide overall"))
-        self._refused(request={"purpose": "Holds a panel. It is 20.0 mm across."})
+        # Both axes: 5.8 is given away by nothing, and 20.0 is *declared* --
+        # which excuses only the number `extrusion_series` states, not this one.
+        # These were retargeted off 20.0 while the disclosure excused by name;
+        # they are back, because that was the hole rather than the rule.
+        for value in (5.8, 20.0):
+            with self.subTest(measurement=value):
+                self._refused(extra=self._req(
+                    source=f"calipers; the part measures {value} across"))
+                self._refused(extra=self._req(note=f"about {value} overall"))
+                self._refused(request={
+                    "purpose": f"Holds a panel. It is {value} mm across."})
 
     def test_a_value_that_is_not_a_number_or_a_name_is_refused(self) -> None:
         """A list is a bounding box with the brackets left on."""
@@ -443,8 +466,128 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
         if not corpus.request_view("voron-deck-support",
                                    self.payload)["checked_against_reference"]:
             self.skipTest("the reference is not on this machine")
+        # Both, for the reason above: a declared axis is excused only in the
+        # requirement that declares it, and an envelope is never that.
+        self._refused(request={"build_envelope_mm":
+                               {"x": 45.0, "y": 45.0, "z": 5.8}})
         self._refused(request={"build_envelope_mm":
                                {"x": 20.0, "y": 45.0, "z": 25.0}})
+
+    def test_one_number_that_leaks_two_measurements_reports_both(self) -> None:
+        """`coincidences` stopped at the first matching name.
+
+        No committed reference has two near-equal extents, so nothing caught
+        this end to end -- and the consequences were both directions of wrong.
+        A value within band of two measurements reported one, so the other
+        leaked invisibly; and which one you got depended on dict iteration
+        order, so an equally true disclosure could be refused as spurious. The
+        spurious check now depends on this enumeration being complete.
+        """
+        measured = {"extent_x": 20.0, "extent_y": 20.3, "extent_z": 5.0,
+                    "volume_mm3": 2030.0}
+        self.assertEqual(
+            [(20.0, "extent_x"), (20.0, "extent_y")],
+            list(corpus.coincidences((20.0,), measured)),
+            "20.0 is within 2% of both extents and both must be named")
+        # And the catalogue-series form reaches all three of them.
+        self.assertEqual(
+            {"extent_x", "extent_y", "volume_mm3"},
+            {n for _, n in corpus.coincidences((2030.0,), measured)})
+
+    def test_a_disclosure_that_gives_away_nothing_is_refused(self) -> None:
+        """Otherwise a `discloses` row is an exemption with a reason attached.
+
+        Declare `extent_z` on an entry whose question never states it, and that
+        axis is excused for every future edit of the entry -- which is the
+        exemption list this whole design replaced. Caught on the first attempt
+        at the manifest: I declared the panel clip's extrusion series discloses
+        `extent_x`, and measurement says it discloses nothing, because the part
+        is 30 mm across and the profile is 20.
+        """
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        with self.assertRaises(corpus.CorpusLeak) as caught:
+            corpus.request_view("voron-deck-support", self._entry(
+                discloses=[{"requirement": "panel_stock",
+                            "measurement": "extent_z",
+                            "why": "it does not, and that is the point"}]))
+        self.assertIn("gives away nothing", str(caught.exception))
+
+    def test_a_disclosure_with_no_reason_is_refused(self) -> None:
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        self._refused(discloses=[{"requirement": "extrusion_series",
+                                  "measurement": "extent_x", "why": "  "}])
+
+    def test_a_disclosure_naming_no_real_measurement_is_refused(self) -> None:
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        """By *this* rule, not by the spurious check firing second.
+
+        `_refused` asserts only that some `CorpusLeak` was raised, and with this
+        branch deleted the spurious check raises instead and the test stays
+        green -- verbatim the failure this file already records for
+        `counterparts`: reading the second failure and calling it the first.
+        """
+        with self.assertRaises(corpus.CorpusLeak) as caught:
+            corpus.request_view("voron-deck-support", self._entry(
+                discloses=[{"requirement": "extrusion_series",
+                            "measurement": "girth", "why": "x"}]))
+        self.assertIn("is measured on", str(caught.exception))
+
+    def test_a_disclosure_of_the_wrong_shape_is_refused(self) -> None:
+        """The shape check had no fixture at all; deleting it stayed green."""
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        for row in ("extent_x", ["extent_x"], {}, {"measurement": "extent_x"},
+                    {"requirement": "extrusion_series", "measurement": "extent_x"},
+                    {"requirement": "extrusion_series", "measurement": "extent_x",
+                     "why": "ok", "extra": 1},
+                    {"requirement": "", "measurement": "extent_x", "why": "ok"},
+                    {"requirement": 3, "measurement": "extent_x", "why": "ok"},
+                    {"requirement": "extrusion_series", "measurement": "extent_x",
+                     "why": ["20.0", "14.5"]}):
+            with self.subTest(row=row):
+                self._refused(discloses=[row])
+
+    def test_a_disclosure_excuses_only_the_number_its_requirement_states(self) -> None:
+        """The exemption list returning, and the reason it is not.
+
+        Declaring `extent_x` because `extrusion_series: 2020` legitimately gives
+        away a 20 mm face used to excuse *every* 20.0 in the entry. A review
+        walked four channels through it, and the worst was the build envelope,
+        which `blind._project` writes into `project.json` as a hard constraint --
+        handing the designer the answer as a rule to obey, which is strictly
+        more than the profile the disclosure was argued for.
+        """
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        self._refused(request={"build_envelope_mm":
+                               {"x": 20.0, "y": 45.0, "z": 25.0}})
+        self._refused(request={"purpose":
+                               "Holds a panel. It is 20.0 mm across overall."})
+        self._refused(extra=self._req(name="panel_pocket", value=20.0))
+        self._refused(extra=self._req(
+            source="calipers; the part measures 20.0 across"))
+        # And the declared one still passes, or the disclosure does nothing.
+        self.assertEqual(
+            ["extent_x"],
+            [row["measurement"] for row
+             in corpus.request_view("voron-deck-support",
+                                    self.payload)["discloses"]])
+
+    def test_only_the_declared_measurement_is_excused(self) -> None:
+        """A disclosure of one axis does not open the others."""
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        # extent_x is declared; stating extent_z as well must still be refused.
+        self._refused(extra=self._req(name="panel_pocket", value=5.8))
 
     def test_the_view_says_whether_it_could_check_the_reference(self) -> None:
         """A checkout that has fetched nothing must not imply a check it skipped."""

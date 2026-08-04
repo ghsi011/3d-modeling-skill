@@ -238,14 +238,50 @@ def coincidences(stated: tuple[float, ...],
         for name, truth in measured.items():
             if truth <= 0:
                 continue
-            for candidate in {value, value / 100.0, value / 10.0}:
-                if abs(candidate - truth) <= truth * COINCIDENCE_FRACTION:
-                    found.append((value, name))
-                    break
-            else:
-                continue
-            break
+            # Every matching name, not the first. A value within band of two
+            # near-equal extents used to be reported against one of them, so the
+            # other leaked invisibly -- and which one you got depended on dict
+            # order, which made an equally true disclosure "spurious". The
+            # spurious check depends on this enumeration being complete.
+            if any(abs(candidate - truth) <= truth * COINCIDENCE_FRACTION
+                   for candidate in (value, value / 10.0, value / 100.0)):
+                found.append((value, name))
     return tuple(dict.fromkeys(found))
+
+
+def _disclosures(entry_id: str, row: dict[str, Any],
+                 measured: dict[str, float]) -> list[dict[str, Any]]:
+    """Which of the reference's own measurements this entry gives away, and why.
+
+    Empty for an entry that gives none, which is the shape to prefer. A
+    disclosure is a cost: the score cannot claim a disclosed axis was
+    reconstructed, so every row here narrows what the benchmark establishes.
+    """
+    out: list[dict[str, Any]] = []
+    for index, item in enumerate(row.get("discloses") or ()):
+        if not isinstance(item, dict) or set(item) != {"requirement",
+                                                       "measurement", "why"}:
+            raise CorpusLeak(
+                f"{entry_id}: discloses[{index}] must name a requirement, the "
+                "measurement it gives away, and why")
+        if item["measurement"] not in measured:
+            raise CorpusLeak(
+                f"{entry_id}: discloses[{index}] names {item['measurement']!r}, "
+                f"and a reference is measured on {sorted(measured)}")
+        if not isinstance(item["requirement"], str) or \
+                not item["requirement"].strip():
+            raise CorpusLeak(
+                f"{entry_id}: discloses[{index}] names no requirement. It is "
+                "load-bearing: only the numbers *that* requirement states are "
+                "excused, so a disclosure with no requirement excuses nothing "
+                "and is refused rather than silently inert.")
+        if not isinstance(item["why"], str) or not item["why"].strip():
+            raise CorpusLeak(
+                f"{entry_id}: discloses[{index}] gives away "
+                f"{item['measurement']} and does not say why. A disclosure with "
+                "no reason is an exemption, which is the design this replaced.")
+        out.append(dict(item))
+    return out
 
 
 def _requirement(entry_id: str, index: int, row: Any,
@@ -402,8 +438,66 @@ def request_view(entry_id: str,
     try:
         measured = reference_measurements(entry_id, payload)
     except (CorpusUnavailable, ImportError):
-        return {**view, "checked_against_reference": False}
-    found = coincidences(numbers_in(view), measured)
+        # No reference on this machine, so no coincidence check and no
+        # disclosure validation -- but the key is still present. Omitting it
+        # made `discloses` absent on a normal unfetched checkout and turned six
+        # L0 tests red, against this module's own "absence is not failure".
+        return {**view, "checked_against_reference": False, "discloses": []}
+    # A *declared* disclosure. For some references an interface dimension and an
+    # answer dimension are the same number -- a bracket that bolts flat to a
+    # 20 mm extrusion face is 20 mm across -- so refusing the coincidence
+    # refuses the information a designer needs to derive anything at all
+    # (`docs/defects.md` D30). The entry may therefore say, in writing, which
+    # measurement it gives away and why. Everything undeclared is still refused,
+    # and the score shrinks its denominator to match: a disclosed axis is
+    # reported as given rather than earned.
+    #
+    # This is `request_vocabulary` from the second design returning in the shape
+    # that makes it defensible. The reason it failed before was that it was an
+    # *exemption* -- a list of spellings a rule would not look at. This names a
+    # specific measurement of a specific reference, and a reviewer reading the
+    # diff sees exactly which axis stopped being a question.
+    row_disclosures = _disclosures(entry_id, row, measured)
+    declared = {item["measurement"] for item in row_disclosures}
+    actual = coincidences(numbers_in(view), measured)
+
+    # Excused: the specific (value, measurement) pairs that the *named
+    # requirement* states. Not every number equal to a disclosed measurement.
+    #
+    # The first version excused by name, and a review showed that is the
+    # exemption list returning with a smaller blast radius. Declare `extent_x`
+    # because `extrusion_series: 2020` legitimately gives away a 20 mm face, and
+    # every 20.0 anywhere in the entry was excused with it -- in `purpose`, in a
+    # requirement's `source`, and worst in `build_envelope_mm`, which
+    # `blind._project` writes into `project.json` as a hard constraint. That
+    # hands the designer the answer as a rule to obey, which is strictly more
+    # than the profile it was argued for.
+    by_name = {item["requirement"] for item in row_disclosures}
+    excused = set()
+    for requirement in view["requirements"]:
+        if requirement["name"] not in by_name:
+            continue
+        for pair in coincidences(numbers_in(requirement), measured):
+            if any(item["requirement"] == requirement["name"]
+                   and item["measurement"] == pair[1]
+                   for item in row_disclosures):
+                excused.add(pair)
+    # A disclosure may only declare something the question actually gives away.
+    # Without this a `discloses` row is a blanket exemption wearing a reason:
+    # declare `extent_x` on an entry that never states it, and the axis is
+    # excused for every future edit of that entry. The first version of this
+    # manifest did exactly that on the panel clip -- I declared its extrusion
+    # series discloses `extent_x`, and measurement says it discloses nothing,
+    # because the part is 30 mm across and the profile is 20.
+    spurious = sorted(declared - {name for _, name in excused})
+    if spurious:
+        raise CorpusLeak(
+            f"{entry_id}: discloses {', '.join(spurious)}, and the question "
+            "states no number that measures it. A disclosure that gives away "
+            "nothing is an exemption with a sentence attached -- it excuses an "
+            "axis for every future edit of this entry. Declare what is given "
+            "away, or declare nothing.")
+    found = tuple(pair for pair in actual if pair not in excused)
     if found:
         detail = "; ".join(f"{value:g} is this part's {name}"
                            for value, name in found)
@@ -413,7 +507,8 @@ def request_view(entry_id: str,
             "an `extrusion_series` of 2020 on a part exactly 20 mm across is a "
             "correctly named counterpart handing over an answer, and it is what "
             "this manifest shipped until this check existed.")
-    return {**view, "checked_against_reference": True}
+    return {**view, "checked_against_reference": True,
+            "discloses": [dict(row) for row in row_disclosures]}
 
 
 def corpus_root(payload: dict[str, Any] | None = None) -> Path:
