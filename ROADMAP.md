@@ -1577,7 +1577,7 @@ Generalize the authoritative job model to support:
 * zero, one, or many sources;
 * source-specific roles;
 * source-specific transforms;
-* selected components within source assemblies;
+* selected components within source assemblies — **blocked on identity, and the order matters.** `design-tool diagnose` reports `bodies` as a *count* and nothing per body: no name, no bbox, no volume, no stable handle. So a declaration selecting "the third body" would resolve to whatever trimesh's `split` or OCC's solid enumeration happened to return that run, which is a reference that means different geometry depending on something nobody declared — the failure [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) exists to stop, moved from datums to bodies. Selection must therefore follow a slice that gives a body an identity a receipt can carry, not precede it. Measured at `pipeline/diagnose.py` (`"bodies": int(len(components))` for meshes, `"bodies": len(solids)` for B-reps);
 * source-specific preserved regions;
 * source-specific removable regions;
 * source-specific editable regions;
