@@ -541,24 +541,24 @@ def _preference(mandatory: dict[str, dict[str, Any]], yardstick: dict[str, Any],
     unfit = sorted(key for key, row in mandatory.items()
                    if row["verdict"] != MANDATORY_PASS)
     if unfit:
-        return {"admissible": False, "because": (
+        return {"admissible": False, "reason": NO_CURRENT_VERDICT, "because": (
             f"{', '.join(unfit)} did not pass its own mandatory checks, or has "
             "no current verdict. A formulation that uses less material or costs "
             "less to explore is not thereby preferable to one that passed: a "
             "preference criterion may not be weighed against a mandatory "
             "failure.")}
     if yardstick["verdict"] != COMPARABLE:
-        return {"admissible": False, "because": (
+        return {"admissible": False, "reason": RUBRICS_DISAGREE, "because": (
             f"{yardstick['verdict']}: {yardstick['note']} Until the rubrics "
             "agree, or a person decides the difference does not matter, the "
             "measured differences below are real and are not a basis for "
             "preferring one.")}
     if blocked:
-        return {"admissible": False, "because": (
+        return {"admissible": False, "reason": DECIDING_UNMEASURED, "because": (
             "the dimension that would decide between these formulations cannot "
             f"be measured by this build: {'; '.join(blocked)}. Every other axis "
             "may be equal and the comparison still settles nothing.")}
-    return {"admissible": True, "because": (
+    return {"admissible": True, "reason": None, "because": (
         "every formulation passed the same mandatory checks against the same "
         "expectations, so what remains is preference. These are measurements, "
         "not a ranking: no weight is applied and no order is implied.")}
@@ -574,6 +574,17 @@ def _preference(mandatory: dict[str, dict[str, Any]], yardstick: dict[str, Any],
 # reporting the axes it could reach as though they were the question.
 DECIDING = "DECIDING"
 CONTEXT = "CONTEXT"
+
+# Why preference is not admissible, as a code rather than as the sentence that
+# explains it. `_preference` has three refusing branches and they are three
+# different findings about a job; a caller that wants to know *which* -- the
+# replay recording does -- must not have to match on English. This is the same
+# move `not_compared`'s `dimension_id` is, for the same reason: the first
+# version of the recording froze the sentence, and a review showed a pure prose
+# improvement to it turning a golden BINDING-red with no defect behind it.
+NO_CURRENT_VERDICT = "NO_CURRENT_VERDICT"
+RUBRICS_DISAGREE = "RUBRICS_DISAGREE"
+DECIDING_UNMEASURED = "DECIDING_DIMENSION_UNMEASURED"
 
 
 def not_compared(project: P.Project,

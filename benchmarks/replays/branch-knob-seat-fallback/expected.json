@@ -51,20 +51,24 @@
       "source_mode"
     ],
     "preference_admissible": false,
+    "preference_reason": "NO_CURRENT_VERDICT",
     "ranking": null,
     "same_requirement_digest": true,
     "score": null
   },
   "dispositions": {
-    "as-drawn": {
-      "basis": "UNRESOLVED_EVIDENCE",
-      "disposition": "FALLBACK",
-      "superseded_by": ""
-    },
-    "plate-seated": {
-      "basis": "UNRESOLVED_EVIDENCE",
-      "disposition": "PREFERRED",
-      "superseded_by": ""
+    "active_alternative": "as-drawn",
+    "by_alternative": {
+      "as-drawn": {
+        "basis": "UNRESOLVED_EVIDENCE",
+        "disposition": "FALLBACK",
+        "superseded_by": ""
+      },
+      "plate-seated": {
+        "basis": "USER_SELECTION",
+        "disposition": "PREFERRED",
+        "superseded_by": ""
+      }
     }
   },
   "exit_codes": [
@@ -564,7 +568,16 @@
       }
     }
   },
-  "recorded_at": "0770a36139d5851e08b4753cf7d4459923890bef",
+  "observed_keys": [
+    "case_id",
+    "comparison",
+    "dispositions",
+    "exit_codes",
+    "formulations",
+    "reviews_answered",
+    "schema_version"
+  ],
+  "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
   "reviews_answered": [
     "verification",
     "verification",

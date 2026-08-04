@@ -615,6 +615,35 @@ def load(case_id: str) -> ReplayCase:
             "A disposition moves an alternative between lifecycle states, and "
             "an unbranched job has none -- the shared root is what they were "
             "branched from, not one of them.")
+    if case.dispositions and case.concludes != "BUILT":
+        raise ReplayError(
+            f"{case_id}: case.json declares dispositions and concludes "
+            f"{case.concludes!r}. `_apply_dispositions` takes no decision about "
+            "a job that did not finish, so these would be skipped on every play "
+            "for ever -- a recording that contradicts the case which produced "
+            "it, with nothing red to say so.")
+    known = {formulation.key for formulation in formulations}
+    for index, row in enumerate(case.dispositions):
+        if row.alternative_id not in known:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] names {row.alternative_id!r} "
+                f"and this case declares {sorted(known)}. Checked here rather "
+                "than left to the command, because the command's refusal is a "
+                "message about `project.json` two verbs later -- and on a play "
+                "where the decisions are skipped it never arrives at all.")
+        # The successor, by the same rule and for the same reason. The first
+        # version of this loop checked the id and not the successor -- the same
+        # omission it was written to fix, one field over, in the code fixing it.
+        if row.superseded_by and row.superseded_by not in known:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] says {row.alternative_id!r} "
+                f"was replaced by {row.superseded_by!r}, and this case declares "
+                f"{sorted(known)}. A successor nobody can find is what "
+                "`SUPERSEDED` exists not to assert.")
+        if row.superseded_by == row.alternative_id:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] says {row.alternative_id!r} "
+                "supersedes itself.")
     if case.concludes not in CONCLUDES:
         raise ReplayError(
             f"{case_id}: concludes {case.concludes!r} is not one of "
@@ -655,9 +684,27 @@ def _disposition(case_id: str, index: int, row: dict[str, Any]) -> Disposition:
             f"{disposition} and declares no basis. Every state but ACTIVE needs "
             "one -- a decision recorded without its reason is a decision nobody "
             "can revisit.")
+    successor = str(row.get("superseded_by") or "")
+    if disposition in pipeline_project.SUCCESSOR_REQUIRED and not successor:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] moves {alternative_id!r} to "
+            f"{disposition} and names no successor. "
+            f"{list(pipeline_project.SUCCESSOR_REQUIRED)} must say what replaced "
+            "them: SUPERSEDED without one asserts that something better exists "
+            "with no way to find it. Checked beside the basis rule above, which "
+            "was here on its own until a review asked why only one of the "
+            "product's successor rules was mirrored. Four of the five are "
+            "mirrored now -- this, the inverse below, and the two id checks in "
+            "`load`. The fifth, that a MERGED successor's `parents` record the "
+            "merge, is not: `case.json` gives a formulation a single `parent`, "
+            "so this harness cannot express a merge to check.")
+    if successor and disposition not in pipeline_project.SUCCESSOR_REQUIRED:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] names a successor and moves "
+            f"{alternative_id!r} to {disposition}, which is not one of "
+            f"{list(pipeline_project.SUCCESSOR_REQUIRED)}")
     return Disposition(alternative_id=alternative_id, disposition=disposition,
-                       basis=basis,
-                       superseded_by=str(row.get("superseded_by") or ""))
+                       basis=basis, superseded_by=successor)
 
 
 def _formulation(case_id: str, index: int, row: dict[str, Any]) -> Formulation:
@@ -1089,16 +1136,30 @@ def _apply_dispositions(case: ReplayCase, project_dir: Path,
     this harness does not issue and must not: it is a consequence the product
     owns, and a harness that issued it would be recording its own behaviour.
 
-    **Nothing is decided about a job that did not finish.** The adversarial
+    **Nothing is decided about a job that left no verdict.** The adversarial
     fixture plays this same case with a sibling's review answer offered to the
     fallback; the run stops and leaves no final status, which is the whole point
     of it. `design-tool branch --disposition` would nonetheless accept both
     commands there -- a formulation does not have to have concluded to be
     retained -- and the recording would then carry a preference formed over
     evidence that does not exist. So the declared decisions are taken only when
-    every declared formulation actually concluded. Skipped rather than refused,
-    because a play that stopped early is a legitimate thing for a fixture to
-    produce and this is not the failure it is demonstrating.
+    every declared formulation wrote a `final_status.json`. Skipped rather than
+    refused, because a play that stopped early is a legitimate thing for a
+    fixture to produce and this is not the failure it is demonstrating; `load`
+    refuses the combination that would make the skip permanent.
+
+    **What this check is, exactly, and what it is not.** It asks whether a run
+    concluded, not whether its conclusion still holds. A review of the commit
+    that added it pointed out that the docstring said "actually concluded" while
+    the code said "left a file behind" -- and that on this very job the retained
+    fallback is `STALE`, because the case revises its model after the run to
+    exercise derived status. Gating on `derived == stored` was the obvious
+    repair and is the wrong one: retaining a stale concept as the fallback is
+    exactly what a fallback is for, and forbidding it would delete the decision
+    this slice exists to record. What was actually wrong was the sentence. So
+    the check stays, it is described as what it does, and the staleness is
+    *recorded beside the decision* rather than left for a reader to discover --
+    see `_observe_dispositions` and the L1 assertion that names it.
     """
     if not case.dispositions:
         return []
@@ -1224,6 +1285,23 @@ def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
                                     or {}).get("same_requirement_digest"),
         "preference_admissible": (payload.get("preference")
                                   or {}).get("admissible"),
+        # The reason as a *code*. `_preference` has three refusing branches --
+        # a formulation with no current verdict, an unusable rubric, a DECIDING
+        # dimension nobody measured -- and they are different findings about the
+        # job. Freezing only `false` cannot tell them apart, and that cost was
+        # measured: ROADMAP, the case's own notes and an L1 docstring all
+        # attributed this job's inadmissible preference to the rubric branch,
+        # when what fires is the first one.
+        #
+        # The first repair froze `because`, the *sentence*. A review broke it
+        # immediately by improving that sentence's grammar with no behaviour
+        # change -- turning a golden BINDING-red with no defect behind it, which
+        # is the pressure that trains somebody to re-record. Exactly the
+        # regression the docstring above says this function avoids, four lines
+        # under the docstring saying it. `compare._preference` carries a stable
+        # `reason` code now and this freezes that, which is `dimension_id`'s
+        # move for `dimension`, one field over.
+        "preference_reason": (payload.get("preference") or {}).get("reason"),
         # Keyed on `dimension_id`, not on `dimension`. The first version of this
         # keyed on the English sentence, which a review demonstrated turns the
         # recording BINDING-red on a reworded explanation -- exactly the
@@ -1311,17 +1389,29 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
     }
     if not case.branched:
         payload.update(_observe_dir(run.project_dir))
+        payload["observed_keys"] = sorted(payload)
         return payload
     payload["formulations"] = {
         key: {**_observe_dir(directory), "derived": run.derived.get(key)}
         for key, directory in run.work_dirs.items()}
     payload["comparison"] = run.comparison
     payload["dispositions"] = _observe_dispositions(run.project_dir)
+    # Every key this function emits, frozen and compared exactly. `compare`
+    # walks a hand-maintained whitelist, so until this existed a new top-level
+    # key was simply not looked at: a review added
+    # `payload["smuggled_ranking"] = [...]` -- an ordered list of formulations,
+    # on every branched recording -- and the whole suite stayed green, 132
+    # passed. That is the same hole `_comparison_marks.payload_keys` closes one
+    # level down, and the argument transfers verbatim: a ranking must not be
+    # able to arrive under a name nobody thought to forbid. Last, so it
+    # describes the finished payload.
+    payload["observed_keys"] = sorted(payload)
     return payload
 
 
 def _observe_dispositions(project_dir: Path) -> dict[str, Any]:
-    """What each formulation's lifecycle state is when the play finishes.
+    """Where the job stands when the play finishes: what it is on, and what
+    was decided about each formulation.
 
     Read off `project.json` rather than off the journal, because the journal
     records *transitions* and this records the state a reader arriving now would
@@ -1334,12 +1424,23 @@ def _observe_dispositions(project_dir: Path) -> dict[str, Any]:
     disposition, which is the confusion `docs/defects.md` D26 is about.
     """
     payload = _read(project_dir, "project.json") or {}
-    return {str(row.get("alternative_id")): {
+    return {
+        # What `design-tool run` would pick up next. It is the field that
+        # decides what happens after the decision, so a block claiming to be
+        # "the state a reader arriving now would see" that omitted it would be
+        # false. On the recorded knob it ends on the *fallback*, because
+        # `_derive_all` leaves the project on the last formulation and FALLBACK
+        # is runnable so nothing moves it off -- which is worth a reader
+        # knowing, and was invisible until a review measured it.
+        "active_alternative": payload.get("active_alternative"),
+        "by_alternative": {
+            str(row.get("alternative_id")): {
                 "disposition": row.get("disposition"),
                 "basis": row.get("basis", ""),
                 "superseded_by": row.get("superseded_by", "")}
             for row in payload.get("alternatives") or ()
-            if row.get("alternative_id")}
+            if row.get("alternative_id")},
+    }
 
 
 def _screening_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1553,7 +1654,13 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
     """Every layer, each by its own rule. See the module docstring for the argument."""
     out: list[Difference] = []
 
-    for field in ("exit_codes", "reviews_answered"):
+    # `observed_keys` first, because it is the one field that says whether the
+    # rest of this function is still looking at everything there is. Everything
+    # below walks a named whitelist; this is what refuses a key that was never
+    # added to it. On both arms of `observe` -- the first version set it only on
+    # the branched one, which left three of the four recordings uncovered by the
+    # guard written to close exactly that kind of gap.
+    for field in ("observed_keys", "exit_codes", "reviews_answered"):
         _compare_exact(field, recorded.get(field), observed.get(field), out)
 
     if "formulations" in recorded or "formulations" in observed:

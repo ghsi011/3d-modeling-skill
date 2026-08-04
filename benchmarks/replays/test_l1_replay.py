@@ -762,7 +762,7 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
         the whole reason the fork exists: if the plate estimate is wrong, the
         sleeve as drawn is the part that ships.
         """
-        rows = self.observed["dispositions"]
+        rows = self.observed["dispositions"]["by_alternative"]
         self.assertEqual("PREFERRED", rows["plate-seated"]["disposition"])
         self.assertEqual("FALLBACK", rows["as-drawn"]["disposition"])
         self.assertNotIn(RP.ROOT_ALTERNATIVE, rows,
@@ -779,27 +779,82 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
     def test_the_decision_does_not_claim_the_support_the_comparison_refused(self) -> None:
         """The half of gate 4.5 that is about honesty rather than about typing.
 
-        The comparison run immediately before these two commands reports
-        `preference.admissible: false` -- the three formulations are measured
-        against different envelope expectations, so their PASSes are not
-        comparable, and the axis that would actually decide is whether the mouth
-        seats on a plate whose height is a photo estimate. A decision is still
-        taken, because a fallback exists precisely for the case where the
-        estimate is wrong. What it may not do is claim measured support that was
-        refused, and the basis is where that shows: `UNRESOLVED_EVIDENCE`, not
-        `STRONGER_CONCEPT`.
+        The comparison run immediately before these commands reports
+        `preference.admissible: false`, and the *reason* is asserted here rather
+        than the boolean alone. An earlier version of this test, of the case's
+        notes and of ROADMAP all said the reason was the rubric -- the three
+        formulations are measured against different envelope expectations, which
+        is true -- and all three were wrong about the mechanism: `_preference`
+        returns on its first branch and never reaches the rubric. Nor is it the
+        third branch: every `not_compared` row on this job is CONTEXT, so the
+        build makes no claim that a deciding axis is unmeasurable.
 
-        Nothing in the build enforces this agreement today; the recording is
-        what makes it visible. A basis that started claiming a stronger ground
-        than the comparison allows would move this test.
+        What actually fires is that `as-drawn` has no current verdict. Its model
+        was revised after the run that verified it, so its mandatory verdict
+        derives `UNKNOWN_STALE`, and a preference over a formulation that cannot
+        presently claim to have passed anything is not admissible.
+
+        A decision is still correct. What it may not do is claim measured
+        support that was refused, and the basis is where that shows --
+        `USER_SELECTION` for the preference, which says a person chose on no
+        measured ground, and not `STRONGER_CONCEPT`, which would say the
+        evidence favoured it. Nothing in the build enforces that agreement; the
+        recording is what makes it visible.
         """
-        self.assertFalse(self.observed["comparison"]["preference_admissible"])
-        self.assertEqual("INCOMPARABLE_EXPECTATIONS",
-                         self.observed["comparison"]["mandatory_verdict"])
-        for key in ("plate-seated", "as-drawn"):
-            with self.subTest(formulation=key):
-                self.assertEqual("UNRESOLVED_EVIDENCE",
-                                 self.observed["dispositions"][key]["basis"])
+        comparison = self.observed["comparison"]
+        self.assertFalse(comparison["preference_admissible"])
+        self.assertEqual("NO_CURRENT_VERDICT", comparison["preference_reason"],
+                         "the reason as a code, pinned. Freezing only `false` "
+                         "cannot tell three different findings about a job "
+                         "apart, and that is how three documents came to name "
+                         "the wrong one; freezing the *sentence* instead, which "
+                         "is what this asserted first, went red on a reworded "
+                         "explanation with no defect behind it")
+        self.assertEqual(
+            {"geometric-difference": "CONTEXT", "print-time": "CONTEXT",
+             "engineering-judgment": "CONTEXT"},
+            comparison["not_compared"],
+            "no DECIDING row: this job's inadmissible preference is not about "
+            "an axis nobody could measure")
+
+        rows = self.observed["dispositions"]["by_alternative"]
+        self.assertEqual("USER_SELECTION", rows["plate-seated"]["basis"])
+        self.assertEqual("UNRESOLVED_EVIDENCE", rows["as-drawn"]["basis"])
+
+    def test_the_retained_fallback_is_one_whose_verification_no_longer_binds(self) -> None:
+        """Recorded beside the decision, because it is a property of the decision.
+
+        The harness takes declared decisions only when every formulation wrote a
+        final status -- which `as-drawn` did. Its verdict is nonetheless `STALE`:
+        the model under it moved afterwards. Retaining a stale concept as the
+        fallback is right, and it is the reason the fallback exists, but a
+        recording that showed `FALLBACK` without showing that would let a reader
+        believe the part behind it is ready to ship. It would need re-verifying
+        first, and `STALE` is the pipeline saying so.
+        """
+        self.assertEqual("FALLBACK",
+                         self.observed["dispositions"]["by_alternative"]
+                         ["as-drawn"]["disposition"])
+        self.assertEqual("STALE",
+                         self.observed["formulations"]["as-drawn"]["derived"]
+                         ["derived_status"])
+        self.assertEqual("UNKNOWN_STALE",
+                         self.observed["comparison"]
+                         ["mandatory_per_formulation"]["as-drawn"]["verdict"])
+
+    def test_the_job_ends_parked_on_the_fallback_and_the_recording_says_so(self) -> None:
+        """Which formulation `design-tool run` would pick up next.
+
+        It is the fallback, not the preferred one: `_derive_all` leaves the
+        project on the last formulation it activated and `FALLBACK` is runnable,
+        so `--disposition` has no reason to move off it. Deterministic, fixed by
+        the order the case declares. Recorded because it decides what happens
+        next and was invisible until a review measured it -- not asserted to be
+        *right*. Whether preferring one formulation should also activate it is a
+        question for whichever slice touches lifecycle next.
+        """
+        self.assertEqual("as-drawn",
+                         self.observed["dispositions"]["active_alternative"])
 
     def test_the_decision_is_journalled_as_a_transition_not_only_as_a_state(self) -> None:
         """`project.json` says where the job stands; the journal says what happened.
@@ -817,9 +872,15 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
              ("as-drawn", "ACTIVE", "FALLBACK")],
             [(row["alternative"], row["was"], row["now"]) for row in events],
             "in the order they were taken, each naming what it moved from")
+        # Per alternative, not "one of these two". The loop already knows which
+        # row it is looking at, and a membership check would pass a journal that
+        # recorded the preference's basis against the fallback -- in a slice
+        # whose whole subject is making the basis mean something.
+        expected = {"plate-seated": "USER_SELECTION",
+                    "as-drawn": "UNRESOLVED_EVIDENCE"}
         for row in events:
             with self.subTest(alternative=row["alternative"]):
-                self.assertEqual("UNRESOLVED_EVIDENCE", row["basis"])
+                self.assertEqual(expected[row["alternative"]], row["basis"])
 
 
 class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
@@ -883,7 +944,7 @@ class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
                                   "superseded_by": ""},
                  "as-drawn": {"disposition": "ACTIVE", "basis": "",
                               "superseded_by": ""}},
-                observed["dispositions"],
+                observed["dispositions"]["by_alternative"],
                 "and nothing was decided: both are still in the state they were "
                 "branched into, with no basis. The case declares two decisions "
                 "and `design-tool branch --disposition` would have accepted "

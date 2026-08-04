@@ -455,20 +455,34 @@ The outcome records:
 * why an alternative was preferred, paused, or rejected;
 * whether the roadmap or architecture should change.
 
-**Where this stands as of Release 4 slice 3.** The last two clauses about
-alternatives were the outstanding ones — Release 3 shipped branching and nobody
-had used it to settle anything. They are met on
-`benchmarks/replays/branch-knob-seat-fallback`, a real vendored request: three
-formulations explored, one preferred and one retained as a fallback through the
-verb a user has, each carrying a basis from the closed set, both the decision
-and the state it left frozen in the recording.
+**Where this stands as of Release 4 slice 3, stated as two clauses because they
+are in different states.** Release 3 shipped branching and nobody had used it to
+settle anything; `benchmarks/replays/branch-knob-seat-fallback` now does, on a
+real vendored request — three formulations explored, one preferred and one
+retained as a fallback through the verb a user has, each carrying a basis from
+the closed set, with the decision, the state it left and the formulation the job
+ends parked on all frozen in the recording.
 
-Read the "why" clause carefully before treating it as closed, though. What is
-recorded is *a* reason — `UNRESOLVED_EVIDENCE` — and it is honest, but it is
-honest partly because the deciding axis could not be measured. This gate is met
-on a job whose comparison declined to make preference admissible. A release that
-wants to say alternatives were preferred *on their merits* still owes a job
-where the merits were measurable.
+* **"which alternatives were explored" — met.** Three formulations, each with
+  its own proposal, contract, receipts and recorded reason for existing.
+* **"why an alternative was preferred, paused, or rejected" — met in the weak
+  sense only, and it should not be read as more.** The reason recorded for the
+  preference is `USER_SELECTION`: a person chose, on no measured ground. That is
+  a true answer to "why", and it is the honest one for this job, because the
+  comparison declined to make preference admissible at all — one of the two
+  formulations has no current verdict. What the gate is *reaching for* is a
+  preference somebody can defend from evidence, and this job cannot supply one.
+
+A release that wants to say alternatives were preferred **on their merits**
+still owes a job where the merits were measurable: every formulation current,
+the rubric shared, and the deciding axis one this build has an instrument for.
+Until then the mechanism is proven and the claim it carries is small.
+
+And the clause names three verbs. Only *preferred* has been exercised on a real
+job: `PAUSED`, `REJECTED`, `SUPERSEDED` and `MERGED` appear in no committed
+case, so two of the seven lifecycle states carry all the evidence there is.
+`SUPERSEDED` and `MERGED` are refused at load by the replay harness unless they
+name a successor that exists, which is a guard and not an exercise.
 
 ### 4.6 Documentation gate
 
@@ -1377,21 +1391,41 @@ between, and until now nothing in this repository had done it. The recorded knob
 now ends the way a job ends: three formulations built and verified, `status`
 deriving what each is still entitled to claim, `compare` saying what that
 establishes, and then two `design-tool branch --disposition` calls —
-`plate-seated` preferred, `as-drawn` retained as `FALLBACK`, both on
-`UNRESOLVED_EVIDENCE`.
+`plate-seated` preferred on `USER_SELECTION`, `as-drawn` retained as `FALLBACK`
+on `UNRESOLVED_EVIDENCE`.
 
 **The basis is the slice.** Typing two commands is not the work; choosing a
-basis that does not overstate is. The comparison run immediately before them
-reports `preference.admissible: false` — the three formulations are measured
-against different envelope expectations, so their `PASS`es are not comparable
-(D25), and the axis that would actually decide is whether the mouth seats on a
-plate whose height is a photo estimate nobody has measured. A decision is still
-correct there: a fallback exists precisely for the case where the estimate is
-wrong. What may not happen is the decision claiming measured support the
-comparison refused to give, and `STRONGER_CONCEPT` would have claimed exactly
-that. The recording pins the agreement between the two — inadmissible
-preference, `UNRESOLVED_EVIDENCE` basis — so a basis that started overstating
-moves a frozen test.
+basis that does not overstate is.
+
+**And the first version of this paragraph got the mechanism wrong, which is the
+more useful thing to record.** It said preference was inadmissible because the
+three formulations are measured against different envelope expectations (D25),
+and because the axis that would actually decide — whether the mouth seats on a
+plate whose height is a photo estimate — cannot be measured. Both sentences
+describe real properties of this job, and neither is why `compare` refuses.
+`_preference` has three branches and returns on the first: **`as-drawn` has no
+current verdict**, because its model is revised after the run that verified it,
+so its mandatory verdict derives `UNKNOWN_STALE`. The rubric branch is never
+reached. The third branch is gated on a `DECIDING` row, and this job has none —
+all three `not_compared` rows are `CONTEXT`, so the build makes no claim that a
+deciding axis is unmeasurable. Preference is inadmissible because one of the two
+formulations being decided between cannot presently claim to have passed
+anything.
+
+The same wrong mechanism was asserted in the case's own notes and in an L1 test
+docstring: three documents, one unchecked claim, and no recording that could
+contradict any of them — because `_comparison_marks` froze `admissible: false`
+and not the reason. It freezes `preference_because` now, so the three branches
+are distinguishable and a change of reason moves a test.
+
+**The two bases differ, because the two decisions do.** `plate-seated` is
+preferred on `USER_SELECTION` — a person chose, on no measured ground, which is
+exactly what happened. `as-drawn` is retained on `UNRESOLVED_EVIDENCE` — the
+plate estimate may be wrong, and that is what a fallback is for. One basis on
+both rows, which is what shipped first, answers "why keep a fallback" and
+answers "why *this* one" not at all. What may not happen either way is a
+decision claiming support the comparison refused to give, and
+`STRONGER_CONCEPT` would have claimed exactly that.
 
 Nothing in the build *enforces* that agreement. A refusal — `--basis
 STRONGER_CONCEPT` rejected while `comparison.json` says preference is
@@ -1405,24 +1439,72 @@ unfinished alternative as a fallback is a legitimate thing to want. But the
 adversarial fixture plays this same case with a sibling's review answer offered
 to the fallback, and there the run stops and leaves no final status — so the
 harness declines to take the declared decisions at all when any declared
-formulation did not conclude. A recorded preference formed over a job that
-stopped is evidence of a decision nobody could have made. The recording says
-`ACTIVE` with no basis, which is "nobody decided" rather than silence.
+formulation left none. A recorded preference formed over a job that stopped is
+evidence of a decision nobody could have made. The recording says `ACTIVE` with
+no basis, which is "nobody decided" rather than silence.
 
-**Evidence.** Re-record: 0 removed, 0 changed on the three unbranched cases; on
-the knob, six additions and two changes, both direct consequences of running two
-more commands — two exit codes, and `lifecycle.json` appearing in the root's
-receipts because the decisions journalled themselves. Three mutations of the
-recorded decisions, three caught: the preference switched to the other
-formulation, the basis upgraded to `STRONGER_CONCEPT`, the fallback quietly
-`REJECTED` instead of retained. Two mutations of the guards, two caught: the
-unfinished-job rule removed (red at L0 *and* in the L1 adversarial fixture), and
-the basis dropped from the command line. Case schema 2 → 3, because a case
-declaring decisions and played by a reader that did not know the key would look
-exactly like a case that declared none.
+That check asks whether a run *concluded*, not whether its conclusion still
+holds, and the distinction matters here: the retained fallback is `STALE` — its
+model was revised after the run that verified it, which is what this case
+exercises. Gating on `derived == stored` was the obvious repair and is the wrong
+one, because retaining a stale concept as the fallback is what a fallback is
+for. What was wrong was a docstring saying "concluded" where the code said "left
+a file behind". The staleness is now recorded beside the decision and asserted
+at L1, rather than left for a reader to discover.
 
-L0 955 passed, 557 subtests, 13 failed (the Windows-assumption set). L1 64
-passed, 49 subtests. Heavy 357 passed, 183 subtests.
+**Two things the review found that the harness had not enforced**, both now
+refused at load: a case that declares decisions and `concludes: REFUSED`, where
+the decisions would be skipped on every play for ever while the recording
+contradicted the case; and a decision naming a formulation the case never
+declared, which used to load cleanly and die two verbs later with a message
+about `project.json`. `SUCCESSOR_REQUIRED` is mirrored beside `BASIS_REQUIRED`
+too — only one of the product's two requirements had been.
+
+**Evidence.** Re-record: 0 removed and 0 changed on the three unbranched cases;
+on the knob, additions plus the restructure named above, and no value moved that
+was not meant to. (`recorded_at` moves on every recording by construction; it is
+provenance and nothing compares it.) Mutations of the recorded decisions, all
+caught: the preference switched to the other formulation, the basis upgraded to
+`STRONGER_CONCEPT`, decisions that stopped being taken, the formulation the job
+ends parked on. Mutations of the guards, all caught: the unfinished-job rule
+removed (red at L0 *and* in the L1 adversarial fixture), and the basis dropped
+from the command line.
+
+The `dispositions` comparison itself had **no** mutation test when it shipped —
+deleting it left L0 and L1 entirely green. It now has four, and deleting the
+guard goes red in under a second.
+
+**That closed a key and not the class, and a second review said so by
+exploiting it**: adding a new uncompared top-level key to `observe` — an ordered
+list of formulations, on every branched recording — left the whole suite green,
+132 passed. `compare` walks a hand-maintained whitelist, so a key nobody adds to
+it is a key nobody looks at. `observed_keys` freezes `sorted(payload)` and is
+compared exactly, which is `payload_keys` one level up and the same argument: a
+ranking must not be able to arrive under a name nobody thought to forbid. The
+first version of that fix set it on the branched arm only, leaving three of the
+four recordings uncovered by the guard written to close exactly that gap; it is
+on both arms now.
+
+**And the fix for the wrong-mechanism finding was itself wrong, in the way the
+file warns about four lines above it.** Freezing `preference.because` froze a
+230-character English sentence as a BINDING value — so improving that sentence's
+grammar, with no behaviour change, turned the golden red with no defect behind
+it. That is the pressure that trains somebody to re-record, and it is the
+regression `_comparison_marks`' own docstring says it avoids, sitting directly
+under the comment explaining that `not_compared` had already been fixed for it.
+`compare._preference` carries a stable `reason` code now —
+`NO_CURRENT_VERDICT` / `RUBRICS_DISAGREE` / `DECIDING_DIMENSION_UNMEASURED` —
+and the recording freezes that. Measured after: the reworded sentence passes,
+and a reason that changes branch still goes red.
+
+Case schema 2 → 3, because a case declaring decisions and played by a reader
+that did not know the key would look exactly like a case that declared none.
+
+L0 970 passed, 557 subtests, 13 failed (the Windows-assumption set). L1 66
+passed, 47 subtests. Heavy 357 passed, 183 subtests. Measured after the work,
+not before it — the first version of this slice published the pre-slice L0 count
+as its own evidence, which a review caught by subtracting the tests the slice
+adds.
 
 ## Release 5 — Multi-source edit and combination model
 

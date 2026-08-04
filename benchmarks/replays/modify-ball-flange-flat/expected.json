@@ -107,6 +107,23 @@
     "unit_scale": "mm",
     "watertight": true
   },
+  "observed_keys": [
+    "acceptance",
+    "allowed_claim",
+    "case_id",
+    "checks",
+    "coverage",
+    "exit_codes",
+    "material",
+    "measured",
+    "outcome",
+    "reasons",
+    "receipts",
+    "reviews_answered",
+    "schema_version",
+    "screening_detail",
+    "tolerances"
+  ],
   "outcome": {
     "backend": "authored",
     "commission_verdict": "PASS",
@@ -147,7 +164,7 @@
     "safety_verification_report.json",
     "verification_report.json"
   ],
-  "recorded_at": "0770a36139d5851e08b4753cf7d4459923890bef",
+  "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
   "reviews_answered": [
     "safety",
     "verification"

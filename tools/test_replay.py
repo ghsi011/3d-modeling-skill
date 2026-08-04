@@ -515,7 +515,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         self.assertEqual(
             {"snap-fit": {"disposition": "PREFERRED",
                           "basis": "USER_SELECTION", "superseded_by": ""}},
-            RP.observe(case, run)["dispositions"])
+            RP.observe(case, run)["dispositions"]["by_alternative"])
 
     def test_nothing_is_decided_about_a_job_that_did_not_finish(self) -> None:
         """The fail-closed half, and it is not what the product would do.
@@ -539,7 +539,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         self.assertEqual(
             {"snap-fit": {"disposition": "ACTIVE", "basis": "",
                           "superseded_by": ""}},
-            RP.observe(case, run)["dispositions"],
+            RP.observe(case, run)["dispositions"]["by_alternative"],
             "still in the state it was branched into, with no basis: the "
             "recording says nobody decided rather than saying nothing")
 
@@ -597,6 +597,129 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         with self.assertRaises(RP.ReplayError) as caught:
             self._seal()
         self.assertIn("no formulations", str(caught.exception))
+
+    def test_a_case_that_does_not_build_may_not_declare_a_decision(self) -> None:
+        """Otherwise the skip is permanent and silent.
+
+        `_apply_dispositions` takes nothing when a formulation left no final
+        status, and a case declaring `concludes: REFUSED` never leaves one. The
+        decisions would then be skipped on every play for ever, and the
+        recording would contradict the case that produced it with nothing red to
+        say so. Found by a review, which constructed exactly this case and
+        watched it load.
+        """
+        _case(self.root, concludes="REFUSED",
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "PREFERRED",
+                             "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("REFUSED", str(caught.exception))
+
+    def test_a_decision_about_a_formulation_the_case_never_declared_is_refused(self) -> None:
+        """Checked against the declared set, not only against the id's shape.
+
+        `_disposition` validated that the id *could* be a directory name and
+        nothing more, so a typo loaded cleanly and died two verbs later with a
+        message about `project.json` -- the failure that function's own docstring
+        says it exists to prevent. On a play where the decisions are skipped it
+        never failed at all.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snapfit",
+                             "disposition": "PREFERRED",
+                             "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("snapfit", str(caught.exception))
+        self.assertIn("snap-fit", str(caught.exception),
+                      "and it names what there is")
+
+    def test_a_superseded_formulation_must_say_what_replaced_it(self) -> None:
+        """The product's second requirement, mirrored beside its first.
+
+        `BASIS_REQUIRED` was checked here and `SUCCESSOR_REQUIRED` was not, so a
+        `SUPERSEDED` row with no successor loaded and failed at the command
+        line. `SUPERSEDED` without one asserts that something better exists with
+        no way to find it.
+        """
+        def declare(**over):
+            _case(self.root,
+                  formulations=[{"alternative_id": "."},
+                                {"alternative_id": "snap-fit", "parent": ".",
+                                 "reason": "no fasteners"},
+                                {"alternative_id": "welded", "parent": ".",
+                                 "reason": "the successor"}],
+                  dispositions=[{"alternative_id": "snap-fit",
+                                 "disposition": "SUPERSEDED",
+                                 "basis": "STRONGER_CONCEPT", **over}])
+
+        declare()
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("successor", str(caught.exception))
+
+        self.raw.cleanup()
+        self.raw = tempfile.TemporaryDirectory()
+        self.addCleanup(self.raw.cleanup)
+        self.root = Path(self.raw.name)
+        RP.CASES_ROOT = self.root
+        declare(superseded_by="welded")
+        self.assertEqual(
+            ("welded",),
+            tuple(row.superseded_by for row in self._seal().dispositions),
+            "and a successor that is named loads, so the check is not a ban")
+
+    def test_a_successor_the_case_never_declared_is_refused(self) -> None:
+        """The same rule as the alternative id, one field over.
+
+        The first version of the id check looked at `alternative_id` and not at
+        `superseded_by` -- the omission it was written to fix, repeated in the
+        code fixing it, and found by a review probing the id rule's siblings.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "SUPERSEDED",
+                             "basis": "STRONGER_CONCEPT",
+                             "superseded_by": "ghost"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("ghost", str(caught.exception))
+
+    def test_a_formulation_may_not_supersede_itself(self) -> None:
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "SUPERSEDED",
+                             "basis": "STRONGER_CONCEPT",
+                             "superseded_by": "snap-fit"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("supersedes itself", str(caught.exception))
+
+    def test_a_successor_on_a_state_that_takes_none_is_refused(self) -> None:
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "FALLBACK",
+                             "basis": "UNRESOLVED_EVIDENCE",
+                             "superseded_by": "welded"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("successor", str(caught.exception))
 
     def test_a_comparison_that_fails_stops_the_play_rather_than_recording_it(self) -> None:
         """It dispatches nothing and builds nothing, so it has no way to be busy.
@@ -878,6 +1001,79 @@ class TheComparatorLayersTest(unittest.TestCase):
         far = {**recorded, "measured": {"seated": 420.0}}
         self.assertEqual([], RP.binding(RP.compare(recorded, near)))
         self.assertTrue(RP.binding(RP.compare(recorded, far)))
+
+    # The branched arm of `compare`. `BASE` above has no `formulations` key, so
+    # nothing else in this class reaches it -- which is how the `dispositions`
+    # guard came to be the one binding comparison in the whole harness with no
+    # mutation test behind it. A review deleted the call and measured the
+    # result: L0 identical, L1 identical, 121 passed either way. Deleting the
+    # sibling `comparison` line goes red at L0 in under a second, so the shape
+    # was already known and had been applied one level down and not one up.
+    BRANCHED = {
+        "schema_version": RP.EXPECTED_SCHEMA, "case_id": "x",
+        "exit_codes": [0], "reviews_answered": [],
+        "formulations": {},
+        "comparison": {"ranking": None, "score": None},
+        "dispositions": {
+            "active_alternative": "seated",
+            "by_alternative": {
+                "seated": {"disposition": "PREFERRED",
+                           "basis": "USER_SELECTION", "superseded_by": ""},
+                "as-drawn": {"disposition": "FALLBACK",
+                             "basis": "UNRESOLVED_EVIDENCE",
+                             "superseded_by": ""}}},
+    }
+
+    def _branched_diff(self, dispositions):
+        return RP.binding(RP.compare(
+            self.BRANCHED, {**self.BRANCHED, "dispositions": dispositions}))
+
+    def test_a_decision_that_moved_is_binding(self) -> None:
+        """The preference switched to the formulation nobody chose."""
+        rows = self.BRANCHED["dispositions"]["by_alternative"]
+        moved = {**self.BRANCHED["dispositions"], "by_alternative": {
+            "seated": {**rows["seated"], "disposition": "FALLBACK"},
+            "as-drawn": {**rows["as-drawn"], "disposition": "PREFERRED"}}}
+        found = self._branched_diff(moved)
+        self.assertTrue(found)
+        self.assertTrue(all("dispositions" in row.where for row in found), found)
+
+    def test_a_basis_that_started_overstating_is_binding(self) -> None:
+        """`USER_SELECTION` -> `STRONGER_CONCEPT` is the claim this repo refuses.
+
+        Nothing in the product forbids it while a comparison says preference is
+        inadmissible, so the recording is the only thing that would notice.
+        """
+        rows = self.BRANCHED["dispositions"]["by_alternative"]
+        louder = {**self.BRANCHED["dispositions"], "by_alternative": {
+            **rows, "seated": {**rows["seated"], "basis": "STRONGER_CONCEPT"}}}
+        found = self._branched_diff(louder)
+        self.assertTrue(found)
+        self.assertTrue(any("basis" in row.where for row in found), found)
+
+    def test_decisions_that_stopped_being_taken_are_binding(self) -> None:
+        """The regression the skip rule could otherwise hide.
+
+        A formulation that quietly stops concluding makes `_apply_dispositions`
+        skip, and every alternative goes back to `ACTIVE`. Without this the
+        recording would have to rely on another test noticing the missing final
+        status.
+        """
+        undecided = {"active_alternative": "seated", "by_alternative": {
+            key: {"disposition": "ACTIVE", "basis": "", "superseded_by": ""}
+            for key in self.BRANCHED["dispositions"]["by_alternative"]}}
+        self.assertTrue(self._branched_diff(undecided))
+
+    def test_the_formulation_the_job_ends_on_is_binding(self) -> None:
+        """It decides what `design-tool run` picks up next."""
+        moved = {**self.BRANCHED["dispositions"], "active_alternative": "as-drawn"}
+        found = self._branched_diff(moved)
+        self.assertTrue(any("active_alternative" in row.where for row in found),
+                        found)
+
+    def test_an_undecided_job_compares_clean(self) -> None:
+        """The guard must not fire on a job where nothing was decided."""
+        self.assertEqual([], RP.compare(self.BRANCHED, dict(self.BRANCHED)))
 
     def test_a_plan_digest_inside_a_measured_value_is_never_compared(self) -> None:
         """It moves with a plan-version bump, which is not a regression.
