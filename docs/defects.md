@@ -299,6 +299,39 @@ say which frame they measured and refuse to issue `CLEAR` for the other one. A
 weaker method may not issue a stronger claim, and "the lowest point of the
 authored mesh" is a weaker claim than "the part does not go below the bed".
 
+**`screening._bed_screen` is fixed. Three contract checks are not, and they
+outrank it.** A screen escalates; a check reaches the commissioning verdict. All
+three read `ctx.bounds[0][2]` in the model frame:
+
+* `commission.py` `seated` — "Part sits on the bed", bed hard-coded to `0.0`,
+  naming no frame, and it PASSes. On one run of the D15 case — a contract
+  declaring a 180° flip about X — `commission` returns PASS while `screening`
+  returns ANOMALY with "the part reaches 14.00 mm below the bed in the printer
+  frame". The receipt carries two contradictory answers and the stronger one is
+  wrong.
+* `commission.py` `_bed_contact` — measures bed-contact area at the part's own
+  lowest plane, feeding the `bed_contact` check. Under a declared rotation a
+  different face is on the bed.
+* `commission.py` `overhang` — calls `metrics.overhang_area` with no
+  `transform=`, though `designer_toolkit/metrics.py` documents that parameter
+  for exactly this, and `cli.py` copies `downward_normal_z_max` and `bed_z_mm`
+  out of the plan support rule while dropping its `model_to_printer_matrix`.
+  Measured on a cone (r=20, h=5, 180° flip): **0.0 mm² authored, 1294.4 mm² in
+  the declared frame** — a PASS against a plan ceiling, about a frame the job
+  did not declare.
+
+`AGENTS.md`'s second clause is live on this: *"stop dependent work until a
+regression test proves the repair."* The claim path is the same one.
+
+**One correction to the paragraph above.** "It is never applied to geometry"
+was scoped here to *anywhere in the pipeline*, and that qualifier matters: it
+**is** applied to geometry three times outside `pipeline/` —
+`designer_toolkit/orient.py` (`placed.apply_transform`), `designer_toolkit/`'s
+own `_check_seated`, which takes exact transformed bounds against the declared
+`bed_z_mm`, and `team_preflight.py`. An archived receipt records it live. That
+is not pedantry: **the correct implementation already exists twice**, and the
+fix for the three checks above is to reach for it rather than write a third.
+
 ## D21 — a lane cap that only downgrades a passing verdict
 
 **Where.** `pipeline/status.py`, the `lane_status` interaction.

@@ -434,7 +434,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1124 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1139 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -1526,6 +1526,24 @@ The scope is checked against what the job declares, and against everything the e
 
 **Evidence.** 37 L0 fixtures, none of which builds geometry. 37 mutations of the protections were attempted and 37 were killed, including the `EXPERIMENTAL_UNAVAILABLE` cap the paragraph above rests on. One mutation survived the first sweep — `is_assumption` carried a `not self.derived_from` clause no test could distinguish from its absence, because a `CHOSEN` datum naming a revision is already refused elsewhere — and the redundant clause was deleted rather than given a fixture, on the grounds that a second copy of a rule is a second authority over one question. The gate is 1066 passing at this slice, up from 1014, against the 13 pre-existing Linux platform failures which are unmoved: HEAD was run in a separate worktree in the same session and fails the identical 13. L0-heavy is 357 passed and 9 skipped in 680 s, which is where `test_the_shipped_goldens_are_untouched` proves the five pinned certified contracts did not move for the new contract key — the absent-when-empty rule holding, measured rather than argued. L1 replay is 66 passed and 47 subtests in 55 s, unchanged.
 
+**Delivered slice: D15 closed — the bed screen answered about a frame the job never declared.** Filed as "orientation is declared, validated, frozen, and read by nothing", the third instance of a field the schema takes seriously and no code consumes. Re-measuring made it something else: `model_to_printer_matrix` occurs in exactly four places, three shape checks and a selftest constant, and is applied to geometry nowhere — while `screening._bed_screen` decided whether the part reached below the bed from the lowest Z of the mesh *as authored*, with a signature of `(ctx)` that could not receive the contract even in principle. Measured before the fixture was written: a part authored at z 0..20, declared printed rotated to z −20..0, returned `bed-plane: CLEAR`.
+
+That is not an unused field. It is a detector issuing a clean verdict about a frame the job did not declare it was working in, which `AGENTS.md` requires to fail closed immediately rather than wait for the capability that would make the claim true.
+
+So the fix is a claim about the claim. `_bed_screen(ctx, contract)` transforms all eight corners of the model-frame box — a rotation does not keep the lowest corner lowest, so putting `bounds[0]` through the matrix would answer about a corner rather than a part — takes the minimum Z, and compares it against the declared `bed_z_mm`, which was ignored the same way. Every reason string names the frame it measured in. A matrix that cannot be applied is an anomaly, because falling back to the model frame is the defect with an extra step. The bound is conservative by construction: a transformed box bounds the transformed mesh, so it can read lower than the part goes and never higher, which turns an unlucky rotation into a look-again rather than a clean verdict.
+
+15 L0 fixtures; 11 mutations attempted and 11 killed. Two survived the first sweep and one of them found a fail-open **in the fix itself**: `NaN` is a `float`, so a NaN `bed_z_mm` passed the type check, and `NaN > 0.05` is `False` — straight through to `CLEAR`. A type check standing in for a validity check, which is structurally the same error as the defect being closed, and it is not shipping only because the sweep forced a case nobody had thought of. The other was that four "unusable matrix" cases contained no well-shaped 4×4 with a bad *entry*, which is the one case a shape check alone misses.
+
+**An independent review returned UNSAFE TO SHIP, and the sharper finding is that the fix opened a false-clean-verdict path of its own.** The eight-corner bound is conservative for an *affine* transform only. Under a projective matrix `w` is affine in the coordinates and can vanish inside the box while all eight corners sit far from zero, so the corner minimum reads **higher** than the part goes: measured, a corner bound of +0.5 mm against a true minimum near −49999 mm, returning `CLEAR` while naming the printer frame. That matrix passes `contract.preflight`, `cli._validate_orientation` and `project.validate`, all three of which check 4×4-of-finite-numbers and no more.
+
+The fix was not a fourth shape check. `team_preflight.is_finite_rigid` already exists and is strictly stronger — finite, last row exactly `[0,0,0,1]`, orthonormal rotation, determinant +1 — so reusing it closes the hole and resolves the proportionality objection at the same time: what had been written here was the weakest of four authorities over one question, and it was the one deciding the verdict. The `weights` block it needed became dead code and went.
+
+**What this does not close, and the first version of this entry claimed it did.** Three checks in `commission.py` read `ctx.bounds[0][2]` in the model frame — `seated`, `bed_contact` and `overhang` — and all three are *contract checks* that reach the commissioning verdict rather than screens that only escalate. On the very case this slice's fixture tests, `commission` returns PASS while `screening` returns ANOMALY: one receipt, two contradictory answers, the stronger one wrong. `overhang` measured 0.0 mm² authored against 1294.4 mm² in the declared frame. They are recorded in `docs/defects.md` under D15 and `AGENTS.md`'s *"stop dependent work until a regression test proves the repair"* is live on that claim path. Bridging and strength direction are orientation-dependent too and nothing measures them at all.
+
+`screening`'s own siblings check out: `_profile_screen` compares model-frame Z against marks that are model-frame on both sides, so it is self-consistent and issues no verdict about an undeclared frame, and `_volume_screen` and `_component_screen` are invariant under any rigid transform.
+
+**One citation corrected.** "It is never applied to geometry" dropped `docs/defects.md`'s *"anywhere in the pipeline"* qualifier, and the unqualified sentence is false: it is applied three times outside `pipeline/`, including a `_check_seated` that already takes exact transformed bounds against the declared bed height. That matters beyond pedantry — the correct implementation exists twice already, and the fix for the three checks above is to reach for it rather than write a third.
+
 **Delivered slice: a body has a handle.** The commit before this recorded why "selected components within source assemblies" could not be built: `diagnose` reported `bodies` as a count and nothing per body, so a declaration selecting "the third body" would resolve to whatever `split` returned that run. Identity first, selection after.
 
 `mesh_io.body_identities` returns one row per disconnected body — a `body_sha256` over the body's own geometry in canonical form, plus `bbox_mm`, `volume_mm3` and `faces` so a person choosing which body to keep does not have to re-open the file. Rows are ordered by handle rather than by split order, because two reads of one file must present the bodies in one order or "the first" is not a thing anybody can say. `_diagnose_mesh` reports them beside the count it already had — and only that one: `_diagnose_step` and `_diagnose_3mf` still report a bare count, so the two formats that actually carry assembly structure are as blocked as they were. This unblocks the mesh path, and says so rather than implying the blocker is cleared.
@@ -2493,7 +2511,7 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 1124 tests in about 57 s on this
+Run on every commit: `uv run pytest`, 1139 tests in about 55 s on this
 machine. The count moves with every slice; what is enforced is
 `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240.
 
