@@ -240,6 +240,16 @@ class _FakeSurface:
             print(json.dumps({"final_status": "NOT_RUN", "stored_status": None,
                               "stale": {}}))
             return 0
+        if argv[0] == "compare":
+            # The smallest report `_comparison_marks` can read. Everything it
+            # does not name is absent on purpose: a fake that filled in the
+            # whole payload would stop the marks function from having to cope
+            # with a report that is missing a block.
+            print(json.dumps({"compared": [RP.ROOT_ALTERNATIVE, "snap-fit"],
+                              "built_nothing": True,
+                              "ranking": None, "score": None,
+                              "axes": {"mandatory": {"verdict": "COMPARABLE"}}}))
+            return 0
         if argv[0] == "route":
             return 0
         work = RP.work_dir(self.project_dir)
@@ -380,6 +390,74 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
             ["branch", str(project), "--from", ".", "--id", "snap-fit",
              "--reason", "no fasteners"],
             [argv for argv in surface.calls if argv[0] == "branch"][0])
+
+    def test_the_comparison_is_issued_once_and_after_everything_else(self) -> None:
+        """A comparison of a job half-finished is a verdict about late evidence.
+
+        Position, not merely presence: `compare` reads the receipts on disk, so
+        issuing it between formulations would report `NOT_RUN` for every sibling
+        that had not had its turn yet and freeze that as the job's answer. Once,
+        because it is over the whole job rather than over a formulation.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners", "reviews": ["safety"]}],
+              judgements={"snap-fit/safety": {"decision": "PASS",
+                                              "summary": "fine"}})
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        surface = _FakeSurface(project, [(0, None),
+                                         (RP.NEEDS_ACTION, self.REVIEW),
+                                         (0, None)])
+        run = RP.play(case, project, invoke=surface)
+
+        verbs = [argv[0] for argv in surface.calls]
+        self.assertEqual(1, verbs.count("compare"))
+        self.assertEqual("compare", verbs[-1])
+        self.assertEqual("COMPARABLE", run.comparison["mandatory_verdict"])
+        self.assertIsNone(run.comparison["ranking"])
+
+    def test_an_unbranched_case_issues_no_comparison_at_all(self) -> None:
+        """`compare` refuses a job with one formulation, and rightly.
+
+        So a harness that issued it anyway would record an error where the
+        branched cases record a report, and the two cases recorded before
+        formulations existed would have had to move to say nothing.
+        """
+        case, project, run = self._play([(0, None)])
+        self.assertEqual({}, run.comparison)
+        self.assertNotIn("comparison", RP.observe(case, run))
+
+    def test_a_comparison_that_fails_stops_the_play_rather_than_recording_it(self) -> None:
+        """It dispatches nothing and builds nothing, so it has no way to be busy.
+
+        A non-zero code is the verb broken. Recording it would freeze the
+        breakage as the expectation, which is the one thing a recording must
+        never do.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}])
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+
+        class _Broken(_FakeSurface):
+            def __call__(self, argv):
+                if argv[0] == "compare":
+                    self.calls.append(list(argv))
+                    return 2
+                return super().__call__(argv)
+
+        with self.assertRaises(RP.ReplayError) as caught:
+            RP.play(case, project,
+                    invoke=_Broken(project, [(0, None), (0, None)]))
+        self.assertIn("compare", str(caught.exception))
 
     def test_a_branch_that_will_not_be_created_stops_the_play(self) -> None:
         """A `branch` that fails leaves the project on the wrong formulation.

@@ -71,6 +71,15 @@
     3,
     3
   ],
+  "material": {
+    "bbox_mm": {
+      "x": 20.3,
+      "y": 26.3,
+      "z": 28.6107
+    },
+    "volume_mm3": 4044.628,
+    "volume_result": "NOT_APPLICABLE"
+  },
   "measured": {
     "bodies": 1,
     "envelope": {
@@ -139,7 +148,7 @@
     "safety_verification_report.json",
     "verification_report.json"
   ],
-  "recorded_at": "46753251857a1cc210207b7da93836ae77d1e33c",
+  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
   "reviews_answered": [
     "safety",
     "verification"

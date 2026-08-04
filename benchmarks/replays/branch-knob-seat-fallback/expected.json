@@ -1,5 +1,44 @@
 {
   "case_id": "branch-knob-seat-fallback",
+  "comparison": {
+    "built_nothing": true,
+    "compared": [
+      ".",
+      "as-drawn",
+      "plate-seated"
+    ],
+    "identical_designs": [],
+    "mandatory_per_formulation": {
+      ".": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "PASS"
+      },
+      "as-drawn": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "UNKNOWN_STALE"
+      },
+      "plate-seated": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "PASS"
+      }
+    },
+    "mandatory_verdict": "INCOMPARABLE_EXPECTATIONS",
+    "not_compared": {
+      "geometric difference between formulations": "CONTEXT",
+      "print time and support toolpaths": "CONTEXT",
+      "strength, serviceability, adjustability, irreversibility": "CONTEXT"
+    },
+    "preference_admissible": false,
+    "ranking": null,
+    "same_requirement_digest": true,
+    "score": null
+  },
   "exit_codes": [
     0,
     3,
@@ -91,6 +130,15 @@
         "stale": [],
         "stored_status": "VERIFIED"
       },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "volume_mm3": 47526.263,
+        "volume_result": "NOT_APPLICABLE"
+      },
       "measured": {
         "bodies": 1,
         "envelope": {
@@ -131,6 +179,7 @@
         "candidate.stl",
         "candidate_declaration.json",
         "commission_report.json",
+        "comparison.json",
         "design_proposal.json",
         "execution_plan.json",
         "final_status.json",
@@ -246,6 +295,15 @@
           "verification_report.json"
         ],
         "stored_status": "VERIFIED"
+      },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "volume_mm3": 47526.263,
+        "volume_result": "NOT_APPLICABLE"
       },
       "measured": {
         "bodies": 1,
@@ -396,6 +454,15 @@
         "stale": [],
         "stored_status": "VERIFIED"
       },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 52.0
+        },
+        "volume_mm3": 49792.874,
+        "volume_result": "NOT_APPLICABLE"
+      },
       "measured": {
         "bodies": 1,
         "envelope": {
@@ -469,7 +536,7 @@
       }
     }
   },
-  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
   "reviews_answered": [
     "verification",
     "verification",

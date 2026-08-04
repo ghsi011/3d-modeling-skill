@@ -288,6 +288,45 @@ def reference_envelope(contract: Contract) -> dict[str, Any]:
     return {"z": sorted(set(round(v, 3) for v in marks))}
 
 
+class ScreeningShapeUnexpected(ValueError):
+    """A commission report's screening block is not the shape `run` writes.
+
+    Loud rather than absent, and the reason is what happened without it.
+    `compare._measured` read `screening.detectors` as a mapping keyed by
+    detector name; `run` returns a *list*, and every L0 fixture that exercised
+    the comparison had been written to agree with the reader instead of with
+    this module. Twenty-two fixtures agreed with each other, the code passed,
+    and the first time the verb met a receipt an actual run had written it
+    raised `AttributeError` inside a dict comprehension.
+
+    A reader that shrugged and returned nothing would have been worse: the
+    comparison's material axis would have reported "no volume measured" on every
+    job forever, which is a sentence nobody would think to doubt.
+    """
+
+
+def detector(report: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """One detector's row out of a commission report, or `None` if it did not run.
+
+    The single reader. `run` below is the single writer, and the two live in one
+    file so that a change to the shape has to pass this function on the way out.
+    """
+    screening = report.get("screening") or {}
+    rows = screening.get("detectors")
+    if rows is None:
+        return None
+    if not isinstance(rows, list):
+        raise ScreeningShapeUnexpected(
+            f"screening.detectors is {type(rows).__name__} and `screening.run` "
+            f"writes a list of rows, each carrying its own 'detector' key. A "
+            f"caller reading it as a {type(rows).__name__} is reading a shape "
+            "no run has ever produced.")
+    for row in rows:
+        if isinstance(row, dict) and row.get("detector") == name:
+            return row
+    return None
+
+
 def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     envelope = reference_envelope(contract)
     independent = _independent(contract)

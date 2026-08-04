@@ -92,6 +92,7 @@ from typing import Any
 from . import bindings as B
 from . import project as P
 from . import schemas as S
+from . import screening as SCR
 from . import status as STATUS
 
 COMPARISON_SCHEMA = 1
@@ -468,10 +469,18 @@ def _measured(reading: dict[str, Any]) -> dict[str, Any]:
     the measurement anyway. So the number is a measurement with no calibrated
     gate behind it, and it carries the detector's own result rather than being
     presented as a check that passed.
+
+    Read through `screening.detector` rather than by subscripting the receipt.
+    This function used to do the latter, treating `screening.detectors` as a
+    mapping keyed by detector name -- which no run has ever written. Every
+    fixture that exercised this line had been authored to match the reader, so
+    the error survived twenty-two of them and surfaced the first time the verb
+    was pointed at a job the pipeline had actually run. See `docs/defects.md`
+    D27.
     """
     report = reading["receipts"]["commission_report.json"] or {}
     manifest = reading["receipts"]["artifact_manifest.json"] or {}
-    volume = ((report.get("screening") or {}).get("detectors") or {}).get("volume") or {}
+    volume = SCR.detector(report, "volume") or {}
     return {
         "bbox_mm": manifest.get("bbox_mm"),
         "volume_mm3": volume.get("measured_mm3"),
@@ -485,13 +494,23 @@ def _measured(reading: dict[str, Any]) -> dict[str, Any]:
 
 
 def _identical_designs(readings: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """Formulations built from the same source, grouped and named.
+    """Formulations whose source is identical *right now*, grouped and named.
 
-    On the recorded knob the root and `as-drawn` are one design under two ids:
-    `case.json` gives both the same `model.py` digest. Their every measured
+    Where two formulations are one design under two ids, their every measured
     value agrees, and without this block a reader takes that agreement for two
     independent designs reaching the same answer. It is one design counted
     twice, and it corroborates nothing.
+
+    **This does not fire on the recorded knob, and this docstring used to claim
+    it did.** `docs/defects.md` D28: the root and `as-drawn` were built from a
+    byte-identical `model.py` and their receipts prove it -- both record
+    `artifact_hashes.source = 1e9b9ea…` and the same candidate digest -- but
+    `as-drawn`'s model was revised after its run concluded, and the grouping key
+    is `bindings.current`, which reads the digest off disk *now*. So the two
+    columns whose numbers are identical are the two this block stays silent
+    about. Grouping on the digest the receipts were produced from is the fix,
+    and it is not made here: it changes what a frozen recording says, so it
+    gets its own slice and its own fixture.
     """
     groups: dict[str, list[str]] = {}
     for key, reading in readings.items():

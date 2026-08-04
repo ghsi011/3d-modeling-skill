@@ -42,6 +42,7 @@ from . import cli
 from . import compare as CMP
 from . import project as P
 from . import schemas as S
+from . import screening as SCR
 
 UTC = "1970-01-01T00:00:00Z"
 
@@ -185,11 +186,16 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
         "coverage": {"covered": declared, "declared": declared,
                      "fraction": 1.0, "minimum": 1.0},
         "checks": checks,
+        # A LIST, which is what `screening.run` writes. It was a mapping keyed
+        # by detector name here until `docs/defects.md` D27: `compare._measured`
+        # read it that way, this fixture was authored to match the reader rather
+        # than the writer, and twenty-two fixtures then agreed with each other
+        # and with nothing the pipeline produces.
         "screening": {"overall": "CLEAR", "calibrated": False,
-                      "detectors": {"volume": {"detector": "volume",
-                                               "result": "NOT_APPLICABLE",
-                                               "measured_mm3": volume_mm3,
-                                               "expected_mm3": None}}}}
+                      "detectors": [{"detector": "volume",
+                                     "result": "NOT_APPLICABLE",
+                                     "measured_mm3": volume_mm3,
+                                     "expected_mm3": None}]}}
     (work_dir / "commission_report.json").write_text(S.canonical_json(report),
                                                      encoding="utf-8")
 
@@ -756,6 +762,65 @@ class TheRequirementDigestIsABindingNotASatisfactionTest(unittest.TestCase):
             self.assertIsNone(payload["shared"]["requirement_digest"])
             self.assertEqual("req-old",
                              payload["shared"]["per_formulation"]["before"])
+
+
+# ---------------------------------------------------------------------------
+# D27: the fixtures agreed with the reader instead of with the writer
+# ---------------------------------------------------------------------------
+
+class TheMaterialAxisReadsTheShapeARunWritesTest(unittest.TestCase):
+    """`screening.detectors` is a list, and this module read it as a mapping.
+
+    Nothing caught it. Every fixture in this file was authored against the
+    reader, so twenty-two of them agreed with each other and with no receipt any
+    run has produced; `compare` raised `AttributeError` the first time it was
+    pointed at the recorded knob. The L1 replay is the protection that would
+    have caught it and now does, because it runs the verb against receipts a
+    real pipeline wrote. These are the L0 half.
+    """
+
+    def _report(self, detectors) -> dict:
+        return {"screening": {"overall": "CLEAR", "detectors": detectors}}
+
+    def test_the_measurement_is_found_in_the_shape_screening_writes(self) -> None:
+        row = SCR.detector(
+            self._report([{"detector": "profile-z", "result": "NOT_APPLICABLE"},
+                          {"detector": "volume", "result": "NOT_APPLICABLE",
+                           "measured_mm3": 47526.263}]),
+            "volume")
+        self.assertEqual(47526.263, row["measured_mm3"])
+
+    def test_the_shape_the_fixtures_invented_is_refused_and_not_shrugged_off(self) -> None:
+        """Loud, because quiet is what made this survive.
+
+        A reader returning `None` here would have reported "no volume measured"
+        on every job forever, and that is a sentence nobody thinks to doubt.
+        """
+        with self.assertRaises(SCR.ScreeningShapeUnexpected) as caught:
+            SCR.detector(
+                self._report({"volume": {"detector": "volume",
+                                         "measured_mm3": 47526.263}}),
+                "volume")
+        self.assertIn("list of rows", str(caught.exception))
+
+    def test_a_detector_that_did_not_run_is_absent_not_an_error(self) -> None:
+        report = self._report([{"detector": "volume", "result": "CLEAR"}])
+        self.assertIsNone(SCR.detector(report, "components"))
+        self.assertIsNone(SCR.detector({}, "volume"))
+
+    def test_the_comparison_carries_the_volume_off_a_real_shaped_receipt(self) -> None:
+        """End to end through `report`, which is where the crash was."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "a", "b")
+            formulation(directory / P.ALTERNATIVES_DIR / "a", volume_mm3=47526.263)
+            formulation(directory / P.ALTERNATIVES_DIR / "b", volume_mm3=49792.874)
+            formulation(directory, volume_mm3=47526.263)
+
+            _, payload = _run(directory)
+            measured = payload["axes"]["measured"]["per_formulation"]
+            self.assertEqual(47526.263, measured["a"]["volume_mm3"])
+            self.assertEqual(49792.874, measured["b"]["volume_mm3"])
+            self.assertEqual("NOT_APPLICABLE", measured["a"]["volume_detector"])
 
 
 if __name__ == "__main__":

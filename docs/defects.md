@@ -585,3 +585,93 @@ remains is only that nobody has done it.
 **Fixture that must fail first.** A branched project where
 `len(status_report["alternatives"]) + 1 == len(status_report["cost"]["by_alternative"])`,
 asserted to become equal.
+
+## D27 — the comparison's material axis read a shape no run has ever written
+
+**Where.** [`pipeline/compare.py`](../skills/3d-modeling/scripts/pipeline/compare.py):474,
+before this commit:
+
+```python
+volume = ((report.get("screening") or {}).get("detectors") or {}).get("volume") or {}
+```
+
+**What is wrong.** `screening.run` returns `detectors` as a **list** of rows,
+each carrying its own `detector` key (`screening.py:294`). Reading it as a
+mapping keyed by detector name raises `AttributeError` on a real receipt, so
+`compare`'s `volume_mm3` and `volume_detector` — the whole material axis
+`ROADMAP.md`'s Release 4 asks for — could never be produced.
+
+**Why nothing caught it.** Every fixture that exercised the line was authored
+against the reader rather than the writer. `test_compare.py:189` built
+`"detectors": {"volume": {...}}`, and twenty-two L0 fixtures then agreed with
+each other and with nothing the pipeline produces. The suite was green, the
+verb was "shipped", and the defect was one command away the whole time: the
+first `design-tool compare` pointed at the recorded knob raised inside a dict
+comprehension.
+
+**Evidence.** Found by running the verb on
+`benchmarks/replays/branch-knob-seat-fallback` while wiring the compare step
+into the L1 recording — the work `ROADMAP.md` listed as owed. Reproduced by
+reverting the reader with the fixtures left correct: 21 of 25 tests in
+`test_compare.py` fail, which is the measure of how much the fixtures were
+holding up on their own.
+
+**Status: FIXED.** `screening.detector(report, name)` is now the single reader
+and lives beside `screening.run`, the single writer. It raises
+`ScreeningShapeUnexpected` on a non-list rather than returning `None`, because a
+reader that shrugged would have reported "no volume measured" on every job
+forever, and that is a sentence nobody thinks to doubt. `tools/replay.py`'s
+`_observe_dir` goes through the same function, so the harness reads a receipt
+the way the product does.
+
+**What this is really evidence for.** A fixture written from a reader tests the
+reader against itself. The protection that catches this class is a tier that
+runs the verb against receipts a real pipeline wrote, which is what the compare
+step in the L1 recording now is.
+
+## D28 — two columns of one design are printed side by side and not named as one
+
+**Where.** [`pipeline/compare.py`](../skills/3d-modeling/scripts/pipeline/compare.py),
+`_identical_designs`: it groups formulations by
+`reading["bindings"]["source"]`, and `bindings.current` (`bindings.py:119`)
+reads that digest off disk **now**.
+
+**What is wrong.** On `benchmarks/replays/branch-knob-seat-fallback` the shared
+root and `as-drawn` are one design under two ids. Their receipts say so:
+
+```
+.          artifact_hashes = {source: 1e9b9ea…, contract: 4b52016…, stl: 50463d3…}
+as-drawn   artifact_hashes = {source: 1e9b9ea…, contract: 4b52016…, stl: 50463d3…}
+```
+
+and every measured value the comparison prints for them is identical —
+`volume_mm3` 47526.263 against 47526.263, envelope 38×38×50 against 38×38×50.
+`identical_designs` is nonetheless `[]`, because `as-drawn`'s `model.py` was
+revised after its run concluded and is `d3da8e4…` on disk. The block that exists
+to stop a reader taking that agreement for two designs independently reaching
+one answer is silent on the only case in the repository that exercises it.
+
+**Evidence.** Measured, not inferred: the digests above are read off the two
+`final_status.json` files a replay of the case writes, and
+`benchmarks/replays/test_l1_replay.py::BranchKnobSeatFallbackTest::test_two_columns_of_one_design_are_not_reported_as_such_and_that_is_a_defect`
+asserts all three facts together — same source digest, identical material, empty
+`identical_designs`.
+
+**Not the same thing as the mitigation.** `as-drawn` is reported `STALE` and its
+mandatory verdict weakens to `UNKNOWN_STALE`, so a careful reader has *a* reason
+to discount its column. That is the claim "this formulation's evidence no longer
+binds", which is a different claim from "these two columns are one design", and
+only the second one stops the agreement being read as corroboration.
+
+**Scope.** The trigger is precisely an input revised after the run. Two
+byte-identical siblings that nobody touched afterwards still group correctly.
+
+**What would close it.** Group on the source digest the receipts were *produced
+from* — `final_status.json`'s `artifact_hashes.source` — rather than the digest
+on disk, since the columns being compared are the receipts and not the working
+tree. Not done here: it changes what a frozen recording says, so it gets its own
+slice.
+
+**Fixture that must fail first.** The L1 assertion above, inverted: it currently
+pins `identical_designs == []` and says in its own message that the fix turns it
+into `[[".", "as-drawn"]]`.

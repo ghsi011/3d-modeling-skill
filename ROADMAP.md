@@ -968,11 +968,15 @@ written by one agent in one pass and never reviewed. Its citations were checked
 one by one. Most held. Three did not survive as written, and they are recorded
 because a reader of that document needs them:
 
-* its §4(C) material-use table — 47,526.263 mm³ against 49,792.874, the single
-  most load-bearing number in the document and the whole of its §5 argument —
-  **exists nowhere in the repository.** `expected.json` records the volume
-  detector's *result* and discards its measurement, so the figure was measured
-  ad hoc and cannot be reproduced from anything committed;
+* ~~its §4(C) material-use table — 47,526.263 mm³ against 49,792.874, the
+  single most load-bearing number in the document and the whole of its §5
+  argument — **exists nowhere in the repository.**~~ **Retired by slice 2, and
+  the numbers were right.** The finding was accurate when written: `expected.json`
+  recorded the volume detector's *result* and discarded its measurement, so
+  nothing committed could reproduce the figure. Slice 2 freezes it, and a replay
+  now produces 47526.263 against 49792.874 — the document's numbers to the
+  digit. What was wrong was the repository, not the citation. The other two
+  findings below stand;
 * its claim that `cli.py:1754` "builds a table over *every* formulation" is
   false in a way that matters: the loop is over `project.alternatives` and
   `branch` never writes a row for the shared root, so `status` reports two
@@ -1021,19 +1025,68 @@ gates on a platform where the confined build boundary cannot run. 15 mutations
 of the protections were attempted and 15 were caught. The gate is 894 passing at
 `5c6ef9e` + this slice, up from 872, against a ceiling of 1050.
 
-**Still owed by slice 1, and blocked rather than skipped.** Both need a Windows
-host, for the reason in §2:
+**Still owed by slice 1, and blocked rather than skipped.** Both needed a
+Windows host, for the reason in §2. `pipeline/confine_posix.py` removed that
+constraint; the first is done, the second is not:
 
-* the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
-  and its output frozen in `expected.json`. Note what the recording must gain
-  first: `_observe_dir` records the volume detector's *result* and throws away
-  its `measured_mm3`, so the one measurement that discriminates between the two
-  designs is frozen nowhere. Freeze `volume_mm3` and `bbox_mm` in the same
-  change, or the material figure stays unverifiable prose;
+* ~~the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
+  and its output frozen in `expected.json`~~ — **shipped as slice 2, below**;
 * the two `design-tool branch --disposition` calls that prefer one formulation
   and retain the other as `FALLBACK`. That is what gate 4.5 says Release 3 still
   owes — nobody has used derived status to decide about a real part — and it is
   one command each, on a case that already exists.
+
+### Slice 2 — the comparison meets a receipt a run actually wrote
+
+`design-tool compare` now runs inside the L1 recording of
+`branch-knob-seat-fallback`, after every formulation has settled, and what it
+claims is frozen. So is the material measurement it is computed from.
+
+**It did not survive first contact, and that is the finding.** The verb shipped
+in slice 1 with twenty-two green L0 fixtures. Pointed at the recorded knob for
+the first time it raised `AttributeError`: `screening.detectors` is a *list* and
+`compare._measured` read it as a mapping keyed by detector name, so the material
+axis could never have produced a number on any real job. Every fixture that
+exercised the line had been authored against the reader rather than the writer,
+so twenty-two of them agreed with each other and with nothing the pipeline
+produces (`docs/defects.md` **D27**). Reverting the reader with the fixtures left
+correct fails 21 of 25 — the measure of how much the fixtures were holding up
+alone. The fix is one reader, `screening.detector`, beside the one writer, and
+it raises rather than returning `None`, because a reader that shrugged would have
+reported "no volume measured" forever.
+
+The general lesson, and the reason this slice was worth its cost: **a fixture
+written from a reader tests the reader against itself.** The tier that catches
+this class is one that runs the verb against receipts a real pipeline wrote.
+
+**What the recording now protects.** `material` — `volume_mm3`, `bbox_mm` and
+the volume detector's own result — per formulation, compared inside a band
+because they come off a tessellator. And the comparison's *claims*: the
+mandatory verdict, both verdicts per formulation, the compared set,
+`identical_designs`, `same_requirement_digest`, `preference.admissible`, every
+`not_compared` dimension with its standing, and `ranking` and `score` pinned as
+`null` — ADR 0005's two forbidden fields, moved out of a docstring and into a
+frozen recording, so acquiring a value is a red test rather than a code review
+somebody may or may not do. The report's prose is recorded by no key: a reworded
+explanation is not a regression.
+
+**A second defect, found by the same first contact and not fixed here.**
+`identical_designs` is empty on the knob, where the root and `as-drawn` are one
+design under two ids — their receipts carry the same `artifact_hashes.source`
+and every measured value agrees. It groups on the digest *on disk now*, and the
+fallback's model was revised after its run. `docs/defects.md` **D28**; the L1
+suite pins the silence so that fixing it turns a test red. Not fixed in this
+slice because it changes what a frozen recording says.
+
+**Evidence.** Re-recording all four cases moved nothing that was already
+recorded: 0 removed, 0 changed across the three unbranched cases, and on the
+branched one 38 additions and a single change — the root formulation's receipt
+list gained `comparison.json`, which the verb writes at the project root, which
+is the root formulation's work directory. It joins `project.json` and `brief.md`,
+already listed there on the same footing. Five mutations of the new golden were
+attempted — the frozen volume nudged 1%, the envelope fork erased, a ranking
+introduced, the rubric verdict softened to `COMPARABLE`, the shared root dropped
+from the compared set — and five were caught. L1: 61 passed, 43 subtests, ~51 s.
 
 `docs/defects.md` D26 is deliberately **not** fixed here for the same reason:
 `status --json` is read by the replay harness, and changing a golden-feeding

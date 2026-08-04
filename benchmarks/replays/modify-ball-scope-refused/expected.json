@@ -14,6 +14,11 @@
     2,
     2
   ],
+  "material": {
+    "bbox_mm": null,
+    "volume_mm3": null,
+    "volume_result": null
+  },
   "measured": {},
   "outcome": {
     "backend": null,
@@ -34,7 +39,7 @@
     "next_action.json",
     "project.json"
   ],
-  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
   "reviews_answered": [],
   "schema_version": 1,
   "screening_detail": {

@@ -635,6 +635,111 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
             "and this is why: the model it was issued against is not the model "
             "on disk")
 
+    # ----------------------------------------------------------------
+    # `design-tool compare`, on the job Release 4 says to exercise it on
+    # ----------------------------------------------------------------
+
+    def test_the_material_difference_between_the_two_designs_is_a_measurement(self) -> None:
+        """The figure that was prose until this recording froze it.
+
+        `docs/release-4-scope.md` rests its whole material argument on two
+        volumes. When that document was judged, neither number could be
+        reproduced from anything committed: `_observe_dir` recorded the volume
+        detector's *result* and threw its measurement away, so the one quantity
+        that discriminates the seated knob from the as-drawn one was frozen
+        nowhere. It is frozen now, and the figures hold -- which retires the
+        finding against that citation, and leaves the other two standing.
+
+        Asserted as a relation and a band, not as a literal: the numbers live in
+        `expected.json`, which is where a recording keeps its literals.
+        """
+        seated = self.observed["formulations"]["plate-seated"]["material"]
+        root = self.observed["formulations"][RP.ROOT_ALTERNATIVE]["material"]
+
+        self.assertGreater(seated["volume_mm3"], root["volume_mm3"],
+                           "the formulation that spends the whole envelope on "
+                           "the body is the one that uses more material")
+        self.assertAlmostEqual(2.0, seated["bbox_mm"]["z"] - root["bbox_mm"]["z"],
+                               places=3,
+                               msg="52 mm against 50 mm: the fork is the "
+                                   "base-plate estimate the request records as "
+                                   "+/-2 mm, and this is that 2 mm")
+        self.assertEqual("NOT_APPLICABLE", root["volume_result"],
+                         "and it is a measurement with no calibrated gate "
+                         "behind it -- no independently specified expected "
+                         "volume exists, so the screen refuses to grade the "
+                         "solid against a number its own author wrote")
+
+    def test_the_comparison_settles_the_rubric_question_and_nothing_else(self) -> None:
+        """What `compare` establishes on a job whose answer a score would destroy.
+
+        Every mandatory check passes on all three. A ranking would therefore
+        report a tie, and the tie would be false: the three are measured against
+        *different envelope expectations*, because on the authored lane a
+        formulation's own proposal sets the `expected_bbox_mm` its always-present
+        checks are graded against (`docs/defects.md` D25). So the first thing the
+        comparison says is that those verdicts are not comparable -- and the
+        thing that actually decides, whether the mouth seats, is a measurement
+        nobody has taken.
+        """
+        marks = self.observed["comparison"]
+        self.assertEqual("INCOMPARABLE_EXPECTATIONS", marks["mandatory_verdict"])
+        self.assertEqual({"PASS", "UNKNOWN_STALE"},
+                         {row["verdict"]
+                          for row in marks["mandatory_per_formulation"].values()},
+                         "no formulation failed a mandatory check; the fallback's "
+                         "verdict is merely no longer supported")
+        self.assertTrue(marks["same_requirement_digest"],
+                        "none of them weakened a requirement a sibling was held "
+                        "to -- which is a binding, not a satisfaction")
+        self.assertFalse(marks["preference_admissible"])
+
+    def test_a_comparison_that_started_ranking_would_fail_this_recording(self) -> None:
+        """ADR 0005's two forbidden fields, pinned where a change has to pass.
+
+        A guarantee that lives only in a docstring is a convention. `ranking` and
+        `score` are recorded as `null`, so acquiring a value is a binding
+        difference in a frozen recording rather than a code review somebody may
+        or may not do.
+        """
+        marks = self.observed["comparison"]
+        self.assertIsNone(marks["ranking"])
+        self.assertIsNone(marks["score"])
+        self.assertTrue(marks["built_nothing"])
+        self.assertEqual([".", "as-drawn", "plate-seated"], marks["compared"],
+                         "all three, including the shared root -- which "
+                         "`status` drops, and which is `docs/defects.md` D26")
+
+    def test_two_columns_of_one_design_are_not_reported_as_such_and_that_is_a_defect(self) -> None:
+        """`docs/defects.md` D28, pinned rather than described.
+
+        The root and the fallback were built from a byte-identical `model.py`,
+        their receipts prove it, and every measured value they carry agrees.
+        `identical_designs` exists to stop a reader taking that agreement for two
+        designs independently reaching one answer -- and it is empty, because it
+        groups on the source digest *on disk now* and the fallback's model was
+        revised after its run.
+
+        This test asserts the defect, so **fixing D28 turns it red**. That is
+        the intent: the fix belongs in a slice with its own fixture, and until
+        then the silence should be something the suite states rather than
+        something a reader has to notice.
+        """
+        root = self._read(RP.ROOT_ALTERNATIVE, "final_status.json")
+        fallback = self._read("as-drawn", "final_status.json")
+        self.assertEqual(root["artifact_hashes"]["source"],
+                         fallback["artifact_hashes"]["source"],
+                         "one design: the receipts were issued against the same "
+                         "model")
+        self.assertEqual(
+            self.observed["formulations"][RP.ROOT_ALTERNATIVE]["material"],
+            self.observed["formulations"]["as-drawn"]["material"],
+            "and every number the comparison prints for them agrees")
+        self.assertEqual([], self.observed["comparison"]["identical_designs"],
+                         "and the block that would say so is silent. When D28 "
+                         "is fixed this becomes [['.', 'as-drawn']] and this "
+                         "assertion is the one to update")
+
 
 class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
     """The false pass, tried for real, on the pair that makes it reachable.

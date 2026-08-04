@@ -712,6 +712,10 @@ class Play:
     # Formulation key -> what `design-tool status` derives for it at the end of
     # the play. Empty unless the case declared formulations; see `observe`.
     derived: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # What `design-tool compare` said about the whole job once every formulation
+    # had settled. Empty unless the case declared formulations -- a comparison
+    # needs two, and `compare` refuses a job with one.
+    comparison: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def work_dir(project_dir: Path) -> Path:
@@ -830,10 +834,11 @@ def play(case: ReplayCase, project_dir: Path,
             f"harness wrote {sorted(written)}. An answer nobody recorded reached "
             "the run.")
     derived = _derive_all(case, project_dir, step, invoke_surface, transcript)
+    comparison = _compare_all(case, project_dir, invoke_surface, transcript)
     return Play(project_dir=project_dir, exit_codes=exit_codes,
                 reviews_answered=answered, responses_written=written,
                 transcript=transcript.getvalue(), work_dirs=work_dirs,
-                derived=derived)
+                derived=derived, comparison=comparison)
 
 
 def _select(case: ReplayCase, project_dir: Path, formulation: Formulation,
@@ -987,6 +992,93 @@ def _derive_all(case: ReplayCase, project_dir: Path,
     return out
 
 
+def _compare_all(case: ReplayCase, project_dir: Path,
+                 invoke_surface: Callable[[list[str]], int],
+                 transcript: io.StringIO) -> dict[str, Any]:
+    """`design-tool compare`, over the whole job, once every formulation is done.
+
+    Last, and deliberately so. A comparison is what you do *after* the work, on
+    the receipts the work left; running it between formulations would compare a
+    job against itself half-finished and record a verdict about evidence that
+    was merely late.
+
+    Only for a branched case, for a stronger reason than `_derive_all`'s: the
+    verb refuses a job with fewer than two formulations, so an unbranched case
+    would record an error where the branched ones record a report.
+
+    What is kept is the report's *shape* -- the verdicts, the counts, the ids,
+    the standing of every dimension nobody could compare. Not the prose, and not
+    `issued_against`, which carries a receipt digest per formulation and would
+    turn this recording into a second copy of the artifact hashes that
+    `outcome` already binds. See `_compare_block` for which half is binding.
+    """
+    if not case.branched:
+        return {}
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured), \
+            contextlib.redirect_stderr(transcript):
+        code = invoke_surface(["compare", str(project_dir), "--json"])
+    transcript.write(captured.getvalue())
+    if code != 0:
+        raise ReplayError(
+            f"{case.case_id}: `design-tool compare` exited {code}. A comparison "
+            "is deterministic and free -- it dispatches nothing and builds "
+            "nothing -- so a non-zero code here is the verb failing, not a job "
+            "needing something.")
+    try:
+        payload = json.loads(captured.getvalue())
+    except json.JSONDecodeError as exc:
+        raise ReplayError(
+            f"{case.case_id}: `design-tool compare --json` printed no JSON "
+            f"report: {exc}") from exc
+    return _comparison_marks(payload)
+
+
+def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
+    """The claims a comparison makes, separated from the sentences it prints.
+
+    Every value here is a verdict, an id or a count. The report's prose --
+    `not_ranked`, `what_that_means`, each `not_compared` row's reason -- is
+    recorded by no key, because `docs/defects.md` and this harness agree that a
+    reworded explanation is not a regression, and pinning it makes a recording
+    that goes red on an improved sentence.
+
+    `ranking` and `score` are pinned as `None` on purpose. They are the two
+    fields ADR 0005 says must never acquire a value, and a recording that
+    watched everything except them would be silent about the one change that
+    would matter most.
+    """
+    axes = payload.get("axes") or {}
+    mandatory = axes.get("mandatory") or {}
+    return {
+        "compared": payload.get("compared"),
+        "built_nothing": payload.get("built_nothing"),
+        "ranking": payload.get("ranking"),
+        "score": payload.get("score"),
+        "mandatory_verdict": mandatory.get("verdict"),
+        # Both verdicts, because the difference between them is the whole of
+        # what `as-drawn` demonstrates: `stored_verdict` is what the receipt
+        # says and `verdict` is what it is still entitled to say now that the
+        # model under it moved. A recording that kept only one would be blind to
+        # a staleness weakening that stopped happening.
+        "mandatory_per_formulation": {
+            key: {"verdict": row.get("verdict"),
+                  "stored_verdict": row.get("stored_verdict"),
+                  "failed": row.get("failed"),
+                  "did_not_run": row.get("did_not_run")}
+            for key, row in sorted((mandatory.get("per_formulation")
+                                    or {}).items())},
+        "identical_designs": [sorted(row.get("members") or ())
+                              for row in payload.get("identical_designs") or ()],
+        "same_requirement_digest": (payload.get("shared")
+                                    or {}).get("same_requirement_digest"),
+        "preference_admissible": (payload.get("preference")
+                                  or {}).get("admissible"),
+        "not_compared": {row.get("dimension"): row.get("standing")
+                         for row in payload.get("not_compared") or ()},
+    }
+
+
 def _status_report(project_dir: Path,
                    invoke_surface: Callable[[list[str]], int],
                    transcript: io.StringIO) -> dict[str, Any]:
@@ -1068,7 +1160,20 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
     payload["formulations"] = {
         key: {**_observe_dir(directory), "derived": run.derived.get(key)}
         for key, directory in run.work_dirs.items()}
+    payload["comparison"] = run.comparison
     return payload
+
+
+def _volume_row(report: dict[str, Any]) -> dict[str, Any] | None:
+    """The volume detector's row, through the pipeline's own reader.
+
+    Late import for the reason `command_surface` gives. The point of going
+    through `screening.detector` rather than subscripting is that the harness
+    then reads the receipt the same way the product does -- which is exactly the
+    agreement `docs/defects.md` D27 turned out not to have.
+    """
+    from pipeline import screening
+    return screening.detector(report, "volume")
 
 
 def _observe_dir(directory: Path) -> dict[str, Any]:
@@ -1094,6 +1199,22 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
         and path.name not in NOT_A_RECEIPT)
 
     return {
+        # The two numbers `compare`'s material axis is computed from, and the
+        # only reason they are a block of their own: `screening_detail` below is
+        # compared exactly, and these are floats off a tessellator. Frozen here
+        # because ROADMAP.md's Release 4 said the material figure stays
+        # unverifiable prose until they are -- `_observe_dir` recorded the volume
+        # detector's *result* and discarded its measurement, so the one number
+        # that discriminates the seated knob from the as-drawn one was frozen
+        # nowhere. Read through `screening.detector`: this recording is the
+        # protection that caught `docs/defects.md` D27, and reading the receipt
+        # by subscript here would have reproduced the defect in the harness.
+        "material": {
+            "volume_mm3": (_volume_row(report) or {}).get("measured_mm3"),
+            "volume_result": (_volume_row(report) or {}).get("result"),
+            "bbox_mm": (_read(directory, "artifact_manifest.json")
+                        or {}).get("bbox_mm"),
+        },
         "outcome": {
             "final_status": final.get("final_status"),
             "commission_verdict": final.get("commission_verdict"),
@@ -1248,6 +1369,12 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
                                   sorted(rows), sorted(seen)))
         for key in sorted(set(rows) & set(seen)):
             _compare_block(f"formulations.{key}.", rows[key], seen[key], out)
+        # Exact, every field: `_comparison_marks` has already dropped the prose,
+        # so what is left is verdicts, ids and counts, and none of those has a
+        # band. A comparison that started ranking is the single change this
+        # recording exists to refuse.
+        _compare_exact("comparison", recorded.get("comparison"),
+                       observed.get("comparison"), out)
     else:
         _compare_block("", recorded, observed, out)
     return out
@@ -1283,6 +1410,14 @@ def _compare_block(prefix: str, recorded: dict[str, Any],
     for check_id in sorted(set(recorded_measured) & set(observed_measured)):
         _compare_value(f"{prefix}measured.{check_id}", recorded_measured[check_id],
                        observed_measured[check_id], tolerances.get(check_id), out)
+
+    # Banded, not exact: a volume and a bounding box come off a tessellator, and
+    # a recording that pinned their last digit would go red on a different
+    # OCC build without anything about the part having changed. The band is
+    # `_band_for`'s default -- no check declares a tolerance for these, because
+    # they are not checks.
+    _compare_value(f"{prefix}material", recorded.get("material"),
+                   observed.get("material"), None, out)
 
     for field in ("reasons", "allowed_claim"):
         _compare_exact(f"{prefix}{field}", recorded.get(field),
