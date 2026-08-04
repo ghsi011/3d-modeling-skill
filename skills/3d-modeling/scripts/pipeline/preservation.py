@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
@@ -89,14 +90,111 @@ PRESERVATION_SCHEMA = 2
 # read by nothing.
 SAMPLE_PLAN_VERSION = 2
 
-# How many points to sample on the preserved surface, per direction. Enough that
-# a missing feature of a few millimetres cannot fall between them on a part of
-# ordinary size, and small enough that the query stays milliseconds.
+# How many points to sample on the preserved surface, per direction, when a job
+# declares no minimum detectable defect size. Enough that a missing feature of a
+# few millimetres cannot fall between them on a part of ordinary size, and small
+# enough that the query stays milliseconds.
 #
-# It is a fixed count, not a density derived from a smallest defect this audit
-# undertakes to find. Deriving it is stage 5's work; until then the number is an
-# engineering choice and the receipt does not pretend otherwise.
+# A job that declares `minimum_detectable_defect_mm` does not use this: its count
+# is derived by `derive_sample_count` from the size it undertook to find. This
+# constant is the fallback for a job that declared nothing, and a run that used
+# it says so on the receipt rather than implying a sensitivity it never claimed.
 DEFAULT_SAMPLES = 20000
+
+# The probability that a defect of exactly the declared size is hit by at least
+# one sample. Not 1.0, because no finite sample plan can promise that: what a
+# density buys is a detection probability, and the honest receipt names it.
+#
+# 0.99 rather than 0.95 because the consumer is a preservation claim -- a missed
+# defect is a part reported unchanged that changed -- and the cost of the
+# stricter figure is a 1.5x sample count against a query already measured in
+# milliseconds.
+DEFAULT_DETECTION_CONFIDENCE = 0.99
+
+# The largest sample plan this audit will build. Beyond it the audit refuses and
+# names the size it *could* have found, rather than quietly sampling less finely
+# than the job asked for. Release 6's rule: a declared resource bound on every
+# query, with a controlled failure instead of an allocation attempt.
+#
+# 4,000,000 points is about 96 MB of float64 coordinates before any query
+# batching, which `_query_batch` then splits against the memory ceiling.
+MAX_DERIVED_SAMPLES = 4_000_000
+
+
+class SampleBudgetExceeded(ValueError):
+    """The declared defect size needs more samples than this audit will build.
+
+    Raised rather than clamped. Clamping would answer a question the job did not
+    ask -- "is this part preserved to 0.1 mm" answered with a plan that can only
+    see 0.4 mm -- and the answer would look identical to one that could.
+    """
+
+
+def derive_sample_count(area_mm2: float, minimum_detectable_defect_mm: float,
+                        *, confidence: float = DEFAULT_DETECTION_CONFIDENCE,
+                        ceiling: int = MAX_DERIVED_SAMPLES) -> int:
+    """How many surface samples it takes to find a defect of that size.
+
+    `_plan_points` is **area-weighted**, so the sample density is uniform over
+    the surface: `n / area` points per mm2 everywhere, whatever shape the part
+    is and whatever fraction of it a declared region occupies. That is what
+    makes this derivation possible at all -- the detectable size is a property
+    of the density, not of the region, so it does not have to be recomputed per
+    region and cannot be quietly different in the corner of the part nobody
+    looked at.
+
+    A defect of characteristic size `d` presents about `d^2` of surface. Treating
+    the plan as a Poisson process over the surface, the chance that at least one
+    of `n` points lands on a patch of area `a` is `1 - exp(-n * a / A)`, so
+    requiring that to reach `confidence` gives
+
+        n >= -ln(1 - confidence) * A / d^2
+
+    That is deliberately the *conservative* reading. The plan is a
+    low-discrepancy sequence, which is more evenly spread than a Poisson process
+    and therefore hits a small patch at least as often -- so a count derived
+    this way finds the declared size at least as reliably as the arithmetic
+    promises. Erring the other way would be a sensitivity claim the method
+    cannot keep.
+
+    Raises `SampleBudgetExceeded` rather than returning a clamped count: see the
+    exception.
+    """
+    area = float(area_mm2)
+    defect = float(minimum_detectable_defect_mm)
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be strictly between 0 and 1, "
+                         f"got {confidence!r}")
+    if not math.isfinite(area) or area <= 0.0:
+        raise ValueError(f"a sample plan needs a positive surface area, "
+                         f"got {area_mm2!r}")
+    if not math.isfinite(defect) or defect <= 0.0:
+        raise ValueError(f"minimum_detectable_defect_mm must be positive, "
+                         f"got {minimum_detectable_defect_mm!r}")
+    needed = math.ceil(-math.log(1.0 - confidence) * area / (defect * defect))
+    if needed > ceiling:
+        raise SampleBudgetExceeded(
+            f"finding a {defect} mm defect on {area:.1f} mm2 of surface at "
+            f"{confidence:.0%} confidence needs {needed:,} samples, over this "
+            f"audit's ceiling of {ceiling:,}. The smallest defect this ceiling "
+            f"can find on this part is "
+            f"{detectable_defect_mm(area, ceiling, confidence=confidence):.4f} mm. "
+            "Declare that size, or split the region.")
+    return max(1, needed)
+
+
+def detectable_defect_mm(area_mm2: float, samples: int, *,
+                         confidence: float = DEFAULT_DETECTION_CONFIDENCE) -> float:
+    """The smallest defect a plan of `samples` points can find, inverted.
+
+    The receipt carries this rather than only the count, because a count means
+    nothing to a reader without the surface it is spread over: 20,000 points is
+    dense on a 20 mm clip and sparse on a build plate.
+    """
+    area = float(area_mm2)
+    if samples <= 0 or not math.isfinite(area) or area <= 0.0:
+        return float("inf")
+    return math.sqrt(-math.log(1.0 - confidence) * area / float(samples))
 
 # The band a sampled comparison is allowed to call "unchanged". Not zero: two
 # tessellations of one surface disagree by the chord error of whichever is
@@ -484,6 +582,13 @@ def _sampled(source, candidate, region: Region, samples: int,
     for _, (_, target) in pairs:
         _query_batch(len(target.faces), ceiling_bytes)     # raises before any query
 
+    # The surface the plan is spread over, and therefore what its density means.
+    # The source's area rather than the candidate's: the plan is a plan of the
+    # geometry that must survive, and on a job that removed material by intent
+    # the candidate is smaller for a reason that is not a change in sensitivity.
+    sampled_area = float(source.area)
+    detectable = detectable_defect_mm(sampled_area, samples)
+
     for name, (a, b) in pairs:
         seed = _direction_seed(material, name)
         seeds[name] = seed
@@ -526,15 +631,24 @@ def _sampled(source, candidate, region: Region, samples: int,
         "samples_outside_region": tested,
         "sample_plan": plan,
         "directions": results,
+        # What this plan could have found, as a size rather than as a count. A
+        # count means nothing to a reader without the surface it is spread over
+        # -- 20,000 points is a 0.49 mm detector on a 20 mm clip and a 7 mm one
+        # on a build plate -- and a preservation claim is exactly the place that
+        # difference decides whether the claim is worth anything.
+        "detectable_defect_mm": S.canonical_number(detectable, 6),
+        "detection_confidence": DEFAULT_DETECTION_CONFIDENCE,
+        "sampled_area_mm2": S.canonical_number(sampled_area, 4),
         "claim_note": "a sampled comparison cannot establish exact preservation; "
                       "it establishes that no sampled point outside the declared "
                       f"region moved more than {tolerance_mm} mm. The plan is "
                       "derived from this pair of artifacts and carries no random "
-                      "draw, so the audit reruns byte-identically -- which is "
-                      "reproducibility and not sensitivity. The density is a fixed "
-                      "count rather than one derived from a declared minimum "
-                      "detectable defect size, so a defect these samples miss is "
-                      "missed identically on every run.",
+                      "draw, so the audit reruns byte-identically. Its density is "
+                      f"{samples} points over {sampled_area:.1f} mm2, which finds "
+                      f"a defect of {detectable:.4f} mm or larger with "
+                      f"{DEFAULT_DETECTION_CONFIDENCE:.0%} confidence; anything "
+                      "smaller than that can still be missed, and is missed "
+                      "identically on every run.",
     }
 
 

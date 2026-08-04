@@ -38,6 +38,7 @@ import trimesh
 from . import acceptance as ACC
 from . import cli
 from . import diagnose as D
+from . import preservation as PR
 from . import project as P
 from . import route as RT
 
@@ -742,3 +743,106 @@ class EdgeManifoldCountsTest(unittest.TestCase):
             self.assertTrue(
                 any("3 or more face" in finding for finding in report["findings"]),
                 f"no finding named the non-manifold edges: {report['findings']}")
+
+
+class DerivedSampleDensityTest(unittest.TestCase):
+    """Release 6: a density derived from what the audit undertook to find.
+
+    The preservation lane has never been allowed to report a part COMMISSIONED
+    or VERIFIED, and the reason recorded on every one of its runs is this one:
+    the sample count was a fixed 20,000 rather than a density derived from a
+    declared minimum detectable defect size, "so a small undeclared addition
+    outside the edit region can still be missed, and is now missed identically
+    on every run."
+
+    Determinism was the previous slice and it is not sensitivity. This is
+    sensitivity: the count is now a function of the surface it is spread over
+    and the defect size the job declared, and the receipt can say what the plan
+    could find rather than how many points it used.
+    """
+
+    def test_the_count_inverts_to_the_size_it_was_derived_from(self) -> None:
+        """The two directions are one relation, so they must agree."""
+        for area in (100.0, 1027.8, 50_000.0):
+            for defect in (2.0, 1.0, 0.5, 0.25):
+                with self.subTest(area=area, defect=defect):
+                    count = PR.derive_sample_count(area, defect)
+                    back = PR.detectable_defect_mm(area, count)
+                    # Rounding up the count can only make the plan finer, never
+                    # coarser -- a detector that found *less* than it promised
+                    # would be the failure this whole slice exists to remove.
+                    self.assertLessEqual(back, defect + 1e-9,
+                                         f"{count} samples finds {back} mm, "
+                                         f"which is coarser than the declared "
+                                         f"{defect} mm")
+
+    def test_density_is_what_matters_not_the_count(self) -> None:
+        """Ten times the area needs ten times the points for the same size.
+
+        This is the property that makes the derivation legitimate at all:
+        `_plan_points` is area-weighted, so density is uniform over the surface
+        and the detectable size does not depend on which region a point landed
+        in. A count that did not scale with area would be a detector whose
+        sensitivity silently depended on how big the part was.
+        """
+        small = PR.derive_sample_count(1_000.0, 0.5)
+        large = PR.derive_sample_count(10_000.0, 0.5)
+        self.assertAlmostEqual(10.0, large / small, places=2)
+
+    def test_halving_the_defect_size_quadruples_the_samples(self) -> None:
+        """A defect presents an area, so the relation is quadratic, not linear."""
+        coarse = PR.derive_sample_count(1_000.0, 1.0)
+        fine = PR.derive_sample_count(1_000.0, 0.5)
+        self.assertAlmostEqual(4.0, fine / coarse, places=2)
+
+    def test_a_demand_over_the_ceiling_is_refused_and_names_what_it_could_find(self) -> None:
+        """A controlled failure, not a clamp, and not an allocation attempt.
+
+        Clamping would answer a question the job did not ask: "is this preserved
+        to 0.01 mm" answered by a plan that can only see 0.03 mm, and the answer
+        would look identical to one that could.
+        """
+        with self.assertRaises(PR.SampleBudgetExceeded) as caught:
+            PR.derive_sample_count(1027.8, 0.01)
+        message = str(caught.exception)
+        self.assertIn("0.01", message)
+        self.assertIn("ceiling", message)
+        # And it names the size that *is* reachable, so the refusal is
+        # actionable rather than only a refusal.
+        reachable = PR.detectable_defect_mm(1027.8, PR.MAX_DERIVED_SAMPLES)
+        self.assertIn(f"{reachable:.4f}", message)
+
+    def test_the_fixed_default_is_a_measurable_sensitivity_not_a_mystery(self) -> None:
+        """What 20,000 points actually bought, stated as a size.
+
+        The old constant was not wrong, it was unquantified -- 20,000 points is
+        dense on a 20 mm clip and sparse on a build plate. Now the same number
+        can be reported as the size it can find, which is what a reader of a
+        preservation claim needs.
+        """
+        clip = PR.detectable_defect_mm(1027.8, PR.DEFAULT_SAMPLES)
+        plate = PR.detectable_defect_mm(250_000.0, PR.DEFAULT_SAMPLES)
+        self.assertLess(clip, 0.6)
+        self.assertGreater(plate, 7.0)
+        self.assertGreater(plate, clip * 10,
+                           "the same fixed count is a very different detector "
+                           "on a small part and a large one, which is why a "
+                           "count alone cannot support a sensitivity claim")
+
+    def test_nonsense_inputs_are_refused_rather_than_producing_a_plan(self) -> None:
+        for area, defect in ((0.0, 1.0), (-5.0, 1.0), (100.0, 0.0),
+                             (100.0, -1.0), (float("nan"), 1.0)):
+            with self.subTest(area=area, defect=defect):
+                with self.assertRaises(ValueError):
+                    PR.derive_sample_count(area, defect)
+        with self.assertRaises(ValueError):
+            PR.derive_sample_count(100.0, 1.0, confidence=1.0)
+        with self.assertRaises(ValueError):
+            PR.derive_sample_count(100.0, 1.0, confidence=0.0)
+
+    def test_a_finer_declared_size_never_buys_fewer_samples(self) -> None:
+        """Monotonicity, which a rounding bug is exactly how you lose."""
+        counts = [PR.derive_sample_count(2_000.0, d)
+                  for d in (4.0, 2.0, 1.0, 0.8, 0.5, 0.3)]
+        self.assertEqual(counts, sorted(counts),
+                         "asking for a smaller defect must never reduce the plan")

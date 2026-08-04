@@ -291,6 +291,14 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                       "max_deviation_mm": report.get("max_deviation_mm"),
                       "samples_outside_region": report.get("samples_outside_region"),
                       "method": report.get("method"),
+                      # Beside `method` because it is a property of the method
+                      # and not of the part: the smallest defect this plan's
+                      # density could have found. A verdict of PRESERVED means
+                      # nothing without it -- 38,014 samples is a fine detector
+                      # on a 17 mm ball and a coarse one on a build plate, and
+                      # a reviewer reading only the verdict cannot tell which
+                      # they were handed.
+                      "detectable_defect_mm": report.get("detectable_defect_mm"),
                       # The plan that produced this number and the digest of the
                       # whole audit. Both travel onto the receipt so a review
                       # answer can be checked against the evidence it read

@@ -86,7 +86,8 @@
         "changed": false,
         "source": 1
       },
-      "evidence_sha256": "17f5cd5efc1fffc9bba7d99c2c38e9a3230152dbf3d9a497430916af4ba64ad1",
+      "detectable_defect_mm": 0.795678,
+      "evidence_sha256": "41eaff6b96653ba397325e0a7ec986666721dce585b7279a84083b487788c8c8",
       "max_deviation_mm": 0.0,
       "method": "sampled bidirectional surface distance",
       "sample_plan_sha256": "e4ada22f2ca21a5fe923f513298fa1d4a2fe8e1860201784bb82dd77c776900a",
@@ -138,7 +139,7 @@
     "safety_verification_report.json",
     "verification_report.json"
   ],
-  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "recorded_at": "b828497feb40725fe87d69f8c3b10015f2a0eaef",
   "reviews_answered": [
     "safety",
     "verification"
