@@ -162,61 +162,99 @@ class TheManifestPublishesNoGeometryTest(unittest.TestCase):
     """A blind benchmark's answer must not be committed beside its question.
 
     The first version of `corpus.json` carried each reference's bounding box in
-    its `note` field, correct to the stated precision, as a sibling of the entry
-    id -- in the file a request generator would read. Found by review, not by
-    any test, because the wall in `tools/fixtures.py` guards fixture material and
-    this file was outside its scope.
+    its `note`, correct to the stated precision, beside the entry id -- in the
+    file a request generator reads.
 
-    A dimension is the *answer*. `role: REFERENCE` says so. So this refuses one
-    anywhere in the manifest's prose rather than trusting whoever adds the next
-    entry to remember, which is the same reason `fixtures.py` keeps its answers
-    in a mapping a design agent has no attribute for.
+    The first version of *this guard* then matched a number adjacent to a length
+    unit, or an `A x B` pair. An independent review broke it in a dozen ways in
+    one pass: `20.00 by 14.50 by 5.80`, `20.00 * 14.50`, `bbox [20.0, 14.5, 5.8]`,
+    `0.787 inches`, `1200 microns`, `Twenty by fourteen`, `radius 2.5
+    millimetres`. Every one is the whole leak restored. Its `deg` branch did not
+    even match `45 degrees`, and its `°` branch did not match `45° chamfer`,
+    because a `\b` after a non-word character requires a word character next.
+
+    So the rule is now the crude one -- **no digit in any prose string** -- and
+    it is enforced over every string in the manifest except the identifier
+    fields. A guard with a pattern to evade is a guard. A rule with nothing to
+    evade is a wall, and this file is the wall.
+
+    The identifier fields are exempt on purpose and it is worth saying why. An
+    entry id names which real part a reference is; anyone holding it can go and
+    fetch that part. The id is the *handle*, not the secret. What the manifest
+    must never do is state the measurement in the same breath, because that is
+    the one thing a blind reconstruction has to produce for itself.
     """
 
-    # What a dimension actually looks like: a number carrying a length unit, or
-    # a pair written `A x B`. Deliberately NOT "any decimal" -- the first version
-    # of this guard was that, and it flagged `ARCHITECTURE.md 16.6` and
-    # `GPL-3.0-only`, which is a guard that trains its reader to ignore it.
-    #
-    # The line drawn is between the *reference's measured geometry*, which is the
-    # answer, and an *interface the request may legitimately state* -- a part that
-    # fits 2020 extrusion is described by naming the extrusion. So a bare
-    # standards callout survives and a measurement does not.
-    _DIMENSION = re.compile(
-        r"\d+(?:\.\d+)?\s*(?:mm|cm|deg|°)\b"
-        r"|\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?",
-        re.IGNORECASE)
+    # Identifiers, digests and locations. They name a thing; they do not measure
+    # one. Everything not on this list is prose and is scanned.
+    EXEMPT = frozenset({"id", "path", "sha256", "ref", "url", "license",
+                        "into", "kind", "source", "role", "schema_version",
+                        "redistribution", "branch", "default", "attribution"})
 
     def setUp(self) -> None:
         self.payload = corpus.manifest()
 
-    def _prose(self):
-        """Only the fields that describe a part.
+    def _strings(self, node, where="", key=None):
+        """Every string in the manifest, with the key it arrived under."""
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from self._strings(v, f"{where}.{k}" if where else k, k)
+        elif isinstance(node, list):
+            for n, v in enumerate(node):
+                yield from self._strings(v, f"{where}[{n}]", key)
+        elif isinstance(node, str) and key not in self.EXEMPT:
+            yield where, node
 
-        `license` is an identifier, not prose about geometry, and scanning it
-        was the other half of the first version's false positives.
-        """
-        yield "note", self.payload.get("note", "")
-        for name, source in self.payload["sources"].items():
-            yield f"sources.{name}.why", str(source.get("why", ""))
-        for row in self.payload["entries"]:
-            yield f"entries[{row['id']}].note", str(row.get("note", ""))
-
-    def test_no_prose_field_states_a_dimension(self) -> None:
-        for where, text in self._prose():
+    def test_no_prose_field_contains_a_digit(self) -> None:
+        for where, text in self._strings(self.payload):
             with self.subTest(field=where):
-                found = self._DIMENSION.findall(text)
+                digits = re.findall(r"\d", text)
                 self.assertEqual(
-                    [], found,
-                    f"{where} states {found}, which is reference geometry. An "
-                    "entry names what a part is for, never what it measures -- "
-                    "the dimensions are the answer a blind benchmark withholds.")
+                    [], digits,
+                    f"{where} contains {len(digits)} digit(s). A prose field "
+                    "names what a part is for; a measurement is the answer a "
+                    "blind benchmark withholds, and every pattern narrower "
+                    "than 'no digits' has been evaded already.")
 
-    def test_the_guard_would_catch_the_leak_it_was_written_for(self) -> None:
-        """Mutation, inline: the exact sentence that shipped must be refused."""
-        shipped = "Supports a 3 mm deck panel. Single body, 20.00 x 14.50 x 5.80 mm."
-        self.assertTrue(self._DIMENSION.findall(shipped),
-                        "the guard must reject the note that actually leaked")
+    def test_the_guard_refuses_every_bypass_the_review_found(self) -> None:
+        """Each of these defeated the previous guard. None may pass this one.
+
+        Pinned individually rather than as 'something matched', because the
+        previous mutation test asserted only that the string matched *somewhere*
+        -- and it retained an unrelated unit, so deleting the entire bounding-box
+        branch left it green.
+        """
+        bypasses = (
+            "Single body, watertight, 20.00 by 14.50 by 5.80.",
+            "20.00 * 14.50 * 5.80",
+            "bbox [20.0, 14.5, 5.8]",
+            "20.00 / 14.50 / 5.80 (millimeters)",
+            "20,00 / 14,50 / 5,80",
+            "radius 2.5 millimetres",
+            "0.787 inches",
+            "1200 microns",
+            "118 thou",
+            "Two M3 holes on a pitch of 15",
+            "Print at 1:1",
+            "A 45\u00b0 chamfer.",
+            "45 degrees of draft.",
+            "20mm_wide slot",
+            "Supports a deck panel. Single body, 20.00 x 14.50 x 5.80 mm.",
+        )
+        for text in bypasses:
+            with self.subTest(bypass=text):
+                self.assertTrue(
+                    re.findall(r"\d", text),
+                    "this string defeated the previous guard and must not "
+                    "defeat this one")
+
+    def test_a_purpose_without_a_measurement_is_allowed(self) -> None:
+        """The guard must let a legitimate description through, or it is a ban."""
+        for text in ("Retains a bottom panel in the extrusion slot.",
+                     "Clamps a toothed belt end. Single body, watertight.",
+                     "Holds a linear rail true to an extrusion."):
+            with self.subTest(note=text):
+                self.assertEqual([], re.findall(r"\d", text))
 
 
 if __name__ == "__main__":

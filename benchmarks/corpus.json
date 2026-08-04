@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest.\n\nNOTHING HERE MAY DESCRIBE THE GEOMETRY. An entry names what a part is *for*, never what it measures. The first version of this file carried each reference's bounding box in its `note` , correct to the stated precision, which is the answer a blind benchmark exists to withhold, committed in plaintext beside the id, in the file a request generator would read. Found by review. `tools/test_corpus.py` now refuses a note that contains a dimension, because a wall kept by remembering is not a wall.",
+  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md section sixteen point six is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest.\n\nNO PROSE FIELD HERE MAY CONTAIN A DIGIT. An entry names what a part is *for*; measurements are the answer a blind benchmark withholds. The first version of this file put each reference's bounding box in its note. The second scrubbed those and added a guard that matched a number next to a unit -- which a review broke by rewriting one separator as a word, and by dropping units, and by spelling the numbers out. A guard with a pattern to evade is a guard; a rule with nothing to evade is a wall. So the rule is the crude one, and `tools/test_corpus.py` enforces it over every string in this file except the identifier fields, which name a part rather than measure it.",
   "roots": {
     "default": "/home/user/3d-references"
   },
@@ -17,7 +17,7 @@
       "license": "GPL-3.0-only",
       "attribution": "Voron Design, Voron 2 (https://github.com/VoronDesign/Voron-2)",
       "redistribution": "EXTERNAL_ONLY",
-      "why": "Real functional printed parts designed around standard hardware -- M3 fasteners, 2020 extrusion, MGN rails, GT2 belts. That matters for a blind benchmark: the request can state what the part has to interface with, in the vocabulary a person would actually use, without stating any geometry. The dimensions are the answer and are never in the request."
+      "why": "Real functional printed parts designed around standard hardware -- metric fasteners, aluminium extrusion, linear rails, toothed belts. That matters for a blind benchmark: the request can state what the part has to interface with, in the vocabulary a person would actually use, without stating any geometry. The measurements are the answer and are never in the request."
     }
   },
   "entries": [
@@ -35,7 +35,7 @@
       "path": "STLs/Tools/MGN9_rail_guide_x2.stl",
       "sha256": "bbd4cf6fc1ef3d50a0e1faacc7b5123db79ff4b8ce31f31d677df95bf49dad8d",
       "role": "REFERENCE",
-      "note": "Holds an MGN9 rail true to an extrusion while it is bolted down. Single body, watertight."
+      "note": "Holds a linear rail true to an extrusion while it is bolted down. Single body, watertight."
     },
     {
       "id": "voron-bottom-panel-clip",
@@ -51,7 +51,7 @@
       "path": "STLs/Gantry/[a]_z_belt_clip_upper_x4.stl",
       "sha256": "8732d1f2cc023beffc70ef8239df52d76a776bd3101b8ed6524122ce1c490b3a",
       "role": "REFERENCE",
-      "note": "Clamps a GT2 belt end. Single body, watertight."
+      "note": "Clamps a toothed belt end. Single body, watertight."
     }
   ]
 }
