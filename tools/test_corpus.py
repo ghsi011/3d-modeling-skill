@@ -14,6 +14,7 @@ mechanism decorative.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -155,6 +156,67 @@ class TheCommittedManifestIsWellFormedTest(unittest.TestCase):
                 where = corpus.location(row["id"], self.payload).resolve()
                 self.assertFalse(str(where).startswith(
                     str(corpus.ROOT.resolve()) + "/"))
+
+
+class TheManifestPublishesNoGeometryTest(unittest.TestCase):
+    """A blind benchmark's answer must not be committed beside its question.
+
+    The first version of `corpus.json` carried each reference's bounding box in
+    its `note` field, correct to the stated precision, as a sibling of the entry
+    id -- in the file a request generator would read. Found by review, not by
+    any test, because the wall in `tools/fixtures.py` guards fixture material and
+    this file was outside its scope.
+
+    A dimension is the *answer*. `role: REFERENCE` says so. So this refuses one
+    anywhere in the manifest's prose rather than trusting whoever adds the next
+    entry to remember, which is the same reason `fixtures.py` keeps its answers
+    in a mapping a design agent has no attribute for.
+    """
+
+    # What a dimension actually looks like: a number carrying a length unit, or
+    # a pair written `A x B`. Deliberately NOT "any decimal" -- the first version
+    # of this guard was that, and it flagged `ARCHITECTURE.md 16.6` and
+    # `GPL-3.0-only`, which is a guard that trains its reader to ignore it.
+    #
+    # The line drawn is between the *reference's measured geometry*, which is the
+    # answer, and an *interface the request may legitimately state* -- a part that
+    # fits 2020 extrusion is described by naming the extrusion. So a bare
+    # standards callout survives and a measurement does not.
+    _DIMENSION = re.compile(
+        r"\d+(?:\.\d+)?\s*(?:mm|cm|deg|°)\b"
+        r"|\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?",
+        re.IGNORECASE)
+
+    def setUp(self) -> None:
+        self.payload = corpus.manifest()
+
+    def _prose(self):
+        """Only the fields that describe a part.
+
+        `license` is an identifier, not prose about geometry, and scanning it
+        was the other half of the first version's false positives.
+        """
+        yield "note", self.payload.get("note", "")
+        for name, source in self.payload["sources"].items():
+            yield f"sources.{name}.why", str(source.get("why", ""))
+        for row in self.payload["entries"]:
+            yield f"entries[{row['id']}].note", str(row.get("note", ""))
+
+    def test_no_prose_field_states_a_dimension(self) -> None:
+        for where, text in self._prose():
+            with self.subTest(field=where):
+                found = self._DIMENSION.findall(text)
+                self.assertEqual(
+                    [], found,
+                    f"{where} states {found}, which is reference geometry. An "
+                    "entry names what a part is for, never what it measures -- "
+                    "the dimensions are the answer a blind benchmark withholds.")
+
+    def test_the_guard_would_catch_the_leak_it_was_written_for(self) -> None:
+        """Mutation, inline: the exact sentence that shipped must be refused."""
+        shipped = "Supports a 3 mm deck panel. Single body, 20.00 x 14.50 x 5.80 mm."
+        self.assertTrue(self._DIMENSION.findall(shipped),
+                        "the guard must reject the note that actually leaked")
 
 
 if __name__ == "__main__":

@@ -81,6 +81,16 @@ def _unavailable_check(feature: Feature, title: str, reason: str, code: str,
         status="UNAVAILABLE", error_code=code, error_message=reason)
 
 
+class SampleAreaUnreadable(ValueError):
+    """The declared sensitivity cannot be turned into a plan on this source.
+
+    Distinct from `SampleBudgetExceeded`: that one means the job asked for more
+    than this audit will build, this one means the surface the count would be
+    derived from could not be read at all. Both become UNAVAILABLE checks, and
+    both name which.
+    """
+
+
 def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int:
     """How many points this row's plan gets, and where the number came from.
 
@@ -90,13 +100,29 @@ def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int
     contract written before this field existed plans exactly the points it always
     did.
 
-    An explicit `samples` on the row still wins, because the frozen fixtures set
-    it and a contract's own number must not be quietly recomputed under a receipt
-    that already names it.
+    An explicit `samples` on the row wins over the fallback, because a contract
+    that names its own count must not have it recomputed under a receipt that
+    already published it. It does **not** win over a declared defect size: a row
+    carrying both used to return the count and drop the declaration on the floor,
+    with no finding and no receipt key, so a job could ask for 0.3 mm, be given a
+    0.8 mm plan, and read PRESERVED with nothing anywhere saying it had not got
+    what it asked for.
+
+    Found by review, along with the fact that the justification originally given
+    here -- "the frozen fixtures set one" -- was not true: no committed JSON in
+    this repository sets `samples`. A rule defended by a fact that is false is a
+    rule nobody can check.
     """
-    if "samples" in expectation:
-        return int(expectation["samples"])
     declared = expectation.get("minimum_detectable_defect_mm")
+    if "samples" in expectation and declared is None:
+        return int(expectation["samples"])
+    if "samples" in expectation:
+        raise SampleAreaUnreadable(
+            f"this contract row names both an explicit sample count "
+            f"({expectation['samples']}) and a minimum detectable defect size "
+            f"of {declared} mm. They are two different instructions about the "
+            "same plan and this audit will not silently honour one: drop the "
+            "count and let the size derive it, or drop the size.")
     from . import preservation as PR          # noqa: PLC0415 - kernel is lazy
     if declared is None:
         return PR.DEFAULT_SAMPLES
@@ -104,8 +130,26 @@ def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int
     # The *normalized* mesh, which is the one the plan is laid out over --
     # `preservation._ordered` canonicalizes the same geometry, and measuring the
     # density against the raw parse would describe a surface the plan never saw.
-    source = analysis.load(Path(source_path))
-    return PR.derive_sample_count(float(source.normalized.area), float(declared))
+    #
+    # `analysis.load` refuses a STEP: `trimesh.load` dispatches those to
+    # `cascadio`, which is not in this runtime, so it raises. `PR.audit` handles
+    # the same source fine -- it routes STEP through `mesh_io.read_step` -- which
+    # made this the sharpest possible failure: *declaring* a sensitivity turned a
+    # working audit into an uncaught stage crash, on the one source class the
+    # module was extended to support. Found by review.
+    #
+    # `SampleAreaUnreadable` rather than a bare raise, so the caller can turn it
+    # into an UNAVAILABLE check like every other measurement this file cannot
+    # take. A declaration must never be the thing that breaks a job.
+    try:
+        area = float(analysis.load(Path(source_path)).normalized.area)
+    except Exception as exc:                     # noqa: BLE001 - any read failure
+        raise SampleAreaUnreadable(
+            f"a minimum detectable defect size of {declared} mm was declared, "
+            f"and the surface area of {Path(source_path).name} could not be "
+            f"read to derive a sample count from it: "
+            f"{type(exc).__name__}: {exc}") from exc
+    return PR.derive_sample_count(area, float(declared))
 
 
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
@@ -302,6 +346,10 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
             return _unavailable_check(
                 feature, "Preservation outside the edit region", str(exc),
                 "PRESERVATION_DENSITY_UNREACHABLE", tolerance_mm, tol)
+        except SampleAreaUnreadable as exc:
+            return _unavailable_check(
+                feature, "Preservation outside the edit region", str(exc),
+                "PRESERVATION_SOURCE_UNREADABLE", tolerance_mm, tol)
         report = PR.audit(source_path=source, candidate_path=ctx.path,
                           region=region, tolerance_mm=tolerance_mm,
                           samples=planned,

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest; a fixture that names one and cannot find it raises FixtureUnavailable rather than skipping silently.",
+  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead -- a corpus that stays external and is referenced by stable identity and hash. `tools/corpus.py` fetches them and verifies every digest.\n\nNOTHING HERE MAY DESCRIBE THE GEOMETRY. An entry names what a part is *for*, never what it measures. The first version of this file carried each reference's bounding box in its `note` , correct to the stated precision, which is the answer a blind benchmark exists to withhold, committed in plaintext beside the id, in the file a request generator would read. Found by review. `tools/test_corpus.py` now refuses a note that contains a dimension, because a wall kept by remembering is not a wall.",
   "roots": {
     "default": "/home/user/3d-references"
   },
@@ -10,7 +10,9 @@
       "url": "https://github.com/VoronDesign/Voron-2.git",
       "ref": "a192410e27ea345644ae5c4b29b4c9c40cbe1a73",
       "branch": "Voron2.4",
-      "sparse": ["STLs"],
+      "sparse": [
+        "STLs"
+      ],
       "into": "voron2",
       "license": "GPL-3.0-only",
       "attribution": "Voron Design, Voron 2 (https://github.com/VoronDesign/Voron-2)",
@@ -25,7 +27,7 @@
       "path": "STLs/Panel_Mounting/deck_support_3mm_x8.stl",
       "sha256": "ab0d69dc18da1516ace18da5be493a82099a332e0767082467b25c9d935a3f03",
       "role": "REFERENCE",
-      "note": "Supports a 3 mm deck panel against extrusion. Single body, watertight, 20.00 x 14.50 x 5.80 mm."
+      "note": "Supports a deck panel against extrusion. Single body, watertight."
     },
     {
       "id": "voron-mgn9-rail-guide",
@@ -33,7 +35,7 @@
       "path": "STLs/Tools/MGN9_rail_guide_x2.stl",
       "sha256": "bbd4cf6fc1ef3d50a0e1faacc7b5123db79ff4b8ce31f31d677df95bf49dad8d",
       "role": "REFERENCE",
-      "note": "Holds an MGN9 rail true to an extrusion while it is bolted down. Single body, watertight, 26.00 x 20.50 x 10.00 mm."
+      "note": "Holds an MGN9 rail true to an extrusion while it is bolted down. Single body, watertight."
     },
     {
       "id": "voron-bottom-panel-clip",
@@ -41,7 +43,7 @@
       "path": "STLs/Panel_Mounting/bottom_panel_clip_x4.stl",
       "sha256": "57843c92364b0a651b12e9e658063e8deedca22f9c7e0fa174bbc9e20a186c26",
       "role": "REFERENCE",
-      "note": "Retains a bottom panel in the extrusion slot. Single body, watertight, 30.00 x 31.71 x 6.00 mm."
+      "note": "Retains a bottom panel in the extrusion slot. Single body, watertight."
     },
     {
       "id": "voron-z-belt-clip-upper",
@@ -49,7 +51,7 @@
       "path": "STLs/Gantry/[a]_z_belt_clip_upper_x4.stl",
       "sha256": "8732d1f2cc023beffc70ef8239df52d76a776bd3101b8ed6524122ce1c490b3a",
       "role": "REFERENCE",
-      "note": "Clamps a GT2 belt end. Single body, watertight, 28.00 x 20.00 x 5.20 mm."
+      "note": "Clamps a GT2 belt end. Single body, watertight."
     }
   ]
 }

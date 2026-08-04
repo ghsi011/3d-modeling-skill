@@ -1022,3 +1022,51 @@ class TheSamplePlanActuallyFindsWhatItPromisesTest(unittest.TestCase):
                                  f"projection {(a, b)} leaves empty cells, which "
                                  "is how a sequence misses a defect that is "
                                  "thinner than its stripe spacing")
+
+
+class ADeclarationMustNotBreakOrBeIgnoredTest(unittest.TestCase):
+    """Two ways a declared sensitivity went wrong, both found by review.
+
+    Declaring something the pipeline supports must never be the thing that
+    breaks a job, and must never be silently dropped. Both happened.
+    """
+
+    def test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
+        """A STEP source: `analysis.load` refuses it, `PR.audit` handles it.
+
+        So *declaring* a sensitivity turned a working audit into an uncaught
+        stage crash, on the one source class the module was extended to support.
+        """
+        from . import commission
+        step = (Path(__file__).resolve().parents[4] / "benchmarks" / "fixtures"
+                / "vent-ball-combine" / "public" / "sources" / "vent_mount.step")
+        if not step.is_file():                       # pragma: no cover
+            self.skipTest("the vendored STEP fixture is not on this machine")
+        with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+            commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, step)
+        self.assertIn("0.3", str(caught.exception))
+        self.assertIn(step.name, str(caught.exception))
+        # And it is not the other refusal: the two mean different things.
+        self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
+
+    def test_a_row_naming_both_a_count_and_a_size_is_refused(self) -> None:
+        """Previously the count won and the declaration vanished silently.
+
+        A job could ask for 0.3 mm, be handed a 0.8 mm plan, and read PRESERVED
+        with nothing on the receipt saying it had not got what it asked for.
+        """
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+                commission._preservation_samples(
+                    {"samples": 20000, "minimum_detectable_defect_mm": 0.3},
+                    source)
+            self.assertIn("two different instructions", str(caught.exception))
+            # Each alone still works.
+            self.assertEqual(20000, commission._preservation_samples(
+                {"samples": 20000}, source))
+            self.assertGreater(commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, source), 20000)
