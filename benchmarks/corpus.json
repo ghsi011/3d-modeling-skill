@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead. `tools/corpus.py` fetches them and verifies every digest.\n\nQUESTION MATERIAL LIVES IN `request`, AND THE RULE ABOUT IT IS NOT ABOUT DIGITS. A request is meant to be full of measurements -- somebody takes calipers to the extrusion slot, the panel, the rail. What it may not carry is a measurement of the reference part ITSELF, because that is what a blind reconstruction has to produce and what the scorer compares.\n\nTwo mechanisms enforce it, and the second exists because the first cannot work alone. (1) Every requirement must name a declared counterpart: its leading token has to appear in this entry's `counterparts`, so `extrusion_slot_opening` and `panel_stock` are admissible and `girth` and `overall_height` are not. That is an allowlist; two earlier designs used denylists -- a regex, then a no-digit rule with exemptions -- and reviews walked through them twelve, nineteen and about eighty times. (2) Every number anywhere in the question is compared against the reference's actual extents and volume, and a coincidence is refused.\n\nThe second check is not theoretical. This file previously stated `extrusion_series: \"2020\"` for a part whose x-extent is exactly 20.0 mm -- a correctly named counterpart handing over one of the three answers, which no wording rule could ever catch. The entries now name the extrusion by its slot rather than by its face dimension.\n\nProvenance is STATED throughout, and that is deliberate. These numbers were read off Voron 2's published hardware; nobody in this repository has calipers or the parts. An earlier version claimed MEASURED with sources like 'calipers across the slot mouth', which was a stronger claim than the method supports. MEASURED stays in the permitted set because a real requester produces it -- this corpus simply does not.",
+  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead. `tools/corpus.py` fetches them and verifies every digest.\n\nQUESTION MATERIAL LIVES IN `request`, AND THE RULE ABOUT IT IS NOT ABOUT DIGITS. A request is meant to be full of measurements -- somebody takes calipers to the extrusion slot, the panel, the rail. What it may not carry is a measurement of the reference part ITSELF, because that is what a blind reconstruction has to produce and what the scorer compares.\n\nTwo mechanisms enforce it, and the second exists because the first cannot work alone. (1) Every requirement must name a declared counterpart: its leading token has to appear in this entry's `counterparts`, so `extrusion_slot_opening` and `panel_stock` are admissible and `girth` and `overall_height` are not. That is an allowlist; two earlier designs used denylists -- a regex, then a no-digit rule with exemptions -- and reviews walked through them twelve, nineteen and about eighty times. (2) Every number anywhere in the question is compared against the reference's actual extents and volume, and a coincidence is refused.\n\nThe second check is not theoretical. This file previously stated `extrusion_series: \"2020\"` for a part whose x-extent is exactly 20.0 mm -- a correctly named counterpart handing over one of the three answers, which no wording rule could ever catch. The entries now name the extrusion by its slot rather than by its face dimension.\n\nProvenance is STATED throughout, and that is deliberate. These numbers were read off Voron 2's published hardware; nobody in this repository has calipers or the parts. An earlier version claimed MEASURED with sources like 'calipers across the slot mouth', which was a stronger claim than the method supports. MEASURED stays in the permitted set because a real requester produces it -- this corpus simply does not.\n\nEach entry states a `build_envelope_mm`: the space the part has to live in. `design-tool run` refuses to guess `envelope_mm` when geometry is authored, so a blind request must state one -- and it must be a constraint the requester has rather than the reference's own size with slack added, which would be the answer with a margin on it. These are deliberately generous and identical across entries, and they go through the same coincidence check as every other number.",
   "roots": {
     "default": "/home/user/3d-references"
   },
@@ -54,7 +54,12 @@
             "source": "Voron 2 published hardware",
             "note": "socket head, into a T-nut"
           }
-        ]
+        ],
+        "build_envelope_mm": {
+          "x": 45.0,
+          "y": 45.0,
+          "z": 25.0
+        }
       },
       "counterparts": [
         "extrusion",
@@ -95,7 +100,12 @@
             "source": "Voron 2 published hardware",
             "note": "the slot the rail is bolted through"
           }
-        ]
+        ],
+        "build_envelope_mm": {
+          "x": 45.0,
+          "y": 45.0,
+          "z": 25.0
+        }
       },
       "counterparts": [
         "rail",
@@ -127,7 +137,12 @@
             "source": "Voron 2 published hardware",
             "note": "the panel this retains"
           }
-        ]
+        ],
+        "build_envelope_mm": {
+          "x": 45.0,
+          "y": 45.0,
+          "z": 25.0
+        }
       },
       "counterparts": [
         "extrusion",
@@ -167,7 +182,12 @@
             "source": "Voron 2 published hardware",
             "note": "draws the clamp closed"
           }
-        ]
+        ],
+        "build_envelope_mm": {
+          "x": 45.0,
+          "y": 45.0,
+          "z": 25.0
+        }
       },
       "counterparts": [
         "belt",

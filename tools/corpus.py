@@ -115,7 +115,7 @@ def manifest() -> dict[str, Any]:
 # *exemption* list instead, and an exemption list grows silently every time an
 # ordinary field needs a digit in it -- a sparse-checkout path, a second corpus
 # root -- and each growth reopened the hole invisibly.
-REQUEST_KEYS = ("purpose", "requirements")
+REQUEST_KEYS = ("purpose", "requirements", "build_envelope_mm")
 
 # Every field of one requirement, and they are `project.Requirement`'s fields
 # rather than a shape invented here. A generator writes these straight into
@@ -336,10 +336,10 @@ def request_view(entry_id: str,
     the guarantee is the paragraph above and not "the answer cannot leak".
     """
     payload = payload if payload is not None else manifest()
-    row = entries(payload).get(entry_id)
+    row = _entries(payload).get(entry_id)
     if row is None:
         raise KeyError(f"{entry_id!r} names no corpus entry; have "
-                       f"{sorted(entries(payload))}")
+                       f"{sorted(_entries(payload))}")
 
     counterparts = tuple(row.get("counterparts") or ())
     if not counterparts or not all(isinstance(c, str) and c.strip()
@@ -376,7 +376,24 @@ def request_view(entry_id: str,
             f"{entry_id}: requirements must be a non-empty list. A request with "
             "no measured interface is not answerable -- that is the blind "
             "benchmark being impossible rather than hard.")
+    # The space the part has to live in. Required because `design-tool run`
+    # refuses to guess `envelope_mm` when geometry is authored, and stated by
+    # the requester rather than derived from the reference -- an envelope taken
+    # from the part's own size with slack added is the answer with a margin on
+    # it. Like every other number here it goes through the coincidence check
+    # below, so an envelope that happens to equal an extent is refused.
+    envelope = block["build_envelope_mm"]
+    if not isinstance(envelope, dict) or set(envelope) != {"x", "y", "z"}:
+        raise CorpusLeak(
+            f"{entry_id}: build_envelope_mm must name x, y and z")
+    for axis, value in sorted(envelope.items()):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                or value <= 0:
+            raise CorpusLeak(
+                f"{entry_id}: build_envelope_mm.{axis} is {value!r}")
+
     view = {"purpose": purpose,
+            "build_envelope_mm": dict(envelope),
             "requirements": [_requirement(entry_id, index, item, counterparts)
                              for index, item in enumerate(rows)]}
 
@@ -407,9 +424,28 @@ def corpus_root(payload: dict[str, Any] | None = None) -> Path:
     return Path(payload["roots"]["default"]).expanduser()
 
 
-def entries(payload: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+def _entries(payload: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Every entry row, answer material and all. Private, and that is the point.
+
+    A row carries `path` and `sha256`: where the reference is and what it hashes
+    to. Handing that to whatever writes the question puts the answer one
+    `.get("path")` away from the request, which is the failure
+    `tools/fixtures.py` records at its line 30 -- its public record "carries no
+    filesystem path at all", because withholding a file while disclosing its
+    directory is not withholding it.
+
+    So the two sides of this module have two doors. `question_ids` and
+    `request_view` are what a generator may call, and neither can reach a path.
+    `resolve` and `reference_measurements` are what a grader calls, and they are
+    a thing a design agent has no reason to have written.
+    """
     payload = payload if payload is not None else manifest()
     return {row["id"]: row for row in payload["entries"]}
+
+
+def question_ids(payload: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Which references there are to ask about. Names only, no locations."""
+    return tuple(sorted(_entries(payload)))
 
 
 def _digest(path: Path) -> str:
@@ -420,12 +456,12 @@ def _digest(path: Path) -> str:
     return reader.hexdigest()
 
 
-def location(entry_id: str, payload: dict[str, Any] | None = None) -> Path:
+def _location(entry_id: str, payload: dict[str, Any] | None = None) -> Path:
     payload = payload if payload is not None else manifest()
-    row = entries(payload).get(entry_id)
+    row = _entries(payload).get(entry_id)
     if row is None:
         raise KeyError(f"{entry_id!r} names no corpus entry; have "
-                       f"{sorted(entries(payload))}")
+                       f"{sorted(_entries(payload))}")
     source = payload["sources"][row["source"]]
     return corpus_root(payload) / source["into"] / row["path"]
 
@@ -438,12 +474,12 @@ def resolve(entry_id: str, payload: dict[str, Any] | None = None) -> Path:
     and the cost here is a hash of a file already in the page cache.
     """
     payload = payload if payload is not None else manifest()
-    path = location(entry_id, payload)
+    path = _location(entry_id, payload)
     if not path.is_file():
         raise CorpusUnavailable(
             f"{entry_id} is not on this machine at {path}. Fetch the corpus: "
             f"`uv run python tools/corpus.py --fetch`")
-    want = entries(payload)[entry_id]["sha256"]
+    want = _entries(payload)[entry_id]["sha256"]
     found = _digest(path)
     if found != want:
         raise CorpusCorrupt(
@@ -495,7 +531,7 @@ def verify(payload: dict[str, Any] | None = None) -> dict[str, str]:
     """Every entry's state, as a mapping a caller can act on."""
     payload = payload if payload is not None else manifest()
     out: dict[str, str] = {}
-    for entry_id in sorted(entries(payload)):
+    for entry_id in sorted(_entries(payload)):
         try:
             resolve(entry_id, payload)
             out[entry_id] = "OK"

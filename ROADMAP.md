@@ -2509,6 +2509,40 @@ No live AI call occurs.
 
 Run on demand and before significant releases.
 
+**Built, for reconstruction.** `tools/blind.py` asks and scores against the
+external reference corpus (`benchmarks/corpus.json`, Voron 2, GPL-3.0, never
+committed):
+
+    uv run python tools/blind.py --ask voron-deck-support --into /tmp/job
+    uv run design-tool run /tmp/job --no-render
+    uv run python tools/blind.py --score /tmp/job/candidate.stl \
+                                 --against voron-deck-support
+
+The question is the part's purpose plus the counterparts somebody measured --
+the extrusion slot, the panel stock, the fastener -- and a stated build
+envelope. Not the part's own geometry: that is the answer, `corpus.request_view`
+is the only door to question material, and it refuses any number coinciding
+with the reference's extents or volume.
+
+**What a score is, and it is narrow.** Four measurements: the three bounding-box
+extents *sorted*, the volume, the body count, whether the solid is closed.
+Sorting buys orientation-independence with no registration — a part modelled
+lying down still scores — and costs the axis identity with it. It is
+**dimensional agreement, not shape equivalence**, and that is measured rather
+than hedged: a plain slab with one rectangular pocket, sized to the deck
+support's bounding box and volume, agrees on every row, and so does the same
+slab with x and y swapped, which would not fit the extrusion the brief
+specifies. In the other direction two percent of that part's volume is about
+one small through-hole, so whether a *correct* reconstruction passes the volume
+row can turn on a feature the brief never dimensioned. Shape comparison is
+Release 6 and needs the registration this avoids.
+
+**What it does not yet do.** No candidate has been built through it. The
+pipeline routes a generated job and reaches a designer commission — measured —
+but the designer has not run, so there is no reconstruction to report and no
+score of anything but references against themselves. That is the next slice,
+and it is where this stops being infrastructure.
+
 Use a small number of authentic jobs to measure:
 
 * request interpretation;

@@ -161,7 +161,7 @@ class TheCommittedManifestIsWellFormedTest(unittest.TestCase):
             f"the corpus root {root} is inside the repository at {corpus.ROOT}")
         for row in self.payload["entries"]:
             with self.subTest(entry=row["id"]):
-                where = corpus.location(row["id"], self.payload).resolve()
+                where = corpus._location(row["id"], self.payload).resolve()
                 self.assertFalse(str(where).startswith(
                     str(corpus.ROOT.resolve()) + "/"))
 
@@ -230,10 +230,11 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
     # -- what the corpus ships -------------------------------------------
 
     def test_every_committed_entry_offers_an_answerable_question(self) -> None:
-        for entry_id in sorted(corpus.entries(self.payload)):
+        for entry_id in corpus.question_ids(self.payload):
             with self.subTest(entry=entry_id):
                 view = corpus.request_view(entry_id, self.payload)
                 self.assertEqual({"purpose", "requirements",
+                                  "build_envelope_mm",
                                   "checked_against_reference"}, set(view))
                 self.assertTrue(view["requirements"])
 
@@ -246,7 +247,7 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
         repository has calipers or the parts. Making the manifest honest turned
         the suite red, which is a test doing the opposite of its job.
         """
-        for entry_id in sorted(corpus.entries(self.payload)):
+        for entry_id in corpus.question_ids(self.payload):
             for row in corpus.request_view(entry_id, self.payload)["requirements"]:
                 with self.subTest(requirement=row["name"]):
                     self.assertIn(row["provenance"], corpus.REQUEST_PROVENANCE)
@@ -261,7 +262,7 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
         that has fetched nothing is ordinary, and asserting a check nobody ran
         is the failure this whole module is about.
         """
-        for entry_id in sorted(corpus.entries(self.payload)):
+        for entry_id in corpus.question_ids(self.payload):
             with self.subTest(entry=entry_id):
                 view = corpus.request_view(entry_id, self.payload)
                 if not view["checked_against_reference"]:
@@ -271,7 +272,7 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
                     (), corpus.coincidences(corpus.numbers_in(view), measured))
 
     def test_the_question_names_no_identifier_path_or_digest(self) -> None:
-        for entry_id, row in sorted(corpus.entries(self.payload).items()):
+        for entry_id, row in sorted(corpus._entries(self.payload).items()):
             with self.subTest(entry=entry_id):
                 flat = repr(corpus.request_view(entry_id, self.payload))
                 for field in ("id", "path", "sha256", "source", "role"):
@@ -393,6 +394,57 @@ class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
                                if k != "request"}]
         with self.assertRaises(corpus.CorpusLeak):
             corpus.request_view("voron-deck-support", payload)
+
+    def test_nothing_a_generator_may_call_can_reach_the_answer(self) -> None:
+        """The wall, structurally rather than by convention.
+
+        `tools/fixtures.py:30` records why: withholding a file while disclosing
+        its directory is not withholding it, and its public record therefore
+        carries no filesystem path at all. This module used to hand out whole
+        entry rows through a public `entries()` -- so the reference's path and
+        digest sat one `.get("path")` away from the question, and the claim that
+        `request_view` was "the only door" was a convention rather than a wall.
+
+        The generator's side of the module is `question_ids` and `request_view`.
+        Neither can produce a path, a digest or a source id, whatever it is
+        asked for.
+        """
+        for entry_id in corpus.question_ids(self.payload):
+            with self.subTest(entry=entry_id):
+                row = corpus._entries(self.payload)[entry_id]
+                reachable = repr(corpus.request_view(entry_id, self.payload))
+                for field in ("path", "sha256", "source"):
+                    self.assertNotIn(str(row[field]), reachable)
+        self.assertNotIn("path", repr(corpus.question_ids(self.payload)))
+
+    def test_the_public_surface_a_generator_sees_names_no_location(self) -> None:
+        """`entries` is private now, and a test says so rather than a comment.
+
+        A public accessor returning answer material is one refactor from being
+        called by the thing it must not be called by.
+        """
+        self.assertFalse(hasattr(corpus, "entries"),
+                         "a public `entries()` returns rows carrying `path` "
+                         "and `sha256`; the generator-facing surface is "
+                         "`question_ids` and `request_view`")
+
+    def test_a_build_envelope_that_is_not_three_positive_axes_is_refused(self) -> None:
+        """Both guards shipped with no fixture; deleting either stayed green."""
+        for envelope in ([45.0, 45.0, 25.0], {"x": 45.0, "y": 45.0},
+                         {"x": 45.0, "y": 45.0, "z": 25.0, "w": 1.0},
+                         {"x": -1.0, "y": 45.0, "z": 25.0},
+                         {"x": 0, "y": 45.0, "z": 25.0},
+                         {"x": "45", "y": 45.0, "z": 25.0}):
+            with self.subTest(envelope=envelope):
+                self._refused(request={"build_envelope_mm": envelope})
+
+    def test_an_envelope_that_is_the_references_own_size_is_refused(self) -> None:
+        """The envelope is the obvious place to smuggle the answer back in."""
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        self._refused(request={"build_envelope_mm":
+                               {"x": 20.0, "y": 45.0, "z": 25.0}})
 
     def test_the_view_says_whether_it_could_check_the_reference(self) -> None:
         """A checkout that has fetched nothing must not imply a check it skipped."""
