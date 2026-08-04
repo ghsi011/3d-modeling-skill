@@ -108,9 +108,11 @@ class ARegionCarriesOneDispositionTest(unittest.TestCase):
                                     may_remove=("the boss",)).problems())
 
     def test_a_scope_declaring_no_disposition_at_all_is_unchanged(self) -> None:
-        """`ROADMAP.md` 3.4: a job that declares nothing new costs what it cost
-        before. Every scope written before this obligation existed declared no
-        `may_change`, and none of them may start failing."""
+        """`ROADMAP.md` 4.4: a job that declares nothing new gains no key in
+        `project.json`. Every scope written before this obligation existed
+        declared no `may_change`, and none of them may start failing. (3.4, cited
+        here first, is "Preserve the common case" -- AI round trips, not
+        serialization.)"""
         self.assertEqual([], _scope().problems())
 
 

@@ -48,10 +48,27 @@ The one authoritative description of a job, validated by
 [`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py). It carries the
 job id, source mode, consequence and rationale, the manufacturing inputs, every
 requirement with its provenance (`STATED` / `INHERITED` / `MEASURED` / `CHOSEN`),
-source artifacts with hashes and classification, interfaces and who owns the other
-side of each, declared motion, edit scope, expected components, open questions,
+source artifacts with hashes, classification and — where the job says — the
+role each one plays, interfaces and who owns the other side of each, declared motion, edit scope, expected components, open questions,
 required reviews, and — only once the job has branched — its design alternatives
 and which one is active.
+
+A source artifact's `role` is one of `ARCHITECTURE.md` 6.2's eight, and
+declaring it is optional — a project that says nothing is a project nobody asked,
+not one granting permission. Four of them name geometry this job owns and may
+derive from: `BASE`, `DONOR`, `PRIOR_REVISION`, `ALTERNATIVE_CANDIDATE`. The
+other four name geometry it only reads: `MATING_OBJECT` (what the part fits),
+`MEASUREMENT_REFERENCE` (what it was measured against), `VISUAL_ENVELOPE` (the
+space it must fit inside) and `PRODUCTION_EXPORT` (a file already handed
+downstream). **Declaring one of those four forbids an edit scope over that
+artifact**, and the run is refused — because an edit scope compiles a
+preservation row, so the job would go on to measure whether somebody else's
+object survived its edit.
+
+Note that `role` on a source artifact and `role` on a component are different
+fields with different vocabularies: the first says what a supplied file is *for*
+and is one of the eight above; the second is free text naming what a printed
+body *is*.
 
 It also carries `datums` where a job declares any: a shared geometric reference
 with an identity, a value, a provenance, the artifact **revision** it was read on

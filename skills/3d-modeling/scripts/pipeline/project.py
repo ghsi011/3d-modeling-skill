@@ -114,6 +114,27 @@ ARTIFACT_CLASS = ("USABLE_EXACT", "USABLE_MESH", "REPAIR_REQUIRED",
                   "RECONSTRUCTION_REQUIRED")
 ARTIFACT_FORMAT = ("STEP", "STL", "3MF", "OBJ", "OTHER")
 
+# What a supplied file is *for*, from `ARCHITECTURE.md` 6.2's list. Closed,
+# because an open one cannot be checked and a role nothing checks is a note.
+#
+# Optional on the row: every project recorded before this existed declares none,
+# and requiring it would refuse all of them for a field they do not use. Absent
+# means undeclared, which is a question not asked rather than permission granted.
+SOURCE_ROLE = ("BASE", "DONOR", "MATING_OBJECT", "MEASUREMENT_REFERENCE",
+               "VISUAL_ENVELOPE", "PRIOR_REVISION", "ALTERNATIVE_CANDIDATE",
+               "PRODUCTION_EXPORT")
+
+# The roles whose geometry this job owns and may therefore change. The rest
+# exist to be read: what the part mates with, what it was measured against, the
+# space it must fit inside, and a file already handed downstream.
+#
+# This is the whole point of the field. An edit scope compiles a preservation
+# row, so a job editing its own mating object would go on to measure whether
+# somebody else's part survived our edit -- deterministic, reproducible, and
+# about an object the job does not own. A receipt like that is worse than none,
+# because it reads as evidence.
+EDITABLE_ROLE = ("BASE", "DONOR", "PRIOR_REVISION", "ALTERNATIVE_CANDIDATE")
+
 MOTION_KIND = ("LINEAR", "ROTARY", "PIECEWISE")
 
 
@@ -240,10 +261,31 @@ class SourceArtifact:
     format: str | None = None
     units: str | None = None
     classification: str | None = None
+    # One of `SOURCE_ROLE`, or empty where the job did not say. See that
+    # constant for why it is optional and `EDITABLE_ROLE` for what declaring it
+    # forbids.
+    role: str = ""
     note: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        payload = dataclasses.asdict(self)
+        # Absent until it means something: an added key that is always there,
+        # even as an empty string, is still an added key in every recorded
+        # `project.json` that declares nothing new.
+        #
+        # It would NOT move a frozen contract hash, and an earlier version of
+        # this comment claimed it would. `as_dict` is reachable only from
+        # `Project.as_payload` -> `project.json`, and there is deliberately no
+        # project hash; a source artifact reaches the acceptance contract as
+        # `source_artifact_sha256` and the preservation row as its path. The
+        # rule is worth keeping for the recordings, and the reason had to stop
+        # being one nobody checked. Same rule `Project.datums` and
+        # `Alternative.basis` follow -- not `minimum_detectable_defect_mm`,
+        # which `EditScope.as_dict` emits always, as null, and whose
+        # absent-when-empty lives in `cli.py`'s contract row instead.
+        if not payload["role"]:
+            del payload["role"]
+        return payload
 
     def problems(self, project_dir: Path | None, index: int = 0) -> list[Issue]:
         where = f"source artifact {self.artifact_id!r}"
@@ -265,6 +307,10 @@ class SourceArtifact:
             out.append(F.problem(F.SCHEMA_ENUM, f"{path}.format",
                                  f"{where}: format {self.format!r} is not one of "
                                  f"{list(ARTIFACT_FORMAT)}"))
+        if str(self.role).strip() and self.role not in SOURCE_ROLE:
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.role",
+                                 f"{where}: role {self.role!r} is not one of "
+                                 f"{list(SOURCE_ROLE)}"))
         if self.classification is not None and self.classification not in ARTIFACT_CLASS:
             out.append(F.problem(F.SCHEMA_ENUM, f"{path}.classification",
                                  f"{where}: classification {self.classification!r} is not one of "
@@ -1273,8 +1319,23 @@ class Project:
                                           f"requirement {requirement.name!r}: artifact_id "
                                           f"{requirement.artifact_id!r} names no source artifact"))
 
+        seen_artifacts: set[str] = set()
         for index, artifact in enumerate(self.source_artifacts):
             problems.extend(artifact.problems(project_dir, index))
+            # 6.2: "Every imported or generated artifact has a stable identity."
+            # `artifact()` returns the first row matching an id, so two rows
+            # under one id are two answers to what that file is -- and the role
+            # rule below rests entirely on which answer wins. Declared BASE then
+            # MATING_OBJECT, an edit scope over it validated clean; swap the
+            # rows and it was refused. Order decided, silently.
+            if artifact.artifact_id in seen_artifacts:
+                problems.append(F.problem(
+                    F.REF_DUPLICATE, f"source_artifacts[{index}].artifact_id",
+                    f"source artifact {artifact.artifact_id!r} is declared "
+                    "twice. An identity two rows answer to is not one, and "
+                    "every reference to it resolves to whichever was written "
+                    "first"))
+            seen_artifacts.add(artifact.artifact_id)
         # What a datum's `valid_for` may name: the rows a scope can be measured
         # against. ADR 0003 decision 3 says artifacts, components and interfaces,
         # and a scope naming none of them is a scope no edit can ever satisfy.
@@ -1349,10 +1410,23 @@ class Project:
         declared_datums = {d.datum_id: d for d in self.datums}
         for index, scope in enumerate(self.edit_scopes):
             problems.extend(scope.problems(index))
-            if self.artifact(scope.artifact_id) is None:
+            edited = self.artifact(scope.artifact_id)
+            if edited is None:
                 problems.append(F.problem(F.REF_UNDECLARED, f"edit_scopes[{index}].artifact_id",
                                           f"{scope.where}: artifact_id names no source "
                                           "artifact"))
+            # A role declared is a role kept. Silence stays silence: an artifact
+            # that declared none is a question nobody asked, not permission
+            # granted, and every project recorded before the field existed is in
+            # that state.
+            elif str(edited.role).strip() and edited.role not in EDITABLE_ROLE:
+                problems.append(F.problem(
+                    F.INTENT_CONTRADICTION, f"edit_scopes[{index}].artifact_id",
+                    f"{scope.where}: {scope.artifact_id!r} is declared "
+                    f"{edited.role}, which is geometry this job reads rather "
+                    "than owns, and an edit scope over it compiles a "
+                    "preservation row -- so the run would go on to measure "
+                    "whether somebody else's object survived our edit"))
             if scope.artifact_id in scoped:
                 problems.append(F.problem(F.REF_DUPLICATE, f"edit_scopes[{index}].artifact_id",
                                           f"{scope.where}: this artifact_id is declared "
@@ -1667,6 +1741,11 @@ def from_payload(payload: dict[str, Any]) -> Project:
                            sha256=row.get("sha256"), format=row.get("format"),
                            units=row.get("units"),
                            classification=row.get("classification"),
+                           # `or ""`, not a `""` default: `"role": null` is how
+                           # this row's other optionals spell "not stated", and
+                           # `str(None)` is the string "None", which was then
+                           # refused as a role nobody wrote.
+                           role=str(row.get("role") or ""),
                            note=str(row.get("note", "")))
             for row in _rows(payload.get("source_artifacts"), "source_artifacts")),
         interfaces=tuple(

@@ -729,7 +729,9 @@ class ADatumSurvivesTheRoundTripTest(unittest.TestCase):
     """A declaration that does not serialize is a declaration for one process."""
 
     def test_a_project_with_no_datums_gains_no_key(self) -> None:
-        """`ROADMAP.md` 3.4: a job declaring none costs what it cost before."""
+        """`ROADMAP.md` 4.4: a job that declares no alternative "gains no key in
+        `project.json`, the execution plan or the review envelope". 3.4, which an
+        earlier version of this cited, is about AI round trips."""
         self.assertNotIn("datums", _placed().as_payload())
 
     def test_the_scope_list_serializes_as_a_list(self) -> None:

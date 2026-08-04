@@ -434,7 +434,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1085 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1096 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -1526,6 +1526,18 @@ The scope is checked against what the job declares, and against everything the e
 
 **Evidence.** 37 L0 fixtures, none of which builds geometry. 37 mutations of the protections were attempted and 37 were killed, including the `EXPERIMENTAL_UNAVAILABLE` cap the paragraph above rests on. One mutation survived the first sweep — `is_assumption` carried a `not self.derived_from` clause no test could distinguish from its absence, because a `CHOSEN` datum naming a revision is already refused elsewhere — and the redundant clause was deleted rather than given a fixture, on the grounds that a second copy of a rule is a second authority over one question. The gate is 1066 passing at this slice, up from 1014, against the 13 pre-existing Linux platform failures which are unmoved: HEAD was run in a separate worktree in the same session and fails the identical 13. L0-heavy is 357 passed and 9 skipped in 680 s, which is where `test_the_shipped_goldens_are_untouched` proves the five pinned certified contracts did not move for the new contract key — the absent-when-empty rule holding, measured rather than argued. L1 replay is 66 passed and 47 subtests in 55 s, unchanged.
 
+**Delivered slice: source-artifact roles.** This section asks for "source-specific roles" and names five; `ARCHITECTURE.md` 6.2 names eight and calls them typical. Neither was implemented, so every supplied file was the same kind of thing: geometry this job may do as it likes with.
+
+The fail-open, measured before the fixture was written, on a constructed case — no fixture here yet supplies a third-party mating object. A vent mount clips into a car's air vent; the vent is supplied so the mount can be fitted to it, and it is not ours to change. `Project.validate` on that job reported nothing at `edit_scopes[0].artifact_id`. That is not a tidy-declaration complaint — an edit scope compiles a preservation row, so the run would have gone on to measure *whether the car's vent survived our edit*: deterministic, reproducible, and about an object the job does not own. A receipt like that is worse than no receipt, because it reads as evidence.
+
+Where that is measured matters, and the first version of this paragraph got it wrong: it quoted `EditScope(...).problems()`, which returns empty for this scope **after** the fix too, because a scope alone cannot know what it is editing. The defect was real and the sentence described a surface the fix does not touch — the same wrong-surface error recorded two slices above, repeated in the next slice written.
+
+`SOURCE_ROLE` is 6.2's eight as a closed set, and `EDITABLE_ROLE` is the four whose geometry the job owns — base, donor, prior revision, alternative candidate. The other four exist to be read: what the part mates with, what it was measured against, the space it must fit inside, and a file already handed downstream. The role is **optional**, because every project recorded before the field existed declares none and requiring it would refuse all of them for a field they do not use; it is absent from `as_dict` when empty for the same reason. Silence stays silence — an artifact that declared no role is a question nobody asked, not permission granted. What the obligation buys is that a role *declared* is a role *kept*.
+
+A second finding closed here is older than this slice: `source_artifacts` had no duplicate-id check where requirements, datums and edit scopes all have one, and `Project.artifact()` returns the first row matching an id. So declaring one file twice — first `BASE`, then `MATING_OBJECT` — let an edit scope over it validate clean, and swapping the two rows refused it. Whether the vent could be edited depended on declaration order. The new rule rests entirely on identity, so the identity check is part of it.
+
+13 L0 fixtures; 8 mutations attempted and 8 killed. One survived first and the fix is worth recording: `test_every_architecture_role_is_accepted` iterated `SOURCE_ROLE` and asserted each member loads clean, which cannot fail — shrink the constant to three and the loop checks three, so a mutation dropping five roles survived. It now reads 6.2's bullet list out of `ARCHITECTURE.md` and asserts the constant equals it, in order: the anti-drift shape `test_documentation.py` already uses for ADR 0001's verb block, and the answer to two hand-written lists being two authorities over one vocabulary.
+
 **Delivered slice: the region disposition obligation.** The other half of the pair above, and the same shape of defect. An `EditScope` carried three lists of region names and nothing compared them, so one name could be declared must-preserve, removable and added at once and `problems()` returned empty — measured before the fixture was written. All of those lists reach the frozen acceptance contract, so the review envelope carried a declaration saying a region must survive *and* that it may go, while the preservation audit read one list and a person read the note. Two authorities over one region, which is ADR 0003's two copies of one number with a different noun.
 
 Every pair is now reported rather than the first, because fixing whichever collision a run happened to name would leave the job still contradicting itself and the next run would report the next pair — which reads as a new defect rather than the rest of the old one. `add` takes part in the comparison and is not one of the three dispositions: it says the geometry does not exist yet, so a name it shares with any disposition is a job claiming a region both does and does not exist.
@@ -2455,7 +2467,7 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 1085 tests in about 56 s on this
+Run on every commit: `uv run pytest`, 1096 tests in about 57 s on this
 machine. The count moves with every slice; what is enforced is
 `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240.
 
