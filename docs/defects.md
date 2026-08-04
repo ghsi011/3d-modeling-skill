@@ -575,10 +575,12 @@ formulation and report the remainder as the whole.
 
 **What would close it.** Iterate the union in `status` as `cost` already does,
 and stop discarding the three derived fields. Deliberately **not** done in the
-commit that found it: `status --json` is read by `tools/replay.py`, the L1
-replay suite cannot execute on Linux (`confine.py:464`), and changing a
-golden-feeding command on a platform that cannot run the goldens is how a
-recording gets broken. It is a Windows-host follow-up, and small.
+commit that found it, for a reason that has since expired: at the time the L1
+replay suite could not execute on Linux at all, and changing a golden-feeding
+command on a platform that cannot run the goldens is how a recording breaks.
+`pipeline/confine_posix.py` removed that constraint — the suite now runs here and
+reproduces its digests — so this is ordinary work on any platform, and what
+remains is only that nobody has done it.
 
 **Fixture that must fail first.** A branched project where
 `len(status_report["alternatives"]) + 1 == len(status_report["cost"]["by_alternative"])`,

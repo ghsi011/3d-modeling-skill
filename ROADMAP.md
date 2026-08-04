@@ -77,7 +77,7 @@ Two things are still platform-bound and both are Windows assumptions in tests
 rather than defects: 13 L0 tests fail on Linux — 11 subtests in
 `tools/test_fixtures.py::TheWallBetweenRequestAndAnswer`, whose absolute-path
 detector looks for `C:\...`, and two in `tools/test_tiers.py::TheSpawnGuardTest`
-that construct a Windows command line. 907 pass.
+that construct a Windows command line. The rest of the gate passes; the count moves with every slice and is reported in each commit rather than pinned here, where it goes stale silently.
 
 The following work is already complete and is treated as the protected baseline.
 
@@ -1249,8 +1249,10 @@ Everything else the old list named goes in `not_compared` with its owner.
 
 Select one as preferred while retaining the other as fallback. **Still owed:**
 the two `design-tool branch --disposition` calls that do it, and the `compare`
-step in the replay recording. Both are blocked on a Windows host — see §2's
-platform note.
+step in the replay recording. Both were blocked on a Windows host when this was
+written; `pipeline/confine_posix.py` unblocked them, and §2 now records that the
+L1 suite runs on Linux and reproduces its goldens. What is left is the work
+itself.
 
 ## Release 5 — Multi-source edit and combination model
 
