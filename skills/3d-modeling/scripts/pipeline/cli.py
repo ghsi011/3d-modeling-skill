@@ -1767,12 +1767,34 @@ def status(argv: list[str]) -> int:
     # that directory's own bindings, so switching branches is not the price of
     # finding out where the other one stands.
     alternatives = []
-    for row in project.alternatives:
-        other = (derived if row.alternative_id == project.active_alternative
-                 else _derived_at(project_dir, project, row.alternative_id))
+    # The union: the shared root plus every declared alternative. `branch` writes
+    # no row for the root -- it is a formulation by having a directory, a
+    # proposal, a contract and its own receipts, not by being declared -- and
+    # iterating `project.alternatives` alone reported two formulations of the
+    # recorded knob while the `cost` block below reported three. One report, two
+    # answers to "what is this job". `docs/defects.md` D26.
+    #
+    # Synthesised here and not in `project.json`: a declared row for the root
+    # would make it a thing a user could reject or supersede, and would move
+    # what every existing project deserialises to.
+    root_row = P.Alternative(alternative_id=ROOT_ALTERNATIVE,
+                             reason="the shared root: what the alternatives "
+                                    "were branched from")
+    for row in (root_row, *project.alternatives):
+        at = None if row.alternative_id == ROOT_ALTERNATIVE else row.alternative_id
+        other = (derived if at == project.active_alternative
+                 else _derived_at(project_dir, project, at))
+        # All five, not two. `_derived_at` computes `allowed_claim`, `stale` and
+        # `reasons` as well, and dropping them made per-formulation staleness
+        # unreadable from the report -- `tools/replay.py` had to issue `branch
+        # --activate` and `status` once per formulation to recover what one call
+        # already knew.
         alternatives.append({**row.as_dict(),
                              "status": other["derived_status"],
-                             "stored_status": other["stored_status"]})
+                             "stored_status": other["stored_status"],
+                             "allowed_claim": other.get("allowed_claim"),
+                             "stale": sorted(other.get("stale") or {}),
+                             "reasons": list(other.get("reasons") or ())})
     # What FALLBACK means to a reader, which is the only thing that separates it
     # from ACTIVE. A retained formulation is the answer to "and if this one does
     # not work out", so it is named exactly when that question is live: the

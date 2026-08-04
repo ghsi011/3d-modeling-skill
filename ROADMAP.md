@@ -2427,7 +2427,9 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 838 tests in 43 s.
+Run on every commit: `uv run pytest`, 975 tests in about 60 s on this
+machine. The count moves with every slice; what is enforced is
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1050.
 
 Which tier a test is collected in is structural. `testpaths` in `pyproject.toml`
 names `skills/3d-modeling/scripts` and `tools`; `benchmarks/heavy` and
@@ -2459,7 +2461,7 @@ Protect:
 **L0-heavy — the component fixtures that cost a process**
 
 Run on pull requests and before merge, on the same trigger as L1:
-`uv run pytest benchmarks/heavy`, 353 tests in about 15 minutes.
+`uv run pytest benchmarks/heavy`, 357 tests in about 13 minutes.
 
 Not a fourth rung. It is the part of L0 that cannot be paid on every commit — the
 two command surfaces, the confined build boundary, the packaging and bundle
@@ -2480,10 +2482,11 @@ envelope of the packet the current run issued and a recorded answer survives a
 protocol bump instead of being refused by one. A case may declare several
 formulations, in which case the harness reaches each through `design-tool branch`
 and reads what each one's receipts currently support through `design-tool
-status`. Three of the list below are covered today — original design,
-modification, and alternative *formulation* in the sense this release ships it
-(siblings isolated on disk and in the review bindings; not comparison, which
-Release 4 owns) — and the rest are recorded as the releases that build them land.
+status`. Four of the list below are covered today — original design, modification,
+alternative *formulation* (siblings isolated on disk and in the review
+bindings), and, since Release 4 slice 2, alternative *comparison*: the branched
+case runs `design-tool compare` after every formulation settles and freezes what
+it claims. The rest are recorded as the releases that build them land.
 
 Cover:
 

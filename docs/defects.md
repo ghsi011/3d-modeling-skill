@@ -586,6 +586,32 @@ remains is only that nobody has done it.
 `len(status_report["alternatives"]) + 1 == len(status_report["cost"]["by_alternative"])`,
 asserted to become equal.
 
+**Status: FIXED.** `cli.status` iterates the union -- the shared root plus every
+declared alternative -- and the root's row is synthesised in the report rather
+than written into `project.json`. That distinction is the whole of the fix's
+scope: a declared row for the root would make it a thing a user could reject or
+supersede, and would move what every existing project deserialises to. It goes
+through the same `Alternative.as_dict()` as any other row, so a basis nobody set
+is absent rather than empty, and the root is a formulation rather than a special
+case.
+
+The quieter half is closed too: all five fields `_derived_at` computes reach the
+report, so per-formulation staleness is readable from one call.
+
+**Fixture:** `pipeline/test_alternatives.py::OneJobHasOneFormulationCountTest`,
+three tests. Before the fix the counts are 3 against 4 and the `stale` field is
+absent; two mutations were attempted -- the root dropped from the union, and the
+three derived fields dropped again -- and both were caught.
+
+**What the fix did *not* move, which is worth recording.** The L1 recordings did
+not change. `tools/replay.py`'s `_derive_all` never read the broken block: it
+issues `branch --activate` and `status` once per formulation and reads
+`final_status`/`stored_status`/`stale` from each. So the harness's workaround is
+also the reason the goldens were never exposed to the defect. That workaround
+can now be one call, which would also stop a replay leaving the project parked
+on whichever formulation it activated last -- separate work, because it changes
+the recorded exit sequence.
+
 ## D27 — the comparison's material axis read a shape no run has ever written
 
 **Where.** [`pipeline/compare.py`](../skills/3d-modeling/scripts/pipeline/compare.py):474,

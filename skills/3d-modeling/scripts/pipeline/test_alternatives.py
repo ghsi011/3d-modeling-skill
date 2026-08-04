@@ -426,5 +426,98 @@ class BranchVerbTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class OneJobHasOneFormulationCountTest(unittest.TestCase):
+    """`docs/defects.md` D26: `status` counted the job two different ways.
+
+    `design-tool branch` writes no `alternatives` row for the shared root -- the
+    root is a formulation by having a directory, a proposal, a contract and its
+    own receipts, not by being declared. So the `alternatives` block iterated
+    `project.alternatives` and saw two formulations of the recorded knob while
+    the `cost` block in the same report iterated the union and saw three. One
+    report, two answers to "what is this job".
+
+    The quieter half is here too. `_derived_at` returns five fields --
+    `derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons` --
+    and the loop kept two, so per-formulation staleness was unreadable from the
+    report. `tools/replay.py` is the proof it was missed: to record what each
+    formulation currently supports the harness had to issue `branch --activate`
+    and `status` once per formulation, because one `status` call could not say.
+    """
+
+    def _status(self, directory: Path) -> dict:
+        import contextlib
+        import io
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(0, cli.status([str(directory), "--json"]))
+        return json.loads(stream.getvalue())
+
+    def _job(self, root: Path) -> Path:
+        directory = _laid_out(root)
+        _author(directory, "ancestor", **SCREW)
+        for name in ("snap-fit", "magnetic"):
+            self.assertEqual(0, _branch(directory, parent=".", name=name,
+                                        reason=f"the {name} concept"))
+        return directory
+
+    def test_the_two_blocks_of_one_report_count_the_same_formulations(self) -> None:
+        """The defect, as the arithmetic that exposed it.
+
+        Fails before the fix with 3 against 4: `cost.by_alternative` carries the
+        root and `alternatives` does not.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+
+            named = {row["alternative_id"] for row in report["alternatives"]}
+            costed = set(report["cost"]["by_alternative"])
+            self.assertEqual(
+                costed, named,
+                "one job, one set of formulations. A caller taking its set from "
+                "`alternatives` silently drops the shared root, which on the "
+                "recorded knob is one of the two designs")
+            self.assertIn(cli.ROOT_ALTERNATIVE, named,
+                          "the root is a formulation: it has a directory, a "
+                          "proposal, a contract and its own receipts")
+
+    def test_the_root_is_named_as_a_formulation_and_not_as_a_row_branch_wrote(self) -> None:
+        """It has no declared row, and `branch` must not start writing one.
+
+        The fix is to iterate the union in the report, not to invent an
+        `alternatives` entry in `project.json` -- that would make the root a
+        thing a user could reject or supersede, and change what every existing
+        project deserialises to.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._job(Path(raw))
+            report = self._status(directory)
+
+            self.assertEqual(
+                ("snap-fit", "magnetic"),
+                tuple(a.alternative_id for a in P.load(directory).alternatives),
+                "project.json still declares exactly the two branches")
+            root = next(row for row in report["alternatives"]
+                        if row["alternative_id"] == cli.ROOT_ALTERNATIVE)
+            self.assertEqual("ACTIVE", root["disposition"])
+            # Absent rather than empty, because that is what `Alternative.as_dict`
+            # does with a basis nobody set -- the rule that keeps a project from
+            # moving for a field it never carried. The root goes through the same
+            # serialisation as any other row rather than a second one written for
+            # it, which is the point: it is a formulation, not a special case.
+            self.assertNotIn("basis", root)
+
+    def test_each_formulation_reports_what_stopped_binding_and_not_only_its_status(self) -> None:
+        """The half `tools/replay.py` had to work around one command at a time."""
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+            for row in report["alternatives"]:
+                with self.subTest(formulation=row["alternative_id"]):
+                    for field in ("status", "stored_status", "stale",
+                                  "allowed_claim"):
+                        self.assertIn(field, row)
+                    self.assertIsInstance(row["stale"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
