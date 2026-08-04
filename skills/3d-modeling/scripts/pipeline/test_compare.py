@@ -808,6 +808,53 @@ class TheMaterialAxisReadsTheShapeARunWritesTest(unittest.TestCase):
         self.assertIsNone(SCR.detector(report, "components"))
         self.assertIsNone(SCR.detector({}, "volume"))
 
+    def test_the_list_reader_is_the_one_every_caller_goes_through(self) -> None:
+        """`detector` is a lookup on top of it, not a second implementation.
+
+        The first fix for D27 said "the single reader" and left
+        `tools/replay.py` subscripting `screening["detectors"]` by hand -- inside
+        the very function the defect record claimed had been routed through the
+        pipeline. A review caught it. So the list itself is the reader, and the
+        by-name lookup is built on it: neutering `detectors` has to take
+        `detector` with it, or the claim is two readers again.
+        """
+        rows = [{"detector": "volume", "result": "CLEAR"},
+                {"detector": "bed-plane", "result": "CLEAR"},
+                "not a row"]
+        self.assertEqual(
+            ["volume", "bed-plane"],
+            [row["detector"] for row in SCR.detectors(self._report(rows))],
+            "in the order `run` wrote them, with a non-dict dropped rather "
+            "than crashing a reader that only wanted one row")
+        self.assertEqual([], SCR.detectors({}))
+        with self.assertRaises(SCR.ScreeningShapeUnexpected):
+            SCR.detectors(self._report({"volume": {"detector": "volume"}}))
+
+    def test_every_uncomparable_dimension_carries_a_stable_id(self) -> None:
+        """The row's prose is a sentence; the key a recording holds must not be.
+
+        `tools/replay.py` froze `not_compared` keyed on `dimension`, and a
+        review showed that rewording "geometric difference between
+        formulations" to "geometric differences between the formulations" turned
+        a frozen recording BINDING-red -- pinning the prose the harness had just
+        finished saying it does not pin.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "a", "b")
+            for name in ("a", "b"):
+                formulation(directory / P.ALTERNATIVES_DIR / name, bodies=3)
+            formulation(directory, bodies=3)
+
+            _, payload = _run(directory)
+            rows = payload["not_compared"]
+            ids = [row["dimension_id"] for row in rows]
+            self.assertEqual(sorted(set(ids)), sorted(ids),
+                             "an id that repeats is an id a mapping collapses")
+            for row in rows:
+                with self.subTest(dimension=row["dimension"]):
+                    self.assertRegex(row["dimension_id"], r"^[a-z0-9-]+$")
+            self.assertIn("assembly", ids)
+
     def test_the_comparison_carries_the_volume_off_a_real_shaped_receipt(self) -> None:
         """End to end through `report`, which is where the crash was."""
         with tempfile.TemporaryDirectory() as raw:

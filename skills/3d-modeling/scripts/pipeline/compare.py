@@ -587,7 +587,8 @@ def not_compared(project: P.Project,
     absent, not zero, and not "1 vs 1".
     """
     rows: list[dict[str, str]] = [
-        {"dimension": "geometric difference between formulations",
+        {"dimension_id": "geometric-difference",
+         "dimension": "geometric difference between formulations",
          "standing": CONTEXT,
          "reason": "nothing in this build measures one formulation against "
                    "another. Surface distance, interference and region "
@@ -595,13 +596,15 @@ def not_compared(project: P.Project,
                    "was measured against its own contract and never against a "
                    "sibling.",
          "owner": "Release 6"},
-        {"dimension": "print time and support toolpaths",
+        {"dimension_id": "print-time",
+         "dimension": "print time and support toolpaths",
          "standing": CONTEXT,
          "reason": "there is no slicer adapter in this stack and there is not "
                    "going to be one (status.SLICER_DEPENDENT). A number here "
                    "would be fabricated rather than deferred.",
          "owner": "permanently absent"},
-        {"dimension": "strength, serviceability, adjustability, irreversibility",
+        {"dimension_id": "engineering-judgment",
+         "dimension": "strength, serviceability, adjustability, irreversibility",
          "standing": CONTEXT,
          "reason": "no instrument anywhere in this build. 8.5 requires a "
                    "comparison to distinguish objective measurements from "
@@ -617,6 +620,7 @@ def not_compared(project: P.Project,
         if modifier == "supports":
             continue                        # already carried by the row above
         rows.append({
+            "dimension_id": f"modifier-{modifier}",
             "dimension": f"{modifier} boundary",
             "standing": DECIDING,
             "reason": f"this job declares the {modifier!r} modifier, and "
@@ -626,6 +630,7 @@ def not_compared(project: P.Project,
 
     if project.source_mode == "MODIFY" or project.edit_scopes:
         rows.append({
+            "dimension_id": "preservation",
             "dimension": "preservation of supplied geometry",
             "standing": DECIDING,
             "reason": "this job modifies supplied geometry, so preservation is "
@@ -646,6 +651,7 @@ def not_compared(project: P.Project,
     if any(isinstance(n, (int, float)) and n > 1 for n in bodies) \
             or len(project.components or ()) > 1:
         rows.append({
+            "dimension_id": "assembly",
             "dimension": "assembly sequence, effort, tooling and hardware count",
             "standing": DECIDING,
             "reason": "this job has more than one body or component, so these "

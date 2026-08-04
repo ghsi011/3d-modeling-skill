@@ -1049,10 +1049,23 @@ class TheBuiltCandidateTest(_AttackTest):
         deletes, which is the step that makes deleting possible at all.
         """
         pattern = "design-tool-sandbox-*"
-        before = set(Path(tempfile.gettempdir()).glob(pattern))
+        temp = Path(tempfile.gettempdir())
+        before = set(temp.glob(pattern))
         _work, built = self._build()
         self.assertTrue(built.stl_path.is_file())
-        self.assertEqual(before, set(Path(tempfile.gettempdir()).glob(pattern)),
+
+        # Set difference in one direction only, and this is not fussiness. The
+        # sandbox name lives in a directory every process on the machine shares,
+        # so an equality here is an assertion about the whole machine: a build
+        # running anywhere else between the two globs fails this test with
+        # nothing wrong. That happened -- the heavy tier reported this red while
+        # an independent review was running the L0 and L1 suites in the same
+        # checkout, and it passed on a clean re-run and under a builder started
+        # deliberately alongside it, so the failure was never reproducible on
+        # demand and cost an investigation. What this test is entitled to say is
+        # that no sandbox *this build* created is still there.
+        survivors = set(temp.glob(pattern)) - before
+        self.assertEqual(set(), survivors,
                          "a build sandbox survived the build")
 
     def test_a_model_that_printed_before_it_failed_has_its_output_reported(self) -> None:

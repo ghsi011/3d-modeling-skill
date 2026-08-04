@@ -81,8 +81,7 @@
       "y": 38.0,
       "z": 50.0
     },
-    "volume_mm3": 45848.947,
-    "volume_result": "NOT_APPLICABLE"
+    "volume_mm3": 45848.947
   },
   "measured": {
     "bodies": 1,
@@ -134,7 +133,7 @@
     "project.json",
     "route_decision.json"
   ],
-  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
+  "recorded_at": "02ab3465bcda9c70e4c8f62ed9522b5f3c793363",
   "reviews_answered": [],
   "schema_version": 1,
   "screening_detail": {

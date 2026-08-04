@@ -420,6 +420,31 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         self.assertEqual("COMPARABLE", run.comparison["mandatory_verdict"])
         self.assertIsNone(run.comparison["ranking"])
 
+    def test_a_ranking_under_any_name_at_all_moves_the_recording(self) -> None:
+        """ADR 0005 pinned by shape, not by two literal field names.
+
+        Measured by a review of the commit that added `_comparison_marks`:
+        adding `rank_order` and `overall_score` to the report left the whole
+        gate green -- 86 passed -- because `ranking` and `score` were pinned by
+        name and the payload's shape was not. A ranking arriving under a name
+        nobody thought to forbid is exactly the change this recording exists to
+        refuse, so the top-level key set is recorded and compared exactly.
+        """
+        honest = {"compared": ["."], "ranking": None, "score": None,
+                  "built_nothing": True, "axes": {}}
+        smuggled = {**honest, "rank_order": [".", "b"], "overall_score": 0.87}
+
+        self.assertEqual(["axes", "built_nothing", "compared", "ranking", "score"],
+                         RP._comparison_marks(honest)["payload_keys"])
+        differences = RP.compare(
+            {"formulations": {}, "comparison": RP._comparison_marks(honest)},
+            {"formulations": {}, "comparison": RP._comparison_marks(smuggled)})
+        self.assertTrue(
+            [row for row in differences
+             if row.severity == RP.BINDING and "payload_keys" in row.where],
+            "a report that grew a ranking under another name must move the "
+            "recording, or the guarantee is two field names rather than a rule")
+
     def test_an_unbranched_case_issues_no_comparison_at_all(self) -> None:
         """`compare` refuses a job with one formulation, and rightly.
 

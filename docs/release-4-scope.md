@@ -6,13 +6,16 @@
 > This document was written by one agent in one pass and was never reviewed. Its
 > citations have since been checked one by one. Most held. What did not:
 >
-> * **§4(C)'s material-use table is unsourced.** The two solid volumes
->   (47,526.263 mm³ and 49,792.874 mm³) and the +4.77% derived from them appear
->   nowhere in this repository. `tools/replay.py`'s `_observe_dir` records the
->   volume detector's *result* and discards its `measured_mm3`, so nothing
->   committed can reproduce them. They are the whole of §5's second argument,
->   and they should be treated as unverified until a recording freezes the
->   number.
+> * ~~**§4(C)'s material-use table is unsourced.**~~ **Withdrawn 2026-08-04, and
+>   the table was right.** The finding was correct when written: `_observe_dir`
+>   recorded the volume detector's *result* and discarded its `measured_mm3`, so
+>   nothing committed could reproduce 47,526.263 mm³ against 49,792.874 mm³. It
+>   said they should be treated as unverified "until a recording freezes the
+>   number". Release 4 slice 2 freezes it, and a replay of
+>   `branch-knob-seat-fallback` produces both figures to the digit, along with
+>   the 38×38×50 and 38×38×52 envelopes. The document was accurate and the
+>   repository was not; §5's second argument stands. The two findings below are
+>   unaffected.
 > * **§1's "`cli.py:1754` builds a table over *every* formulation" is false.**
 >   The loop is over `project.alternatives`, and `branch` writes no row for the
 >   shared root — so `status` reports two formulations where `cost.compare` in

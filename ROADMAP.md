@@ -68,10 +68,22 @@ asserted:
 | authority reduction | restricted token, same user | empty capability bounding set, same user |
 
 The strongest evidence that the Linux boundary is not the weaker one is not any
-of those rows: it is that **the L1 replay suite produces byte-identical goldens
-through it**. 57 passed, 43 subtests, ~80 s against a two-minute budget — the
-same numbers the reference Windows machine reports, against recordings frozen on
-Windows and not re-recorded. A boundary that leaked would not reproduce a digest.
+of those rows: it is that **the L1 replay suite reproduces every value the
+Windows recordings froze**. A boundary that leaked would not reproduce a digest.
+
+The exact shape of that evidence changed when Release 4's slice 2 landed, and
+saying so matters more than keeping the older, simpler sentence. This paragraph
+used to read "against recordings frozen on Windows and not re-recorded" — which
+was true until that slice re-recorded all four cases on Linux to add the compare
+step. The claim available now is different and stronger: the Linux re-record was
+diffed key by key against the Windows-frozen recordings and **changed no value
+any of them held** — 0 keys removed and 0 values changed across four cases,
+every difference an addition. Reproducing a recording is evidence; reproducing
+one you then rewrite and finding you rewrote nothing is the same evidence with
+the digests checked one at a time.
+
+Current: 61 passed, 43 subtests, ~52 s against a two-minute budget. The count
+moves with every slice and is reported in each commit.
 
 Two things are still platform-bound and both are Windows assumptions in tests
 rather than defects: 13 L0 tests fail on Linux — 11 subtests in
@@ -1059,16 +1071,40 @@ The general lesson, and the reason this slice was worth its cost: **a fixture
 written from a reader tests the reader against itself.** The tier that catches
 this class is one that runs the verb against receipts a real pipeline wrote.
 
-**What the recording now protects.** `material` — `volume_mm3`, `bbox_mm` and
-the volume detector's own result — per formulation, compared inside a band
-because they come off a tessellator. And the comparison's *claims*: the
-mandatory verdict, both verdicts per formulation, the compared set,
-`identical_designs`, `same_requirement_digest`, `preference.admissible`, every
-`not_compared` dimension with its standing, and `ranking` and `score` pinned as
-`null` — ADR 0005's two forbidden fields, moved out of a docstring and into a
-frozen recording, so acquiring a value is a red test rather than a code review
-somebody may or may not do. The report's prose is recorded by no key: a reworded
-explanation is not a regression.
+**What the recording now protects.** `material.volume_mm3` per formulation,
+compared inside a band because it comes off a tessellator, plus `bbox_mm` —
+which `measured.envelope` also carries, from a different writer, so the two
+agreeing is itself worth freezing. And the comparison's *claims*: the mandatory
+verdict, both verdicts per formulation, the compared set, `identical_designs`,
+`same_requirement_digest`, `preference.admissible`, the standing of each
+`not_compared` dimension the recorded job exercises, `ranking` and `score`
+pinned as `null`, and the payload's whole top-level key set. The report's prose
+is recorded by no key: a reworded explanation is not a regression.
+
+Three of those came from the independent review of this slice, and each closed
+something the slice had claimed and not delivered:
+
+* **ADR 0005 was pinned by name, not by shape.** Adding `rank_order` and
+  `overall_score` to the report left the entire gate green — 86 passed — so the
+  guarantee covered two literal field names rather than the rule. `payload_keys`
+  records `sorted(payload)` and is compared exactly, which is the anti-drift
+  shape already built for ADR 0001's verb list. Re-measured after the fix: the
+  same smuggled ranking now fails the recording.
+* **`not_compared` was keyed on its own English.** Rewording a dimension's
+  sentence turned the recording red — pinning the prose the harness had just
+  said it does not pin. Each row now carries a `dimension_id`.
+* **"the single reader" was false.** `tools/replay.py` still subscripted
+  `screening["detectors"]` by hand, inside the very function `docs/defects.md`
+  D27 said had been routed through the pipeline's reader. `screening.detectors`
+  is that reader and `detector` is a lookup on top of it.
+
+Two claims the review shortened. `material.volume_result` was deleted: it
+duplicated `screening_detail.detectors.volume`, and recording a value twice does
+not protect it twice. And of the five golden mutations reported, one — "the
+2 mm envelope fork erased" — was exercising `measured.envelope`, which was
+already frozen before this slice, so it demonstrated nothing new. The band it
+was measured against is 0.5% + 1e-3, which for this part is 237.63 mm³ against a
+2266.6 mm³ signal.
 
 **A second defect, found by the same first contact and not fixed here.**
 `identical_designs` is empty on the knob, where the root and `as-drawn` are one
@@ -1078,15 +1114,21 @@ fallback's model was revised after its run. `docs/defects.md` **D28**; the L1
 suite pins the silence so that fixing it turns a test red. Not fixed in this
 slice because it changes what a frozen recording says.
 
-**Evidence.** Re-recording all four cases moved nothing that was already
-recorded: 0 removed, 0 changed across the three unbranched cases, and on the
-branched one 38 additions and a single change — the root formulation's receipt
-list gained `comparison.json`, which the verb writes at the project root, which
-is the root formulation's work directory. It joins `project.json` and `brief.md`,
-already listed there on the same footing. Five mutations of the new golden were
-attempted — the frozen volume nudged 1%, the envelope fork erased, a ranking
+**Evidence.** Re-recording all four cases moved no value any of them held: 0
+removed and 0 changed across the three unbranched cases, and on the branched one
+38 additions and a single change — the root formulation's receipt list gained
+`comparison.json`, which the verb writes at the project root, which is the root
+formulation's work directory. It joins `project.json` and `brief.md`, already
+listed there on the same footing. (`recorded_at` moves on every recording by
+construction; it is provenance and nothing compares it.)
+
+Mutations of the new golden, each caught: the frozen volume nudged 1%, a ranking
 introduced, the rubric verdict softened to `COMPARABLE`, the shared root dropped
-from the compared set — and five were caught. L1: 61 passed, 43 subtests, ~51 s.
+from the compared set. Then, after the review, a ranking smuggled in under names
+ADR 0005 does not spell — also caught, which it was not before.
+
+L1: 61 passed, 43 subtests, ~52 s. Heavy tier: 356 passed, 9 skipped, 183
+subtests, 11 min 40 s.
 
 `docs/defects.md` D26 is deliberately **not** fixed here for the same reason:
 `status --json` is read by the replay harness, and changing a golden-feeding
@@ -1289,6 +1331,13 @@ thing that actually decides is whether the mouth seats, which nobody has
 measured.
 
 Compare them on the dimensions this build has an instrument for:
+
+**What the L1 tier does and does not cover, since the list below reads as
+though it covers all of it.** `branch-knob-seat-fallback` is the only branched
+replay case and its `source_mode` is `NEW`, so the only `not_compared` rows it
+exercises are the three unconditional `CONTEXT` ones. The two `DECIDING` rows —
+preservation of supplied geometry, and the assembly row — have L0 coverage only.
+Gate 4.3 is met; the recorded evidence is narrower than the dimension list.
 
 * mandatory check-set and expectation agreement (the rubric question);
 * evidence completeness and inequality — derived status, staleness, screening

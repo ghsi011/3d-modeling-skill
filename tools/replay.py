@@ -1008,9 +1008,13 @@ def _compare_all(case: ReplayCase, project_dir: Path,
 
     What is kept is the report's *shape* -- the verdicts, the counts, the ids,
     the standing of every dimension nobody could compare. Not the prose, and not
-    `issued_against`, which carries a receipt digest per formulation and would
-    turn this recording into a second copy of the artifact hashes that
-    `outcome` already binds. See `_compare_block` for which half is binding.
+    `issued_against`: it carries a receipt digest per formulation, and a digest
+    moves with the tessellator that produced the mesh, which is the same reason
+    `determinism_marks` exists as a separate thing compared between two runs of
+    one commit rather than against a recording frozen at another. (An earlier
+    version of this docstring said `outcome` already binds those hashes. It does
+    not -- `expected.json` contains no digest at all -- and the real reason is
+    the one above.) See `_compare_block` for which half is binding.
     """
     if not case.branched:
         return {}
@@ -1047,10 +1051,20 @@ def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
     fields ADR 0005 says must never acquire a value, and a recording that
     watched everything except them would be silent about the one change that
     would matter most.
+
+    `payload_keys` is why that pinning is not merely a gesture. A review of the
+    commit that added this function measured the hole: adding `rank_order` and
+    `overall_score` to `compare.report`'s payload left the L1 suite *and* the L0
+    suite entirely green -- 86 passed -- because two literal names were pinned
+    and the report's shape was not. So the whole top-level key set is recorded
+    and compared exactly, which is the anti-drift shape this repository already
+    built for ADR 0001's verb list. A ranking cannot now arrive under a name
+    nobody thought to forbid.
     """
     axes = payload.get("axes") or {}
     mandatory = axes.get("mandatory") or {}
     return {
+        "payload_keys": sorted(payload),
         "compared": payload.get("compared"),
         "built_nothing": payload.get("built_nothing"),
         "ranking": payload.get("ranking"),
@@ -1074,7 +1088,12 @@ def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
                                     or {}).get("same_requirement_digest"),
         "preference_admissible": (payload.get("preference")
                                   or {}).get("admissible"),
-        "not_compared": {row.get("dimension"): row.get("standing")
+        # Keyed on `dimension_id`, not on `dimension`. The first version of this
+        # keyed on the English sentence, which a review demonstrated turns the
+        # recording BINDING-red on a reworded explanation -- exactly the
+        # regression the docstring above says this function avoids. The ids were
+        # added to `compare.not_compared` for this.
+        "not_compared": {row.get("dimension_id"): row.get("standing")
                          for row in payload.get("not_compared") or ()},
     }
 
@@ -1164,16 +1183,26 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
     return payload
 
 
-def _volume_row(report: dict[str, Any]) -> dict[str, Any] | None:
-    """The volume detector's row, through the pipeline's own reader.
+def _screening_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every detector row, through the pipeline's own reader.
 
     Late import for the reason `command_surface` gives. The point of going
-    through `screening.detector` rather than subscripting is that the harness
+    through `screening.detectors` rather than subscripting is that the harness
     then reads the receipt the same way the product does -- which is exactly the
-    agreement `docs/defects.md` D27 turned out not to have.
+    agreement `docs/defects.md` D27 turned out not to have. The first attempt at
+    that fix routed *this* function through the reader and left `_observe_dir`'s
+    `screening_detail` still subscripting the receipt by hand; a review caught
+    it, and both go through here now.
     """
     from pipeline import screening
-    return screening.detector(report, "volume")
+    return screening.detectors(report)
+
+
+def _volume_row(report: dict[str, Any]) -> dict[str, Any]:
+    for row in _screening_rows(report):
+        if row.get("detector") == "volume":
+            return row
+    return {}
 
 
 def _observe_dir(directory: Path) -> dict[str, Any]:
@@ -1199,19 +1228,26 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
         and path.name not in NOT_A_RECEIPT)
 
     return {
-        # The two numbers `compare`'s material axis is computed from, and the
-        # only reason they are a block of their own: `screening_detail` below is
-        # compared exactly, and these are floats off a tessellator. Frozen here
-        # because ROADMAP.md's Release 4 said the material figure stays
-        # unverifiable prose until they are -- `_observe_dir` recorded the volume
-        # detector's *result* and discarded its measurement, so the one number
-        # that discriminates the seated knob from the as-drawn one was frozen
-        # nowhere. Read through `screening.detector`: this recording is the
-        # protection that caught `docs/defects.md` D27, and reading the receipt
-        # by subscript here would have reproduced the defect in the harness.
+        # `volume_mm3` is the one number `compare`'s material axis adds that no
+        # other block here already froze, and it is a block of its own because
+        # `screening_detail` below is compared exactly while this is a float off
+        # a tessellator. ROADMAP.md's Release 4 said the material figure stays
+        # unverifiable prose until it is frozen: `_observe_dir` recorded the
+        # volume detector's *result* and discarded its measurement, so the one
+        # number that discriminates the seated knob from the as-drawn one was
+        # frozen nowhere.
+        #
+        # `volume_result` and `bbox_mm` were here too until a review pointed out
+        # that both were already recorded -- the detector's result exactly under
+        # `screening_detail.detectors.volume`, and the envelope at band under
+        # `measured.envelope`. Recording a value twice does not protect it twice;
+        # it makes a reader who finds the two disagreeing unable to say which is
+        # the recording. `bbox_mm` stays only because `compare` reads it from
+        # `artifact_manifest.json` and `measured.envelope` comes off the
+        # commission report, so the two have different writers and agreeing is
+        # a fact worth freezing. The detector result had one writer and is gone.
         "material": {
-            "volume_mm3": (_volume_row(report) or {}).get("measured_mm3"),
-            "volume_result": (_volume_row(report) or {}).get("result"),
+            "volume_mm3": _volume_row(report).get("measured_mm3"),
             "bbox_mm": (_read(directory, "artifact_manifest.json")
                         or {}).get("bbox_mm"),
         },
@@ -1238,7 +1274,7 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
             # four answers, so a detector that stopped running and one that
             # started clearing everything both leave it exactly where it was.
             "detectors": {row.get("detector"): row.get("result")
-                          for row in screening.get("detectors", ())},
+                          for row in _screening_rows(report)},
         },
         "acceptance": {
             "revision": frozen.get("revision"),
@@ -1448,8 +1484,14 @@ def record(case_id: str, destination: Path) -> dict[str, Any]:
     """
     _, _, observed = run_case(case_id, destination)
     payload = {**observed, "recorded_at": _head()}
+    # `newline="\n"` explicitly, and `.gitattributes` stores this tree verbatim
+    # (`-text`). Without it a re-record on a different platform rewrites every
+    # line, and the first cross-platform re-record turned a 69-line change into
+    # a 1025-line diff -- which is the opposite of what reviewing a re-record
+    # needs, since the whole question is which values moved.
     (CASES_ROOT / case_id / EXPECTED_FILE).write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="\n")
     return payload
 
 
@@ -1468,7 +1510,7 @@ def reseal(case_id: str) -> dict[str, str]:
     payload["inputs_sha256"] = digests
     payload["recorded_at"] = _head()
     path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n",
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     return digests
 
 

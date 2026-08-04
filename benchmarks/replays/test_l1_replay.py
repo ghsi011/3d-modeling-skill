@@ -664,11 +664,17 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
                                msg="52 mm against 50 mm: the fork is the "
                                    "base-plate estimate the request records as "
                                    "+/-2 mm, and this is that 2 mm")
-        self.assertEqual("NOT_APPLICABLE", root["volume_result"],
-                         "and it is a measurement with no calibrated gate "
-                         "behind it -- no independently specified expected "
-                         "volume exists, so the screen refuses to grade the "
-                         "solid against a number its own author wrote")
+        self.assertEqual(
+            "NOT_APPLICABLE",
+            self.observed["formulations"][RP.ROOT_ALTERNATIVE]
+            ["screening_detail"]["detectors"]["volume"],
+            "and it is a measurement with no calibrated gate behind it -- no "
+            "independently specified expected volume exists, so the screen "
+            "refuses to grade the solid against a number its own author wrote. "
+            "Read from `screening_detail`, which is where the recording keeps "
+            "the detector's verdict; `material` carried a second copy of it "
+            "until a review pointed out that recording a value twice does not "
+            "protect it twice")
 
     def test_the_comparison_settles_the_rubric_question_and_nothing_else(self) -> None:
         """What `compare` establishes on a job whose answer a score would destroy.

@@ -402,7 +402,20 @@ class DeterministicEvidenceTest(unittest.TestCase):
                                 seeds["candidate_to_source"])
 
     def test_the_receipt_does_not_claim_a_sensitivity_it_has_not_earned(self) -> None:
-        """Determinism is not accuracy, and the words must not imply it is."""
+        """Determinism is not accuracy, and the words must not imply it is.
+
+        The three properties, not three words. This asserted `"minimum" in note`
+        until the sampling rework replaced "minimum detectable defect" with a
+        size and an explicit confidence -- so the assertion went red while the
+        note it was guarding got *more* precise. It was a word search wearing a
+        property's name, and it was the only thing in the heavy tier that
+        noticed the rework, which is its own finding: the tier had not been run.
+
+        What a claim note must do is refuse to sound exact, state the size it
+        can find and the confidence it finds it with, and admit that anything
+        smaller is missed. A note that dropped any of the three would be
+        claiming a sensitivity the sampling has not earned.
+        """
         with tempfile.TemporaryDirectory() as raw:
             source_path, candidate_path = self._pair(Path(raw))
             region = PR.Region.from_declaration(_edit_scope().region_box)
@@ -410,7 +423,13 @@ class DeterministicEvidenceTest(unittest.TestCase):
                             candidate_path=candidate_path,
                             region=region)["claim_note"]
             self.assertIn("cannot establish exact preservation", note)
-            self.assertIn("minimum", note)
+            self.assertRegex(
+                note, r"\d+(?:\.\d+)?\s*mm",
+                "the note must state the defect size it can find, in units")
+            self.assertRegex(
+                note, r"\d+(?:\.\d+)?\s*%\s*confidence",
+                "and the confidence it finds it with -- a size with no "
+                "confidence behind it reads as a guarantee")
             self.assertIn("missed identically on every run", note)
 
     def test_reordering_the_faces_of_one_file_does_not_move_the_measurement(self) -> None:

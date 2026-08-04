@@ -66,6 +66,7 @@ from . import project as P
 from . import review as R
 from . import route as RT
 from . import runner, schemas as S
+from . import screening as SCR
 from . import status as STATUS
 
 JOB_FILE = "job.json"
@@ -2323,7 +2324,13 @@ def compare(argv: list[str]) -> int:
 
     try:
         payload = CMP.report(project, readings, costs)
-    except CMP.CompareError as exc:
+    except (CMP.CompareError, SCR.ScreeningShapeUnexpected) as exc:
+        # The second one is `docs/defects.md` D27's guard. It is deliberately
+        # loud, but loud is not the same as uncontrolled: `CompareError` is not
+        # a `ValueError` and `main` catches nothing, so without this a shape
+        # regression reached a user as a bare traceback while every other
+        # failure in this program reaches them as one `design-tool:` line. Gate
+        # 4.1 asks for controlled failure, not for a stack.
         sys.stderr.write(f"design-tool: {exc}\n")
         return 2
 

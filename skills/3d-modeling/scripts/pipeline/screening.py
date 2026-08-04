@@ -305,24 +305,37 @@ class ScreeningShapeUnexpected(ValueError):
     """
 
 
-def detector(report: dict[str, Any], name: str) -> dict[str, Any] | None:
-    """One detector's row out of a commission report, or `None` if it did not run.
+def detectors(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every detector row a commission report carries, in the order `run` wrote them.
 
-    The single reader. `run` below is the single writer, and the two live in one
-    file so that a change to the shape has to pass this function on the way out.
+    The single reader, and it is this one rather than `detector` below: a review
+    of the commit that added `detector` pointed out that `tools/replay.py` still
+    reached into `screening["detectors"]` by hand -- inside the very function
+    `docs/defects.md` D27 claimed went through the pipeline's own reader. One
+    caller fixed and one caller left is not "one reader", it is one reader and
+    one place the next shape change surfaces as a bare `AttributeError`.
+
+    Empty for a report with no screening block, which is a job that did not get
+    that far. Raising for a report whose block is the wrong *type*, which is a
+    caller reading a shape no run has ever produced.
     """
     screening = report.get("screening") or {}
     rows = screening.get("detectors")
     if rows is None:
-        return None
+        return []
     if not isinstance(rows, list):
         raise ScreeningShapeUnexpected(
             f"screening.detectors is {type(rows).__name__} and `screening.run` "
             f"writes a list of rows, each carrying its own 'detector' key. A "
             f"caller reading it as a {type(rows).__name__} is reading a shape "
             "no run has ever produced.")
-    for row in rows:
-        if isinstance(row, dict) and row.get("detector") == name:
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def detector(report: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """One detector's row, looked up by name, or `None` if it did not run."""
+    for row in detectors(report):
+        if row.get("detector") == name:
             return row
     return None
 

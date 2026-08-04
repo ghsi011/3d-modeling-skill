@@ -616,13 +616,30 @@ reverting the reader with the fixtures left correct: 21 of 25 tests in
 `test_compare.py` fail, which is the measure of how much the fixtures were
 holding up on their own.
 
-**Status: FIXED.** `screening.detector(report, name)` is now the single reader
-and lives beside `screening.run`, the single writer. It raises
-`ScreeningShapeUnexpected` on a non-list rather than returning `None`, because a
-reader that shrugged would have reported "no volume measured" on every job
-forever, and that is a sentence nobody thinks to doubt. `tools/replay.py`'s
-`_observe_dir` goes through the same function, so the harness reads a receipt
-the way the product does.
+**Status: FIXED**, in two goes, and the first go is worth recording because it
+made exactly the mistake this defect is about.
+
+The first fix added `screening.detector(report, name)` and called it "the single
+reader". An independent review found it was not: `tools/replay.py:1241` still
+built `screening_detail.detectors` with `for row in screening.get("detectors",
+())` — inside `_observe_dir`, the very function this record claimed had been
+routed through the pipeline's reader. One caller fixed and one caller left is
+not one reader; it is one reader and one place the next shape change surfaces as
+a bare `AttributeError`.
+
+So the reader is now `screening.detectors(report)`, returning the list, and
+`detector(report, name)` is a lookup built on top of it — neutering the first
+takes the second with it. Both live beside `screening.run`, the single writer.
+`detectors` raises `ScreeningShapeUnexpected` on a non-list rather than
+returning `[]`, because a reader that shrugged would have reported "no volume
+measured" on every job forever, and that is a sentence nobody thinks to doubt.
+`cli.compare` catches it beside `CompareError` and returns 2: loud is right,
+but gate 4.1 asks for controlled failure rather than a stack trace.
+
+Remaining subscript readers, deliberately: `test_pipeline.py:364` and three
+sites in `benchmarks/heavy/test_phase2_heavy.py`. They are tests asserting on a
+receipt they have just watched a run write, which is the one place reading the
+shape directly is the point.
 
 **What this is really evidence for.** A fixture written from a reader tests the
 reader against itself. The protection that catches this class is a tier that
@@ -675,3 +692,44 @@ slice.
 **Fixture that must fail first.** The L1 assertion above, inverted: it currently
 pins `identical_designs == []` and says in its own message that the fix turns it
 into `[[".", "as-drawn"]]`.
+
+## D29 — a declared tolerance in the wrong shape is silently ignored by the replay band
+
+**Where.** [`tools/replay.py`](../tools/replay.py), `_band_for`:
+
+```python
+if isinstance(tolerance, dict):
+    declared = abs(float(tolerance.get("abs") or 0.0))
+```
+
+**What is wrong.** A check whose `tolerance` is a bare number rather than a
+`{"abs": …}` mapping falls through to the computed default. On
+`benchmarks/replays/branch-knob-seat-fallback` the `envelope` check records
+`tolerance: 0.5`, so the replay compares that measurement at 0.251 mm — the
+0.5% + 1e-3 default — rather than at the 0.5 mm the receipt declares.
+
+**Why it is recorded rather than fixed.** The direction is safe: the band in use
+is *tighter* than the declared one, so nothing passes that should fail, and
+"fixing" it would loosen a live protection by a factor of two. There is also a
+real question underneath it, which is whether a replay band should read an
+acceptance tolerance at all: a contract's tolerance says how far a part may be
+from its target and still be acceptable, while a replay band says how far a
+rerun may be from the recording and still be the same run. Those are different
+questions, and `_band_for` currently answers the second with the first's number
+where one happens to be in the expected shape.
+
+**Evidence.** Found by an independent review of Release 4 slice 2 while checking
+whether the new `material` band was real protection. Measured on the knob:
+`volume_mm3` band 237.63 mm³ against a 2266.6 mm³ signal between the two
+designs; `bbox_mm.z` band 0.251 mm. Probed — +200 mm³ passes, +300 mm³ fails;
++0.2 mm passes, +0.3 mm fails.
+
+**What it can cause.** Nothing today, and that is why it is a note rather than a
+repair. What it would cause is a maintainer reading `_band_for` and concluding
+that declared tolerances are honoured, then writing one as a bare float and
+believing they had widened a band they had not touched.
+
+**What would close it.** Decide the question above first. If a replay band
+should never read an acceptance tolerance, delete the branch and say so; if it
+should, accept both shapes. Either way the knob's recording moves, so it is a
+slice with a re-record and not a one-line change.

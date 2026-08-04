@@ -30,10 +30,26 @@
     },
     "mandatory_verdict": "INCOMPARABLE_EXPECTATIONS",
     "not_compared": {
-      "geometric difference between formulations": "CONTEXT",
-      "print time and support toolpaths": "CONTEXT",
-      "strength, serviceability, adjustability, irreversibility": "CONTEXT"
+      "engineering-judgment": "CONTEXT",
+      "geometric-difference": "CONTEXT",
+      "print-time": "CONTEXT"
     },
+    "payload_keys": [
+      "axes",
+      "built_nothing",
+      "compared",
+      "identical_designs",
+      "issued_against",
+      "job_id",
+      "not_compared",
+      "not_ranked",
+      "preference",
+      "ranking",
+      "schema_version",
+      "score",
+      "shared",
+      "source_mode"
+    ],
     "preference_admissible": false,
     "ranking": null,
     "same_requirement_digest": true,
@@ -136,8 +152,7 @@
           "y": 38.0,
           "z": 50.0
         },
-        "volume_mm3": 47526.263,
-        "volume_result": "NOT_APPLICABLE"
+        "volume_mm3": 47526.263
       },
       "measured": {
         "bodies": 1,
@@ -302,8 +317,7 @@
           "y": 38.0,
           "z": 50.0
         },
-        "volume_mm3": 47526.263,
-        "volume_result": "NOT_APPLICABLE"
+        "volume_mm3": 47526.263
       },
       "measured": {
         "bodies": 1,
@@ -460,8 +474,7 @@
           "y": 38.0,
           "z": 52.0
         },
-        "volume_mm3": 49792.874,
-        "volume_result": "NOT_APPLICABLE"
+        "volume_mm3": 49792.874
       },
       "measured": {
         "bodies": 1,
@@ -536,7 +549,7 @@
       }
     }
   },
-  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
+  "recorded_at": "02ab3465bcda9c70e4c8f62ed9522b5f3c793363",
   "reviews_answered": [
     "verification",
     "verification",

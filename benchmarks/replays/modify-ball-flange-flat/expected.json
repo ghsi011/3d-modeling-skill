@@ -77,8 +77,7 @@
       "y": 26.3,
       "z": 28.6107
     },
-    "volume_mm3": 4044.628,
-    "volume_result": "NOT_APPLICABLE"
+    "volume_mm3": 4044.628
   },
   "measured": {
     "bodies": 1,
@@ -148,7 +147,7 @@
     "safety_verification_report.json",
     "verification_report.json"
   ],
-  "recorded_at": "f36ae4fdb34a50f621902b4c9a1225fef49434a5",
+  "recorded_at": "02ab3465bcda9c70e4c8f62ed9522b5f3c793363",
   "reviews_answered": [
     "safety",
     "verification"
