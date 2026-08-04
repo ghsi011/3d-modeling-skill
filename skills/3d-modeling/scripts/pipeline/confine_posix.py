@@ -128,6 +128,10 @@ CLONE_NEWUTS = 0x04000000
 CONFINED_NAMESPACES = (CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET
                        | CLONE_NEWIPC | CLONE_NEWUTS)
 
+MS_RDONLY = 0x1
+MS_NOSUID = 0x2
+MS_NODEV = 0x4
+MS_NOEXEC = 0x8
 MS_BIND = 0x1000
 MS_REC = 0x4000
 MS_PRIVATE = 0x40000
@@ -164,6 +168,11 @@ AUDIT_ARCH_AARCH64 = 0xC00000B7
 
 BPF_LD, BPF_W, BPF_ABS = 0x00, 0x00, 0x20
 BPF_JMP, BPF_JEQ, BPF_K, BPF_RET = 0x05, 0x10, 0x00, 0x06
+BPF_JGE = 0x30
+
+# `__X32_SYSCALL_BIT`. An x32 call is x86-64 by arch token and carries this bit
+# in its number, which is why the arch check alone does not see it.
+_X32_SYSCALL_BIT = 0x40000000
 
 # The syscalls a build has no business making. Per architecture, because the
 # numbers differ and a filter written for the wrong one either blocks nothing or
@@ -373,22 +382,32 @@ def seal_syscalls() -> None:
         return
     execve, execveat = _EXEC_SYSCALLS[_ARCH]
     program = [
-        # A = the architecture the call was made on. A filter that did not check
-        # this could be stepped around on a multi-arch kernel by making the same
-        # call under a different personality, where the numbers mean other
-        # syscalls entirely.
+        # 0: A = the architecture the call was made on. A filter that did not
+        # check this could be stepped around on a multi-arch kernel by making
+        # the same call under a different personality, where the numbers mean
+        # other syscalls entirely.
         _SockFilter(BPF_LD | BPF_W | BPF_ABS, 0, 0, 4),
+        # 1: equal -> 3, otherwise -> 2.
         _SockFilter(BPF_JMP | BPF_JEQ | BPF_K, 1, 0, _ARCH),
         _SockFilter(BPF_RET | BPF_K, 0, 0, SECCOMP_RET_KILL_PROCESS),
-        # A = the syscall number.
+        # 3: A = the syscall number.
         _SockFilter(BPF_LD | BPF_W | BPF_ABS, 0, 0, 0),
-        _SockFilter(BPF_JMP | BPF_JEQ | BPF_K, 2, 0, execve),
-        _SockFilter(BPF_JMP | BPF_JEQ | BPF_K, 1, 0, execveat),
-        _SockFilter(BPF_RET | BPF_K, 0, 0, SECCOMP_RET_ALLOW),
-        # EPERM rather than a kill: a model that shells out gets an exception it
-        # can report, and the manifest says what it tried. A killed process
+        # 4: the x32 ABI, and checking the arch token is not enough to catch it.
+        # An x32 call carries the *same* `AUDIT_ARCH_X86_64` token with
+        # `__X32_SYSCALL_BIT` OR'd into the number, so x32 `execve` arrives as
+        # 0x4000003B -- not equal to 59 or 322, and the first version of this
+        # filter fell straight through to ALLOW. Found by review. Nothing in
+        # this build has any business issuing an x32 call, so the whole range is
+        # killed rather than picked over. x32 -> 9.
+        _SockFilter(BPF_JMP | BPF_JGE | BPF_K, 4, 0, _X32_SYSCALL_BIT),
+        _SockFilter(BPF_JMP | BPF_JEQ | BPF_K, 2, 0, execve),      # 5 -> 8
+        _SockFilter(BPF_JMP | BPF_JEQ | BPF_K, 1, 0, execveat),    # 6 -> 8
+        _SockFilter(BPF_RET | BPF_K, 0, 0, SECCOMP_RET_ALLOW),     # 7
+        # 8: EPERM rather than a kill: a model that shells out gets an exception
+        # it can report, and the manifest says what it tried. A killed process
         # writes no manifest and looks like a crash.
         _SockFilter(BPF_RET | BPF_K, 0, 0, SECCOMP_RET_ERRNO | errno.EPERM),
+        _SockFilter(BPF_RET | BPF_K, 0, 0, SECCOMP_RET_KILL_PROCESS),   # 9
     ]
     block = (_SockFilter * len(program))(*program)
     prog = _SockFprog(len(program), ctypes.cast(block,
@@ -541,7 +560,27 @@ def _supervise(argv: list[str], cwd: Path, env: dict[str, str], timeout: float,
         _seal_filesystem(cwd)
         # A `/proc` for *this* namespace, so the survivor count below is of this
         # namespace's processes and not of the host's.
-        _mount("proc", "/proc", "proc", 0)
+        #
+        # **Read-only, and this is a repaired escape rather than tidiness.** The
+        # first version mounted it with flags `0`, after `_seal_filesystem` had
+        # already run -- so the recursive read-only attribute did not cover it,
+        # and the tree had two writable mounts while the docstring claimed one.
+        # The candidate keeps the parent's identity by design, so it was uid 0
+        # over root-owned procfs tunables with nothing but that mount to stop it:
+        # write `|/path/in/the/build/dir/evil` into `/proc/sys/kernel/core_pattern`,
+        # fork, crash, and the kernel runs that helper through
+        # `call_usermodehelper` as root on the *host*, outside every namespace
+        # and outside the seccomp filter. `/proc/sys/kernel/modprobe` is the same
+        # move. An empty capability set does not help: a uid-0 owner writing a
+        # 0644 sysctl needs no capability.
+        #
+        # `nosuid`/`nodev`/`noexec` beside read-only because this mount is the
+        # one surface in the namespace that is not plain file data.
+        _mount("proc", "/proc", "proc",
+               MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC)
+        # Belt and braces: the flags above are the mount's own, and a re-seal
+        # costs nothing and covers any submount procfs brings with it.
+        _mount_setattr("/proc", attr_set=MOUNT_ATTR_RDONLY)
 
         child = os.fork()
         if child == 0:                                    # the candidate

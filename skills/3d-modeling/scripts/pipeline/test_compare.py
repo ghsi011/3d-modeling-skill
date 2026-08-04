@@ -351,10 +351,15 @@ class TheRubricIsNotSharedTest(unittest.TestCase):
             axis = payload["axes"]["mandatory"]
             self.assertEqual(CMP.INCOMPARABLE_EXPECTATIONS, axis["verdict"])
             row = axis["expectations"]["feature-bore-wall-section"]
-            # The two were measured against the same number. Only the width of
-            # the gate around it moved.
-            self.assertEqual({"tight": 881.33, "relaxed": 881.33, ".": 881.33},
-                             row["expected"])
+            # The two were measured against the same expectation. Only the
+            # width of the gate around it moved. Asserted against the *contract's*
+            # own shape -- the whole expectation dict -- because that is what the
+            # comparand reads now: an independent review found the previous
+            # comparand (the check's projected `expected`) dropped the probe
+            # height into the check title, so two formulations measuring
+            # different sections of different parts compared equal.
+            self.assertEqual(BORE["expectation"], row["expected"]["tight"])
+            self.assertEqual(BORE["expectation"], row["expected"]["relaxed"])
             self.assertEqual({"abs": 4.41}, row["tolerance"]["tight"])
             self.assertEqual({"abs": 40.0}, row["tolerance"]["relaxed"])
 

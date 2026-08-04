@@ -258,23 +258,61 @@ def _yardstick(readings: dict[str, dict[str, Any]]) -> dict[str, Any]:
     only_in = {key: sorted(rows - shared) for key, rows in present.items()}
     sets_differ = any(only_in.values())
 
-    # Same check id, different frozen expectation or different band. Compared
-    # only over checks every formulation actually reported, because a check one
-    # of them never ran has no expectation to disagree about -- that is the
-    # `did_not_run` finding, one block down, and conflating the two would report
-    # a broken instrument as a design difference.
-    reported = [set(_checks(readings[key])) for key in present]
+    # Same obligation, different rubric. Compared over the *contract's* feature
+    # rows and contract-level expectations rather than over the check rows the
+    # report projects from them, because the projection loses the half that
+    # decides what was measured.
+    #
+    # Found by review, on the fixture this module was built around. A
+    # `section_area` check publishes `expected = value_mm2` and puts the probe
+    # height in its *title* (`commission.py`, "Section area at z=7.00"), so the
+    # recorded knob -- whose root declares `grip-section` at z 7.0 and whose
+    # `plate-seated` declares it at z 8.0, with the same area -- compared
+    # **equal** on both feature rows. Two different sections of two different
+    # parts, reported as one rubric. The same loss applies to `through_hole`
+    # (`at`, `z_from`, `z_to`), `void_region`, `overhang`, `bore_by_displacement`
+    # and `preservation`, whose whole region box is outside `expected`.
+    #
+    # The contract's `expectation` dict is the rubric itself, so comparing it
+    # cannot lose a field by construction.
     expectations: dict[str, Any] = {}
-    for check_id in sorted(set.intersection(*reported) if reported else set()):
-        rows = {key: _checks(readings[key])[check_id] for key in present}
-        wanted = {key: S.canonical_json(row.get("expected")) for key, row in rows.items()}
-        bands = {key: S.canonical_json(row.get("tolerance")) for key, row in rows.items()}
-        if len(set(wanted.values())) > 1 or len(set(bands.values())) > 1:
+    features = {key: _feature_rubrics(readings[key]) for key in present}
+    for feature_id in sorted(shared):
+        rows = {key: features[key].get(feature_id) for key in present}
+        if any(row is None for row in rows.values()):
+            continue
+        spelled = {key: S.canonical_json(row) for key, row in rows.items()}
+        if len(set(spelled.values())) > 1:
+            check_id = f"feature-{feature_id}"
             expectations[check_id] = {
                 "equal": False,
-                "expected": {key: rows[key].get("expected") for key in sorted(rows)},
-                "tolerance": {key: rows[key].get("tolerance") for key in sorted(rows)},
-                "result": {key: rows[key].get("result") for key in sorted(rows)},
+                "expected": {key: rows[key]["expectation"] for key in sorted(rows)},
+                "tolerance": {key: rows[key]["tolerance"] for key in sorted(rows)},
+                # What each formulation concluded against its own rubric. The
+                # point of the row is that these verdicts are not comparable, so
+                # they are shown together rather than left for a reader to find
+                # in another block and assume they meet.
+                "result": {key: (_checks(readings[key]).get(check_id) or {}).get("result")
+                           for key in sorted(rows)},
+            }
+    # And the contract-level expectations the always-present structural checks
+    # measure against, which belong to no feature row.
+    for name, field in (("envelope", "expected_bbox_mm"),
+                        ("bodies", "expected_bodies"),
+                        ("envelope-band", "bbox_tolerance_mm")):
+        stated = {key: (readings[key]["receipts"]["model_contract.json"] or {}).get(field)
+                  for key in present}
+        if any(value is None for value in stated.values()):
+            continue
+        if len({S.canonical_json(value) for value in stated.values()}) > 1:
+            band = {key: (readings[key]["receipts"]["model_contract.json"] or {}
+                          ).get("bbox_tolerance_mm") for key in present}
+            expectations[name] = {
+                "equal": False,
+                "expected": dict(sorted(stated.items())),
+                "tolerance": dict(sorted(band.items())),
+                "result": {key: (_checks(readings[key]).get(name) or {}).get("result")
+                           for key in sorted(present)},
             }
 
     if sets_differ:
@@ -313,6 +351,22 @@ def _yardstick(readings: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "no_contract_on_disk": absent,
         "note": note,
     }
+
+
+def _feature_rubrics(reading: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each declared feature's rubric: what it expects and the band around it.
+
+    Straight off `model_contract.json`, which is the contract commissioning
+    measured against -- so this is the thing two formulations either agree on or
+    do not, with no field lost to a projection on the way.
+    """
+    contract = reading["receipts"]["model_contract.json"]
+    if not isinstance(contract, dict) or not isinstance(contract.get("features"), list):
+        return {}
+    return {str(row["feature_id"]): {"expectation": row.get("expectation"),
+                                     "tolerance": row.get("tolerance")}
+            for row in contract["features"]
+            if isinstance(row, dict) and row.get("feature_id")}
 
 
 def _mandatory(reading: dict[str, Any]) -> dict[str, Any]:

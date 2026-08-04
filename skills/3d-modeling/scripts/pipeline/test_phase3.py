@@ -944,3 +944,81 @@ class ADeclaredDefectSizeReachesThePlanTest(unittest.TestCase):
             with self.assertRaises(PR.SampleBudgetExceeded):
                 commission._preservation_samples(
                     {"minimum_detectable_defect_mm": 0.0005}, source)
+
+
+class TheSamplePlanActuallyFindsWhatItPromisesTest(unittest.TestCase):
+    """The one property the whole derivation claims, measured on the planner.
+
+    Written after an independent review refuted the claim by measurement. Every
+    other test of `derive_sample_count` checks the *arithmetic* -- inversion,
+    area scaling, quadratic scaling in d, monotonicity, refusals -- and all of
+    them passed while the instrument missed a d-sized patch 13% of the time at
+    the default count and 22% at the count the recorded golden used.
+
+    The cause was the sample sequence, not the arithmetic. An additive-recurrence
+    (Kronecker) sequence was chosen because low discrepancy sounds strictly
+    better than random; it is not, for this question. Discrepancy bounds how far
+    a box's sample count strays from its volume. Finding a defect needs bounded
+    *dispersion* -- no empty patch anywhere -- which low discrepancy does not
+    bound, and a Kronecker sequence's 2-D projections are striated, so it misses
+    thin patches far more often than area implies.
+
+    So this test measures the thing the docstring promises rather than the
+    algebra behind it, and it is the test that would have caught it.
+    """
+
+    @staticmethod
+    def _miss_rate(count: int, seed: str, trials: int = 1500) -> float:
+        """Fraction of d-sized patches containing no sample, d from the count."""
+        side = PR.detectable_defect_mm(1.0, count)
+        points = PR._stream(seed, count)[:, :2]
+        # Patch corners on their own deterministic grid, so this test does not
+        # itself depend on a random draw.
+        corners = PR._stream(f"{seed}-probes", trials)[:, :2] * (1.0 - side)
+        missed = 0
+        for x, y in corners:
+            if not ((points[:, 0] >= x) & (points[:, 0] < x + side)
+                    & (points[:, 1] >= y) & (points[:, 1] < y + side)).any():
+                missed += 1
+        return missed / trials
+
+    def test_a_derived_plan_misses_at_about_the_declared_rate(self) -> None:
+        """1% promised, so the measured miss must be near 1% and not 13%."""
+        for count in (20_000, 38_014):
+            with self.subTest(samples=count):
+                missed = self._miss_rate(count, f"plan-{count}")
+                self.assertLess(
+                    missed, 0.04,
+                    f"{count} samples missed {missed:.2%} of patches of the size "
+                    f"the derivation says they find at "
+                    f"{PR.DEFAULT_DETECTION_CONFIDENCE:.0%}. The plan does not "
+                    "deliver the sensitivity the receipt reports.")
+
+    def test_the_stream_is_deterministic_and_pinned(self) -> None:
+        """Same seed, same bytes -- the property the sequence was chosen for."""
+        first = PR._stream("a-seed", 64)
+        again = PR._stream("a-seed", 64)
+        self.assertTrue((first == again).all())
+        self.assertFalse((first == PR._stream("another-seed", 64)).all())
+        self.assertEqual((64, 3), first.shape)
+        self.assertTrue(((first >= 0.0) & (first < 1.0)).all())
+
+    def test_the_stream_is_not_striated_in_its_projections(self) -> None:
+        """The specific failure of the sequence this replaced.
+
+        Every 2-D projection is checked, because the planner uses coordinate 0
+        for the face choice and 1 and 2 for the position inside the triangle --
+        so a projection with holes puts holes on the surface.
+        """
+        points = PR._stream("striation-probe", 20_000)
+        for a, b in ((0, 1), (1, 2), (0, 2)):
+            with self.subTest(projection=(a, b)):
+                cells = 40
+                grid = np.zeros((cells, cells), dtype=np.int64)
+                xs = (points[:, a] * cells).astype(int)
+                ys = (points[:, b] * cells).astype(int)
+                np.add.at(grid, (xs, ys), 1)
+                self.assertEqual(0, int((grid == 0).sum()),
+                                 f"projection {(a, b)} leaves empty cells, which "
+                                 "is how a sequence misses a defect that is "
+                                 "thinner than its stripe spacing")

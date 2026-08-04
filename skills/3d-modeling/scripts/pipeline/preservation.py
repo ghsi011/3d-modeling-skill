@@ -32,18 +32,29 @@ a reviewer's answer to run *n* could not be checked against run *n+1*, so no
 could not be resumed, and it could not be finished.
 
 The plan is now derived from the two artifacts' own hashes, the declared region
-and the sample count, and laid out along a low-discrepancy sequence over meshes
+and the sample count, and laid out with a pinned SplitMix64 stream over meshes
 whose vertex and face order has been made canonical first. Identical inputs
 produce byte-identical evidence, and the plan's digest travels with the verdict
 so an answer can name the evidence it was written against.
 
-**Determinism is not sensitivity, and this file must not be read as claiming it
-is.** A plan that misses a 0.5 mm undeclared cube still misses it -- it now
-misses it identically on every run, which is what makes the round trip possible
-and is the whole of what this change buys. The density is still a fixed count
-rather than one derived from a declared minimum detectable defect size, real
-B-rep comparison is still not implemented, and both are owed by stage 5 of
-ADR 0002. The receipts say so in the words they use.
+**It was a low-discrepancy sequence, and that was a measured mistake.** See
+`_stream`: an independent review reimplemented the planner and counted patches
+of the size the derivation undertakes to find that contained no sample at all --
+13.10% at the default count and 21.99% at the count the recorded fixture uses,
+against the 1% promised. A Kronecker sequence's 2-D projections are striated, and
+the planner uses two of those coordinates to place a point inside its triangle,
+so the stripes land on the surface. Low discrepancy bounds a box's count against
+its volume; finding a defect needs bounded dispersion, which it does not bound.
+An independent stream satisfies the Poisson arithmetic the derivation actually
+uses, and `SAMPLE_PLAN_VERSION` is 3 because every plan digest moved.
+
+**Determinism is not sensitivity.** Reproducibility is what makes the review
+round trip possible; it says nothing about what the plan can find. Sensitivity is
+a separate property with a separate mechanism -- `derive_sample_count` from a
+declared `minimum_detectable_defect_mm`, measured end to end by
+`test_phase3.TheSamplePlanActuallyFindsWhatItPromisesTest` rather than argued
+from the arithmetic. Real B-rep comparison is still not implemented. The receipts
+say so in the words they use.
 
 **Determinism of the answer is not determinism of completing.** The plan was
 reproducible and the run was not: the same unchanged pair took 23 GiB and died on
@@ -88,7 +99,7 @@ PRESERVATION_SCHEMA = 2
 # sits in the job's shared frame. It is the one edit-intent field that says which
 # geometry the plan is a plan *of*, and it used to be declared, validated, and
 # read by nothing.
-SAMPLE_PLAN_VERSION = 2
+SAMPLE_PLAN_VERSION = 3
 
 # How many points to sample on the preserved surface, per direction, when a job
 # declares no minimum detectable defect size. Enough that a missing feature of a
@@ -460,6 +471,58 @@ _ALPHA = np.array([1.0 / _generalized_golden(3) ** (j + 1) for j in range(3)],
                   dtype=np.float64)
 
 
+# SplitMix64. Ten lines, pinned here forever, and the reason it is here rather
+# than `numpy.random` is the reason the additive-recurrence sequence was here
+# before it: a library generator's stream is not something this file should have
+# to pin, because a plan that changes when a dependency changes invalidates every
+# review bound to it.
+#
+# **Why the sequence it replaces had to go.** It was an additive recurrence
+# (`t_i = frac(offset + i*alpha)`), chosen because low discrepancy sounded
+# strictly better than random. It is not, for this question. Discrepancy bounds
+# how far a *box's* sample count strays from its volume; what a defect hunt needs
+# is bounded *dispersion* -- no empty patch anywhere -- and low discrepancy does
+# not bound that. Worse, a Kronecker sequence's 2-D projections are striated, so
+# it misses patches thinner than its stripe spacing far more often than area
+# alone implies.
+#
+# Measured, by reimplementing the old planner and counting patches of area d^2
+# that contained no sample, at exactly the count `derive_sample_count` returns
+# for that d: 13.10% missed at 20,000 samples and 21.99% at 38,014, against the
+# 1% the derivation promises. Not a narrow resonance -- it spanned 10^4 to 10^5,
+# which is the whole operating band. A uniform draw through the same measurement
+# gives 1.06% against 1.00% theory, which is what the Poisson arithmetic in
+# `derive_sample_count` assumes and what this now supplies.
+#
+# So the trade is deliberate and the other way round from the original: an
+# equidistributed sequence that breaks the model, for an independent one that
+# satisfies it. Reproducibility is unchanged -- same seed, same bytes, forever.
+_SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
+_SPLITMIX_MASK = (1 << 64) - 1
+
+
+def _stream(seed: str, count: int) -> np.ndarray:
+    """`count` x 3 independent uniforms in [0, 1), deterministic from `seed`.
+
+    Vectorised SplitMix64: the state is `s0 + i*gamma` for i in 0..3n, which is
+    a pure function of the index, so the whole block is generated without a loop
+    and without carrying state between calls.
+    """
+    if count <= 0:
+        return np.zeros((0, 3), dtype=np.float64)
+    start = int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:8],
+                           "big")
+    index = np.arange(3 * count, dtype=np.uint64)
+    z = (np.uint64(start) + index * np.uint64(_SPLITMIX_GAMMA))
+    z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    z = z ^ (z >> np.uint64(31))
+    # 53 bits is exactly what a float64 mantissa holds, so every value is
+    # representable and the map to [0,1) is uniform rather than nearly so.
+    return ((z >> np.uint64(11)).astype(np.float64)
+            / float(1 << 53)).reshape(count, 3)
+
+
 def _offsets(seed: str) -> np.ndarray:
     """Three starting phases in [0, 1), read straight out of the seed digest."""
     raw = hashlib.sha256(seed.encode("utf-8")).digest()
@@ -490,8 +553,7 @@ def _plan_points(mesh, count: int, seed: str) -> np.ndarray:
     cumulative = np.cumsum(areas) / total
     cumulative[-1] = 1.0
 
-    index = np.arange(1, count + 1, dtype=np.float64)
-    t = np.mod(_offsets(seed)[None, :] + index[:, None] * _ALPHA[None, :], 1.0)
+    t = _stream(seed, count)
 
     faces = np.searchsorted(cumulative, t[:, 0], side="left")
     faces = np.clip(faces, 0, len(areas) - 1)
