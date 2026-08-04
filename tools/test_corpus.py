@@ -26,17 +26,20 @@ import corpus
 
 def _manifest(root: Path, digest: str) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "roots": {"default": str(root)},
-        "request_vocabulary": ["flat panel"],
         "sources": {"demo": {"kind": "git", "url": "https://example.invalid/x.git",
                              "ref": "0" * 40, "sparse": ["STLs"], "into": "demo",
                              "license": "GPL-3.0-only"}},
         "entries": [{"id": "demo-part", "source": "demo",
                      "path": "STLs/part.stl", "sha256": digest,
                      "role": "REFERENCE",
-                     "request": {"purpose": "Holds a panel flat.",
-                                 "interfaces": ["flat panel"]}}],
+                     "request": {
+                         "purpose": "Holds a panel flat against an extrusion.",
+                         "requirements": [
+                             {"name": "panel_stock", "value": 3.0, "unit": "mm",
+                              "provenance": "MEASURED", "source": "calipers",
+                              "note": ""}]}}],
     }
 
 
@@ -163,180 +166,226 @@ class TheCommittedManifestIsWellFormedTest(unittest.TestCase):
                     str(corpus.ROOT.resolve()) + "/"))
 
 
-class TheQuestionDoesNotCarryTheAnswerTest(unittest.TestCase):
-    r"""A blind benchmark's answer must not reach whoever writes its question.
+class TheQuestionCarriesMeasurementsButNotTheAnswerTest(unittest.TestCase):
+    r"""A request is full of numbers. None of them may be the part's own size.
 
-    Three versions of this, and the first two failed the same way.
+    Three designs and a correction, and the first three all failed the same way:
+    they were rules about *how a leak is spelled*.
 
-    `corpus.json` originally carried each reference's bounding box in its
-    `note`, beside the entry id. The first guard was a regular expression in
-    *this file*, matching a number next to a length unit or an `A x B` pair. A
-    review broke it twelve ways in one pass -- `20.00 by 14.50 by 5.80` is the
-    sentence it was written for with one word changed -- and two of its four
-    branches were dead on arrival, because `\b` after a non-word character
-    requires a word character next, so neither `45 degrees` nor `45° chamfer`
-    ever matched.
+    A regex matching a number next to a unit -- broken twelve ways in one review
+    pass. Then "no digit in any string" with an exemption list -- nineteen. Then
+    a twenty-word denylist of the part's own vocabulary -- about eighty, with
+    `girth`, `ht`, `part_thickness` and `overall` walking straight through, and
+    four of its own entries unable to match themselves because the tokenizer
+    split on underscores and `bounding_box` has one.
 
-    The second guard widened the pattern to "no digit in any string, except
-    these fifteen key names". A second review broke that nineteen ways: the
-    measurement went into a JSON number, into a dict *key*, into `attribution`,
-    into a fullwidth digit, into a Roman numeral -- and, already committed in
-    the very diff that scrubbed the notes, into the entry id
-    `voron-deck-support-3mm`. It also proved the two tests written to
-    demonstrate the guard were tautologies over their own literals: replace the
-    enforcing rule with `re.compile(r"(?!x)x")`, restore the original bounding
-    box to a note, and the suite stayed green.
+    Each round got harder to evade and no closer to being right, because a real
+    request *is* measurements: somebody puts calipers on the extrusion slot and
+    the panel edge and writes the numbers down, and a request with those
+    stripped out is not a hard benchmark but an unanswerable one. The question
+    was never how the number is spelled. It is what the number measures.
 
-    Both failures are one failure. A rule in a test constrains the committed
-    text; the leak happens in whatever a generator is *handed*. So the rule is
-    `corpus.request_view` now, it is the only door to question material, and
-    these tests call it instead of restating it -- mutate `corpus.leaks` and
-    every test below goes red, which is the property the previous two versions
-    did not have.
+    So two mechanisms, and the second exists because the first cannot work
+    alone:
 
-    What is enforced, exactly: no numeric character, numeral or number-word
-    reaches question material, except through a term on `request_vocabulary`.
-    Not "no measurement can leak" -- a purpose can still describe a shape in
-    words. A weaker method may not issue a stronger claim.
+    * **names are allowlisted.** A requirement's leading token must be one of
+      the entry's declared `counterparts`. Every other allowlist in this module
+      -- `REQUEST_KEYS`, `REQUIREMENT_KEYS`, `REQUEST_PROVENANCE` -- is a thing
+      nothing got through; the single denylist is the thing eighty names got
+      through.
+    * **numbers are checked against the reference.** No wording rule can catch
+      `extrusion_series: "2020"` on a part whose x-extent is exactly 20.0 mm.
+      That is not hypothetical: it is what this manifest shipped, found by a
+      review measuring the STLs. So every number anywhere in the question is
+      compared against the reference's own extents and volume.
+
+    What is enforced is in `request_view`'s docstring, and it stops short of
+    "the answer cannot leak" -- a purpose can still describe a shape in words
+    carrying no number at all, and with the corpus absent the second check
+    cannot run and the view says so.
     """
 
     def setUp(self) -> None:
         self.payload = corpus.manifest()
 
-    def _entry(self, **request):
-        """A manifest whose one entry carries the request block given."""
+    def _entry(self, entry_id="voron-deck-support", **over):
         payload = copy.deepcopy(self.payload)
-        payload["entries"] = [{**self.payload["entries"][0],
-                               "request": request}]
+        row = next(r for r in payload["entries"] if r["id"] == entry_id)
+        request = dict(row["request"])
+        request.update(over.pop("request", {}))
+        if "extra" in over:
+            request["requirements"] = list(request["requirements"]) + [over.pop("extra")]
+        payload["entries"] = [{**row, **over, "request": request}]
         return payload
 
-    def test_every_committed_entry_offers_a_clean_question(self) -> None:
+    def _refused(self, **over):
+        with self.assertRaises(corpus.CorpusLeak):
+            corpus.request_view("voron-deck-support", self._entry(**over))
+
+    def _req(self, **over):
+        base = {"name": "panel_stock", "value": 3.0, "unit": "mm",
+                "provenance": "STATED", "source": "published hardware", "note": ""}
+        return {**base, **over}
+
+    # -- what the corpus ships -------------------------------------------
+
+    def test_every_committed_entry_offers_an_answerable_question(self) -> None:
         for entry_id in sorted(corpus.entries(self.payload)):
             with self.subTest(entry=entry_id):
                 view = corpus.request_view(entry_id, self.payload)
-                self.assertEqual({"purpose", "interfaces"}, set(view))
+                self.assertEqual({"purpose", "requirements",
+                                  "checked_against_reference"}, set(view))
+                self.assertTrue(view["requirements"])
 
-    def test_the_question_names_no_identifier_path_or_digest(self) -> None:
-        """An id is a place a measurement hides; a path is one `ls` from the answer.
+    def test_every_committed_request_carries_measurements_with_a_source(self) -> None:
+        """The property the digit rules destroyed in order to protect.
 
-        `voron-deck-support-3mm` was the committed id at the moment the notes
-        were scrubbed, and `deck_support_3mm_x8.stl` still is the path -- it is
-        the vendor's own filename and cannot be renamed. Neither can reach a
-        question, so neither needs a rule about its contents.
+        Deliberately *not* asserting anything is `MEASURED`. The version of this
+        test that did was requiring a false claim: six rows said `MEASURED` with
+        sources like "calipers across the slot mouth", and nobody in this
+        repository has calipers or the parts. Making the manifest honest turned
+        the suite red, which is a test doing the opposite of its job.
         """
-        for entry_id, row in sorted(corpus.entries(self.payload).items()):
+        for entry_id in sorted(corpus.entries(self.payload)):
+            for row in corpus.request_view(entry_id, self.payload)["requirements"]:
+                with self.subTest(requirement=row["name"]):
+                    self.assertIn(row["provenance"], corpus.REQUEST_PROVENANCE)
+                    self.assertTrue(row["source"].strip())
+                    if isinstance(row["value"], (int, float)):
+                        self.assertTrue(row["unit"].strip())
+
+    def test_the_committed_corpus_states_no_number_the_reference_measures(self) -> None:
+        """The check that operates on the answer instead of on the wording.
+
+        Skipped rather than faked where the corpus is not fetched: a checkout
+        that has fetched nothing is ordinary, and asserting a check nobody ran
+        is the failure this whole module is about.
+        """
+        for entry_id in sorted(corpus.entries(self.payload)):
             with self.subTest(entry=entry_id):
                 view = corpus.request_view(entry_id, self.payload)
-                flat = repr(view)
-                for field in ("id", "path", "sha256", "source", "role"):
-                    self.assertNotIn(field, view)
-                    self.assertNotIn(str(row[field]), flat)
+                if not view["checked_against_reference"]:
+                    self.skipTest(f"{entry_id} is not on this machine")
+                measured = corpus.reference_measurements(entry_id, self.payload)
+                self.assertEqual(
+                    (), corpus.coincidences(corpus.numbers_in(view), measured))
 
-    def test_the_rule_refuses_every_bypass_two_reviews_found(self) -> None:
-        r"""Each of these defeated a previous guard. None may pass this one.
-
-        Through `corpus.leaks`, the function `request_view` itself calls, so
-        weakening the rule fails this test. The version this replaces asserted
-        `re.findall(r"\d", text)` over its own literals and protected nothing.
-        """
-        bypasses = (
-            # Defeated the pattern guard.
-            "Single body, watertight, 20.00 by 14.50 by 5.80.",
-            "20.00 * 14.50 * 5.80",
-            "bbox [20.0, 14.5, 5.8]",
-            "20,00 / 14,50 / 5,80",
-            "radius 2.5 millimetres",
-            "0.787 inches",
-            "1200 microns",
-            "118 thou",
-            "Two M3 holes on a pitch of 15",
-            "Print at 1:1",
-            "A 45° chamfer.",
-            "45 degrees of draft.",
-            "20mm_wide slot",
-            # Defeated the digit guard. Not one of these holds an ASCII digit.
-            "Twenty by fourteen point five by five point eight millimetres.",
-            "２０.００ by １４.５０",   # fullwidth
-            "٢٠ by ١٤",                             # Arabic-Indic
-            "²⁰ by ¹⁴; wall ½ that.",          # superscript, fraction
-            "⑳ by ⑭ by ⑤.",                              # circled
-            "XX by XIV by VI.",                                         # Roman
-            "Single body.",                                             # states the bodies check
-        )
-        for text in bypasses:
-            with self.subTest(bypass=text):
-                self.assertTrue(
-                    corpus.leaks(text),
-                    "this string defeated an earlier guard and must not defeat "
-                    "this one")
-
-    def test_a_purpose_that_states_no_quantity_is_allowed(self) -> None:
-        """Over the committed prose, not over literals written to pass.
-
-        The rule must let a real description through or it is a ban, and the
-        descriptions that matter are the ones in the file.
-        """
+    def test_the_question_names_no_identifier_path_or_digest(self) -> None:
         for entry_id, row in sorted(corpus.entries(self.payload).items()):
             with self.subTest(entry=entry_id):
-                self.assertEqual((), corpus.leaks(row["request"]["purpose"]))
+                flat = repr(corpus.request_view(entry_id, self.payload))
+                for field in ("id", "path", "sha256", "source", "role"):
+                    self.assertNotIn(str(row[field]), flat)
 
-    def test_a_quantity_in_a_purpose_is_refused(self) -> None:
-        for purpose in ("Holds a 3 mm panel.",
-                        "Holds a three-millimetre panel.",
-                        "Holds a panel. Single body."):
-            with self.subTest(purpose=purpose):
-                with self.assertRaises(corpus.CorpusLeak):
-                    corpus.request_view("voron-deck-support",
-                                        self._entry(purpose=purpose,
-                                                    interfaces=[]))
+    # -- the allowlist ---------------------------------------------------
 
-    def test_a_measurement_that_is_not_a_string_has_nowhere_to_go(self) -> None:
-        """The channels the digit guard could not see, closed by the key whitelist.
+    def test_a_name_that_measures_no_declared_counterpart_is_refused(self) -> None:
+        """Every name a review walked through the denylist with."""
+        for name in ("girth", "span", "overall", "size", "dimension",
+                     "ht", "wd", "dia", "part_x", "lwh",
+                     "bounding_box", "body_count", "thickness_of_part",
+                     "part_thickness", "envelope", "envelopes", "bodycount",
+                     "ｅｎｖｅｌｏｐｅ"):
+            with self.subTest(name=name):
+                self._refused(extra=self._req(name=name, value=1.7))
 
-        A JSON number, a list of them and a measurement used as a dict *key* all
-        passed the previous rule, which walked to string leaves and yielded
-        values. Here they are neither scanned nor refused -- they are
-        unrepresentable, because two keys exist and both have a pinned type.
-        """
-        cases = {
-            "json numbers": {"purpose": "Holds a panel.", "interfaces": [],
-                             "bbox": [20.0, 14.5, 5.8]},
-            "json scalar": {"purpose": "Holds a panel.", "interfaces": [],
-                            "height_mm": 5.8},
-            "dict key": {"purpose": "Holds a panel.", "interfaces": [],
-                         "envelope": {"20.00 x 14.50 x 5.80": "bounding box"}},
-            "purpose is a number": {"purpose": 5.8, "interfaces": []},
-            "interfaces is prose": {"purpose": "Holds a panel.",
-                                    "interfaces": "20.00 x 14.50"},
-        }
-        for name, request in cases.items():
-            with self.subTest(channel=name):
-                with self.assertRaises(corpus.CorpusLeak):
-                    corpus.request_view("voron-deck-support",
-                                        self._entry(**request))
+    def test_a_name_that_measures_a_declared_counterpart_is_admitted(self) -> None:
+        for name in ("extrusion_slot_opening", "panel_stock", "panel_pocket",
+                     "fastener_thread_pitch"):
+            with self.subTest(name=name):
+                view = corpus.request_view(
+                    "voron-deck-support",
+                    self._entry(extra=self._req(name=name, value=1.7)))
+                self.assertIn(name, [r["name"] for r in view["requirements"]])
 
-    def test_an_interface_off_the_declared_disclosure_is_refused(self) -> None:
-        """Interfaces may carry measurements. Only the ones declared."""
+    def test_an_entry_declaring_no_counterparts_is_refused(self) -> None:
+        """An empty allowlist admits everything, which is the denylist again."""
         with self.assertRaises(corpus.CorpusLeak) as caught:
-            corpus.request_view(
-                "voron-deck-support",
-                self._entry(purpose="Holds a panel.",
-                            interfaces=["20.00 x 14.50 x 5.80 envelope"]))
-        self.assertIn("request_vocabulary", str(caught.exception))
+            corpus.request_view("voron-deck-support",
+                                self._entry(counterparts=[]))
+        # The *reason* matters. With no counterparts every requirement also
+        # fails the allowlist, so a test asserting only that something raised
+        # passed with this guard deleted -- it was reading the second failure
+        # and calling it the first.
+        self.assertIn("counterparts", str(caught.exception))
 
-    def test_the_declared_disclosure_is_pinned(self) -> None:
-        """Growing it is an edit here, so a new disclosure cannot pass unread.
+    # -- the coincidence check -------------------------------------------
 
-        This is the whole difference between this list and the exemption list it
-        replaced. An exemption grew whenever an ordinary field needed a digit --
-        a sparse-checkout path, a second corpus root -- and each growth silently
-        reopened the hole. A disclosure names the dimension being given away,
-        and adding one turns this test red until somebody writes it down.
+    def test_the_leak_this_manifest_actually_shipped_is_refused(self) -> None:
+        """`extrusion_series: "2020"` on a part exactly 20.0 mm across.
+
+        A correctly named counterpart, a true statement about the hardware, and
+        one of the three answers. Found by a review measuring the STL, not by
+        any rule about words -- and no rule about words could have found it.
         """
-        self.assertEqual(
-            ["2020 aluminium extrusion", "3 mm flat panel", "M3 fastener",
-             "MGN9 linear rail", "flat panel", "toothed belt"],
-            self.payload["request_vocabulary"])
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        # The note deliberately carries no number. The first version of this
+        # test wrote "aluminium T-slot, 20 mm face", which states a bare 20 and
+        # so passed even with the multiple-of-ten matching removed -- the test
+        # was green for a reason that had nothing to do with what it names.
+        with self.assertRaises(corpus.CorpusLeak) as caught:
+            corpus.request_view("voron-deck-support", self._entry(
+                extra=self._req(name="extrusion_series", value="2020", unit="",
+                                note="aluminium T-slot extrusion")))
+        self.assertIn("extent_x", str(caught.exception),
+                      "2020 is 20.20 in centimetres of nothing -- what makes it "
+                      "a leak is that a 2020 extrusion is 20 mm across and so "
+                      "is this part")
+
+    def test_a_measurement_smuggled_into_any_field_is_refused(self) -> None:
+        """`names_the_part` scanned two fields of six. This scans the question."""
+        if not corpus.request_view("voron-deck-support",
+                                   self.payload)["checked_against_reference"]:
+            self.skipTest("the reference is not on this machine")
+        self._refused(extra=self._req(
+            source="calipers; the part measures 20.0 across"))
+        self._refused(extra=self._req(note="about 20.0 wide overall"))
+        self._refused(request={"purpose": "Holds a panel. It is 20.0 mm across."})
+
+    def test_a_value_that_is_not_a_number_or_a_name_is_refused(self) -> None:
+        """A list is a bounding box with the brackets left on."""
+        for value in ([20.0, 14.5, 5.8], {"x": 20.0}, None, True):
+            with self.subTest(value=value):
+                self._refused(extra=self._req(value=value, unit=""))
+
+    def test_a_non_string_in_any_text_field_is_refused(self) -> None:
+        for field in ("note", "source", "unit", "name"):
+            with self.subTest(field=field):
+                self._refused(extra=self._req(**{field: [20.0, 14.5]}))
+
+    # -- the rest of the shape -------------------------------------------
+
+    def test_a_provenance_a_requester_could_not_have_is_refused(self) -> None:
+        for provenance in ("INHERITED", "CHOSEN", "GUESSED", ""):
+            with self.subTest(provenance=provenance):
+                self._refused(extra=self._req(provenance=provenance))
+
+    def test_a_number_with_no_unit_and_a_name_with_one_are_both_refused(self) -> None:
+        self._refused(extra=self._req(value=1.7, unit=""))
+        self._refused(extra=self._req(name="fastener_thread", value="M3", unit="mm"))
+
+    def test_a_measurement_with_no_source_is_refused(self) -> None:
+        self._refused(extra=self._req(source=""))
+
+    def test_an_unknown_key_anywhere_is_refused(self) -> None:
+        self._refused(request={"bbox": [20.0, 14.5]})
+        self._refused(extra={**self._req(), "measured_bbox": [20.0]})
+
+    def test_a_request_missing_either_half_is_refused(self) -> None:
+        """Neither half is optional, and neither was covered until a review
+        deleted the check and watched every test stay green."""
+        for drop in ("purpose", "requirements"):
+            with self.subTest(missing=drop):
+                payload = self._entry()
+                del payload["entries"][0]["request"][drop]
+                with self.assertRaises(corpus.CorpusLeak):
+                    corpus.request_view("voron-deck-support", payload)
+
+    def test_a_request_with_no_requirements_at_all_is_refused(self) -> None:
+        """Unanswerable is not the same as hard."""
+        self._refused(request={"requirements": []})
 
     def test_an_entry_with_no_request_block_is_refused_not_improvised(self) -> None:
         payload = copy.deepcopy(self.payload)
@@ -345,18 +394,12 @@ class TheQuestionDoesNotCarryTheAnswerTest(unittest.TestCase):
         with self.assertRaises(corpus.CorpusLeak):
             corpus.request_view("voron-deck-support", payload)
 
-    def test_material_outside_a_request_is_not_the_generators_business(self) -> None:
-        """And so may carry digits, which the previous rule taxed for nothing.
-
-        Under the digit guard `ARCHITECTURE.md 16.6` had to be written "section
-        sixteen point six", which broke the cross-reference every other pointer
-        in the repository greps for, and `M3 fasteners` became "metric
-        fasteners" in a sentence that still promised "the vocabulary a person
-        would actually use". Both are back, because neither is question material
-        and the wall is no longer made of prose.
-        """
-        self.assertIn("16.6", self.payload["note"])
-        self.assertIn("M3 fasteners", self.payload["sources"]["voron2"]["why"])
+    def test_the_view_says_whether_it_could_check_the_reference(self) -> None:
+        """A checkout that has fetched nothing must not imply a check it skipped."""
+        payload = copy.deepcopy(self.payload)
+        payload["roots"]["default"] = "/nonexistent-corpus-root"
+        view = corpus.request_view("voron-deck-support", payload)
+        self.assertFalse(view["checked_against_reference"])
 
 
 if __name__ == "__main__":
