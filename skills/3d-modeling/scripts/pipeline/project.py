@@ -131,12 +131,42 @@ def _ids(value: Any, what: str) -> tuple[str, ...]:
     `tuple("magnet-pockets")` is fourteen ids, so a caller who wrote a string
     where a list belongs would otherwise be told about fourteen interfaces
     nobody declared instead of about the field they got wrong.
+
+    The *elements* are checked too, and that was missing. This validated the
+    container and nothing in it, so `[["magnet-pockets"]]` -- one nesting level
+    too many, which is what a hand-edit produces -- reached a set membership
+    test downstream and came back out of `design-tool status` as
+    `TypeError: unhashable type: 'list'`. An id that is not a string is the same
+    class of malformed declaration as a bare string in place of a list, and it
+    gets the same answer: the field named, rather than a traceback.
     """
     if value is None:
         return ()
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
         raise S.SchemaError(f"{what} must be a list of ids, not a bare string")
+    for position, item in enumerate(value):
+        if not isinstance(item, str):
+            raise S.SchemaError(f"{what}[{position}] must be an id, not "
+                                f"{type(item).__name__}")
     return tuple(value)
+
+
+def _derivation(value: Any, what: str) -> dict[str, Any] | None:
+    """Where a datum was read off geometry, refusing a spelling of it.
+
+    This used to coerce anything that was not a dict to `None`, and
+    `Datum.problems` inspects the field only when it is one -- so on a
+    `MEASURED` row, where the revision is optional, `"derived_from": "drawer,
+    revision 1"` loaded as *no revision at all* and validated clean. That is the
+    malformed-declaration-read-as-clean failure `_ids` exists to stop, on the
+    field ADR 0003 calls "the field that failed".
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise S.SchemaError(f"{what} must be an object naming artifact_id and "
+                            f"revision, not {type(value).__name__}")
+    return value
 
 
 def _text(value: Any, what: str, *, required: bool = True) -> str | None:
@@ -348,7 +378,18 @@ class Datum:
         # `MEASURED` covers both of 6.5's measuring classes: off supplied
         # evidence, and off generated geometry. The second has a revision and the
         # first may not -- calipers on a physical part have no artifact revision
-        # to invent -- so it is optional. It may not be *refused*: this rule read
+        # to invent -- so it is optional.
+        #
+        # And it reaches only half of what it should: `Project.validate` requires
+        # the named artifact to be a declared *source* artifact, so a datum
+        # measured off geometry this job generated still cannot record the
+        # revision it was measured on. That is the same incentive inversion, one
+        # class over, and it is not closed here -- generated geometry has no
+        # revision to name until a build result is an addressable artifact, which
+        # is Release 6. It fails closed rather than silently, which is why it is
+        # a stated limit and not a defect.
+        #
+        # What it may not do is *refuse* the supplied-evidence case: this rule read
         # `INHERITED` only, which meant the honest row recording the revision it
         # was measured on was rejected while the vague one validated clean, and
         # the only way to record the revision was to relabel the number
@@ -1642,9 +1683,8 @@ def from_payload(payload: dict[str, Any]) -> Project:
                   value=row.get("value"),
                   unit=str(row.get("unit", "")),
                   provenance=str(row.get("provenance", "")),
-                  derived_from=(row.get("derived_from")
-                                if isinstance(row.get("derived_from"), dict)
-                                else None),
+                  derived_from=_derivation(row.get("derived_from"),
+                                           f"datums[{index}].derived_from"),
                   # `_ids`, like every other id list here. `tuple("case-body")`
                   # is nine scopes, and a malformed declaration that recorded
                   # nine bogus ones read as a clean datum.

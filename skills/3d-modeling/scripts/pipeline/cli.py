@@ -1163,7 +1163,7 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             "may_remove": list(scope.may_remove),
             "add": list(scope.add),
             # Which declared datum this edit was placed against (ADR 0003), by
-            # the same argument as the six above: re-placing an edit against a
+            # the same argument as every other field in this block: re-placing an edit against a
             # different reference changes what the job claims to be doing, and
             # an answer written against the previous claim must not survive it.
             # Absent where the job declares none, for the reason
@@ -1870,9 +1870,14 @@ def status(argv: list[str]) -> int:
         # person asks what the job is resting on instead. Release 6 is where an
         # assessment has to name the ones its conclusion rested on.
         # Each row carries who settles it and what settling it means, because a
-        # list of bare ids is the `note` this replaced.
-        "assumptions": [{"datum_id": row.datum_id, "owner": row.owner,
-                         "settled_by": row.settled_by}
+        # list of bare ids is the `note` this replaced -- and its provenance,
+        # because the two kinds of assumption are not the same thing. A `CHOSEN`
+        # number was picked deliberately; a blank one was never recorded at all,
+        # and ADR 0003 decision 1 is about telling those apart. A row without it
+        # left no consumer able to.
+        "assumptions": [{"datum_id": row.datum_id,
+                         "provenance": row.provenance,
+                         "owner": row.owner, "settled_by": row.settled_by}
                         for row in project.datums if row.is_assumption],
         "problems": F.messages(problems),
         "findings": [issue.to_dict() for issue in problems],
@@ -1936,7 +1941,9 @@ def status(argv: list[str]) -> int:
         # is a sentence, and four of them behind a comma is a paragraph nobody
         # reads. A job with none prints nothing, as it did before ADR 0003.
         for row in report["assumptions"]:
-            print(f"  assuming     {row['datum_id']} is a chosen number. "
+            kind = ("a chosen number" if row["provenance"] == "CHOSEN"
+                    else "a number with no recorded provenance")
+            print(f"  assuming     {row['datum_id']} is {kind}. "
                   f"{row['owner']} settles it: {row['settled_by']}")
         if report["stored_status"]:
             print(f"  status       {report['final_status']}")

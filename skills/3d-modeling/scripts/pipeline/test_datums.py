@@ -136,9 +136,11 @@ class ADatumRecordsWhereItCameFromTest(unittest.TestCase):
             "sixth invented here would be a second vocabulary for one idea")
 
     def test_a_datum_with_no_provenance_is_the_assumption_not_a_refusal(self) -> None:
-        """ADR 0003 decision 1 and 6.4, in the same words: *"A datum with no
-        recorded provenance is an assumption. It may still be used -- the ADR
-        does not forbid it -- but it is recorded as one."*
+        """ADR 0003 decision 1 and 6.4, in the ADR's words: *"A datum with no
+        recorded provenance is an assumption. It may still be used -- the
+        alternative is a job that cannot start -- but it is named as an
+        assumption, it carries an owner, and it carries the check that would
+        settle it."*
 
         The first version of this file refused it, while `cli.py` cited that very
         sentence as the reason assumptions are reported by `status` rather than
@@ -162,8 +164,8 @@ class ADatumRecordsWhereItCameFromTest(unittest.TestCase):
                          _codes(_datum(provenance="").problems()))
 
     def test_an_assumption_is_reported_where_somebody_would_look(self) -> None:
-        """*"It may still be used ... but it is recorded as one"* -- and a
-        record nothing surfaces is not one.
+        """*"It may still be used ... but it is named as an assumption"* -- and
+        a name nothing surfaces is not one.
 
         Not through `validate`. Every caller of it here refuses the run on a
         non-empty list, warning severity included, and the ADR says plainly that
@@ -175,15 +177,22 @@ class ADatumRecordsWhereItCameFromTest(unittest.TestCase):
             dataclasses.replace(_placed(), datums=(
                 _assumed(datum_id="guessed-clearance", owner="print engineer",
                          settled_by="calipers on the printed magnet pocket"),
+                _assumed(datum_id="never-recorded", provenance="",
+                         owner="designer", settled_by="ask who chose it"),
                 _datum(datum_id="magnet-pocket-face", provenance="MEASURED"),
             )).save(directory)
             self.assertEqual(
-                [{"datum_id": "guessed-clearance", "owner": "print engineer",
-                  "settled_by": "calipers on the printed magnet pocket"}],
+                [{"datum_id": "guessed-clearance", "provenance": "CHOSEN",
+                  "owner": "print engineer",
+                  "settled_by": "calipers on the printed magnet pocket"},
+                 {"datum_id": "never-recorded", "provenance": "",
+                  "owner": "designer", "settled_by": "ask who chose it"}],
                 _status(directory)["assumptions"],
-                "the chosen number is named and the measured one is not; a "
-                "list naming both would say nothing. And it carries who "
-                "settles it and how, or it is a list nobody can act on")
+                "both assumptions are named and the measured one is not; and "
+                "each carries its provenance, because a number somebody chose "
+                "and a number nobody recorded are the two cases decision 1 "
+                "exists to keep apart -- a report calling both 'a chosen "
+                "number' asserts the labelled one for the unlabelled case")
 
     def test_a_job_with_no_assumptions_says_so_by_saying_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -193,8 +202,9 @@ class ADatumRecordsWhereItCameFromTest(unittest.TestCase):
 
     def test_an_assumption_is_permitted_and_is_labelled(self) -> None:
         """ADR 0003: *"A datum with no recorded provenance is an assumption. It
-        may still be used -- the ADR does not forbid it -- but it is recorded as
-        one."*
+        may still be used -- the alternative is a job that cannot start -- but
+        it is named as an assumption, it carries an owner, and it carries the
+        check that would settle it."*
 
         So `CHOSEN` loads clean and `is_assumption` says so. A rule that refused
         assumptions outright would be refused by every job that has one, and the
@@ -287,6 +297,52 @@ class ADerivedDatumNamesTheRevisionTest(unittest.TestCase):
         self.assertEqual([], _datum(provenance="MEASURED").problems(),
                          "and it stays optional, or calipers have to invent one")
 
+    def test_the_generated_geometry_half_of_MEASURED_still_cannot_say_so(self) -> None:
+        """The limit of the fix above, asserted so it is not read as closed.
+
+        6.5's second measuring class is *"measured from generated geometry"*,
+        and `Project.validate` requires a named artifact to be a declared
+        *source* artifact -- geometry this job produced is not one. So a datum
+        measured off the job's own output still cannot record the revision it
+        was measured on, which is the same incentive inversion one class over.
+        It fails closed rather than quietly, and closing it needs a build result
+        to be an addressable artifact with a revision, which is Release 6.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            project = dataclasses.replace(_placed(), datums=(_datum(
+                provenance="MEASURED",
+                derived_from={"artifact_id": "the candidate", "revision": 2}),))
+            self.assertIn(
+                F.REF_UNDECLARED,
+                _at(project.validate(directory, require_buildable=False),
+                    "datums[0].derived_from.artifact_id"),
+                "refused, and refused is the honest answer today -- but it is "
+                "the honest row being refused, so this is a stated gap")
+
+    def test_a_derived_from_that_is_not_an_object_names_the_field(self) -> None:
+        """The same failure `valid_for` had, on the field the ADR calls *"the
+        field that failed"*.
+
+        The loader coerced anything that was not a dict to `None`, and
+        `problems` inspects it only when it is one. So on a `MEASURED` row --
+        where the revision is optional -- `"derived_from": "drawer, revision 1"`,
+        a plausible hand-authored spelling, loaded as *no revision at all* and
+        validated completely clean. `INHERITED` was safe by accident: the
+        coercion trips its `SCHEMA_REQUIRED`.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            dataclasses.replace(_placed(), datums=(_datum(),)).save(directory)
+            payload = json.loads((directory / P.PROJECT_FILE)
+                                 .read_text(encoding="utf-8"))
+            payload["datums"][0]["derived_from"] = "drawer, revision 1"
+            (directory / P.PROJECT_FILE).write_text(json.dumps(payload),
+                                                    encoding="utf-8")
+            with self.assertRaises(S.SchemaError) as caught:
+                P.load(directory)
+            self.assertIn("datums[0].derived_from", str(caught.exception))
+
     def test_a_revision_of_true_is_not_a_revision_of_one(self) -> None:
         """`isinstance(True, int)` is True in Python, so without the explicit
         bool check `revision: true` reads as revision 1 -- a revision number
@@ -350,7 +406,7 @@ class ADatumStatesItsScopeTest(unittest.TestCase):
                 self.assertEqual([], _datum(valid_for=scope).problems())
 
     def test_a_bare_string_of_scopes_names_the_field_not_its_letters(self) -> None:
-        """`tuple("src")` is nine scopes. `_ids` exists in this file for
+        """`tuple("src")` is three scopes. `_ids` exists in this file for
         exactly that and `datum_ids` uses it; `valid_for` bypassed it, so a
         malformed declaration recorded nine bogus scopes as clean -- and a
         non-list crashed `design-tool status` with an unhandled TypeError
@@ -360,7 +416,12 @@ class ADatumStatesItsScopeTest(unittest.TestCase):
             dataclasses.replace(_placed(), datums=(_datum(),)).save(directory)
             payload = json.loads((directory / P.PROJECT_FILE)
                                  .read_text(encoding="utf-8"))
-            for bad in ("src", 7):
+            # The third case is not the container but an *element*. `_ids`
+            # validated the list and never what was in it, so `[["src"]]` reached
+            # a set membership test and came out as `TypeError: unhashable type:
+            # 'list'` from `design-tool status` -- the same unhandled crash on
+            # the command surface, one level in.
+            for bad in ("src", 7, [["src"]]):
                 with self.subTest(valid_for=bad):
                     payload["datums"][0]["valid_for"] = bad
                     (directory / P.PROJECT_FILE).write_text(
@@ -375,6 +436,29 @@ class TheProjectRefusesADatumNobodyCanUseTest(unittest.TestCase):
 
     def _project_with(self, datums, **over) -> P.Project:
         return dataclasses.replace(_placed(**over), datums=tuple(datums))
+
+    def test_a_row_that_is_wrong_in_itself_reaches_the_project(self) -> None:
+        """The one line that wires `Datum.problems` to a real `project.json`.
+
+        Every rule in that method -- the provenance enum, the three-way revision
+        rule, the value, the unit, a non-empty scope, an assumption's owner and
+        settling check -- is otherwise only ever asserted by calling
+        `_datum(...).problems()` directly. Delete `problems.extend(...)` from
+        `Project.validate` and all of those tests stay green while
+        `design-tool status` accepts a datum with no provenance, no value, no
+        unit, no owner and no scope. A mutation proved exactly that: the whole
+        gate stayed at its baseline.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            broken = P.Datum(datum_id="nothing-at-all", value=None, unit="",
+                             provenance="", derived_from=None, valid_for=())
+            project = self._project_with([broken])
+            reported = _at(project.validate(directory, require_buildable=False),
+                           "datums[0]")
+            self.assertEqual({F.SCHEMA_TYPE, F.SCHEMA_REQUIRED}, reported,
+                             "the row's own rules have to arrive here, or they "
+                             "are rules about a dataclass and not about a job")
 
     def test_two_datums_may_not_claim_one_id(self) -> None:
         """Decision 4's precondition: an identity two rows answer to is not one."""
@@ -442,9 +526,39 @@ class TheScopeIsCheckedAgainstWhatTheJobDeclaresTest(unittest.TestCase):
             reported = project.validate(directory, require_buildable=False)
             self.assertEqual(
                 set(), _at(reported, "edit_scopes[0].datum_ids")
-                | _at(reported, "edit_scopes[1].datum_ids"),
+                | _at(reported, "edit_scopes[1].datum_ids")
+                # And at the declaration too. Asserting only at the reference
+                # sites let a refusal *relocate* to `datums[0].valid_for` and
+                # stay invisible: a mutation dropping interfaces out of the
+                # placeable set left this test green while the job it builds was
+                # refused at the other end.
+                | _at(reported, "datums["),
                 "the datum is scoped to the interface these two scopes realize, "
                 "which is the coordinated case the ADR exists for")
+
+    def test_a_datum_may_be_scoped_to_a_declared_component(self) -> None:
+        """Declarable, and — say it plainly — not yet referenceable.
+
+        ADR decision 3 names artifacts, components and interfaces, so a
+        component id is accepted here. No `EditScope` names a component, so the
+        scope match (artifact plus interfaces) can never be inside one: a
+        component-scoped datum is a declaration nothing can use yet. The axis
+        stays because the ADR names it and because dropping it would make the
+        declaration unrepresentable rather than merely unused; what does not
+        stay is the impression that it works. Referencing it needs a component
+        to be something an edit scope can be inside, which no release has built.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            project = dataclasses.replace(
+                self._with([_datum(valid_for=("drawer-body",))], ()),
+                components=(P.Component(component_id="drawer-body",
+                                        role="printed part"),))
+            self.assertEqual(
+                set(), _at(project.validate(directory,
+                                            require_buildable=False),
+                           "datums[0].valid_for"),
+                "a component the job declares is a scope the datum may name")
 
     def test_a_scope_naming_nothing_the_job_declares_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
