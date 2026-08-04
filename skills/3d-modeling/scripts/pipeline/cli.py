@@ -1102,11 +1102,11 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     `preservation_tolerance_mm`, with `mesh_fallback_allowed` folded into `exact`
     -- so a job could change what it promised about the edit (what must survive,
     what may go, what is being added, how many bodies should result, whether the
-    source's metadata must, which interface the edit realizes, where the source
-    sits in the job's frame) without moving the contract hash, and keep the review
-    answer somebody wrote against the previous promise. Everything here reaches
-    the frozen acceptance revision and therefore `contract_sha256` in the review
-    envelope.
+    source's metadata must, which interface the edit realizes, which datum it is
+    placed against, where the source sits in the job's frame) without moving the
+    contract hash, and keep the review answer somebody wrote against the previous
+    promise. Everything here reaches the frozen acceptance revision and therefore
+    `contract_sha256` in the review envelope.
     """
     rows: list[dict[str, Any]] = []
     for scope in project.edit_scopes:
@@ -1149,13 +1149,22 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             # the review envelope: a job that changes what it claims to be doing
             # can no longer keep the answer somebody wrote against the previous
             # claim. Only `alignment_transform` goes on to the sampling seed --
-            # see `preservation._seed_material`. The other six say what the edit
+            # see `preservation._seed_material`. The others say what the edit
             # promised, not where the geometry is, so they must not move the plan
             # digest of a measurement they cannot change.
             "alignment_transform": scope.canonical_alignment_transform(),
             "preserve": list(scope.preserve),
             "may_remove": list(scope.may_remove),
             "add": list(scope.add),
+            # Which declared datum this edit was placed against (ADR 0003), by
+            # the same argument as the six above: re-placing an edit against a
+            # different reference changes what the job claims to be doing, and
+            # an answer written against the previous claim must not survive it.
+            # Absent where the job declares none, for the reason
+            # `minimum_detectable_defect_mm` gives above -- an always-present key
+            # would move the five pinned certified contracts for a field they do
+            # not use.
+            **({"datum_ids": list(scope.datum_ids)} if scope.datum_ids else {}),
             "expected_body_delta": int(scope.expected_body_delta),
             "preserve_metadata": bool(scope.preserve_metadata),
             "interface_ids": list(scope.interface_ids),
@@ -1847,6 +1856,18 @@ def status(argv: list[str]) -> int:
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
+        # ADR 0003 decision 1: an assumption is permitted and is *findable*.
+        # A datum somebody chose is not a defect, so `validate` says nothing
+        # about it -- every caller of it here refuses the run on a non-empty
+        # list, warning severity included, and the ADR says plainly that a job
+        # whose datum has no provenance is not refused. It belongs where a
+        # person asks what the job is resting on instead. Release 6 is where an
+        # assessment has to name the ones its conclusion rested on.
+        # Each row carries who settles it and what settling it means, because a
+        # list of bare ids is the `note` this replaced.
+        "assumptions": [{"datum_id": row.datum_id, "owner": row.owner,
+                         "settled_by": row.settled_by}
+                        for row in project.datums if row.is_assumption],
         "problems": F.messages(problems),
         "findings": [issue.to_dict() for issue in problems],
         "waiting_for": next_action,
@@ -1905,6 +1926,12 @@ def status(argv: list[str]) -> int:
             print(f"  because      {report['route_rationale']}")
         if report["required_reviews"]:
             print(f"  reviews      {', '.join(report['required_reviews'])}")
+        # One line per assumption rather than a joined list: the settling check
+        # is a sentence, and four of them behind a comma is a paragraph nobody
+        # reads. A job with none prints nothing, as it did before ADR 0003.
+        for row in report["assumptions"]:
+            print(f"  assuming     {row['datum_id']} is a chosen number. "
+                  f"{row['owner']} settles it: {row['settled_by']}")
         if report["stored_status"]:
             print(f"  status       {report['final_status']}")
             if report["final_status"] == report["stored_status"]:

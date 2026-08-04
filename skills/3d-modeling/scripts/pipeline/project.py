@@ -243,6 +243,199 @@ class SourceArtifact:
 
 
 @dataclasses.dataclass(frozen=True)
+class Datum:
+    """A geometric reference, and the evidence that makes it usable.
+
+    [ADR 0003](../../../docs/adr/0003-datum-provenance-and-authority.md). The
+    failure it was written from: a job coordinated two edit scopes across two
+    artifacts by writing the same number into both, the source file was
+    rewritten mid-job, and under the new revision that declaration produced
+    three bosses that must not exist. Nothing detected it, for two reasons that
+    are both fields here -- nothing recorded which revision the number had been
+    measured on, and there were two copies of one number, so the second to be
+    corrected was the one that shipped.
+
+    So a datum is one object with an identity, and coordinated scopes reference
+    it rather than each holding a copy. `valid_for` is the scope in which it may
+    be used: 6.12 requires evidence to carry the scope it was taken in, and a
+    datum is evidence.
+
+    **An assumption is allowed and is labelled.** A number somebody picked is
+    often the only way two artifacts can be coordinated before either is
+    measured. The ADR does not forbid it; what it forbids is being unable to
+    tell it from a measurement.
+
+    **What this is not.** An `Interface` is the other shared thing two edit
+    scopes name, and the two answer different questions. An interface says *that
+    a mating surface exists between two artifacts and who owns the far side of
+    it*; a datum says *what number an edit is placed against, where that number
+    came from, and where it may be used*. Two scopes cutting one magnet pocket
+    name the interface; the face they measure the pocket from is the datum. A
+    datum may be scoped to an interface (`valid_for`), which is the only link
+    between them, and it is a reference rather than a second copy.
+    """
+
+    datum_id: str
+    value: Any
+    unit: str
+    # One of `PROVENANCE`, the same closed set every other design-driving value
+    # uses -- or empty, which 6.4 names as the assumption case and permits. A
+    # sixth *class* invented here would be a second vocabulary for one idea, and
+    # 6.5's argument applies unchanged; the empty string is not a sixth class but
+    # the absence of one, which is the distinction the ADR turns on.
+    provenance: str
+    # `{"artifact_id": ..., "revision": ...}` where the datum was read off
+    # geometry, and None where it was not. A derived datum is valid against the
+    # revision it was measured on and no later one.
+    derived_from: dict[str, Any] | None = None
+    # Which artifacts, components or interfaces this may be used to place. Each
+    # entry must name a row the job declares -- see `Project.validate` -- because
+    # a scope naming nothing is a scope no edit can ever satisfy.
+    valid_for: tuple[str, ...] = ()
+    # An assumption's two obligations, and only an assumption's. 6.4: it "is
+    # named as an assumption, with an owner and with the check that would settle
+    # it". Without them the status report lists a number nobody can act on,
+    # which is exactly what a `note` already was.
+    owner: str = ""
+    settled_by: str = ""
+    note: str = ""
+
+    @property
+    def is_assumption(self) -> bool:
+        """A number nobody measured and nobody derived.
+
+        Provenance decides it, and nothing else. Two cases, for the reason 6.4
+        gives: a number with **no recorded provenance** is the assumption the ADR
+        names outright, and `CHOSEN` -- engineering judgment -- is the same thing
+        with a label on it. Neither is refused; both owe an owner and a check.
+
+        This read `provenance == "CHOSEN" and not self.derived_from` until a
+        mutation survived: no test could tell that from dropping the second
+        clause, because a `CHOSEN` datum naming an artifact revision is already
+        refused below. A second copy of that rule here would be a second
+        authority over one question, which is the thing ADR 0003 is about.
+        """
+        return self.provenance == "CHOSEN" or not str(self.provenance).strip()
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = dataclasses.asdict(self)
+        payload["valid_for"] = list(self.valid_for)
+        return payload
+
+    def problems(self, index: int = 0) -> list[Issue]:
+        where = f"datum {self.datum_id!r}"
+        path = f"datums[{index}]"
+        out: list[Issue] = []
+        if not self.datum_id.strip():
+            out.append(F.problem(F.SCHEMA_REQUIRED, f"{path}.datum_id",
+                                 "a datum with no id cannot be referenced, and "
+                                 "a datum nobody can reference is a copy"))
+        # Empty is permitted and is the assumption 6.4 names; see
+        # `is_assumption`. Anything else must be one of the closed set.
+        if str(self.provenance).strip() and self.provenance not in PROVENANCE:
+            out.append(F.problem(F.SCHEMA_ENUM, f"{path}.provenance",
+                                 f"{where}: provenance {self.provenance!r} is "
+                                 f"not one of {list(PROVENANCE)}"))
+
+        # Required of `INHERITED`, permitted of `MEASURED`, refused of the rest,
+        # and the three are different questions that one flag used to answer
+        # wrongly.
+        #
+        # `INHERITED` means read out of a supplied artifact, so it always has a
+        # revision to name -- the same shape `Requirement` uses, which requires
+        # `artifact_id` on `INHERITED` and is silent elsewhere.
+        #
+        # `MEASURED` covers both of 6.5's measuring classes: off supplied
+        # evidence, and off generated geometry. The second has a revision and the
+        # first may not -- calipers on a physical part have no artifact revision
+        # to invent -- so it is optional. It may not be *refused*: this rule read
+        # `INHERITED` only, which meant the honest row recording the revision it
+        # was measured on was rejected while the vague one validated clean, and
+        # the only way to record the revision was to relabel the number
+        # `INHERITED`, a provenance the value cannot support. That inverted the
+        # incentive on precisely the class ADR 0003 was written from -- the
+        # incident's bad field was measured off the job's own drawer.
+        required = self.provenance == "INHERITED"
+        may_carry = required or self.provenance == "MEASURED"
+        if required and not isinstance(self.derived_from, dict):
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.derived_from",
+                f"{where}: INHERITED means read out of a supplied artifact, and "
+                "a datum that does not say which artifact at which revision is "
+                "valid against nothing in particular"))
+        elif isinstance(self.derived_from, dict):
+            if not may_carry:
+                out.append(F.problem(
+                    F.INTENT_CONTRADICTION, f"{path}.derived_from",
+                    f"{where}: provenance is {self.provenance!r} and it names an "
+                    "artifact revision. A number nobody read off geometry has no "
+                    "revision to be valid against, and claiming one is a "
+                    "provenance the value cannot support"))
+            if not str(self.derived_from.get("artifact_id", "")).strip():
+                out.append(F.problem(F.SCHEMA_REQUIRED,
+                                     f"{path}.derived_from.artifact_id",
+                                     f"{where}: derived from which artifact?"))
+            revision = self.derived_from.get("revision")
+            if not isinstance(revision, int) or isinstance(revision, bool) \
+                    or revision < 1:
+                out.append(F.problem(
+                    F.SCHEMA_TYPE, f"{path}.derived_from.revision",
+                    f"{where}: revision {revision!r} is not a revision number. "
+                    "This is the field the three bosses turned on"))
+
+        # The number the whole construct exists to carry, checked the way
+        # `Requirement` checks its own. A datum whose value is None is a
+        # reference to nothing, and it used to validate clean: this block
+        # checked the id, the provenance, the revision and the scope, and never
+        # the number.
+        if isinstance(self.value, bool) or self.value is None:
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.value",
+                                 f"{where}: value must be a finite number or a "
+                                 "non-empty string"))
+        elif isinstance(self.value, (int, float)):
+            try:
+                S.require_finite_number(self.value, what=where)
+            except S.SchemaError as exc:
+                out.append(F.problem(F.SCHEMA_NON_FINITE, f"{path}.value",
+                                     str(exc)))
+            # Only where the value is a number. A datum naming a face rather
+            # than a length has no unit, and requiring one would make it invent
+            # one -- the same reasoning the revision field follows above.
+            if not str(self.unit).strip():
+                out.append(F.problem(
+                    F.SCHEMA_REQUIRED, f"{path}.unit",
+                    f"{where}: a number with no unit is a number two readers "
+                    "can read differently, which 12 exists to stop"))
+        elif not (isinstance(self.value, str) and self.value.strip()):
+            out.append(F.problem(F.SCHEMA_TYPE, f"{path}.value",
+                                 f"{where}: value must be a finite number or a "
+                                 "non-empty string"))
+
+        if not self.valid_for:
+            out.append(F.problem(
+                F.SCHEMA_REQUIRED, f"{path}.valid_for",
+                f"{where}: a datum that may be used to place anything is a "
+                "datum with no scope, and 6.12 requires evidence to carry the "
+                "scope it was taken in"))
+
+        # 6.4 permits the assumption and prices it. The obligation is the
+        # assumption's alone: a measured or inherited number is already settled,
+        # and asking it to name a settling check would make every honest datum
+        # invent one.
+        if self.is_assumption:
+            for field, what in (("owner", "who resolves it"),
+                                ("settled_by", "what resolving it means")):
+                if not str(getattr(self, field)).strip():
+                    out.append(F.problem(
+                        F.SCHEMA_REQUIRED, f"{path}.{field}",
+                        f"{where}: a number nobody measured is an assumption, "
+                        f"and 6.4 names one with an owner and with the check "
+                        f"that would settle it. This one does not say {what}, "
+                        f"so it is a number in a list nobody can act on"))
+        return out
+
+
+@dataclasses.dataclass(frozen=True)
 class Interface:
     """A mating surface, and who owns the geometry on the other side of it.
 
@@ -369,7 +562,21 @@ class EditScope:
     # beside an interface with nothing saying they were its two sides, so the
     # agreement lived in a `note` a reader had to believe rather than in a field
     # a validator could check.
+    #
+    # This comment used to call an interface "the shared datum between two
+    # scopes", which ADR 0003 made ambiguous. The two are different questions and
+    # both are needed: an interface says *that* a mating surface exists between
+    # two artifacts and who owns the far side; a `Datum` says *what number* an
+    # edit is placed against, where it came from, and where it may be used. The
+    # link between them is that a datum may be `valid_for` an interface, which is
+    # how one number serves both sides of one feature.
     interface_ids: tuple[str, ...] = ()
+    # Which declared `Datum` rows this edit is placed against. ADR 0003
+    # decision 4: coordinated scopes that must agree on a reference name one
+    # identity and do not each hold a copy, because two copies of a number are
+    # two authorities over one declaration and the second one to be corrected is
+    # the one that ships.
+    datum_ids: tuple[str, ...] = ()
     # The band a sampled comparison may call unchanged. Two tessellations of one
     # surface disagree by the chord error of whichever is coarser, so this is not
     # zero -- and it is declared before the edit, like everything else here.
@@ -390,7 +597,8 @@ class EditScope:
 
     def as_dict(self) -> dict[str, Any]:
         payload = dataclasses.asdict(self)
-        for key in ("preserve", "may_remove", "add", "interface_ids"):
+        for key in ("preserve", "may_remove", "add", "interface_ids",
+                    "datum_ids"):
             payload[key] = list(getattr(self, key))
         return payload
 
@@ -694,6 +902,7 @@ class Project:
     requirements: tuple[Requirement, ...] = ()
     source_artifacts: tuple[SourceArtifact, ...] = ()
     interfaces: tuple[Interface, ...] = ()
+    datums: tuple[Datum, ...] = ()
     motion: tuple[Motion, ...] = ()
     components: tuple[Component, ...] = ()
     open_questions: tuple[OpenQuestion, ...] = ()
@@ -813,6 +1022,12 @@ class Project:
             # that somebody considered the question, and on a canonical project
             # the answer is read off the declared interfaces instead.
             payload["external_geometry"] = self.external_geometry
+        # Absent until it means something, for the reason the docstring gives
+        # about `alternatives`: a job that declares no datum must serialize to
+        # exactly the bytes it did before ADR 0003 was implemented, or every
+        # frozen contract hash in the corpus moves for a key saying nothing.
+        if self.datums:
+            payload["datums"] = [d.as_dict() for d in self.datums]
         if self.alternatives:
             payload["alternatives"] = [a.as_dict() for a in self.alternatives]
             payload["active_alternative"] = self.active_alternative
@@ -978,6 +1193,53 @@ class Project:
 
         for index, artifact in enumerate(self.source_artifacts):
             problems.extend(artifact.problems(project_dir, index))
+        # What a datum's `valid_for` may name: the rows a scope can be measured
+        # against. ADR 0003 decision 3 says artifacts, components and interfaces,
+        # and a scope naming none of them is a scope no edit can ever satisfy.
+        placeable = ({row.artifact_id for row in self.source_artifacts}
+                     | {row.component_id for row in self.components}
+                     | {row.interface_id for row in self.interfaces})
+        seen_datums: set[str] = set()
+        for index, datum in enumerate(self.datums):
+            problems.extend(datum.problems(index))
+            if datum.datum_id in seen_datums:
+                # ADR 0003 decision 4's precondition. An identity two rows
+                # answer to is not an identity, and the whole mechanism is that
+                # coordinated scopes reference *one* object.
+                #
+                # What this detects is the id collision, and only that. Two rows
+                # holding one number under two ids validate clean; finding those
+                # means comparing values, which is Release 6's job and not a
+                # declaration check.
+                problems.append(F.problem(
+                    F.REF_DUPLICATE, f"datums[{index}].datum_id",
+                    f"datum {datum.datum_id!r} is declared twice. An identity "
+                    "two rows answer to is not one, and coordinated scopes "
+                    "reference one object rather than each holding a copy"))
+            seen_datums.add(datum.datum_id)
+            # The field the ADR calls "the field that failed", and the one id
+            # reference in this neighbourhood that had no referential check
+            # while every other one did.
+            derived_from = datum.derived_from
+            if isinstance(derived_from, dict):
+                named = str(derived_from.get("artifact_id", "")).strip()
+                if named and self.artifact(named) is None:
+                    problems.append(F.problem(
+                        F.REF_UNDECLARED,
+                        f"datums[{index}].derived_from.artifact_id",
+                        f"datum {datum.datum_id!r} was derived from {named!r}, "
+                        "which names no declared source artifact. A revision of "
+                        "a file the job does not have is a revision nothing can "
+                        "be checked against"))
+            for position, scope_id in enumerate(datum.valid_for):
+                if scope_id not in placeable:
+                    problems.append(F.problem(
+                        F.REF_UNDECLARED,
+                        f"datums[{index}].valid_for[{position}]",
+                        f"datum {datum.datum_id!r} is valid for {scope_id!r}, "
+                        "which names no declared artifact, component or "
+                        "interface. A scope nothing answers to is a scope no "
+                        "edit can be inside"))
         for index, interface in enumerate(self.interfaces):
             problems.extend(interface.problems(index))
             if interface.motion_id and not any(m.motion_id == interface.motion_id
@@ -1002,6 +1264,7 @@ class Project:
                                           "what must be preserved"))
         scoped: set[str] = set()
         declared_interfaces = {i.interface_id for i in self.interfaces}
+        declared_datums = {d.datum_id: d for d in self.datums}
         for index, scope in enumerate(self.edit_scopes):
             problems.extend(scope.problems(index))
             if self.artifact(scope.artifact_id) is None:
@@ -1024,6 +1287,35 @@ class Project:
                         f"{scope.where}: interface_id {interface_id!r} "
                         "names no declared interface; a datum two edits "
                         "have to agree on cannot be one nothing declares"))
+            # ADR 0003: a datum is one object, referenced. A scope may name one
+            # that exists, and only inside the scope that datum declares itself
+            # valid for -- a reference used one artifact over is the stale
+            # reference the ADR was written from, moved sideways.
+            for position, datum_id in enumerate(scope.datum_ids):
+                at = f"edit_scopes[{index}].datum_ids[{position}]"
+                datum = declared_datums.get(datum_id)
+                if datum is None:
+                    problems.append(F.problem(
+                        F.REF_UNDECLARED, at,
+                        f"{scope.where}: datum_id {datum_id!r} names no "
+                        "declared datum. Two scopes agreeing on a reference "
+                        "name one identity; a name nothing declares is a copy "
+                        "with extra steps"))
+                # Decision 3 names artifacts, components *and* interfaces, so
+                # the match is against everything this scope is inside -- the
+                # artifact it edits and the interfaces it realizes. Comparing
+                # against `artifact_id` alone refused the coordinated case the
+                # ADR is written for: a datum scoped to the interface two scopes
+                # both realize was out of scope for both of them.
+                elif not (set(datum.valid_for)
+                          & ({scope.artifact_id} | set(scope.interface_ids))):
+                    problems.append(F.problem(
+                        F.INTENT_CONTRADICTION, at,
+                        f"{scope.where}: datum {datum_id!r} is valid for "
+                        f"{list(datum.valid_for)} and this scope edits "
+                        f"{scope.artifact_id!r}. A datum used outside the scope "
+                        "it was taken in is the stale reference ADR 0003 exists "
+                        "to stop, one artifact over"))
         if self.source_mode == "NEW" and self.source_artifacts:
             problems.append(F.problem(F.INTENT_CONTRADICTION, "source_mode",
                                       "source_mode is NEW but source artifacts are declared; "
@@ -1246,7 +1538,9 @@ def from_payload(payload: dict[str, Any]) -> Project:
             preserve_metadata=bool(edit.get("preserve_metadata", True)),
             alignment_transform=edit.get("alignment_transform", "identity"),
             interface_ids=_ids(edit.get("interface_ids"),
-                               f"edit_scopes[{index}].interface_ids"))
+                               f"edit_scopes[{index}].interface_ids"),
+            datum_ids=_ids(edit.get("datum_ids"),
+                           f"edit_scopes[{index}].datum_ids"))
         for index, edit in enumerate(
             _rows(payload.get("edit_scopes"), "edit_scopes")))
 
@@ -1293,6 +1587,23 @@ def from_payload(payload: dict[str, Any]) -> Project:
                       motion_id=row.get("motion_id"),
                       note=str(row.get("note", "")))
             for row in _rows(payload.get("interfaces"), "interfaces")),
+        datums=tuple(
+            Datum(datum_id=str(row.get("datum_id", "")),
+                  value=row.get("value"),
+                  unit=str(row.get("unit", "")),
+                  provenance=str(row.get("provenance", "")),
+                  derived_from=(row.get("derived_from")
+                                if isinstance(row.get("derived_from"), dict)
+                                else None),
+                  # `_ids`, like every other id list here. `tuple("case-body")`
+                  # is nine scopes, and a malformed declaration that recorded
+                  # nine bogus ones read as a clean datum.
+                  valid_for=_ids(row.get("valid_for"),
+                                 f"datums[{index}].valid_for"),
+                  owner=str(row.get("owner", "")),
+                  settled_by=str(row.get("settled_by", "")),
+                  note=str(row.get("note", "")))
+            for index, row in enumerate(_rows(payload.get("datums"), "datums"))),
         motion=tuple(
             Motion(motion_id=str(row.get("motion_id", "")),
                    kind=str(row.get("kind", "")),

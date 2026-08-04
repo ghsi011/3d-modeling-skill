@@ -588,7 +588,7 @@ def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
     transform invalidate the evidence; it does not make the audit frame-aware.
 
     The other declared edit-intent fields -- `preserve`, `may_remove`, `add`,
-    `expected_body_delta`, `preserve_metadata`, `interface_ids` -- are
+    `expected_body_delta`, `preserve_metadata`, `interface_ids`, `datum_ids` -- are
     deliberately *not* here. They are promises about the edit rather than
     statements about where the geometry is, and none of them changes which points
     get sampled or what they are compared against. They are bound into the

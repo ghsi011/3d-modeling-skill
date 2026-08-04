@@ -53,6 +53,17 @@ side of each, declared motion, edit scope, expected components, open questions,
 required reviews, and — only once the job has branched — its design alternatives
 and which one is active.
 
+It also carries `datums` where a job declares any: a shared geometric reference
+with an identity, a value, a provenance, the artifact **revision** it was read on
+where it was read off geometry, and the artifacts, components or interfaces it is
+valid for. Coordinated edit scopes name one datum identity through `datum_ids`
+rather than each holding a copy of the number
+([ADR 0003](adr/0003-datum-provenance-and-authority.md)). A datum with no recorded
+provenance is permitted and is an assumption: it names an owner and the check that
+would settle it, and `design-tool status` reports it. Changing a datum's *value*
+currently invalidates nothing — see `ROADMAP.md` — which is why a job with an edit
+scope cannot claim success.
+
 There is no `status` and no `bindings` block. They mirrored one run's outcome —
 its stage, its final status, its allowed claim and its artifact digests — into
 the one file that has to stay shared, so the project said the job was whatever
@@ -173,6 +184,7 @@ disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derive
 | `stale` | each receipt that no longer binds, and which binding broke |
 | `state` | the binding values the receipts are being checked against |
 | `bindings` | this formulation's own artifact hashes, from its own final status |
+| `assumptions` | every declared datum nobody measured — its id, who settles it, and what settling it means. Empty on a job that declares none, and the terminal prints nothing. This is where an assumption is *findable*: it is deliberately not a `validate` finding, because every caller there refuses the run on a non-empty list and ADR 0003 says an assumption does not refuse the job |
 | `problems` | every reason the project cannot be routed, as sentences |
 | `findings` | the same list as structure — `code`, `where`, `severity`, `id` — so "which alternative and which field" is a match rather than a search |
 | `alternatives[]` | one row per formulation — the shared root **and** every declared alternative — each carrying `status`, `stored_status`, `stale` (the receipt **names** only -- the reasons stay on the top-level `stale`), `allowed_claim` and `reasons`, derived in that formulation's own directory, so switching branches is not the price of finding out where the other one stands. The root has no declared row in `project.json` and is synthesised into the report: it is a formulation by having a directory, a proposal, a contract and its own receipts. Iterating only the declared rows was `docs/defects.md` D26, where this block counted two formulations of the recorded knob and `cost` below counted three |

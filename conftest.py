@@ -77,12 +77,26 @@ _SPAWN_ALLOWED = frozenset({"git"})
 
 L0_TEST_CEILING_S = 5.0
 
-# The gate collected 890 when this was set. 1050 is about 18% headroom -- room
-# for a release's worth of ordinary fixtures without a conversation, and not so
-# much that the mechanism that took the gate to 997 s could return unnoticed.
-# Raising it is allowed and is meant to be deliberate: a raise is a line in a
-# diff saying the gate got bigger, which is the whole point.
-L0_COLLECTED_CEILING = 1050
+# The gate collected 890 when this was first set, and 1050 was about 18%
+# headroom -- room for a release's worth of ordinary fixtures without a
+# conversation. That headroom is spent: ADR 0003's datum fixtures took the gate
+# past it and this guard refused them, which is the guard working.
+#
+# Raised to 1240 on the same rule -- about 16% over the 1066 the gate now holds.
+# What that costs, measured in one session so the machine's own drift is common
+# to every reading: 56.0 s at 1066, against 56.4 s at 1033 on the commit before
+# this slice. An intermediate state of the same slice measured 55.4 s and 56.4 s
+# at 1052 -- one commit, two readings, a full second apart and in the wrong
+# direction. Thirty-three added fixtures are not measurable against that, which
+# is the argument for counting tests rather than timing them and is exactly why
+# this number and not the wall clock is the control.
+#
+# 174 tests of headroom cannot hide the mechanism that once took the gate to
+# 997 s: that was child interpreters at ~1.6 s each, and `_violation` refuses a
+# spawn inside the gate outright rather than pricing it. A raise stays deliberate
+# -- it is a line in a diff saying the gate got bigger, with what it costs beside
+# it.
+L0_COLLECTED_CEILING = 1240
 
 # Set by CI (or by hand) to profile without the gate refusing; the value is
 # printed in the failure text so a run that was let through says so.
