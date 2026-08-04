@@ -31,8 +31,8 @@ def _write(path: Path, text: str) -> None:
 
 
 def _case(directory: Path, *, reviews=(), judgements=None, substitutions=None,
-          inputs=None, revisions=None, formulations=None, concludes="BUILT",
-          case_id="synthetic") -> Path:
+          inputs=None, revisions=None, formulations=None, dispositions=None,
+          concludes="BUILT", case_id="synthetic") -> Path:
     """A case on disk under a temporary CASES_ROOT, sealed and loadable.
 
     `inputs`, `revisions` and `judgements` take the case-relative path inside
@@ -61,6 +61,8 @@ def _case(directory: Path, *, reviews=(), judgements=None, substitutions=None,
         payload["reviews"] = list(reviews)
     else:
         payload["formulations"] = list(formulations)
+    if dispositions is not None:
+        payload["dispositions"] = list(dispositions)
     (room / RP.CASE_FILE).write_text(json.dumps(payload), encoding="utf-8")
     return room
 
@@ -224,13 +226,29 @@ class _FakeSurface:
         if argv[0] == "branch":
             payload = self._project()
             rows = list(payload.get("alternatives") or ())
+            if "--disposition" in argv:
+                wanted = argv[argv.index("--of") + 1]
+                state = argv[argv.index("--disposition") + 1]
+                basis = (argv[argv.index("--basis") + 1]
+                         if "--basis" in argv else "")
+                payload["alternatives"] = [
+                    {**row, "disposition": state, "basis": basis}
+                    if row.get("alternative_id") == wanted else row
+                    for row in rows]
+                self._save(payload)
+                return 0
             if "--activate" in argv:
                 wanted = argv[argv.index("--activate") + 1]
                 payload["active_alternative"] = (
                     None if wanted == RP.ROOT_ALTERNATIVE else wanted)
             else:
                 wanted = argv[argv.index("--id") + 1]
-                rows.append({"alternative_id": wanted})
+                # `ACTIVE` because that is what `cli.py` writes for a new
+                # alternative. A fake that left the field out would make
+                # "nothing was decided" look like `None` rather than like the
+                # state a formulation is branched into.
+                rows.append({"alternative_id": wanted, "disposition": "ACTIVE",
+                             "basis": ""})
                 payload["alternatives"] = rows
                 payload["active_alternative"] = wanted
             self._save(payload)
@@ -257,6 +275,12 @@ class _FakeSurface:
         pending = work / "next_action.json"
         if action is None:
             pending.unlink(missing_ok=True)
+            # A run that stops with nothing pending has concluded, and the real
+            # one leaves a final status behind when it does. `_apply_dispositions`
+            # reads exactly that to decide whether the job finished, so a fake
+            # that skipped it would make every decision test vacuous.
+            (work / "final_status.json").write_text(
+                json.dumps({"final_status": "VERIFIED"}), encoding="utf-8")
         else:
             (work / "reviews").mkdir(parents=True, exist_ok=True)
             if action.get("kind") == "REVIEW":
@@ -455,6 +479,124 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case, project, run = self._play([(0, None)])
         self.assertEqual({}, run.comparison)
         self.assertNotIn("comparison", RP.observe(case, run))
+
+    def _decided(self, dispositions, script=None, **kw):
+        """A two-formulation case that concludes, with decisions declared."""
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=dispositions, **kw)
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        surface = _FakeSurface(project, script or [(0, None), (0, None)])
+        return case, project, surface
+
+    def test_a_declared_decision_is_taken_through_the_verb_a_user_has(self) -> None:
+        """Gate 4.5's mechanism, at L0 speed.
+
+        One command per decision, after everything else, with the basis on the
+        command line -- because a disposition that reached `project.json` by any
+        other route would be a state this harness set rather than a decision the
+        product recorded.
+        """
+        case, project, surface = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}])
+        run = RP.play(case, project, invoke=surface)
+
+        self.assertEqual(
+            ["branch", str(project), "--disposition", "PREFERRED",
+             "--of", "snap-fit", "--basis", "USER_SELECTION"],
+            surface.calls[-1],
+            "last, so the comparison that informs it has already run")
+        self.assertEqual(
+            {"snap-fit": {"disposition": "PREFERRED",
+                          "basis": "USER_SELECTION", "superseded_by": ""}},
+            RP.observe(case, run)["dispositions"])
+
+    def test_nothing_is_decided_about_a_job_that_did_not_finish(self) -> None:
+        """The fail-closed half, and it is not what the product would do.
+
+        `design-tool branch --disposition` accepts a formulation that never
+        concluded -- retaining an unfinished alternative as a fallback is a
+        legitimate thing to want. But a *recording* that carried a preference
+        formed over a formulation with no final status would be evidence of a
+        decision nobody could have made, so the harness declines to take the
+        declared decisions at all.
+        """
+        case, project, surface = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}],
+            # The second formulation stops with an instruction still pending, so
+            # it writes no final status.
+            script=[(0, None), (RP.NEEDS_ACTION, {"kind": "OTHER"})])
+        run = RP.play(case, project, invoke=surface)
+
+        self.assertNotIn("--disposition", [a for argv in surface.calls for a in argv])
+        self.assertEqual(
+            {"snap-fit": {"disposition": "ACTIVE", "basis": "",
+                          "superseded_by": ""}},
+            RP.observe(case, run)["dispositions"],
+            "still in the state it was branched into, with no basis: the "
+            "recording says nobody decided rather than saying nothing")
+
+    def test_a_decision_the_product_refuses_stops_the_play(self) -> None:
+        case, project, _ = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}])
+
+        class _Refuses(_FakeSurface):
+            def __call__(self, argv):
+                if "--disposition" in argv:
+                    self.calls.append(list(argv))
+                    return 2
+                return super().__call__(argv)
+
+        with self.assertRaises(RP.ReplayError) as caught:
+            RP.play(case, project, invoke=_Refuses(project, [(0, None), (0, None)]))
+        self.assertIn("--disposition", str(caught.exception))
+
+    def test_a_basis_the_pipeline_does_not_know_is_refused_at_load(self) -> None:
+        """Against `project.DISPOSITION_BASIS`, not a copy of it.
+
+        A harness holding its own list would let a case declare a basis the
+        product refuses, and the play would fail two commands later with a
+        message about `project.json` rather than about the case.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "PREFERRED",
+                             "basis": "IT_LOOKED_BETTER"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("IT_LOOKED_BETTER", str(caught.exception))
+
+    def test_a_decision_with_no_basis_is_refused_at_load(self) -> None:
+        """14.6: a disposition records why, or it records that somebody moved on."""
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "FALLBACK"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("basis", str(caught.exception))
+
+    def test_an_unbranched_case_may_not_declare_a_decision(self) -> None:
+        """There is nothing to decide between, and the root is not a candidate."""
+        _case(self.root, dispositions=[{"alternative_id": "snap-fit",
+                                        "disposition": "PREFERRED",
+                                        "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("no formulations", str(caught.exception))
 
     def test_a_comparison_that_fails_stops_the_play_rather_than_recording_it(self) -> None:
         """It dispatches nothing and builds nothing, so it has no way to be busy.

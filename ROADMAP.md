@@ -455,6 +455,21 @@ The outcome records:
 * why an alternative was preferred, paused, or rejected;
 * whether the roadmap or architecture should change.
 
+**Where this stands as of Release 4 slice 3.** The last two clauses about
+alternatives were the outstanding ones — Release 3 shipped branching and nobody
+had used it to settle anything. They are met on
+`benchmarks/replays/branch-knob-seat-fallback`, a real vendored request: three
+formulations explored, one preferred and one retained as a fallback through the
+verb a user has, each carrying a basis from the closed set, both the decision
+and the state it left frozen in the recording.
+
+Read the "why" clause carefully before treating it as closed, though. What is
+recorded is *a* reason — `UNRESOLVED_EVIDENCE` — and it is honest, but it is
+honest partly because the deciding axis could not be measured. This gate is met
+on a job whose comparison declined to make preference admissible. A release that
+wants to say alternatives were preferred *on their merits* still owes a job
+where the merits were measurable.
+
 ### 4.6 Documentation gate
 
 Current documentation must describe what the released skill actually supports.
@@ -1043,10 +1058,9 @@ constraint; the first is done, the second is not:
 
 * ~~the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
   and its output frozen in `expected.json`~~ — **shipped as slice 2, below**;
-* the two `design-tool branch --disposition` calls that prefer one formulation
-  and retain the other as `FALLBACK`. That is what gate 4.5 says Release 3 still
-  owes — nobody has used derived status to decide about a real part — and it is
-  one command each, on a case that already exists.
+* ~~the two `design-tool branch --disposition` calls that prefer one formulation
+  and retain the other as `FALLBACK`~~ — **shipped as slice 3, below.** Release 4
+  owes nothing further.
 
 ### Slice 2 — the comparison meets a receipt a run actually wrote
 
@@ -1355,6 +1369,60 @@ step in the replay recording. Both were blocked on a Windows host when this was
 written; `pipeline/confine_posix.py` unblocked them, and §2 now records that the
 L1 suite runs on Linux and reproduces its goldens. What is left is the work
 itself.
+
+### Slice 3 — somebody decides, and does not claim more than the comparison gave
+
+Gate 4.5 asked for a real part whose alternatives somebody actually decided
+between, and until now nothing in this repository had done it. The recorded knob
+now ends the way a job ends: three formulations built and verified, `status`
+deriving what each is still entitled to claim, `compare` saying what that
+establishes, and then two `design-tool branch --disposition` calls —
+`plate-seated` preferred, `as-drawn` retained as `FALLBACK`, both on
+`UNRESOLVED_EVIDENCE`.
+
+**The basis is the slice.** Typing two commands is not the work; choosing a
+basis that does not overstate is. The comparison run immediately before them
+reports `preference.admissible: false` — the three formulations are measured
+against different envelope expectations, so their `PASS`es are not comparable
+(D25), and the axis that would actually decide is whether the mouth seats on a
+plate whose height is a photo estimate nobody has measured. A decision is still
+correct there: a fallback exists precisely for the case where the estimate is
+wrong. What may not happen is the decision claiming measured support the
+comparison refused to give, and `STRONGER_CONCEPT` would have claimed exactly
+that. The recording pins the agreement between the two — inadmissible
+preference, `UNRESOLVED_EVIDENCE` basis — so a basis that started overstating
+moves a frozen test.
+
+Nothing in the build *enforces* that agreement. A refusal — `--basis
+STRONGER_CONCEPT` rejected while `comparison.json` says preference is
+inadmissible — is a real mechanism and is deliberately not built here, because
+Release 4 asked for the decision and not for a new gate over it. It is a
+candidate for whichever release next touches lifecycle.
+
+**Fail-closed, against what the product allows.** `design-tool branch
+--disposition` accepts a formulation that never concluded, and retaining an
+unfinished alternative as a fallback is a legitimate thing to want. But the
+adversarial fixture plays this same case with a sibling's review answer offered
+to the fallback, and there the run stops and leaves no final status — so the
+harness declines to take the declared decisions at all when any declared
+formulation did not conclude. A recorded preference formed over a job that
+stopped is evidence of a decision nobody could have made. The recording says
+`ACTIVE` with no basis, which is "nobody decided" rather than silence.
+
+**Evidence.** Re-record: 0 removed, 0 changed on the three unbranched cases; on
+the knob, six additions and two changes, both direct consequences of running two
+more commands — two exit codes, and `lifecycle.json` appearing in the root's
+receipts because the decisions journalled themselves. Three mutations of the
+recorded decisions, three caught: the preference switched to the other
+formulation, the basis upgraded to `STRONGER_CONCEPT`, the fallback quietly
+`REJECTED` instead of retained. Two mutations of the guards, two caught: the
+unfinished-job rule removed (red at L0 *and* in the L1 adversarial fixture), and
+the basis dropped from the command line. Case schema 2 → 3, because a case
+declaring decisions and played by a reader that did not know the key would look
+exactly like a case that declared none.
+
+L0 955 passed, 557 subtests, 13 failed (the Windows-assumption set). L1 64
+passed, 49 subtests. Heavy 357 passed, 183 subtests.
 
 ## Release 5 — Multi-source edit and combination model
 

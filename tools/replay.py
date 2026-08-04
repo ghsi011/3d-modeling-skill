@@ -295,7 +295,12 @@ JUDGEMENT_DIR = "judgements"
 # whether the job reaches a final status or is refused before it builds. Both
 # are read by the loader, so a case written against schema 1 is refused by
 # version rather than silently played as an unbranched one that concludes.
-CASE_SCHEMA = 2
+# 3: a case may declare `dispositions` -- the decisions taken about its
+# formulations once the job is done and compared. Bumped rather than made
+# optional: a case declaring them, played by a reader that did not know the key,
+# would record a job nobody decided anything about and look exactly like a case
+# that declared none.
+CASE_SCHEMA = 3
 EXPECTED_SCHEMA = 1
 
 # Where a branched formulation's work directory sits, and how its id may be
@@ -407,6 +412,30 @@ class Formulation:
 
 
 @dataclasses.dataclass(frozen=True)
+class Disposition:
+    """One decision about one formulation, taken after the job is done.
+
+    A separate declaration from `Formulation` rather than a field on it, because
+    the two answer different questions and are taken at different times. A
+    formulation says what was *explored*; a disposition says what somebody
+    decided about it once the exploring finished and the results were set side
+    by side. Folding the second into the first would make the decision look like
+    a property the alternative was branched with, which is exactly the reading
+    `ARCHITECTURE.md` 14.6 refuses when it requires a disposition to carry its
+    own basis.
+
+    `basis` is one of `project.DISPOSITION_BASIS`. It is not free text and it is
+    not optional for anything but `ACTIVE`: a disposition with no basis records
+    that a decision happened and destroys why.
+    """
+
+    alternative_id: str
+    disposition: str
+    basis: str
+    superseded_by: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class ReplayCase:
     case_id: str
     use_case: str
@@ -437,6 +466,10 @@ class ReplayCase:
     recorded_at: str
     provenance: str
     notes: str
+    # The decisions taken once the job is done and compared, in order. Empty on
+    # every case that declares none, which is the shape every case had before
+    # this arrived. See `_apply_dispositions` for why they run last.
+    dispositions: tuple[Disposition, ...] = ()
 
     @property
     def directory(self) -> Path:
@@ -572,13 +605,59 @@ def load(case_id: str) -> ReplayCase:
         inputs_sha256=dict(payload["inputs_sha256"]),
         recorded_at=payload["recorded_at"],
         provenance=payload["provenance"],
-        notes=payload.get("notes", ""))
+        notes=payload.get("notes", ""),
+        dispositions=tuple(
+            _disposition(case_id, index, row)
+            for index, row in enumerate(payload.get("dispositions") or ())))
+    if case.dispositions and not declared:
+        raise ReplayError(
+            f"{case_id}: case.json declares dispositions and no formulations. "
+            "A disposition moves an alternative between lifecycle states, and "
+            "an unbranched job has none -- the shared root is what they were "
+            "branched from, not one of them.")
     if case.concludes not in CONCLUDES:
         raise ReplayError(
             f"{case_id}: concludes {case.concludes!r} is not one of "
             f"{list(CONCLUDES)}")
     _verify_inputs(case)
     return case
+
+
+def _disposition(case_id: str, index: int, row: dict[str, Any]) -> Disposition:
+    """One declared decision, checked before it reaches a command line.
+
+    The basis is checked against the pipeline's own closed set rather than a
+    copy of it: a harness holding its own list would let a case declare a basis
+    the product refuses, and the play would fail two commands later with a
+    message about `project.json` instead of about the case.
+    """
+    from pipeline import project as pipeline_project
+
+    alternative_id = str(row.get("alternative_id") or "")
+    if not ALTERNATIVE_ID.match(alternative_id):
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].alternative_id {alternative_id!r} "
+            f"must match {ALTERNATIVE_ID.pattern}. The shared root has no "
+            "declared row and no disposition applies to it.")
+    disposition = str(row.get("disposition") or "")
+    if disposition not in pipeline_project.ALTERNATIVE_DISPOSITION:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].disposition {disposition!r} is "
+            f"not one of {list(pipeline_project.ALTERNATIVE_DISPOSITION)}")
+    basis = str(row.get("basis") or "")
+    if basis and basis not in pipeline_project.DISPOSITION_BASIS:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].basis {basis!r} is not one of "
+            f"{list(pipeline_project.DISPOSITION_BASIS)}")
+    if disposition in pipeline_project.BASIS_REQUIRED and not basis:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] moves {alternative_id!r} to "
+            f"{disposition} and declares no basis. Every state but ACTIVE needs "
+            "one -- a decision recorded without its reason is a decision nobody "
+            "can revisit.")
+    return Disposition(alternative_id=alternative_id, disposition=disposition,
+                       basis=basis,
+                       superseded_by=str(row.get("superseded_by") or ""))
 
 
 def _formulation(case_id: str, index: int, row: dict[str, Any]) -> Formulation:
@@ -835,6 +914,7 @@ def play(case: ReplayCase, project_dir: Path,
             "the run.")
     derived = _derive_all(case, project_dir, step, invoke_surface, transcript)
     comparison = _compare_all(case, project_dir, invoke_surface, transcript)
+    exit_codes += _apply_dispositions(case, project_dir, step)
     return Play(project_dir=project_dir, exit_codes=exit_codes,
                 reviews_answered=answered, responses_written=written,
                 transcript=transcript.getvalue(), work_dirs=work_dirs,
@@ -990,6 +1070,62 @@ def _derive_all(case: ReplayCase, project_dir: Path,
             "stale": sorted(report.get("stale") or {}),
         }
     return out
+
+
+def _apply_dispositions(case: ReplayCase, project_dir: Path,
+                        step: Callable[[list[str]], int]) -> list[str | int]:
+    """The decisions the case declares, through `design-tool branch`.
+
+    **After the comparison, and that ordering is the whole point.** Gate 4.5 asks
+    for a real part whose alternatives somebody actually decided between, and a
+    decision taken before the evidence was set side by side would be a decision
+    the comparison did not inform. The recording therefore holds them in the
+    order they happen: every formulation settles, `status` derives what each is
+    still entitled to claim, `compare` says what that establishes and -- on this
+    job -- what it refuses to settle, and only then does somebody choose.
+
+    Through the same verb a user has, and one command per decision. Preferring
+    one demotes the previously preferred one, which is a second journal entry
+    this harness does not issue and must not: it is a consequence the product
+    owns, and a harness that issued it would be recording its own behaviour.
+
+    **Nothing is decided about a job that did not finish.** The adversarial
+    fixture plays this same case with a sibling's review answer offered to the
+    fallback; the run stops and leaves no final status, which is the whole point
+    of it. `design-tool branch --disposition` would nonetheless accept both
+    commands there -- a formulation does not have to have concluded to be
+    retained -- and the recording would then carry a preference formed over
+    evidence that does not exist. So the declared decisions are taken only when
+    every declared formulation actually concluded. Skipped rather than refused,
+    because a play that stopped early is a legitimate thing for a fixture to
+    produce and this is not the failure it is demonstrating.
+    """
+    if not case.dispositions:
+        return []
+    unfinished = sorted(
+        formulation.key for formulation in case.formulations
+        if not (project_dir / formulation.relative_dir()
+                / "final_status.json").is_file())
+    if unfinished:
+        return []
+
+    codes: list[str | int] = []
+    for row in case.dispositions:
+        argv = ["branch", str(project_dir), "--disposition", row.disposition,
+                "--of", row.alternative_id]
+        if row.basis:
+            argv += ["--basis", row.basis]
+        if row.superseded_by:
+            argv += ["--superseded-by", row.superseded_by]
+        code = step(argv)
+        codes.append(code)
+        if code != 0:
+            raise ReplayError(
+                f"{case.case_id}: `design-tool branch --disposition "
+                f"{row.disposition} --of {row.alternative_id}` exited {code}. "
+                "A decision the case declares and the product refuses is a case "
+                "describing a lifecycle this build does not have.")
+    return codes
 
 
 def _compare_all(case: ReplayCase, project_dir: Path,
@@ -1180,7 +1316,30 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
         key: {**_observe_dir(directory), "derived": run.derived.get(key)}
         for key, directory in run.work_dirs.items()}
     payload["comparison"] = run.comparison
+    payload["dispositions"] = _observe_dispositions(run.project_dir)
     return payload
+
+
+def _observe_dispositions(project_dir: Path) -> dict[str, Any]:
+    """What each formulation's lifecycle state is when the play finishes.
+
+    Read off `project.json` rather than off the journal, because the journal
+    records *transitions* and this records the state a reader arriving now would
+    see. Both matter and they are different claims: `lifecycle.json` says a
+    decision was taken, this says what it left behind.
+
+    The shared root is absent rather than null. `branch` writes no row for it --
+    it is what the alternatives were branched from, not one of them -- and a key
+    saying so would be a key inviting a reader to look for the root's
+    disposition, which is the confusion `docs/defects.md` D26 is about.
+    """
+    payload = _read(project_dir, "project.json") or {}
+    return {str(row.get("alternative_id")): {
+                "disposition": row.get("disposition"),
+                "basis": row.get("basis", ""),
+                "superseded_by": row.get("superseded_by", "")}
+            for row in payload.get("alternatives") or ()
+            if row.get("alternative_id")}
 
 
 def _screening_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1411,6 +1570,12 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
         # recording exists to refuse.
         _compare_exact("comparison", recorded.get("comparison"),
                        observed.get("comparison"), out)
+        # Exact, and binding. A decision is the one thing in a recording that
+        # was made by a person rather than measured by the pipeline, so a replay
+        # that produced a different one is not a rounding difference -- it is
+        # the job having been decided differently.
+        _compare_exact("dispositions", recorded.get("dispositions"),
+                       observed.get("dispositions"), out)
     else:
         _compare_block("", recorded, observed, out)
     return out

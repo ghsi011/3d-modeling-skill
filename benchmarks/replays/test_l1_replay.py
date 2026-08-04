@@ -746,6 +746,81 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
                          "is fixed this becomes [['.', 'as-drawn']] and this "
                          "assertion is the one to update")
 
+    # ----------------------------------------------------------------
+    # Gate 4.5: somebody decides, on a real part
+    # ----------------------------------------------------------------
+
+    def test_one_formulation_is_preferred_and_the_other_is_kept(self) -> None:
+        """What Release 3 owed and nothing in this repository had done.
+
+        Gate 4.5 asks for derived status used to decide about a real part. Three
+        formulations of a real vendored request were built, verified, compared,
+        and then decided between -- through `design-tool branch --disposition`,
+        the verb a user has, one command per decision.
+
+        Retained, not deleted. 13.1 does not rewrite history and the fallback is
+        the whole reason the fork exists: if the plate estimate is wrong, the
+        sleeve as drawn is the part that ships.
+        """
+        rows = self.observed["dispositions"]
+        self.assertEqual("PREFERRED", rows["plate-seated"]["disposition"])
+        self.assertEqual("FALLBACK", rows["as-drawn"]["disposition"])
+        self.assertNotIn(RP.ROOT_ALTERNATIVE, rows,
+                         "the shared root has no declared row and no "
+                         "disposition applies to it -- it is what the "
+                         "alternatives were branched from")
+        for key in ("plate-seated", "as-drawn"):
+            with self.subTest(formulation=key):
+                self.assertTrue((self.play.work_dirs[key] / "final_status.json")
+                                .is_file(),
+                                "deciding deletes nothing; both formulations "
+                                "keep every receipt they earned")
+
+    def test_the_decision_does_not_claim_the_support_the_comparison_refused(self) -> None:
+        """The half of gate 4.5 that is about honesty rather than about typing.
+
+        The comparison run immediately before these two commands reports
+        `preference.admissible: false` -- the three formulations are measured
+        against different envelope expectations, so their PASSes are not
+        comparable, and the axis that would actually decide is whether the mouth
+        seats on a plate whose height is a photo estimate. A decision is still
+        taken, because a fallback exists precisely for the case where the
+        estimate is wrong. What it may not do is claim measured support that was
+        refused, and the basis is where that shows: `UNRESOLVED_EVIDENCE`, not
+        `STRONGER_CONCEPT`.
+
+        Nothing in the build enforces this agreement today; the recording is
+        what makes it visible. A basis that started claiming a stronger ground
+        than the comparison allows would move this test.
+        """
+        self.assertFalse(self.observed["comparison"]["preference_admissible"])
+        self.assertEqual("INCOMPARABLE_EXPECTATIONS",
+                         self.observed["comparison"]["mandatory_verdict"])
+        for key in ("plate-seated", "as-drawn"):
+            with self.subTest(formulation=key):
+                self.assertEqual("UNRESOLVED_EVIDENCE",
+                                 self.observed["dispositions"][key]["basis"])
+
+    def test_the_decision_is_journalled_as_a_transition_not_only_as_a_state(self) -> None:
+        """`project.json` says where the job stands; the journal says what happened.
+
+        Both are needed and they are different claims. A reader arriving later
+        finds `PREFERRED` in the project and has no way to tell whether somebody
+        chose it or it was always so -- 14.6's requirement that a disposition
+        carry its basis is about the decision, and a decision is an event.
+        """
+        from pipeline import lifecycle as LC
+        events = [row for row in LC.read(self.play.project_dir)
+                  if row.get("event") == "DISPOSITION"]
+        self.assertEqual(
+            [("plate-seated", "ACTIVE", "PREFERRED"),
+             ("as-drawn", "ACTIVE", "FALLBACK")],
+            [(row["alternative"], row["was"], row["now"]) for row in events],
+            "in the order they were taken, each naming what it moved from")
+        for row in events:
+            with self.subTest(alternative=row["alternative"]):
+                self.assertEqual("UNRESOLVED_EVIDENCE", row["basis"])
+
 
 class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
     """The false pass, tried for real, on the pair that makes it reachable.
@@ -801,6 +876,22 @@ class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
             for sibling in (project, project / "alternatives" / "plate-seated"):
                 self.assertTrue((sibling / "final_status.json").is_file(),
                                 "the refusal is the fallback's alone")
+
+            observed = RP.observe(case, run)
+            self.assertEqual(
+                {"plate-seated": {"disposition": "ACTIVE", "basis": "",
+                                  "superseded_by": ""},
+                 "as-drawn": {"disposition": "ACTIVE", "basis": "",
+                              "superseded_by": ""}},
+                observed["dispositions"],
+                "and nothing was decided: both are still in the state they were "
+                "branched into, with no basis. The case declares two decisions "
+                "and `design-tool branch --disposition` would have accepted "
+                "both -- a formulation need not have concluded to be retained "
+                "as a fallback -- so the harness declines to take them when a "
+                "declared formulation left no final status. A preference "
+                "recorded over a job that stopped is one nobody could have "
+                "formed from evidence that is not there.")
 
             failures = RP.binding(
                 RP.compare(RP.expected(self.CASE_ID), RP.observe(case, run)))

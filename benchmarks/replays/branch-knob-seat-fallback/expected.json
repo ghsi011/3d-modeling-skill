@@ -55,6 +55,18 @@
     "same_requirement_digest": true,
     "score": null
   },
+  "dispositions": {
+    "as-drawn": {
+      "basis": "UNRESOLVED_EVIDENCE",
+      "disposition": "FALLBACK",
+      "superseded_by": ""
+    },
+    "plate-seated": {
+      "basis": "UNRESOLVED_EVIDENCE",
+      "disposition": "PREFERRED",
+      "superseded_by": ""
+    }
+  },
   "exit_codes": [
     0,
     3,
@@ -66,6 +78,8 @@
     0,
     0,
     3,
+    0,
+    0,
     0
   ],
   "formulations": {
@@ -199,6 +213,7 @@
         "execution_plan.json",
         "final_status.json",
         "intent_manifest.json",
+        "lifecycle.json",
         "model.py",
         "model_contract.json",
         "print_plan_checks.json",
@@ -549,7 +564,7 @@
       }
     }
   },
-  "recorded_at": "02ab3465bcda9c70e4c8f62ed9522b5f3c793363",
+  "recorded_at": "0770a36139d5851e08b4753cf7d4459923890bef",
   "reviews_answered": [
     "verification",
     "verification",
