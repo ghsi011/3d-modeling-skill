@@ -2537,11 +2537,49 @@ one small through-hole, so whether a *correct* reconstruction passes the volume
 row can turn on a feature the brief never dimensioned. Shape comparison is
 Release 6 and needs the registration this avoids.
 
-**What it does not yet do.** No candidate has been built through it. The
-pipeline routes a generated job and reaches a designer commission — measured —
-but the designer has not run, so there is no reconstruction to report and no
-score of anything but references against themselves. That is the next slice,
-and it is where this stops being infrastructure.
+**The first blind run, and what it measured.** A designer agent with no access
+to this session was given the generated job and nothing else, and told not to
+open the corpus, the reference, or the web. It did not. Scored against the
+withheld reference:
+
+    OFF smallest  8.200 against  5.800  (+2.400, band 0.116)
+    OFF middle   12.000 against 14.495  (-2.495, band 0.290)
+    OFF largest  16.000 against 20.000  (-4.000, band 0.400)
+    OFF volume   1023.19 against 1068.534        (4.2% out, band 2%)
+    ok  bodies        1 against       1
+    ok  watertight True against    True
+
+Wrong on all three axes by 15–40%, and within **4.2% on volume**. Reasoning from
+function and wall thickness got the quantity of material nearly right while
+getting the shape wrong, which is the disclaimer above demonstrated rather than
+asserted.
+
+**Two findings the run produced that no test would have.**
+
+The designer reported, unprompted, that the brief was not fully blind: every
+requirement's `source` read "Voron 2 published hardware" and the purpose said
+"deck panel", so any model carrying Voron familiarity was handed the ecosystem,
+the part class and the hardware standard — *"which fixes the topology even
+though it withholds the sizes"*. Sources are non-identifying now. Worth noting
+what caught this: not a rule, a designer volunteering that its answer came
+partly from recall.
+
+And it named the deeper problem before the score was run — `docs/defects.md`
+**D30**: for this reference the interface dimension **is** the answer dimension.
+The part bolts flat to a 20 mm extrusion face, so it is 20 mm across.
+`extrusion_series: "2020"` was refused by the coincidence check because 2020
+states 20 and 20.0 mm is the answer — and removing it removed what the designer
+needed to derive the width. Its own largest unconstrained axis was the depth
+along the extrusion: *"Nothing stated touches it. A reference at 8 or at 20 is
+equally consistent with the brief."* Two of three failing axes trace to
+information the question could not carry, so `OFF, OFF, OFF` here is partly a
+property of the question rather than of the designer, and D30 records the three
+ways to close it.
+
+**What it does not yet do.** Run more than once, on more than one entry, or with
+D30 resolved — so there is no baseline, and one score is an anecdote. The
+envelope was checked as a possible signal and carries none: all four entries
+declare an identical 45×45×25.
 
 Use a small number of authentic jobs to measure:
 

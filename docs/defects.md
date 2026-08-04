@@ -759,3 +759,64 @@ believing they had widened a band they had not touched.
 should never read an acceptance tolerance, delete the branch and say so; if it
 should, accept both shapes. Either way the knob's recording moves, so it is a
 slice with a re-record and not a one-line change.
+
+## D30 — for some references the interface dimension *is* the answer dimension
+
+**Where.** [`benchmarks/corpus.json`](../benchmarks/corpus.json), and the whole
+blind-benchmark premise in [`tools/blind.py`](../tools/blind.py).
+
+**What is wrong.** A blind request states what the part must fit and withholds
+the part's own size. For `voron-deck-support` those are the same number. The
+part bolts flat against a 20 mm extrusion face, so it is 20 mm across: its
+x-extent *is* the interface. `extrusion_series: "2020"` was refused by the
+coincidence check for exactly this reason — 2020 states 20, and 20.0 mm is the
+answer — and removing it removed information the designer needed.
+
+**Evidence.** The first blind run, scored against the withheld reference:
+
+```
+OFF smallest  8.200 against  5.800  (+2.400, band 0.116)
+OFF middle   12.000 against 14.495  (-2.495, band 0.290)
+OFF largest  16.000 against 20.000  (-4.000, band 0.400)
+OFF volume   1023.19 against 1068.534         (4.2% out, band 2%)
+ok  bodies        1 against       1
+ok  watertight True against    True
+```
+
+The designer's own report named the cause before the score was run: *"No
+extrusion profile size is given (2020? 2040? 1515?). That is what actually sets
+how far the panel edge sits from the slot centreline, and therefore the pad
+length and the total X."* It also ranked, unprompted, the depth along the
+extrusion as its largest unconstrained axis: *"Nothing stated touches it. A
+reference at 8 or at 20 is equally consistent with the brief."*
+
+**What it can cause.** A benchmark that is unanswerable rather than hard, and
+reports the difference as a low score. Two of the three failing axes here are
+traceable to information the question could not carry: one because stating it
+would state the answer, one because nothing in the brief constrains it at all.
+A reader taking `OFF, OFF, OFF` as a measure of the designer is reading a
+property of the question.
+
+**What it is not.** A reason to hand the dimension over quietly. The coincidence
+check is right that `"2020"` on a 20 mm part is the answer; what is wrong is
+concluding that the request is therefore fine without it.
+
+**What would close it.** One of three, and the choice is a design decision
+rather than a repair:
+
+* **declare the disclosure.** State the extrusion series, record in the manifest
+  that the x-extent is thereby given, and score the remaining axes. This is
+  `request_vocabulary` from the second design returning in a principled form —
+  a *declared* disclosure rather than an exemption, with the score's denominator
+  shrinking to match.
+* **choose references whose interfaces do not fix their envelope.** A part that
+  clips into a slot without spanning a face has an interface that constrains it
+  without determining it. None of the four committed entries is clearly that.
+* **score what the question can constrain.** Drop the axis the interface fixes
+  from the comparison and say so, which makes the score narrower and honest
+  rather than wide and misleading.
+
+**Fixture that must fail first.** A test asserting that for each entry, every
+axis the score compares is constrained by something the request states — which
+fails today on `voron-deck-support`'s x, and would fail on its y for a different
+reason.

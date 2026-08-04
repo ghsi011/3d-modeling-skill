@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead. `tools/corpus.py` fetches them and verifies every digest.\n\nQUESTION MATERIAL LIVES IN `request`, AND THE RULE ABOUT IT IS NOT ABOUT DIGITS. A request is meant to be full of measurements -- somebody takes calipers to the extrusion slot, the panel, the rail. What it may not carry is a measurement of the reference part ITSELF, because that is what a blind reconstruction has to produce and what the scorer compares.\n\nTwo mechanisms enforce it, and the second exists because the first cannot work alone. (1) Every requirement must name a declared counterpart: its leading token has to appear in this entry's `counterparts`, so `extrusion_slot_opening` and `panel_stock` are admissible and `girth` and `overall_height` are not. That is an allowlist; two earlier designs used denylists -- a regex, then a no-digit rule with exemptions -- and reviews walked through them twelve, nineteen and about eighty times. (2) Every number anywhere in the question is compared against the reference's actual extents and volume, and a coincidence is refused.\n\nThe second check is not theoretical. This file previously stated `extrusion_series: \"2020\"` for a part whose x-extent is exactly 20.0 mm -- a correctly named counterpart handing over one of the three answers, which no wording rule could ever catch. The entries now name the extrusion by its slot rather than by its face dimension.\n\nProvenance is STATED throughout, and that is deliberate. These numbers were read off Voron 2's published hardware; nobody in this repository has calipers or the parts. An earlier version claimed MEASURED with sources like 'calipers across the slot mouth', which was a stronger claim than the method supports. MEASURED stays in the permitted set because a real requester produces it -- this corpus simply does not.\n\nEach entry states a `build_envelope_mm`: the space the part has to live in. `design-tool run` refuses to guess `envelope_mm` when geometry is authored, so a blind request must state one -- and it must be a constraint the requester has rather than the reference's own size with slack added, which would be the answer with a margin on it. These are deliberately generous and identical across entries, and they go through the same coincidence check as every other number.",
+  "note": "External reference geometry for blind benchmarks. Nothing here is committed: these are third-party artifacts, and AGENTS.md forbids putting them in this repository. ARCHITECTURE.md 16.6 is the rule they follow instead. `tools/corpus.py` fetches them and verifies every digest.\n\nQUESTION MATERIAL LIVES IN `request`, AND THE RULE ABOUT IT IS NOT ABOUT DIGITS. A request is meant to be full of measurements -- somebody takes calipers to the extrusion slot, the panel, the rail. What it may not carry is a measurement of the reference part ITSELF, because that is what a blind reconstruction has to produce and what the scorer compares.\n\nTwo mechanisms enforce it, and the second exists because the first cannot work alone. (1) Every requirement must name a declared counterpart: its leading token has to appear in this entry's `counterparts`, so `extrusion_slot_opening` and `panel_stock` are admissible and `girth` and `overall_height` are not. That is an allowlist; two earlier designs used denylists -- a regex, then a no-digit rule with exemptions -- and reviews walked through them twelve, nineteen and about eighty times. (2) Every number anywhere in the question is compared against the reference's actual extents and volume, and a coincidence is refused.\n\nThe second check is not theoretical. This file previously stated `extrusion_series: \"2020\"` for a part whose x-extent is exactly 20.0 mm -- a correctly named counterpart handing over one of the three answers, which no wording rule could ever catch. The entries now name the extrusion by its slot rather than by its face dimension.\n\nProvenance is STATED throughout, and that is deliberate. These numbers were read off Voron 2's published hardware; nobody in this repository has calipers or the parts. An earlier version claimed MEASURED with sources like 'calipers across the slot mouth', which was a stronger claim than the method supports. MEASURED stays in the permitted set because a real requester produces it -- this corpus simply does not.\n\nEach entry states a `build_envelope_mm`: the space the part has to live in. `design-tool run` refuses to guess `envelope_mm` when geometry is authored, so a blind request must state one -- and it must be a constraint the requester has rather than the reference's own size with slack added, which would be the answer with a margin on it. These are deliberately generous and identical across entries, and they go through the same coincidence check as every other number.\n\nThe first blind run found a leak no rule was looking for. Every requirement's `source` read 'Voron 2 published hardware', and the purpose said 'deck panel' -- so a designer with any Voron familiarity was told the ecosystem, the part class and the hardware standard, which fixes the topology by recall rather than by derivation. The designer reported it unprompted. Sources are non-identifying now.",
   "roots": {
     "default": "/home/user/3d-references"
   },
@@ -28,14 +28,14 @@
       "sha256": "ab0d69dc18da1516ace18da5be493a82099a332e0767082467b25c9d935a3f03",
       "role": "REFERENCE",
       "request": {
-        "purpose": "Holds a deck panel down against an aluminium extrusion so the panel cannot lift. It bolts into the extrusion's slot and traps the panel edge under a lip.",
+        "purpose": "Holds a flat panel down against an aluminium extrusion so the panel cannot lift. It bolts into the extrusion's slot and traps the panel edge under a lip.",
         "requirements": [
           {
             "name": "extrusion_slot_opening",
             "value": 6.2,
             "unit": "mm",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "the T-slot a fastener drops into"
           },
           {
@@ -43,7 +43,7 @@
             "value": 3.0,
             "unit": "mm",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "the panel this retains"
           },
           {
@@ -51,7 +51,7 @@
             "value": "M3",
             "unit": "",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "socket head, into a T-nut"
           }
         ],
@@ -81,7 +81,7 @@
             "value": "MGN9",
             "unit": "",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "miniature linear guide"
           },
           {
@@ -97,7 +97,7 @@
             "value": 6.2,
             "unit": "mm",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "the slot the rail is bolted through"
           }
         ],
@@ -119,14 +119,14 @@
       "sha256": "57843c92364b0a651b12e9e658063e8deedca22f9c7e0fa174bbc9e20a186c26",
       "role": "REFERENCE",
       "request": {
-        "purpose": "Retains a bottom panel inside the slot of an extrusion. It clips in without a fastener and holds the panel against the frame.",
+        "purpose": "Retains a flat panel inside the slot of an extrusion. It clips in without a fastener and holds the panel against the frame.",
         "requirements": [
           {
             "name": "extrusion_slot_opening",
             "value": 6.2,
             "unit": "mm",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "the T-slot a fastener drops into"
           },
           {
@@ -134,7 +134,7 @@
             "value": 3.0,
             "unit": "mm",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "the panel this retains"
           }
         ],
@@ -163,7 +163,7 @@
             "value": "GT2",
             "unit": "",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "toothed drive belt"
           },
           {
@@ -179,7 +179,7 @@
             "value": "M3",
             "unit": "",
             "provenance": "STATED",
-            "source": "Voron 2 published hardware",
+            "source": "vendor hardware specification",
             "note": "draws the clamp closed"
           }
         ],
