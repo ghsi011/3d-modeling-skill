@@ -277,6 +277,28 @@ it. Overhang, bridging and strength direction are all orientation-dependent.
 **Fixture that must fail first.** Two contracts differing only in orientation,
 asserted to produce different assessments.
 
+**Re-measured, and it is worse than "read by nothing".** `model_to_printer_matrix`
+occurs in exactly four places — `cli._number`'s shape check, `contract.preflight`'s
+shape check, `project.validate`'s shape check, and a selftest constant. It is
+**never applied to geometry** anywhere in the pipeline.
+
+That upgrades this from an unused field to a **false-clean-verdict path**, which
+AGENTS.md requires to fail closed rather than wait for a capability.
+`screening._bed_screen` decides whether the part sits below the bed from
+`ctx.bounds[0][2]` — the mesh's lowest Z *as authored* — and its signature is
+`_bed_screen(ctx: MeshAnalysisContext)`, with no contract parameter at all, so it
+cannot see the declared orientation even in principle. A job may therefore
+declare a rotation that puts the part below the bed, have that rotation validated
+and hashed into the acceptance contract, and receive `bed-plane: CLEAR`. The
+detector is not merely ignoring the orientation; it is reporting a clean result
+about a frame the job never said it was working in.
+
+So the remedy is narrower and more urgent than the fixture above implies. Either
+the screens that are frame-dependent work in the declared printer frame, or they
+say which frame they measured and refuse to issue `CLEAR` for the other one. A
+weaker method may not issue a stronger claim, and "the lowest point of the
+authored mesh" is a weaker claim than "the part does not go below the bed".
+
 ## D21 — a lane cap that only downgrades a passing verdict
 
 **Where.** `pipeline/status.py`, the `lane_status` interaction.
