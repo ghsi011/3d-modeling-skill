@@ -5,7 +5,7 @@ Paste the block below into a fresh Claude Code session in `C:\github\3d-modeling
 ---
 
 Work from `claude/milestone-1`. Fetch first. Record `git rev-parse HEAD` and
-`git status --short`. Expected head at handoff: `bb49eb8`. One writer only.
+`git status --short`. Expected head at handoff: `8ebfb80`. One writer only.
 
 Draft PR: https://github.com/ghsi011/3d-modeling-skill/pull/1
 
@@ -19,16 +19,17 @@ added. D29 is deliberately held open with its reasoning recorded in
 
 ## Task 1 — finish the PR gate (blocking merge)
 
-Two items are outstanding on the PR checklist:
+**L0-heavy is now done and green** — `354 passed, 11 skipped, 1 xfailed, 194
+subtests passed in 1214.55s`, exit 0, from the detached worktree pinned at
+`f327687`. Everything between that commit and head is documentation
+(`git diff --name-only f327687..HEAD | grep -v '\.md$'` is empty), so no code
+the heavy tier exercises has moved. Do not re-run it unless you change code.
 
-1. **L0-heavy at head `bb49eb8`.** Run `uv run pytest benchmarks/heavy -q` from a
-   clean pinned worktree and post the result to the PR. A full-tier run was
-   started at `f327687` and never confirmed; the only delta since is a
-   docs-only commit (`git diff --stat f327687..HEAD` is two `.md` files). The
-   Release-1 proof subset already passed from the pinned checkout. Do not report
-   the tier green without a completed full run.
-2. **CI on the PR** — both jobs, Linux, Python 3.11 and 3.12. The PR reports two
-   Windows L0 failures separately and honestly; both reproduce at the branch
+**One item is outstanding on the PR checklist:**
+
+1. **CI on the PR** — both jobs, Linux, Python 3.11 and 3.12. Every number in
+   the PR was measured on Windows, so Linux is the open question. The PR reports
+   two Windows L0 failures separately and honestly; both reproduce at the branch
    point `62fe422`:
    * `tools/test_documentation.py::test_every_architecture_section_cited_by_name_exists`
      fails the 5 s L0 tier guard, not its assertion — it passes with
