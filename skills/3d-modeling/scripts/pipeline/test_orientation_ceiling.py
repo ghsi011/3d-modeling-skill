@@ -4,7 +4,7 @@
 `test_orientation_frame.py` closed the screen and `test_commission_frame.py`
 closed the three contract checks. Both fixed the side of the inequality that
 measures the *candidate*. The review of that slice found the other side still
-open, and `docs/defects.md` D15 carried it:
+open, and the defect log carried it until this landed:
 
 * `cli._print_plan` called `designer_toolkit.plan.direct_template` without the
   project's orientation, and `direct_template` wrote `IDENTITY_TRANSFORM` into
@@ -29,10 +29,11 @@ disagree; and `contract.as_transform` is the single resolution all of them use,
 so `"identity"` and the 4x4 identity are one declaration in two spellings rather
 than a refusal.
 
-Every test here fails against at least one of the five mutations recorded in
-`docs/defects.md` D15 -- removing the orientation from plan generation, the
-alignment from the composition, the printer transform from the inherited
-measurement, the preflight equality, or the `transform=` argument itself.
+Every test here fails against at least one of the five mutations D15 named --
+removing the orientation from plan generation, the alignment from the
+composition, the printer transform from the inherited measurement, the preflight
+equality, or the `transform=` argument itself. All five are run in
+`CHANGELOG.md`'s entry for this fix.
 """
 from __future__ import annotations
 

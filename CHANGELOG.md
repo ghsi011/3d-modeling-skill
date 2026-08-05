@@ -6,6 +6,52 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the support ceiling and the candidate are measured in one frame (D15)
+
+D15's last half, and the one its own fix's review found. Since `5ac852e` the
+*candidate's* overhang has been measured through `contract.printer_transform`.
+The ceiling it is measured against was still generated in whatever frame the
+template assumed, so on a `MODIFY` job declaring any reorientation the two sides
+of one inequality were two frames — and before the candidate half landed they
+had at least been wrong the same way.
+
+Three places each answered the frame question separately. `cli._print_plan`
+called `designer_toolkit.plan.direct_template` without the project's
+orientation, and `direct_template` wrote `IDENTITY_TRANSFORM` into its one
+support rule whatever the job had declared. `cli._plan_features` copied that
+rule's `downward_normal_z_max` and `bed_z_mm` into the contract row and dropped
+its `model_to_printer_matrix`, so the contract's orientation silently stood in
+for a declaration another artifact had made and nothing checked they agreed.
+And `cli._inherited_overhang` called `metrics.overhang_area` with no
+`transform=` at all, though that function documents the parameter for exactly
+this.
+
+**One authority chain, not a fourth transform reader.** `project.orientation` is
+the declaration. It reached the acceptance contract already; it now reaches the
+generated plan; the plan rule's copy travels into the contract feature row, so a
+frozen contract records which frame each ceiling was measured in; and
+`contract.preflight` refuses the run when the row and the orientation disagree
+about the matrix or the bed height, before any geometry is paid for and without
+preferring either declaration. Inherited overhang is measured under
+`printer @ alignment` — each source placed out of its own coordinates into the
+job's frame and then into the printer's. `contract.as_transform` is the single
+resolution all of them use, which is why `"identity"` and the 4×4 identity are
+one declaration in two spellings rather than a refusal.
+
+A frame that cannot be resolved makes that source a **named gap**, never a
+silent identity: crediting an allowance measured somewhere the source does not
+sit fails in the direction that passes a bad part. D18's controlled partial
+ceiling is unchanged, and a fixture pins that.
+
+Identity orientation emits byte-identical plans, so no recorded
+`print_plan_sha256` moved and the L1 replays passed unrecorded. The composition
+fixture is a non-commuting pair — the alignment turns about Z and translates,
+the printer turns about X — over a stepped source chosen because the five
+candidate mutations land on five distinct areas: the composition 100.0 mm²,
+the reversed product 0.0 mm², the alignment alone, the printer alone and no
+transform at all 300.0 mm² each. All five are mutation-tested in
+`test_orientation_ceiling.py`.
+
 ### Added — Release 3's context-budget foundation: what a job cost, and what it was allowed to cost
 
 `MISSION.md` makes efficiency a first-class objective and `ARCHITECTURE.md` 15.6

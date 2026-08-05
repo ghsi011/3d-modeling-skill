@@ -180,7 +180,7 @@ def printer_transform(contract: Contract):
 
     One reading of `orientation.model_to_printer_matrix`, here because this is
     where the field lives. `screening` and `commission` both call it, and that
-    is the point rather than a convenience: `docs/defects.md` D15 is a receipt
+    is the point rather than a convenience: D15 (`CHANGELOG.md`) is a receipt
     holding two answers about one part, produced by two readings of one
     declaration, and a review of the first half of the fix found the weakest of
     four shape checks over this question deciding the verdict.

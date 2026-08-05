@@ -283,7 +283,7 @@ def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
 
     This used to read `ctx.bounds[0][2]`, the lowest Z of the mesh *as
     authored*, and its signature took no contract, so it could not see the
-    declared orientation even in principle. `docs/defects.md` D15 filed that as
+    declared orientation even in principle. D15 (`CHANGELOG.md`) filed that as
     an unused field; it is worse than that. A job could declare a rotation
     putting the part below the bed, have the rotation validated and hashed into
     the acceptance contract, and receive `bed-plane: CLEAR` -- a clean verdict
