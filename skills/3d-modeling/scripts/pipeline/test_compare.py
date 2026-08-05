@@ -921,20 +921,53 @@ class TheGroupingIsBoundToTheReceiptsTest(unittest.TestCase):
     def test_a_receipt_missing_a_digest_never_groups(self) -> None:
         """The same rule one level down: a receipt is on disk and it does not
         carry what the key needs. Absent for `source` or `stl` means the run did
-        not conclude, where absent for `step` is a legitimate answer."""
+        not conclude, where absent for `step` is a legitimate answer.
+
+        **Both formulations are stripped, not one.** A one-sided fixture is
+        satisfied by an implementation that coerces the absence to a sentinel
+        and groups on it: the two keys still differ, so nothing groups and the
+        test passes for a reason that has nothing to do with the rule. Measured
+        -- a mutation replacing the two refusals with `source or ""` survived
+        the one-sided version of this test and is caught by this one. Two
+        formulations that are each missing the same digest are exactly the pair
+        that would group on a pair of absences.
+        """
         for field in ("source", "stl"):
             with self.subTest(missing=field), tempfile.TemporaryDirectory() as raw:
                 directory = _branched(Path(raw), "twin")
                 twin = directory / P.ALTERNATIVES_DIR / "twin"
                 formulation(twin, source="the model as authored")
                 formulation(directory, source="the model as authored")
-                status = _status(twin)
-                status["artifact_hashes"][field] = None
-                (twin / "final_status.json").write_text(
-                    S.canonical_json(status), encoding="utf-8")
+                for work_dir in (twin, directory):
+                    status = _status(work_dir)
+                    status["artifact_hashes"][field] = None
+                    (work_dir / "final_status.json").write_text(
+                        S.canonical_json(status), encoding="utf-8")
 
                 _, payload = _run(directory)
-                self.assertEqual([], payload["identical_designs"])
+                self.assertEqual([], payload["identical_designs"],
+                                 f"neither receipt records a {field} digest, so "
+                                 "there is nothing to establish that they are "
+                                 "one design")
+
+    def test_two_formulations_nobody_completed_do_not_group_with_each_other(self) -> None:
+        """The absence-pairs-with-absence case for the whole receipt.
+
+        `test_a_formulation_with_no_completed_receipt_never_groups` deletes both
+        `final_status.json` files and a third, complete formulation is present
+        to be grouped *with*. This one has only the two incomplete ones, so an
+        implementation that treated "no receipt" as a groupable identity would
+        pair them together rather than merely failing to exclude them.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "unfinished")
+            twin = directory / P.ALTERNATIVES_DIR / "unfinished"
+            for work_dir in (twin, directory):
+                formulation(work_dir, source="the model as authored")
+                (work_dir / "final_status.json").unlink()
+
+            _, payload = _run(directory)
+            self.assertEqual([], payload["identical_designs"])
 
     def test_the_group_names_the_digests_it_grouped_on(self) -> None:
         """A reader who disagrees has to be able to check the claim without
