@@ -697,6 +697,18 @@ should never read an acceptance tolerance, delete the branch and say so; if it
 should, accept both shapes. Either way the knob's recording moves, so it is a
 slice with a re-record and not a one-line change.
 
+**Deliberately not closed in the D15/D28 closure pass, and the reason is worth
+keeping.** The obvious "fix" — accept a bare float so that `_band_for` honours
+both shapes — would **widen a live band by a factor of two** on the one
+recording that exercises it, in exchange for making an input shape look
+consistent. A protection is not improved by being loosened to match the
+documentation of its own input. And the two numbers still answer different
+questions: an acceptance tolerance says how far a *part* may be from its target
+and remain acceptable, a replay band says how far a *rerun* may be from the
+recording and still be the same run. Until that question is settled, the
+conservative behaviour stands and this entry stays open rather than being
+converted into a change that trades protection for tidiness.
+
 ## D30 — for some references the interface dimension *is* the answer dimension
 
 **Where.** [`benchmarks/corpus.json`](../benchmarks/corpus.json), and the whole
