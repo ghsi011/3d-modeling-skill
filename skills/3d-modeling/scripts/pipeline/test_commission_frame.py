@@ -17,7 +17,8 @@ wrong. `overhang` is worse than contradictory: `designer_toolkit.metrics.
 overhang_area` documents a `transform=` parameter *for exactly this*, and
 `commission` did not pass it while `cli` copies the plan support rule's
 `downward_normal_z_max` and `bed_z_mm` and drops its `model_to_printer_matrix`.
-On a cone that is 0.0 mm2 authored against 1294 mm2 in the declared frame -- a
+On this file's cone (`sections=64`) that is 0.0 mm2 authored against
+1293.3 mm2 in the declared frame -- a
 PASS against a plan ceiling, about a frame the job did not declare.
 
 **One reading of the orientation field, not a third.** The screening fix reached
@@ -188,9 +189,78 @@ class TheBedContactIsMeasuredWhereThePartLandsTest(unittest.TestCase):
                            "the flipped part lands on its other face; measuring "
                            "the authored plane would find nothing on the bed")
 
-    def test_an_unusable_matrix_reports_no_contact_rather_than_guessing(self) -> None:
-        self.assertEqual(0.0, C._bed_contact(
+    def test_an_unusable_matrix_measures_nothing_rather_than_zero(self) -> None:
+        """`0.0` **is** the guess, and the first version of this test asserted
+        it under a name saying it wasn't.
+
+        Zero contact area is a legitimate measurement -- it is what a part
+        touching the bed nowhere returns -- so a refusal spelled `0.0` is
+        indistinguishable from one, and `_feature_check` published it as
+        `ran: true, status: MEASURED, reason: "measured"`. A review measured the
+        consequence: the fabricated row kept `coverage.fraction` at 1.0, so the
+        gate that exists because three SKIPPED checks went uncounted was
+        defeated by a row claiming to have been measured.
+        """
+        self.assertIsNone(C._bed_contact(
             _Ctx(), _contract(model_to_printer_matrix="sideways")))
+
+    def test_a_refused_contact_area_is_not_counted_as_covered(self) -> None:
+        """The consequence, asserted where it bites rather than inferred."""
+        feature = Feature(feature_id="bed-footprint", kind="bed_contact",
+                          provenance="STATED",
+                          expectation={"value_mm2": 0.4},
+                          tolerance={"abs": 1.0},
+                          verified_by="the bed-contact measurement")
+        row = C._feature_check(_Ctx(), feature, None, None,
+                               _contract(model_to_printer_matrix="sideways"))
+        self.assertFalse(row.ran, "an unmeasured check may not count as covered")
+        self.assertEqual("UNAVAILABLE", row.status)
+        self.assertNotEqual("PASS", row.result,
+                            "with a small enough declared area, a fabricated "
+                            "0.0 passed this outright")
+
+
+class ThePreflightRefusesWhatTheChecksRefuseTest(unittest.TestCase):
+    """`preflight` exists so a job is refused before geometry is paid for.
+
+    It accepted a mirror, a projective matrix, a uniform scale and a NaN bed
+    height that every placement check refuses -- so those four paid for the
+    whole build and then landed on *"the geometry does not match its
+    contract"*, which is a claim about a comparison that never happened.
+    """
+
+    def _problems(self, **over) -> list[str]:
+        """`preflight` validates the whole contract, so the fixture has to be a
+        contract it would otherwise accept -- `backend="none"` raises before
+        orientation is ever reached, and a test failing there would be testing
+        its own helper."""
+        import dataclasses
+        contract = dataclasses.replace(_contract(**over), backend="authored",
+                                       template="authored",
+                                       source={"kind": "authored"})
+        return CT.preflight(contract, known_checks=frozenset())
+
+    def test_an_unusable_matrix_is_refused_before_the_build(self) -> None:
+        projective = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
+                      [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 1.0, 1.0]]
+        mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
+                  [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+        for matrix in (projective, mirror, "sideways"):
+            with self.subTest(matrix=matrix):
+                self.assertTrue(
+                    [p for p in self._problems(model_to_printer_matrix=matrix)
+                     if "model_to_printer_matrix" in p])
+
+    def test_an_unusable_bed_height_is_refused_before_the_build(self) -> None:
+        for bed_z in (float("nan"), "the table", None):
+            with self.subTest(bed_z_mm=bed_z):
+                self.assertTrue([p for p in self._problems(bed_z_mm=bed_z)
+                                 if "bed_z_mm" in p])
+
+    def test_a_usable_declaration_is_not_complained_about(self) -> None:
+        """Or the clause is a way of refusing every job."""
+        self.assertEqual([], [p for p in self._problems()
+                              if "orientation" in p or "bed_z" in p])
 
 
 class TheOverhangIsScreenedInPrintOrientationTest(unittest.TestCase):
@@ -219,6 +289,17 @@ class TheOverhangIsScreenedInPrintOrientationTest(unittest.TestCase):
                          "apex-down the cone is unsupported, against the same "
                          "ceiling either way")
         self.assertGreater(flipped.measured, upright.measured)
+
+    def test_omitting_the_contract_does_not_measure_the_authored_frame(self) -> None:
+        """The refusal used to be guarded by `contract is not None`, so a caller
+        that forgot the argument skipped it and measured the model frame: PASS
+        at 0.0 mm2 where supplying the contract gives FAIL at 1293 mm2, with a
+        reason naming no frame. That is D15 reachable by forgetting an optional
+        argument."""
+        row = C._feature_check(_ConeCtx(), self._feature(), None, None)
+        self.assertNotEqual("PASS", row.result,
+                            "no contract means no known frame, and a screen "
+                            "that does not know its frame may not clear a part")
 
     def test_an_unusable_matrix_makes_the_overhang_unavailable(self) -> None:
         row = C._feature_check(_ConeCtx(), self._feature(), None, None,

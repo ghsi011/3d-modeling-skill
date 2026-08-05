@@ -299,8 +299,12 @@ say which frame they measured and refuse to issue `CLEAR` for the other one. A
 weaker method may not issue a stronger claim, and "the lowest point of the
 authored mesh" is a weaker claim than "the part does not go below the bed".
 
-**`screening._bed_screen` is fixed. Three contract checks are not, and they
-outrank it.** A screen escalates; a check reaches the commissioning verdict. All
+**FIXED** at `5ac852e`, and the follow-up that its review demanded. All three
+now resolve the orientation through `contract.printer_transform` and refuse
+rather than measuring the authored frame. What follows is what they did.
+
+**`screening._bed_screen` was fixed first. Three contract checks were not, and
+they outrank it.** A screen escalates; a check reaches the commissioning verdict. All
 three read `ctx.bounds[0][2]` in the model frame:
 
 * `commission.py` `seated` — "Part sits on the bed", bed hard-coded to `0.0`,
@@ -320,8 +324,18 @@ three read `ctx.bounds[0][2]` in the model frame:
   the declared frame** — a PASS against a plan ceiling, about a frame the job
   did not declare.
 
-`AGENTS.md`'s second clause is live on this: *"stop dependent work until a
-regression test proves the repair."* The claim path is the same one.
+`AGENTS.md`'s second clause was live on this until `5ac852e`: *"stop dependent
+work until a regression test proves the repair."* The regression tests are
+`test_commission_frame.py` and `test_orientation_frame.py`.
+
+**Still open, and found by that slice's review rather than by it.** The
+overhang *ceiling* is computed in the model frame -- `cli._inherited_overhang`
+calls `overhang_area` with no `transform=` and the result becomes the
+candidate's `max_area_mm2` -- so the two sides of one inequality are now in
+two different frames, where before the fix they were at least wrong the same
+way. And `cli._plan_features` still drops the support rule's own
+`model_to_printer_matrix`, so the contract's orientation is substituted for a
+different artifact's declaration, with nothing checking the two agree.
 
 **One correction to the paragraph above.** "It is never applied to geometry"
 was scoped here to *anywhere in the pipeline*, and that qualifier matters: it

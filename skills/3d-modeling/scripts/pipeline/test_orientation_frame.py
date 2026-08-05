@@ -41,10 +41,11 @@ reach the commissioning verdict rather than screens that only escalate:
   rule's `model_to_printer_matrix` while copying its other two fields. Measured
   on a cone: 0.0 mm2 authored, 1294.4 mm2 in the declared frame.
 
-`docs/defects.md` D15 records them as open. They are a separate slice because
-each is a different measurement, not because they are less urgent -- and until
-that slice lands, `AGENTS.md`'s "stop dependent work until a regression test
-proves the repair" is still live on this claim path.
+All three were fixed at `5ac852e`, in `test_commission_frame.py`. What that
+slice's own review then found still open is the overhang *ceiling*: `cli`
+computes it in the model frame while the candidate is now measured in the
+declared one, so the two sides of one inequality are in two frames.
+`docs/defects.md` D15 carries it.
 
 Bridging and strength direction are orientation-dependent too and nothing
 measures them at all.

@@ -310,7 +310,13 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         from .contract import printer_transform
 
         transform = None if contract is None else printer_transform(contract)
-        if contract is not None and transform is None:
+        # No `contract is not None` conjunct. With it, a caller that omitted the
+        # argument skipped the refusal *and* measured the authored frame: on the
+        # cone fixture, PASS at 0.0 mm2 against FAIL at 1293 mm2, with a reason
+        # naming no frame. That is D15 verbatim, reachable by forgetting an
+        # optional argument -- the fallback this slice claims to have removed,
+        # kept as a default.
+        if transform is None:
             return _unavailable_check(
                 feature, "Unsupported downward-facing area",
                 "orientation.model_to_printer_matrix cannot be applied, so the "
@@ -655,15 +661,26 @@ def _seated_check(ctx: MeshAnalysisContext, contract: Contract) -> Check:
                  "PASS" if abs(lowest - bed_z) <= 0.05 else "FAIL")
 
 
-def _bed_contact(ctx: MeshAnalysisContext, contract: Contract) -> float:
+def _bed_contact(ctx: MeshAnalysisContext, contract: Contract) -> float | None:
     """Area of faces lying on the bed plane, in the frame the part prints in.
 
-    Measured at the part's own lowest plane in its authored placement, which
-    under a declared rotation is a different face entirely.
+    At the part's lowest plane *after* the declared orientation is applied.
+    Measured in its authored placement -- which is what this did -- that is a
+    different face entirely under any rotation.
+
+    `None`, never `0.0`, when the orientation cannot be applied. Zero contact
+    area is a legitimate measurement, so returning it for a refusal made the two
+    indistinguishable, and `_feature_check` published the refusal as
+    `ran: true, status: MEASURED, reason: "measured"` -- three false statements
+    on one row. Worse, `run` counts a check as covered when `feature_id and
+    ran`, so the fabricated row held coverage at 1.0: the gate that exists
+    because "a candidate shipped 31% too thick while three checks reported
+    SKIPPED and nothing counted them" was defeated by that exact mechanism. With
+    a small enough declared area it also PASSed.
     """
     mesh = _placed(ctx, contract)
     if mesh is None:
-        return 0.0
+        return None
     z0 = float(mesh.bounds[0][2])
     triangles = mesh.triangles
     on_bed = (abs(triangles[:, :, 2] - z0).max(axis=1) <= 0.02)

@@ -316,5 +316,20 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
         problems.append("orientation.model_to_printer_matrix must be 'identity' or a 4x4 matrix")
     if not isinstance(bed_z, (int, float)) or isinstance(bed_z, bool):
         problems.append("orientation.bed_z_mm must be a number")
+    # The two functions the checks actually use. `preflight` exists so a job is
+    # refused "before any geometry is paid for", and it accepted a mirror, a
+    # projective matrix, a uniform scale and a NaN bed height that
+    # `printer_transform` and `declared_bed_z` all refuse -- so those four paid
+    # for the whole build and then landed on "the geometry does not match its
+    # contract", which is a claim about a comparison that never happened.
+    if printer_transform(contract) is None:
+        problems.append(
+            "orientation.model_to_printer_matrix is not a usable rigid "
+            "transform (finite, last row [0,0,0,1], orthonormal rotation, "
+            "determinant +1), so no check that places this part can run")
+    if declared_bed_z(contract) is None:
+        problems.append(
+            "orientation.bed_z_mm is not a finite number, so there is no bed "
+            "height for a placement check to measure against")
     return problems
 

@@ -248,7 +248,7 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
             "expected_mm3": round(want, 3), "measured_mm3": round(got, 3)}
 
 
-def _printer_frame_low_z(bounds, matrix_or_contract) -> float | None:
+def _printer_frame_low_z(bounds, transform) -> float | None:
     """The lowest Z the part reaches once the declared orientation is applied.
 
     All eight corners of the model-frame box, transformed, then the minimum -- a
@@ -269,7 +269,6 @@ def _printer_frame_low_z(bounds, matrix_or_contract) -> float | None:
     low, high = np.asarray(bounds, dtype=np.float64)
     if not np.all(np.isfinite([low, high])):
         return None
-    transform = matrix_or_contract
     if transform is None:
         return None
     corners = np.array([[x, y, z] for x in (low[0], high[0])
@@ -295,8 +294,6 @@ def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     """
     from .contract import declared_bed_z, printer_transform
 
-    orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
-    matrix = orientation.get("model_to_printer_matrix")
     transform = printer_transform(contract)
     bed_z = declared_bed_z(contract)
     if bed_z is None:
@@ -311,11 +308,12 @@ def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
                           "so this part's height above the bed is unknown. "
                           "Measuring the model frame instead would report a "
                           "clean result about a frame the job did not declare"}
-    # `isinstance` first: `matrix == "identity"` on a numpy array raises
-    # `ValueError: the truth value of an array ... is ambiguous`, and this is
-    # the second place that comparison appears.
-    identity = isinstance(matrix, str) and matrix == "identity"
-    frame = ("model frame (orientation is identity)" if identity
+    # Off the resolved transform, not by re-reading the declaration: a second
+    # read of one field, in the function this slice centralised, is the shape
+    # being fixed. It also removes the `matrix == "identity"` comparison that
+    # raised on a numpy array.
+    identity = bool(np.allclose(transform, np.eye(4)))
+    frame = ("model frame (the declared orientation is the identity)" if identity
              else "printer frame (the declared orientation is applied)")
     below = float(bed_z) - lowest
     if below > 0.05:
