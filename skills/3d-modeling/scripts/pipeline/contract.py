@@ -142,15 +142,15 @@ class Contract:
 _REQUIRED_FIELDS = ("provenance", "expectation", "tolerance", "verified_by", "on_unrunnable")
 
 
-def printer_transform(contract: Contract):
-    """The declared model-to-printer transform, or None if it cannot be applied.
+def as_transform(matrix: Any):
+    """One declared matrix resolved to one usable transform, or None.
 
-    One reading of `orientation.model_to_printer_matrix`, here because this is
-    where the field lives. `screening` and `commission` both call it, and that
-    is the point rather than a convenience: `docs/defects.md` D15 is a receipt
-    holding two answers about one part, produced by two readings of one
-    declaration, and a review of the first half of the fix found the weakest of
-    four shape checks over this question deciding the verdict.
+    The convention, in one function, so that nothing in this repository grows a
+    second one. `printer_transform` reads the contract's orientation through it,
+    `preflight` reads a print plan rule's own matrix through it to check the two
+    agree, and `cli._inherited_overhang` reads an edit scope's
+    `alignment_transform` through it before composing. Three declarations of a
+    placement, one predicate deciding whether a mesh may be moved by them.
 
     `team_preflight.is_finite_rigid` is the predicate: finite, last row exactly
     [0,0,0,1], the rotation block orthonormal, determinant +1. Weaker than that
@@ -162,17 +162,31 @@ def printer_transform(contract: Contract):
     true minimum near -49999 mm, reported CLEAR.
 
     `"identity"` resolves to the identity matrix rather than to None: a job that
-    declares no reorientation has declared one and is entitled to an answer.
+    declares no reorientation has declared one and is entitled to an answer. It
+    is the spelling both `orientation.model_to_printer_matrix` and
+    `edit_scopes[].alignment_transform` already use for that.
     """
     from team_preflight import is_finite_rigid
 
-    orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
-    matrix = orientation.get("model_to_printer_matrix")
     if isinstance(matrix, str):
         return np.eye(4) if matrix == "identity" else None
     if not is_finite_rigid(matrix):
         return None
     return np.array(matrix, dtype=np.float64)
+
+
+def printer_transform(contract: Contract):
+    """The declared model-to-printer transform, or None if it cannot be applied.
+
+    One reading of `orientation.model_to_printer_matrix`, here because this is
+    where the field lives. `screening` and `commission` both call it, and that
+    is the point rather than a convenience: `docs/defects.md` D15 is a receipt
+    holding two answers about one part, produced by two readings of one
+    declaration, and a review of the first half of the fix found the weakest of
+    four shape checks over this question deciding the verdict.
+    """
+    orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
+    return as_transform(orientation.get("model_to_printer_matrix"))
 
 
 def declared_bed_z(contract: Contract) -> float | None:
@@ -331,5 +345,61 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
         problems.append(
             "orientation.bed_z_mm is not a finite number, so there is no bed "
             "height for a placement check to measure against")
+    problems += _frame_disagreements(contract)
+    return problems
+
+
+def _frame_disagreements(contract: Contract) -> list[str]:
+    """Where a feature row and the contract declare two different print frames.
+
+    The half of D15 that survived the first two fixes. `commission` measures the
+    candidate's overhang in `printer_transform(contract)`; the ceiling it is
+    measured against comes off a print plan support rule which carries its
+    *own* `model_to_printer_matrix` and `bed_z_mm`. Nothing compared them, so the
+    two sides of one inequality could be two frames -- and `cli._plan_features`
+    dropped the rule's matrix on the way here, which meant the contract's
+    orientation was silently substituted for a declaration another artifact had
+    made and nobody had checked.
+
+    Refused rather than reconciled, and refused *here* rather than at the
+    measurement, for the reason the rest of this function exists: a frame
+    disagreement needs no mesh to find, and choosing either side of it would be
+    this file deciding which of two declarations the job meant. A rule that
+    agrees is silent; a rule that does not stops the run before geometry is paid
+    for.
+
+    Compared as resolved transforms and not as literals: `"identity"` and the
+    4x4 identity are one declaration in two spellings, and refusing that pair
+    would fail every job that spells them differently for no geometric reason.
+    """
+    declared = printer_transform(contract)
+    bed = declared_bed_z(contract)
+    problems: list[str] = []
+    for feature in contract.features:
+        expectation = feature.expectation if isinstance(feature.expectation, dict) else {}
+        if "model_to_printer_matrix" not in expectation:
+            continue
+        where = f"feature {feature.feature_id!r}"
+        rule = as_transform(expectation["model_to_printer_matrix"])
+        if rule is None:
+            problems.append(
+                f"{where}: model_to_printer_matrix is not a usable rigid "
+                "transform, so the frame its ceiling was measured in is unknown")
+        elif declared is not None and not np.array_equal(rule, declared):
+            problems.append(
+                f"{where}: the print plan rule declares a different print "
+                "orientation from orientation.model_to_printer_matrix. The "
+                "candidate is measured in the contract's frame and this row's "
+                "ceiling was measured in the rule's, so the two sides of one "
+                "inequality would be two frames. Neither is chosen here.")
+        rule_bed = expectation.get("bed_z_mm")
+        if isinstance(rule_bed, bool) or not isinstance(rule_bed, (int, float)):
+            continue
+        if bed is not None and float(rule_bed) != bed:
+            problems.append(
+                f"{where}: the print plan rule's bed_z_mm is {float(rule_bed)!r} "
+                f"and orientation.bed_z_mm is {bed!r}. Bed contact is what "
+                "separates a supported face from an overhang, so two bed "
+                "heights are two different measurements.")
     return problems
 

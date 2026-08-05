@@ -924,6 +924,13 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     Regenerated on every run from the same inputs, so it is byte-stable, and
     refused if it does not validate -- an unbuildable plan discovered after a
     build is 39 archived minutes of nothing.
+
+    Generated *in the orientation the project declared*, which it was not. The
+    template wrote the identity into its support rule whatever the job said, so
+    the ceiling a candidate was gated against was measured in one frame while
+    the candidate was measured in another. `project.orientation` is the single
+    authority: it reaches the acceptance contract already, it reaches the plan
+    from here, and `contract.preflight` refuses the run if the two disagree.
     """
     from designer_toolkit.plan import direct_template, validate_plan
 
@@ -935,7 +942,8 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         material=str(project.material["material"]),
         bodies=max(1, sum(c.count for c in project.components) or 1),
         updated_utc=project.updated_utc,
-        consequence=project.consequence)
+        consequence=project.consequence,
+        orientation=project.orientation)
     problems = validate_plan(plan)
     if not problems:
         (work_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
@@ -981,10 +989,34 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
 
     `None` still means the generated zero, and now means what it says: not one
     declared source could be measured, so there is no evidence to credit at all.
+
+    **In the frame the candidate is measured in.** This called `overhang_area`
+    with no `transform=` while `commission` passes the contract's printer
+    transform, so the ceiling and the measurement it caps were two frames of one
+    inequality -- the last live half of D15. Each source is now placed the way
+    it is actually placed:
+
+        source's own coordinates --alignment_transform--> the job's design frame
+                                 --model_to_printer_matrix--> the printer's
+
+    which is one composition, `printer @ alignment`, in that order. The order is
+    not a convention to pick: `alignment_transform` maps *out of* the source's
+    frame and the printer matrix maps *out of* the design frame, so reversing
+    them applies the printer rotation to coordinates that are not in the design
+    frame yet. For a translating alignment and a rotating printer the two
+    products differ, and a fixture pins that.
+
+    An alignment or a rule matrix this cannot resolve makes that source an
+    unmeasured gap by name, never a silent identity. Substituting identity would
+    credit the candidate an allowance measured in the wrong place, which is the
+    direction that passes a part that should fail.
     """
     if not project.edit_scopes or project.source_mode != "MODIFY":
         return None
 
+    from .contract import as_transform
+
+    printer = as_transform(rule.get("model_to_printer_matrix", "identity"))
     measured: list[tuple[str, float]] = []
     unmeasured: list[tuple[str, str]] = []
     for scope in project.edit_scopes:
@@ -992,6 +1024,19 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
         if artifact is None:
             unmeasured.append((scope.artifact_id,
                                "no source artifact carries this id"))
+            continue
+        if printer is None:
+            unmeasured.append((artifact.path,
+                               "the print plan rule's model_to_printer_matrix "
+                               "is not a usable rigid transform, so there is no "
+                               "printer frame to measure this source in"))
+            continue
+        alignment = as_transform(scope.alignment_transform)
+        if alignment is None:
+            unmeasured.append((artifact.path,
+                               "alignment_transform is not a usable rigid "
+                               "transform, so where this source sits in the "
+                               "job's frame is unknown"))
             continue
         try:
             source = S.resolve_within(project_dir, artifact.path,
@@ -1003,7 +1048,8 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
             area = float(M.overhang_area(
                 str(source),
                 threshold=float(rule.get("downward_normal_z_max", -0.73)),
-                bed_z=float(rule.get("bed_z_mm", 0.0))))
+                bed_z=float(rule.get("bed_z_mm", 0.0)),
+                transform=printer @ alignment))
         except Exception as exc:                      # noqa: BLE001 - one source
             unmeasured.append((artifact.path,         # that cannot be read is a
                                f"{type(exc).__name__}: {exc}"))   # named gap, not
@@ -1042,6 +1088,14 @@ def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
     novel part prints at all, and it is the rule the archived runs violated. The
     rest of the plan (edges, interfaces, coupons) is measured by
     `designer_toolkit.commission` and is not duplicated here.
+
+    The rule's `model_to_printer_matrix` travels with its threshold and its bed
+    height, where it used to be dropped. Dropping it did not make the row
+    frameless; it made the contract's orientation silently stand in for a
+    declaration another artifact had made, with nothing checking the two agreed.
+    Carried here, the frozen contract records which frame each ceiling was
+    measured in, and `contract.preflight` has both numbers in one place to
+    refuse a disagreement before any geometry is built.
     """
     rows: list[dict[str, Any]] = []
     for index, rule in enumerate(plan.get("support_rules") or []):
@@ -1066,6 +1120,8 @@ def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
             "downward_normal_z_max": float(
                 rule.get("downward_normal_z_max", -0.73)),
             "bed_z_mm": float(rule.get("bed_z_mm", 0.0)),
+            "model_to_printer_matrix": rule.get("model_to_printer_matrix",
+                                                "identity"),
             # Zero allowance on top of the ceiling. The plan's own number is the
             # band; adding a default one here would widen a threshold the plan
             # set deliberately.

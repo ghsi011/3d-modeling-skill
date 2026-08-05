@@ -133,6 +133,38 @@ def _validate_interface_rows(plan: dict[str, Any]) -> list[str]:
 IDENTITY_TRANSFORM = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 
 
+def _declared_frame(orientation: Any) -> tuple[Any, Any]:
+    """The support rule's frame, taken from the job rather than assumed.
+
+    This template used to write `IDENTITY_TRANSFORM` and `DEFAULT_BED_Z_MM` into
+    its one support rule unconditionally, which is the last live half of D15: a
+    job that declared a print orientation had it validated, hashed into the
+    acceptance contract and applied to the *candidate*, while the ceiling that
+    candidate was gated against was generated in a frame nobody declared.
+
+    `None` keeps the old constants, and deliberately: `direct_template` is called
+    from tests and from `plan.py`'s own command line with no project behind it,
+    and a job that declares identity gets byte-identical output either way, so
+    no existing plan hash moves.
+
+    A malformed declaration comes back verbatim rather than raising, the way
+    `EditScope.canonical_alignment_transform` does. `validate_plan` is what
+    refuses a plan, and a generator that threw first would turn a refusal a
+    caller can print into a traceback.
+    """
+    if not isinstance(orientation, dict):
+        return IDENTITY_TRANSFORM, DEFAULT_BED_Z_MM
+    matrix = orientation.get("model_to_printer_matrix", IDENTITY_TRANSFORM)
+    # `"identity"` is the contract's spelling and a support rule needs a matrix:
+    # `support_audit` requires all three rule fields unconditionally and raises
+    # before it reads the mesh. Normalised here so that the common path -- a job
+    # declaring no reorientation -- emits exactly the bytes it emitted before.
+    if matrix == "identity":
+        matrix = IDENTITY_TRANSFORM
+    bed_z = orientation.get("bed_z_mm", DEFAULT_BED_Z_MM)
+    return matrix, bed_z
+
+
 def direct_template(
     bbox_mm: tuple[float, float, float],
     *,
@@ -146,9 +178,11 @@ def direct_template(
     consequence: str | None = None,
     assembly_mesh_paths: tuple[str, ...] = (),
     assembly_overlap_budget_mm3: float | None = None,
+    orientation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """A bound plan for a job whose dimensions were stated, not measured."""
     x, y, z = (float(v) for v in bbox_mm)
+    rule_matrix, rule_bed_z = _declared_frame(orientation)
     if min(x, y, z) <= 0:
         raise ValueError(f"bbox must be positive in every axis, got {bbox_mm}")
     if tolerance_mm is None:
@@ -192,8 +226,12 @@ def direct_template(
                 # before it ever reads the mesh. A template that omits them
                 # produces a plan no candidate can satisfy -- which is what one
                 # measured run spent 55 minutes discovering.
-                "model_to_printer_matrix": IDENTITY_TRANSFORM,
-                "bed_z_mm": DEFAULT_BED_Z_MM,
+                #
+                # The job's declaration, not a constant. See `_declared_frame`:
+                # a generated ceiling in a frame the job never declared is the
+                # half of D15 that outlived the fix to the checks.
+                "model_to_printer_matrix": rule_matrix,
+                "bed_z_mm": rule_bed_z,
                 "bed_tolerance_mm": DEFAULT_BED_TOLERANCE_MM,
                 "downward_normal_z_max": DEFAULT_DOWNWARD_NORMAL_Z_MAX,
                 "max_out_of_limit_area_mm2": DEFAULT_MAX_OUT_OF_LIMIT_AREA_MM2,
