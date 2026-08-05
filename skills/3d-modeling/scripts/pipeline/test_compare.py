@@ -95,7 +95,8 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
                 bbox=(38.0, 38.0, 50.0), bodies=1, verdict="PASS",
                 final_status="VERIFIED", requirement_sha256="req-shared",
                 source="the model as authored", volume_mm3=47526.263,
-                measured=None) -> None:
+                measured=None, candidate="solid candidate\nendsolid\n",
+                step_sha256=None) -> None:
     """Lay down the receipts one finished run would have written.
 
     Consistent by construction: every digest a receipt records is computed from
@@ -106,8 +107,11 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     (work_dir / "model.py").write_text(source, encoding="utf-8")
-    (work_dir / "candidate.stl").write_text("solid candidate\nendsolid\n",
-                                            encoding="utf-8")
+    # `candidate` and `step_sha256` are separable from `source` on purpose: D28
+    # is grouped on what a receipt says was built as well as on what it was
+    # built from, and a helper that could only vary the source together with the
+    # output could not write the fixture that tells the two apart.
+    (work_dir / "candidate.stl").write_text(candidate, encoding="utf-8")
     source_sha = S.sha256_file(work_dir / "model.py")
     stl_sha = S.sha256_file(work_dir / "candidate.stl")
 
@@ -143,7 +147,7 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
 
     manifest = {"schema_version": 1, "job_id": "comparing",
                 "contract_sha256": contract_sha, "stl_sha256": stl_sha,
-                "step_sha256": None, "source_sha256": source_sha,
+                "step_sha256": step_sha256, "source_sha256": source_sha,
                 "backend": "authored", "units": "mm",
                 "bbox_mm": {"x": bbox[0], "y": bbox[1], "z": bbox[2]},
                 "updated_utc": UTC}
@@ -209,7 +213,7 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
         "allowed_claim": f"the run concluded {final_status}",
         "unavailable_checks": [], "reasons": [],
         "artifact_hashes": {"contract": contract_sha, "stl": stl_sha,
-                            "step": None, "source": source_sha},
+                            "step": step_sha256, "source": source_sha},
         "updated_utc": UTC}
     (work_dir / "final_status.json").write_text(S.canonical_json(status),
                                                 encoding="utf-8")
@@ -223,6 +227,11 @@ def _branched(root: Path, *ids: str, project=None) -> Path:
         assert cli.branch([str(directory), "--from", ".", "--id", name,
                            "--reason", f"the {name} concept"]) == 0
     return directory
+
+
+def _status(work_dir: Path) -> dict:
+    """One formulation's `final_status.json`, as the comparison reads it."""
+    return json.loads((work_dir / "final_status.json").read_text(encoding="utf-8"))
 
 
 def _run(directory: Path, *args: str) -> tuple[int, dict | None]:
@@ -722,6 +731,251 @@ class TheCommandSurfaceTest(unittest.TestCase):
             self.assertEqual(1, len(groups))
             self.assertEqual([".", "twin"], groups[0]["members"])
             self.assertIn("corroboration", groups[0]["note"])
+
+
+# ---------------------------------------------------------------------------
+# What the receipts say was built -- D28
+# ---------------------------------------------------------------------------
+
+class TheGroupingIsBoundToTheReceiptsTest(unittest.TestCase):
+    """D28: the columns being compared are the receipts, not the working tree.
+
+    `_identical_designs` grouped on `bindings.current`, which reads the source
+    digest off disk *now*. So on the one case in the repository that exercises
+    it -- `benchmarks/replays/branch-knob-seat-fallback`, where the root and
+    `as-drawn` were built from a byte-identical `model.py`, both receipts record
+    `artifact_hashes.source = 1e9b9ea…`, and every measured value agrees -- the
+    block was silent, because `as-drawn`'s model was revised after its run
+    concluded.
+
+    **D28's own suggested fix is not the one made here.** It proposed grouping
+    on `artifact_hashes.source` alone. One `model.py` builds different geometry
+    under different parameters or different inputs, so a source-only key would
+    group two genuinely different designs and print this file's strongest
+    sentence about them. The key is what the completed receipts establish about
+    both the implementation *and* the output: source, candidate, and STEP where
+    the job produced one.
+    """
+
+    def _one_design(self, root: Path) -> Path:
+        """Two formulations one design produced, plus an unrelated third."""
+        directory = _branched(root, "twin", "other")
+        formulation(directory / P.ALTERNATIVES_DIR / "twin",
+                    source="the model as authored")
+        formulation(directory / P.ALTERNATIVES_DIR / "other",
+                    source="a materially different model",
+                    candidate="solid other\nendsolid\n")
+        formulation(directory, source="the model as authored")
+        return directory
+
+    def test_a_model_revised_after_its_run_still_groups(self) -> None:
+        """The defect, inverted.
+
+        The recorded case exactly: two receipts issued against one design, and
+        then one of the two model files is edited on disk afterwards. The
+        working tree now disagrees with both receipts, and the receipts still
+        say what they said. Grouping on the tree lost the only real case.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._one_design(Path(raw))
+            twin = directory / P.ALTERNATIVES_DIR / "twin"
+            (twin / "model.py").write_text("revised after the run concluded",
+                                           encoding="utf-8")
+
+            _, payload = _run(directory)
+            groups = payload["identical_designs"]
+            self.assertEqual(1, len(groups), payload["identical_designs"])
+            self.assertEqual([".", "twin"], groups[0]["members"],
+                             "the two receipts were issued against one design "
+                             "and say so; the file on disk is not one of the "
+                             "columns being compared")
+
+    def test_the_revised_formulation_is_still_stale(self) -> None:
+        """Grouping is not a claim about currency and must not become one.
+
+        `as-drawn` is reported STALE and its mandatory verdict weakens to
+        `UNKNOWN_STALE`. That is the claim "this formulation's evidence no
+        longer binds", which is a *different* claim from "these two columns are
+        one design" -- and a grouping that quietly restored the first would have
+        turned a defect about a missing sentence into a defect about a false
+        one.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._one_design(Path(raw))
+            twin = directory / P.ALTERNATIVES_DIR / "twin"
+            (twin / "model.py").write_text("revised after the run concluded",
+                                           encoding="utf-8")
+
+            _, payload = _run(directory)
+            self.assertEqual([".", "twin"],
+                             payload["identical_designs"][0]["members"])
+            mandatory = payload["axes"]["mandatory"]["per_formulation"]
+            self.assertNotEqual(mandatory["twin"]["verdict"],
+                                mandatory["."]["verdict"],
+                                "one of these two columns no longer binds its "
+                                "evidence, and grouping them did not change "
+                                "which")
+            self.assertTrue(payload["issued_against"]["twin"]["stale"],
+                            "still stale")
+            self.assertFalse(payload["issued_against"]["."]["stale"])
+
+    def test_the_same_source_under_a_different_output_does_not_group(self) -> None:
+        """Why D28's literal proposal is refused.
+
+        One `model.py` produces different geometry under different parameters or
+        different inputs. Two receipts recording the same source and different
+        candidates are two designs, and the sentence this block prints -- "their
+        agreement is not corroboration" -- would be false about them.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "twin")
+            formulation(directory / P.ALTERNATIVES_DIR / "twin",
+                        source="one parametric model",
+                        candidate="solid at 12mm\nendsolid\n")
+            formulation(directory, source="one parametric model",
+                        candidate="solid at 18mm\nendsolid\n")
+
+            _, payload = _run(directory)
+            root = _status(directory)
+            twin = _status(directory / P.ALTERNATIVES_DIR / "twin")
+            self.assertEqual(root["artifact_hashes"]["source"],
+                             twin["artifact_hashes"]["source"],
+                             "same design implementation")
+            self.assertNotEqual(root["artifact_hashes"]["stl"],
+                                twin["artifact_hashes"]["stl"],
+                                "and a different solid came out of it")
+            self.assertEqual([], payload["identical_designs"])
+
+    def test_the_same_output_from_a_different_source_does_not_group(self) -> None:
+        """The other direction, and it is not symmetric with the one above.
+
+        Two different `model.py` files that happen to emit byte-identical STLs
+        are two design implementations. They may well be worth noticing -- and
+        the measured axes will show every number agreeing -- but "one design
+        under several ids" is a statement about the design, and the receipts
+        say there were two. Grouping them would collapse a genuine independent
+        agreement, which is the *opposite* of the error D28 records and would
+        cost a reader the corroboration they actually have.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "twin")
+            formulation(directory / P.ALTERNATIVES_DIR / "twin",
+                        source="one way of drawing it")
+            formulation(directory, source="a different way of drawing it")
+
+            _, payload = _run(directory)
+            root = _status(directory)
+            twin = _status(directory / P.ALTERNATIVES_DIR / "twin")
+            self.assertEqual(root["artifact_hashes"]["stl"],
+                             twin["artifact_hashes"]["stl"],
+                             "byte-identical output")
+            self.assertNotEqual(root["artifact_hashes"]["source"],
+                                twin["artifact_hashes"]["source"])
+            self.assertEqual([], payload["identical_designs"])
+
+    def test_a_step_only_one_of_them_produced_is_a_different_output(self) -> None:
+        """`step` participates as itself. Absent is a real answer for it -- most
+        jobs declare no STEP and two such jobs still group -- and a job that
+        exported one did not produce what a job that did not exported."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "with-step")
+            formulation(directory / P.ALTERNATIVES_DIR / "with-step",
+                        source="the model as authored",
+                        step_sha256="a" * 64)
+            formulation(directory, source="the model as authored")
+
+            _, payload = _run(directory)
+            self.assertEqual([], payload["identical_designs"])
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "also-step")
+            for target in (directory / P.ALTERNATIVES_DIR / "also-step", directory):
+                formulation(target, source="the model as authored",
+                            step_sha256="a" * 64)
+
+            _, payload = _run(directory)
+            self.assertEqual([[".", "also-step"]],
+                             [g["members"] for g in payload["identical_designs"]],
+                             "two jobs that produced the same STEP are still "
+                             "one design")
+
+    def test_a_formulation_with_no_completed_receipt_never_groups(self) -> None:
+        """Missing digests do not form a group.
+
+        A formulation with no `final_status.json` completed nothing. Grouping it
+        would state the strongest sentence in this file about a run that has no
+        evidence at all -- and two such formulations would group *with each
+        other*, on a pair of absences.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _branched(Path(raw), "unfinished", "also-unfinished")
+            for name in ("unfinished", "also-unfinished"):
+                target = directory / P.ALTERNATIVES_DIR / name
+                formulation(target, source="the model as authored")
+                (target / "final_status.json").unlink()
+            formulation(directory, source="the model as authored")
+
+            _, payload = _run(directory)
+            self.assertEqual([], payload["identical_designs"])
+
+    def test_a_receipt_missing_a_digest_never_groups(self) -> None:
+        """The same rule one level down: a receipt is on disk and it does not
+        carry what the key needs. Absent for `source` or `stl` means the run did
+        not conclude, where absent for `step` is a legitimate answer."""
+        for field in ("source", "stl"):
+            with self.subTest(missing=field), tempfile.TemporaryDirectory() as raw:
+                directory = _branched(Path(raw), "twin")
+                twin = directory / P.ALTERNATIVES_DIR / "twin"
+                formulation(twin, source="the model as authored")
+                formulation(directory, source="the model as authored")
+                status = _status(twin)
+                status["artifact_hashes"][field] = None
+                (twin / "final_status.json").write_text(
+                    S.canonical_json(status), encoding="utf-8")
+
+                _, payload = _run(directory)
+                self.assertEqual([], payload["identical_designs"])
+
+    def test_the_group_names_the_digests_it_grouped_on(self) -> None:
+        """A reader who disagrees has to be able to check the claim without
+        re-deriving it."""
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._one_design(Path(raw))
+            _, payload = _run(directory)
+            group = payload["identical_designs"][0]
+            root = _status(directory)
+            self.assertEqual(root["artifact_hashes"]["source"],
+                             group["source_sha256"])
+            self.assertEqual(root["artifact_hashes"]["stl"], group["stl_sha256"])
+            self.assertIsNone(group["step_sha256"])
+            self.assertIn("still current", group["note"],
+                          "the note has to keep grouping and currency apart")
+
+    def test_a_changed_receipt_changes_the_comparison_normally(self) -> None:
+        """Nothing here is pinned to a frozen answer.
+
+        The comparison is recomputed from the receipts every time, so editing
+        one moves the grouping the way editing any input moves any derived
+        value -- and re-running over unchanged receipts is the same comparison.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._one_design(Path(raw))
+            _, first = _run(directory)
+            _, again = _run(directory)
+            self.assertEqual(first, again)
+            self.assertEqual([[".", "twin"]],
+                             [g["members"] for g in first["identical_designs"]])
+
+            twin = directory / P.ALTERNATIVES_DIR / "twin"
+            status = _status(twin)
+            status["artifact_hashes"]["stl"] = "b" * 64
+            (twin / "final_status.json").write_text(S.canonical_json(status),
+                                                    encoding="utf-8")
+
+            _, after = _run(directory)
+            self.assertEqual([], after["identical_designs"],
+                             "the receipt now says a different solid came out")
+            self.assertNotEqual(first, after)
 
 
 # ---------------------------------------------------------------------------

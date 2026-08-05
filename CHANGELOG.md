@@ -6,6 +6,50 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — two columns of one design are named as one (D28)
+
+`compare._identical_designs` grouped formulations by `bindings.current`, which
+reads the source digest off disk **now**. The block exists to stop a reader
+taking two identical columns for two designs independently reaching one answer
+— and it was silent on the only case in the repository that exercises it. On
+`benchmarks/replays/branch-knob-seat-fallback` the shared root and `as-drawn`
+were built from a byte-identical `model.py`, both receipts record
+`artifact_hashes.source = 1e9b9ea…` and the same candidate digest, and every
+measured value the comparison prints for them agrees — but `as-drawn`'s model
+was revised after its run concluded, so the key had moved and the two identical
+columns were printed side by side, unnamed.
+
+**Grouped on what the completed receipts establish**, because the columns being
+compared *are* the receipts and the working tree is not among them. The key is
+`final_status.artifact_hashes`: `source`, `stl`, and `step` where the job
+produced one.
+
+**Not the source digest alone, which is what the defect proposed.** One
+`model.py` builds different geometry under different parameters or different
+inputs, so a source-only key would group two genuinely different designs and
+print the strongest sentence in that file about them. The output digest is the
+half a source digest cannot carry. The converse is refused too: two different
+sources that emit byte-identical STLs are two implementations, and collapsing
+them would destroy a genuine independent agreement — the opposite of the error
+recorded here.
+
+**Missing digests do not form a group.** A formulation with no
+`final_status.json`, or a receipt carrying no source or no candidate digest, is
+one nobody completed; grouping it would state the strongest available claim
+about a run with no evidence, and two such formulations would group with each
+other on a pair of absences. `step` is exempt: absent is a real answer for it,
+two jobs that produced none still group, and a job that exported one never
+groups with a job that did not.
+
+**Grouping is not a claim about currency and did not become one.** `as-drawn`
+is still `STALE` and its mandatory verdict is still `UNKNOWN_STALE`; those come
+from `bindings.broken` and `status.derive`, which this does not touch. The
+group's note says so, and an L1 test asserts it.
+
+The L1 assertion that pinned the defect is inverted — its own message named the
+value it would become — and `branch-knob-seat-fallback`'s recording moves by
+exactly one field, `identical_designs` from `[]` to `[[".", "as-drawn"]]`.
+
 ### Fixed — the support ceiling and the candidate are measured in one frame (D15)
 
 D15's last half, and the one its own fix's review found. Since `5ac852e` the

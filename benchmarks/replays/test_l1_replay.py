@@ -716,20 +716,25 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
                          "all three, including the shared root -- which "
                          "`status` drops, and which is `docs/defects.md` D26")
 
-    def test_two_columns_of_one_design_are_not_reported_as_such_and_that_is_a_defect(self) -> None:
-        """`docs/defects.md` D28, pinned rather than described.
+    def test_two_columns_of_one_design_are_named_as_one(self) -> None:
+        """D28 closed, on the only case in the repository that exercises it.
 
         The root and the fallback were built from a byte-identical `model.py`,
         their receipts prove it, and every measured value they carry agrees.
-        `identical_designs` exists to stop a reader taking that agreement for two
-        designs independently reaching one answer -- and it is empty, because it
-        groups on the source digest *on disk now* and the fallback's model was
-        revised after its run.
+        `identical_designs` exists to stop a reader taking that agreement for
+        two designs independently reaching one answer -- and it used to be
+        empty, because it grouped on the source digest *on disk now* and the
+        fallback's model was revised after its run concluded.
 
-        This test asserts the defect, so **fixing D28 turns it red**. That is
-        the intent: the fix belongs in a slice with its own fixture, and until
-        then the silence should be something the suite states rather than
-        something a reader has to notice.
+        This assertion was inverted when the fix landed. The comment it carried
+        said so by name: "when D28 is fixed this becomes [['.', 'as-drawn']] and
+        this assertion is the one to update".
+
+        What is grouped is what the **receipts** establish -- the same design
+        implementation and the same built artifacts. It is not a statement that
+        either formulation's evidence is still current, and the test below keeps
+        that separate: `as-drawn` is still STALE and its mandatory verdict is
+        still `UNKNOWN_STALE`.
         """
         root = self._read(RP.ROOT_ALTERNATIVE, "final_status.json")
         fallback = self._read("as-drawn", "final_status.json")
@@ -737,14 +742,37 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
                          fallback["artifact_hashes"]["source"],
                          "one design: the receipts were issued against the same "
                          "model")
+        self.assertEqual(root["artifact_hashes"]["stl"],
+                         fallback["artifact_hashes"]["stl"],
+                         "and the same solid came out of it, which is the half "
+                         "of the key a source digest alone cannot carry")
         self.assertEqual(
             self.observed["formulations"][RP.ROOT_ALTERNATIVE]["material"],
             self.observed["formulations"]["as-drawn"]["material"],
             "and every number the comparison prints for them agrees")
-        self.assertEqual([], self.observed["comparison"]["identical_designs"],
-                         "and the block that would say so is silent. When D28 "
-                         "is fixed this becomes [['.', 'as-drawn']] and this "
-                         "assertion is the one to update")
+        self.assertEqual([[RP.ROOT_ALTERNATIVE, "as-drawn"]],
+                         self.observed["comparison"]["identical_designs"],
+                         "and the block that says so is no longer silent")
+
+    def test_naming_them_as_one_design_did_not_make_the_stale_one_current(self) -> None:
+        """The claim D28's mitigation already made, kept separate from the fix.
+
+        "These two columns are one design" and "this formulation's evidence
+        still binds" are different sentences. `as-drawn`'s model was revised
+        after its run, so its evidence does not bind and its mandatory verdict
+        is `UNKNOWN_STALE`; grouping it with the root must not restore or
+        strengthen that. A grouping that quietly did would have turned a defect
+        about a missing sentence into a defect about a false one.
+        """
+        marks = self.observed["comparison"]
+        self.assertEqual([[RP.ROOT_ALTERNATIVE, "as-drawn"]],
+                         marks["identical_designs"])
+        self.assertEqual(
+            "UNKNOWN_STALE",
+            marks["mandatory_per_formulation"]["as-drawn"]["verdict"],
+            "still stale, still not a current verdict")
+        self.assertFalse(marks["preference_admissible"],
+                         "and still no basis for preferring one")
 
     # ----------------------------------------------------------------
     # Gate 4.5: somebody decides, on a real part

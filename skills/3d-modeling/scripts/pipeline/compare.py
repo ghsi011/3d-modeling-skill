@@ -493,36 +493,98 @@ def _measured(reading: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _design_key(reading: dict[str, Any]) -> tuple[str, str, str | None] | None:
+    """What the completed receipt says this formulation implemented and produced.
+
+    The identity a comparison is entitled to group on, and the whole of D28's
+    fix. The columns being compared **are the receipts**; the working tree is
+    not among them.
+
+    Three digests, all from `final_status.json`, and each is there for a reason
+    the others cannot cover:
+
+    * `source` -- the design implementation the receipt was issued against.
+      Alone it is not enough, and D28's own suggested fix was to use it alone:
+      one `model.py` builds different geometry under different parameters, so a
+      source-only key would group two genuinely different designs and print the
+      strongest sentence in this file about them.
+    * `stl` -- the output. Two runs of one source that produced different solids
+      are not one design in any sense a reader cares about.
+    * `step`, where the job produced one. `None` is a legitimate value -- most
+      jobs declare no STEP -- and it participates as itself, so two jobs that
+      both produced none still group and a job that produced one never groups
+      with a job that did not.
+
+    **Missing digests do not form a group.** A formulation with no
+    `final_status.json`, or one whose receipt carries no source or no candidate
+    digest, is a formulation nobody completed. Grouping it would state the
+    strongest available claim about a run that has none, and two incomplete
+    formulations would group with each other on a pair of absences.
+
+    `step` is deliberately not required: absent is a real answer for it, where
+    absent for the other two means the run did not conclude.
+    """
+    status = reading["receipts"]["final_status.json"]
+    if not isinstance(status, dict):
+        return None
+    hashes = status.get("artifact_hashes")
+    if not isinstance(hashes, dict):
+        return None
+    source, stl = hashes.get("source"), hashes.get("stl")
+    if not isinstance(source, str) or not source:
+        return None
+    if not isinstance(stl, str) or not stl:
+        return None
+    step = hashes.get("step")
+    return source, stl, step if isinstance(step, str) and step else None
+
+
 def _identical_designs(readings: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """Formulations whose source is identical *right now*, grouped and named.
+    """Formulations one design produced, grouped and named.
 
     Where two formulations are one design under two ids, their every measured
     value agrees, and without this block a reader takes that agreement for two
     independent designs reaching the same answer. It is one design counted
     twice, and it corroborates nothing.
 
-    **This does not fire on the recorded knob, and this docstring used to claim
-    it did.** `docs/defects.md` D28: the root and `as-drawn` were built from a
-    byte-identical `model.py` and their receipts prove it -- both record
-    `artifact_hashes.source = 1e9b9ea…` and the same candidate digest -- but
-    `as-drawn`'s model was revised after its run concluded, and the grouping key
-    is `bindings.current`, which reads the digest off disk *now*. So the two
-    columns whose numbers are identical are the two this block stays silent
-    about. Grouping on the digest the receipts were produced from is the fix,
-    and it is not made here: it changes what a frozen recording says, so it
-    gets its own slice and its own fixture.
+    **It used to group on `bindings.current`, which reads the digest off disk
+    now**, and so was silent on the only case in the repository that exercises
+    it. On `benchmarks/replays/branch-knob-seat-fallback` the root and
+    `as-drawn` were built from a byte-identical `model.py`, both receipts record
+    `artifact_hashes.source = 1e9b9ea…` and the same candidate digest, and every
+    measured value the comparison prints for them agrees -- but `as-drawn`'s
+    model was revised after its run concluded, so the key it was grouped by had
+    moved and the two identical columns were printed side by side unnamed. That
+    is D28.
+
+    **Grouping is not a claim about currency, and does not become one.**
+    `as-drawn` is still `STALE` and its mandatory verdict is still
+    `UNKNOWN_STALE`; those come from `bindings.broken` and `status.derive` and
+    nothing here touches them. "These two columns are one design" and "this
+    formulation's evidence still binds" are different sentences, and a reader
+    needs both. What this block prevents is reading the first as corroboration.
     """
-    groups: dict[str, list[str]] = {}
+    groups: dict[tuple[str, str, str | None], list[str]] = {}
     for key, reading in readings.items():
-        source = reading["bindings"].get("source")
-        if source:
-            groups.setdefault(str(source), []).append(key)
+        design = _design_key(reading)
+        if design is not None:
+            groups.setdefault(design, []).append(key)
     return [{"members": sorted(members),
              "source_sha256": source,
-             "note": "these formulations were built from the same source file. "
-                     "They are one design under several ids, and their agreement "
-                     "is not corroboration."}
-            for source, members in sorted(groups.items()) if len(members) > 1]
+             "stl_sha256": stl,
+             "step_sha256": step,
+             "note": "these formulations' receipts were issued against the same "
+                     "design implementation and record the same built "
+                     "artifacts. They are one design under several ids, and "
+                     "their agreement is not corroboration. It is not a "
+                     "statement that their evidence is still current: read each "
+                     "formulation's own status for that."}
+            # Sorted through a key that tolerates the absent STEP rather than on
+            # the tuple itself: `None < "a"` is a TypeError, and a job that
+            # declared no STEP is the common case rather than the exotic one.
+            for (source, stl, step), members in sorted(
+                groups.items(), key=lambda row: (row[0][0], row[0][1], row[0][2] or ""))
+            if len(members) > 1]
 
 
 def _preference(mandatory: dict[str, dict[str, Any]], yardstick: dict[str, Any],

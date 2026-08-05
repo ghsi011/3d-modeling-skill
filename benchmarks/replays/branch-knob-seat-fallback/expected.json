@@ -7,7 +7,12 @@
       "as-drawn",
       "plate-seated"
     ],
-    "identical_designs": [],
+    "identical_designs": [
+      [
+        ".",
+        "as-drawn"
+      ]
+    ],
     "mandatory_per_formulation": {
       ".": {
         "did_not_run": [],
@@ -577,7 +582,7 @@
     "reviews_answered",
     "schema_version"
   ],
-  "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
+  "recorded_at": "395426209c31075f068911317df94b7def7c8a47",
   "reviews_answered": [
     "verification",
     "verification",
