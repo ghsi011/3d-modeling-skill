@@ -399,10 +399,19 @@ def _mesh_facts(mesh) -> dict[str, Any]:
     if triangles == 0:
         return {"triangles": 0, "vertices": int(len(mesh.vertices)), "bbox_mm": [],
                 "watertight": False, "winding_consistent": False,
-                "volume_mm3": None, "bodies": 0, "boundary_edges": 0,
+                # Present and empty, not absent: a caller reading
+                # `body_identities` to check it against `bodies` would get a
+                # KeyError on the one object where the two are most obviously
+                # equal, and an early return that omits a key its own function
+                # promises is how a reader learns to use `.get`.
+                "volume_mm3": None, "bodies": 0, "body_identities": [],
+                "boundary_edges": 0,
                 "nonmanifold_edges": 0, "max_faces_per_edge": 0}
     watertight = bool(mesh.is_watertight)
     edges = edge_manifold_counts(mesh)
+    import mesh_io
+
+    bodies = mesh.split(only_watertight=False) if len(mesh.faces) else []
     return {
         "triangles": triangles,
         "vertices": int(len(mesh.vertices)),
@@ -410,7 +419,16 @@ def _mesh_facts(mesh) -> dict[str, Any]:
         "watertight": watertight,
         "winding_consistent": bool(mesh.is_winding_consistent),
         "volume_mm3": round(float(mesh.volume), 4) if watertight else None,
-        "bodies": int(len(mesh.split(only_watertight=False))),
+        "bodies": len(bodies),
+        # Every body it counted, by the handle a loose mesh of the same geometry
+        # gets. A count cannot be referenced, and 3MF is the format Release 5's
+        # "selected components within source assemblies" is about -- so a
+        # declaration naming a body in a supplied assembly names one of these.
+        #
+        # The split is the one computed just above: `_mesh_facts` already paid
+        # for it to produce the count, and splitting twice would double the most
+        # expensive thing this function does.
+        "body_identities": mesh_io.body_identities(mesh, bodies=bodies),
         # The same split as the mesh branch, for the same reason: one number
         # here reported a hole and a three-face edge as the same condition.
         "boundary_edges": edges["boundary_edges"],
