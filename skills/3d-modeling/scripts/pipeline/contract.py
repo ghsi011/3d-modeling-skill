@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import dataclasses
 import math
+
+import numpy as np
 from typing import Any
 
 from . import schemas as S
@@ -138,6 +140,54 @@ class Contract:
 # --------------------------------------------------------------------------
 
 _REQUIRED_FIELDS = ("provenance", "expectation", "tolerance", "verified_by", "on_unrunnable")
+
+
+def printer_transform(contract: Contract):
+    """The declared model-to-printer transform, or None if it cannot be applied.
+
+    One reading of `orientation.model_to_printer_matrix`, here because this is
+    where the field lives. `screening` and `commission` both call it, and that
+    is the point rather than a convenience: `docs/defects.md` D15 is a receipt
+    holding two answers about one part, produced by two readings of one
+    declaration, and a review of the first half of the fix found the weakest of
+    four shape checks over this question deciding the verdict.
+
+    `team_preflight.is_finite_rigid` is the predicate: finite, last row exactly
+    [0,0,0,1], the rotation block orthonormal, determinant +1. Weaker than that
+    is not a transform a mesh may be moved by -- and the affine requirement is
+    load-bearing rather than fastidious, because `screening` bounds a part by
+    its transformed box corners, which is conservative for an affine map and
+    *wrong in the unsafe direction* for a projective one. Measured on a matrix
+    every shape check in this repository accepts: corner bound +0.5 mm against a
+    true minimum near -49999 mm, reported CLEAR.
+
+    `"identity"` resolves to the identity matrix rather than to None: a job that
+    declares no reorientation has declared one and is entitled to an answer.
+    """
+    from team_preflight import is_finite_rigid
+
+    orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
+    matrix = orientation.get("model_to_printer_matrix")
+    if isinstance(matrix, str):
+        return np.eye(4) if matrix == "identity" else None
+    if not is_finite_rigid(matrix):
+        return None
+    return np.array(matrix, dtype=np.float64)
+
+
+def declared_bed_z(contract: Contract) -> float | None:
+    """The bed height the job declared, or None where it did not declare one.
+
+    Not defaulted to zero. Defaulting answers a question the job did not ask,
+    which is the substitution D15 was made of -- and `NaN` is a `float` for
+    which every comparison is False, so a NaN bed height would pass a type check
+    and then quietly decide a verdict.
+    """
+    orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
+    bed_z = orientation.get("bed_z_mm")
+    if isinstance(bed_z, bool) or not isinstance(bed_z, (int, float)):
+        return None
+    return float(bed_z) if math.isfinite(float(bed_z)) else None
 
 
 def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:

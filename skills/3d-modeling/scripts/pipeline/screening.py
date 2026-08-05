@@ -33,7 +33,6 @@ carries which of the legitimate sources, if any, the expectation came from.
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
@@ -249,48 +248,34 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
             "expected_mm3": round(want, 3), "measured_mm3": round(got, 3)}
 
 
-def _printer_frame_low_z(bounds, matrix) -> float | None:
+def _printer_frame_low_z(bounds, matrix_or_contract) -> float | None:
     """The lowest Z the part reaches once the declared orientation is applied.
 
     All eight corners of the model-frame box, transformed, then the minimum -- a
     rotation does not keep the lowest corner lowest, so putting `bounds[0]`
     through the matrix would answer about a corner rather than about the part.
 
-    Conservative, and only because the matrix is checked to be **rigid** first.
-    A transformed box bounds the transformed mesh under an affine map, so this
-    can read lower than the part goes and never higher, which turns an unlucky
-    rotation into a look-again rather than a clean verdict. Under a *projective*
-    matrix that is false: `w` is affine in the coordinates and can vanish inside
-    the box while all eight corners sit far from zero, and the corner minimum
-    then reads **higher** than the part goes. A review built one -- corner bound
-    +0.5 mm against a true minimum near -49999 mm -- and it returned CLEAR while
-    naming the printer frame. It passes `contract.preflight`,
-    `cli._validate_orientation` and `project.validate`, all three of which check
-    4x4-of-finite-numbers and no more.
+    Conservative, and only because `contract.printer_transform` has already
+    established the matrix is rigid: a transformed box bounds the transformed
+    mesh under an affine map, so this reads lower than the part goes and never
+    higher, which turns an unlucky rotation into a look-again rather than a
+    clean verdict. Under a projective matrix that is false, and a review built
+    one that read +0.5 mm against a true minimum near -49999 mm.
 
-    `is_finite_rigid` is the repo's existing answer and is strictly stronger
-    than the shape check this used to carry: finite, last row exactly
-    [0,0,0,1], the rotation block orthonormal, determinant +1. Reusing it rather
-    than writing a fourth shape check is also the point -- the weaker of two
-    authorities over one question was the one deciding the verdict.
-
-    `None` where the matrix cannot be applied. The caller must refuse, not fall
-    back to the model frame; falling back is the defect with an extra step.
+    The matrix is resolved by `contract.printer_transform` and not here. This
+    used to call `is_finite_rigid` itself, which made two readings of one
+    declaration -- the shape of the defect being fixed.
     """
-    from team_preflight import is_finite_rigid
-
     low, high = np.asarray(bounds, dtype=np.float64)
     if not np.all(np.isfinite([low, high])):
         return None
-    if isinstance(matrix, str):
-        return float(low[2]) if matrix == "identity" else None
-    if not is_finite_rigid(matrix):
+    transform = matrix_or_contract
+    if transform is None:
         return None
-    transform = np.array(matrix, dtype=np.float64)
     corners = np.array([[x, y, z] for x in (low[0], high[0])
                         for y in (low[1], high[1])
                         for z in (low[2], high[2])], dtype=np.float64)
-    moved = corners @ transform[:3, :3].T + transform[:3, 3]
+    moved = corners @ np.asarray(transform)[:3, :3].T + np.asarray(transform)[:3, 3]
     return float(np.min(moved[:, 2]))
 
 
@@ -308,22 +293,18 @@ def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     So the frame is named in every reason string, and a matrix that cannot be
     applied is an anomaly rather than a fallback.
     """
+    from .contract import declared_bed_z, printer_transform
+
     orientation = contract.orientation if isinstance(contract.orientation, dict) else {}
     matrix = orientation.get("model_to_printer_matrix")
-    # No default. This slice's own fixture argues that defaulting it "would
-    # answer a question the job did not ask -- the same substitution the frame
-    # defect was made of", and then the code defaulted it to 0.0.
-    bed_z = orientation.get("bed_z_mm")
-    # Finite, not merely a float: NaN is a float, `NaN > 0.05` is False, and a
-    # NaN bed height therefore fell straight through to CLEAR. Caught by the
-    # fixture rather than by review, which is the only reason it is not shipping.
-    if (isinstance(bed_z, bool) or not isinstance(bed_z, (int, float))
-            or not math.isfinite(float(bed_z))):
+    transform = printer_transform(contract)
+    bed_z = declared_bed_z(contract)
+    if bed_z is None:
         return {"detector": "bed-plane", "result": "ANOMALY",
                 "reason": "orientation.bed_z_mm is not a finite number, so there "
                           "is no bed height to measure against and no downward "
                           "measurement means what it says"}
-    lowest = _printer_frame_low_z(ctx.bounds, matrix)
+    lowest = _printer_frame_low_z(ctx.bounds, transform)
     if lowest is None:
         return {"detector": "bed-plane", "result": "ANOMALY",
                 "reason": "orientation.model_to_printer_matrix cannot be applied, "

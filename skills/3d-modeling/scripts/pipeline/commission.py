@@ -154,7 +154,8 @@ def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int
 
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                    bed_contact_mm2: float | None,
-                   source_dir: Path | None = None) -> Check:
+                   source_dir: Path | None = None,
+                   contract: Contract | None = None) -> Check:
     exp = feature.expectation
     kind = feature.kind
 
@@ -301,8 +302,23 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         threshold = float(exp.get("downward_normal_z_max",
                                   M.DEFAULT_DOWNWARD_NORMAL_Z_MAX))
         bed_z = float(exp.get("bed_z_mm", M.DEFAULT_BED_Z_MM))
+        # In the frame the part prints in. `overhang_area` documents this
+        # parameter for exactly that -- "Pass the model-to-printer `transform`
+        # to screen in print orientation" -- and this call omitted it while
+        # `cli` copies the plan rule's threshold and bed height and drops its
+        # matrix. On a cone: 0.0 mm2 authored, 1294 mm2 in the declared frame.
+        from .contract import printer_transform
+
+        transform = None if contract is None else printer_transform(contract)
+        if contract is not None and transform is None:
+            return _unavailable_check(
+                feature, "Unsupported downward-facing area",
+                "orientation.model_to_printer_matrix cannot be applied, so the "
+                "print orientation this area would be measured in is unknown",
+                "ORIENTATION_UNUSABLE", allowed, tol)
         try:
-            got = M.overhang_area(ctx.normalized, threshold=threshold, bed_z=bed_z)
+            got = M.overhang_area(ctx.normalized, threshold=threshold,
+                                  bed_z=bed_z, transform=transform)
         except Exception as exc:                      # noqa: BLE001 - a measurement
             return _unavailable_check(                # that cannot run is a finding
                 feature, "Unsupported downward-facing area",
@@ -495,10 +511,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract,
                         contract.expected_bodies, bodies, None,
                         "PASS" if bodies == contract.expected_bodies else "FAIL"))
 
-    lowest = float(ctx.bounds[0][2])
-    checks.append(Check("seated", None, "Part sits on the bed", True, "measured",
-                        0.0, round(lowest, 4), 0.05,
-                        "PASS" if abs(lowest) <= 0.05 else "FAIL"))
+    checks.append(_seated_check(ctx, contract))
 
     extents = [float(v) for v in ctx.extents]
     want = contract.expected_bbox_mm
@@ -517,11 +530,12 @@ def run(ctx: MeshAnalysisContext, contract: Contract,
                         f"extent ratio {ratio:.3f} against the contract",
                         "mm", "mm", None, "FAIL" if suspicious else "PASS"))
 
-    bed_contact = _bed_contact(ctx)
+    bed_contact = _bed_contact(ctx, contract)
     for feature in contract.features:
         if feature.kind == "fit_acceptance":
             continue
-        checks.append(_feature_check(ctx, feature, bed_contact, source_dir))
+        checks.append(_feature_check(ctx, feature, bed_contact, source_dir,
+                                     contract))
 
     for feature in contract.features:
         if feature.kind == "fit_acceptance":
@@ -592,10 +606,65 @@ def _evidence_digests(checks: list[Check]) -> dict[str, str]:
     return digests
 
 
-def _bed_contact(ctx: MeshAnalysisContext) -> float:
-    """Area of faces lying on the bed plane, in the part's own placement."""
-    mesh = ctx.normalized
-    z0 = float(ctx.bounds[0][2])
+def _placed(ctx: MeshAnalysisContext, contract: Contract):
+    """The mesh as it will be printed, or None if the declaration cannot say.
+
+    `designer_toolkit/orient.py` already applies a transform to a mesh and this
+    is the same call. No second arithmetic: two of those is how one receipt came
+    to hold two answers about one part.
+    """
+    from .contract import printer_transform
+
+    transform = printer_transform(contract)
+    if transform is None:
+        return None
+    placed = ctx.normalized.copy()
+    placed.apply_transform(transform)
+    return placed
+
+
+def _seated_check(ctx: MeshAnalysisContext, contract: Contract) -> Check:
+    """Does the part sit on the bed -- in the frame it will be printed in?
+
+    This read `ctx.bounds[0][2]` against a hard-coded 0.0, named no frame, and
+    could PASS. On a contract declaring a 180 degree flip it returned PASS at
+    measured 0.0 while `screening._bed_screen`, fixed one commit earlier,
+    returned ANOMALY at 14 mm below the bed. A screen escalates and a check
+    decides, so the receipt carried two answers and the deciding one was wrong.
+    """
+    from .contract import declared_bed_z
+
+    placed = _placed(ctx, contract)
+    bed_z = declared_bed_z(contract)
+    if placed is None or bed_z is None:
+        missing = "model_to_printer_matrix" if placed is None else "bed_z_mm"
+        return Check(
+            "seated", None, "Part sits on the bed", False,
+            f"orientation.{missing} cannot be used", None, None, None, "FAIL",
+            error_code="ORIENTATION_UNUSABLE",
+            error_message=(
+                f"orientation.{missing} cannot be used, so where this part sits "
+                "relative to the bed is unknown. Measuring the authored frame "
+                "instead would decide the verdict from a frame the job did not "
+                "declare"))
+    lowest = float(placed.bounds[0][2])
+    return Check("seated", None, "Part sits on the bed", True,
+                 "measured in the printer frame (the declared "
+                 "model_to_printer_matrix is applied)",
+                 round(bed_z, 4), round(lowest, 4), 0.05,
+                 "PASS" if abs(lowest - bed_z) <= 0.05 else "FAIL")
+
+
+def _bed_contact(ctx: MeshAnalysisContext, contract: Contract) -> float:
+    """Area of faces lying on the bed plane, in the frame the part prints in.
+
+    Measured at the part's own lowest plane in its authored placement, which
+    under a declared rotation is a different face entirely.
+    """
+    mesh = _placed(ctx, contract)
+    if mesh is None:
+        return 0.0
+    z0 = float(mesh.bounds[0][2])
     triangles = mesh.triangles
     on_bed = (abs(triangles[:, :, 2] - z0).max(axis=1) <= 0.02)
     down = mesh.face_normals[:, 2] <= -0.999
