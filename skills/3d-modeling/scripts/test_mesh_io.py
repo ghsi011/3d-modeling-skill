@@ -200,6 +200,106 @@ class BrepTessellationDiagnosticTest(unittest.TestCase):
         self.assertIn("BSPLINE", message)
         self.assertIn("null triangulation", message)
 
+    def test_a_shape_whose_faces_cannot_be_walked_is_not_reported_complete(self) -> None:
+        """docs/defects.md D23: no failures read as success.
+
+        `complete` was `not failures`, and a shape this function cannot walk
+        produces no failures -- so the probe added to stop `diagnose` calling an
+        untessellatable STEP clean returned clean for the one input it can learn
+        least about. Recorded twice by accident: `build123d.Shape.cast` returns
+        `None` for a `ShapeFix_Shape` result, and that `None` arrived here.
+        """
+
+        class NoFaces:
+            """A shape object with no face enumeration at all."""
+
+        for label, shape in (("None", None), ("no faces() method", NoFaces()),
+                             ("faces is not callable", type("S", (), {"faces": 3})())):
+            with self.subTest(shape=label):
+                reading = mesh_io.tessellate_brep(shape, tolerance=0.01,
+                                                  angular_tolerance=0.1)
+                self.assertFalse(
+                    reading.complete,
+                    "a shape whose faces cannot be enumerated is unknown, not clean")
+                self.assertFalse(reading.enumerated)
+                self.assertIn("could not be enumerated", reading.summary())
+                # And the gate in front of every B-rep export refuses it.
+                with self.assertRaises(ValueError):
+                    mesh_io.validate_brep_tessellation(shape, tolerance=0.01,
+                                                       angular_tolerance=0.1)
+
+    def test_a_shape_with_no_faces_at_all_is_not_reported_complete(self) -> None:
+        """Zero faces tessellated out of zero is not a successful reading.
+
+        The same arithmetic as above one step later: an empty enumeration
+        produces an empty failure list, and `not failures` called it clean. A
+        B-rep with no faces is not a solid, and exporting one exports nothing.
+        """
+
+        class Empty:
+            def faces(self):
+                return []
+
+        reading = mesh_io.tessellate_brep(Empty(), tolerance=0.01,
+                                          angular_tolerance=0.1)
+        self.assertTrue(reading.enumerated)
+        self.assertEqual(0, reading.faces)
+        self.assertFalse(reading.complete)
+        self.assertIn("no faces", reading.summary())
+        with self.assertRaises(ValueError):
+            mesh_io.validate_brep_tessellation(Empty(), tolerance=0.01,
+                                               angular_tolerance=0.1)
+
+    def test_a_reading_that_walked_every_face_is_still_complete(self) -> None:
+        """The other half of the fix: it must still be able to say yes."""
+
+        class Vertex:
+            X = Y = Z = 0.0
+
+        class Face:
+            geom_type = "PLANE"
+
+            def tessellate(self, tolerance, angular_tolerance):
+                _ = tolerance, angular_tolerance
+                return [Vertex(), Vertex(), Vertex()], [(0, 1, 2)]
+
+        class Shape:
+            def faces(self):
+                return [Face(), Face()]
+
+        reading = mesh_io.tessellate_brep(Shape(), tolerance=0.01,
+                                          angular_tolerance=0.1)
+        self.assertTrue(reading.enumerated)
+        self.assertTrue(reading.complete)
+        self.assertEqual((2, 2), (reading.faces, reading.tessellated))
+        mesh_io.validate_brep_tessellation(Shape(), tolerance=0.01,
+                                           angular_tolerance=0.1)
+
+    def test_the_receipt_says_whether_the_shape_could_be_walked(self) -> None:
+        """A reader of the evidence can tell "clean" from "never looked"."""
+        reading = mesh_io.tessellate_brep(None, tolerance=0.01,
+                                          angular_tolerance=0.1)
+        self.assertFalse(reading.as_dict()["enumerated"])
+        self.assertEqual(0, reading.as_dict()["faces"])
+
+    def test_unwalkable_is_not_clean_even_with_faces_counted(self) -> None:
+        """`enumerated` carries its own weight in `complete`, not the zero count.
+
+        Through `tessellate_brep` the two always coincide -- the one site that
+        sets `enumerated=False` also reports zero faces -- so a mutation
+        dropping either conjunct survives every other test in this class. They
+        are different statements: `enumerated=False` is *nobody looked*, and
+        `faces == 0` is *looked, and there was nothing there*. `summary()`
+        already tells them apart, and `BrepTessellation` is a public dataclass a
+        caller can construct, so the invariant is asserted here against the type
+        rather than against the one path that happens to reach it.
+        """
+        reading = mesh_io.BrepTessellation(
+            faces=3, tessellated=3, failures=(), linear_deflection=0.01,
+            angular_deflection=0.1, enumerated=False)
+        self.assertFalse(reading.complete)
+        self.assertIn("could not be enumerated", reading.summary())
+
 
 class ConnectedComponentCountTest(unittest.TestCase):
     """The count must be right on a core-only install. ``mesh.split`` is not

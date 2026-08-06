@@ -635,6 +635,281 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
             "and this is why: the model it was issued against is not the model "
             "on disk")
 
+    # ----------------------------------------------------------------
+    # `design-tool compare`, on the job Release 4 says to exercise it on
+    # ----------------------------------------------------------------
+
+    def test_the_material_difference_between_the_two_designs_is_a_measurement(self) -> None:
+        """The figure that was prose until this recording froze it.
+
+        `docs/release-4-scope.md` rests its whole material argument on two
+        volumes. When that document was judged, neither number could be
+        reproduced from anything committed: `_observe_dir` recorded the volume
+        detector's *result* and threw its measurement away, so the one quantity
+        that discriminates the seated knob from the as-drawn one was frozen
+        nowhere. It is frozen now, and the figures hold -- which retires the
+        finding against that citation, and leaves the other two standing.
+
+        Asserted as a relation and a band, not as a literal: the numbers live in
+        `expected.json`, which is where a recording keeps its literals.
+        """
+        seated = self.observed["formulations"]["plate-seated"]["material"]
+        root = self.observed["formulations"][RP.ROOT_ALTERNATIVE]["material"]
+
+        self.assertGreater(seated["volume_mm3"], root["volume_mm3"],
+                           "the formulation that spends the whole envelope on "
+                           "the body is the one that uses more material")
+        self.assertAlmostEqual(2.0, seated["bbox_mm"]["z"] - root["bbox_mm"]["z"],
+                               places=3,
+                               msg="52 mm against 50 mm: the fork is the "
+                                   "base-plate estimate the request records as "
+                                   "+/-2 mm, and this is that 2 mm")
+        self.assertEqual(
+            "NOT_APPLICABLE",
+            self.observed["formulations"][RP.ROOT_ALTERNATIVE]
+            ["screening_detail"]["detectors"]["volume"],
+            "and it is a measurement with no calibrated gate behind it -- no "
+            "independently specified expected volume exists, so the screen "
+            "refuses to grade the solid against a number its own author wrote. "
+            "Read from `screening_detail`, which is where the recording keeps "
+            "the detector's verdict; `material` carried a second copy of it "
+            "until a review pointed out that recording a value twice does not "
+            "protect it twice")
+
+    def test_the_comparison_settles_the_rubric_question_and_nothing_else(self) -> None:
+        """What `compare` establishes on a job whose answer a score would destroy.
+
+        Every mandatory check passes on all three. A ranking would therefore
+        report a tie, and the tie would be false: the three are measured against
+        *different envelope expectations*, because on the authored lane a
+        formulation's own proposal sets the `expected_bbox_mm` its always-present
+        checks are graded against (`docs/defects.md` D25). So the first thing the
+        comparison says is that those verdicts are not comparable -- and the
+        thing that actually decides, whether the mouth seats, is a measurement
+        nobody has taken.
+        """
+        marks = self.observed["comparison"]
+        self.assertEqual("INCOMPARABLE_EXPECTATIONS", marks["mandatory_verdict"])
+        self.assertEqual({"PASS", "UNKNOWN_STALE"},
+                         {row["verdict"]
+                          for row in marks["mandatory_per_formulation"].values()},
+                         "no formulation failed a mandatory check; the fallback's "
+                         "verdict is merely no longer supported")
+        self.assertTrue(marks["same_requirement_digest"],
+                        "none of them weakened a requirement a sibling was held "
+                        "to -- which is a binding, not a satisfaction")
+        self.assertFalse(marks["preference_admissible"])
+
+    def test_a_comparison_that_started_ranking_would_fail_this_recording(self) -> None:
+        """ADR 0005's two forbidden fields, pinned where a change has to pass.
+
+        A guarantee that lives only in a docstring is a convention. `ranking` and
+        `score` are recorded as `null`, so acquiring a value is a binding
+        difference in a frozen recording rather than a code review somebody may
+        or may not do.
+        """
+        marks = self.observed["comparison"]
+        self.assertIsNone(marks["ranking"])
+        self.assertIsNone(marks["score"])
+        self.assertTrue(marks["built_nothing"])
+        self.assertEqual([".", "as-drawn", "plate-seated"], marks["compared"],
+                         "all three, including the shared root -- which "
+                         "`status` drops, and which is `docs/defects.md` D26")
+
+    def test_two_columns_of_one_design_are_named_as_one(self) -> None:
+        """D28 closed, on the only case in the repository that exercises it.
+
+        The root and the fallback were built from a byte-identical `model.py`,
+        their receipts prove it, and every measured value they carry agrees.
+        `identical_designs` exists to stop a reader taking that agreement for
+        two designs independently reaching one answer -- and it used to be
+        empty, because it grouped on the source digest *on disk now* and the
+        fallback's model was revised after its run concluded.
+
+        This assertion was inverted when the fix landed. The comment it carried
+        said so by name: "when D28 is fixed this becomes [['.', 'as-drawn']] and
+        this assertion is the one to update".
+
+        What is grouped is what the **receipts** establish -- the same design
+        implementation and the same built artifacts. It is not a statement that
+        either formulation's evidence is still current, and the test below keeps
+        that separate: `as-drawn` is still STALE and its mandatory verdict is
+        still `UNKNOWN_STALE`.
+        """
+        root = self._read(RP.ROOT_ALTERNATIVE, "final_status.json")
+        fallback = self._read("as-drawn", "final_status.json")
+        self.assertEqual(root["artifact_hashes"]["source"],
+                         fallback["artifact_hashes"]["source"],
+                         "one design: the receipts were issued against the same "
+                         "model")
+        self.assertEqual(root["artifact_hashes"]["stl"],
+                         fallback["artifact_hashes"]["stl"],
+                         "and the same solid came out of it, which is the half "
+                         "of the key a source digest alone cannot carry")
+        self.assertEqual(
+            self.observed["formulations"][RP.ROOT_ALTERNATIVE]["material"],
+            self.observed["formulations"]["as-drawn"]["material"],
+            "and every number the comparison prints for them agrees")
+        self.assertEqual([[RP.ROOT_ALTERNATIVE, "as-drawn"]],
+                         self.observed["comparison"]["identical_designs"],
+                         "and the block that says so is no longer silent")
+
+    def test_naming_them_as_one_design_did_not_make_the_stale_one_current(self) -> None:
+        """The claim D28's mitigation already made, kept separate from the fix.
+
+        "These two columns are one design" and "this formulation's evidence
+        still binds" are different sentences. `as-drawn`'s model was revised
+        after its run, so its evidence does not bind and its mandatory verdict
+        is `UNKNOWN_STALE`; grouping it with the root must not restore or
+        strengthen that. A grouping that quietly did would have turned a defect
+        about a missing sentence into a defect about a false one.
+        """
+        marks = self.observed["comparison"]
+        self.assertEqual([[RP.ROOT_ALTERNATIVE, "as-drawn"]],
+                         marks["identical_designs"])
+        self.assertEqual(
+            "UNKNOWN_STALE",
+            marks["mandatory_per_formulation"]["as-drawn"]["verdict"],
+            "still stale, still not a current verdict")
+        self.assertFalse(marks["preference_admissible"],
+                         "and still no basis for preferring one")
+
+    # ----------------------------------------------------------------
+    # Gate 4.5: somebody decides, on a real part
+    # ----------------------------------------------------------------
+
+    def test_one_formulation_is_preferred_and_the_other_is_kept(self) -> None:
+        """What Release 3 owed and nothing in this repository had done.
+
+        Gate 4.5 asks for derived status used to decide about a real part. Three
+        formulations of a real vendored request were built, verified, compared,
+        and then decided between -- through `design-tool branch --disposition`,
+        the verb a user has, one command per decision.
+
+        Retained, not deleted. 13.1 does not rewrite history and the fallback is
+        the whole reason the fork exists: if the plate estimate is wrong, the
+        sleeve as drawn is the part that ships.
+        """
+        rows = self.observed["dispositions"]["by_alternative"]
+        self.assertEqual("PREFERRED", rows["plate-seated"]["disposition"])
+        self.assertEqual("FALLBACK", rows["as-drawn"]["disposition"])
+        self.assertNotIn(RP.ROOT_ALTERNATIVE, rows,
+                         "the shared root has no declared row and no "
+                         "disposition applies to it -- it is what the "
+                         "alternatives were branched from")
+        for key in ("plate-seated", "as-drawn"):
+            with self.subTest(formulation=key):
+                self.assertTrue((self.play.work_dirs[key] / "final_status.json")
+                                .is_file(),
+                                "deciding deletes nothing; both formulations "
+                                "keep every receipt they earned")
+
+    def test_the_decision_does_not_claim_the_support_the_comparison_refused(self) -> None:
+        """The half of gate 4.5 that is about honesty rather than about typing.
+
+        The comparison run immediately before these commands reports
+        `preference.admissible: false`, and the *reason* is asserted here rather
+        than the boolean alone. An earlier version of this test, of the case's
+        notes and of ROADMAP all said the reason was the rubric -- the three
+        formulations are measured against different envelope expectations, which
+        is true -- and all three were wrong about the mechanism: `_preference`
+        returns on its first branch and never reaches the rubric. Nor is it the
+        third branch: every `not_compared` row on this job is CONTEXT, so the
+        build makes no claim that a deciding axis is unmeasurable.
+
+        What actually fires is that `as-drawn` has no current verdict. Its model
+        was revised after the run that verified it, so its mandatory verdict
+        derives `UNKNOWN_STALE`, and a preference over a formulation that cannot
+        presently claim to have passed anything is not admissible.
+
+        A decision is still correct. What it may not do is claim measured
+        support that was refused, and the basis is where that shows --
+        `USER_SELECTION` for the preference, which says a person chose on no
+        measured ground, and not `STRONGER_CONCEPT`, which would say the
+        evidence favoured it. Nothing in the build enforces that agreement; the
+        recording is what makes it visible.
+        """
+        comparison = self.observed["comparison"]
+        self.assertFalse(comparison["preference_admissible"])
+        self.assertEqual("NO_CURRENT_VERDICT", comparison["preference_reason"],
+                         "the reason as a code, pinned. Freezing only `false` "
+                         "cannot tell three different findings about a job "
+                         "apart, and that is how three documents came to name "
+                         "the wrong one; freezing the *sentence* instead, which "
+                         "is what this asserted first, went red on a reworded "
+                         "explanation with no defect behind it")
+        self.assertEqual(
+            {"geometric-difference": "CONTEXT", "print-time": "CONTEXT",
+             "engineering-judgment": "CONTEXT"},
+            comparison["not_compared"],
+            "no DECIDING row: this job's inadmissible preference is not about "
+            "an axis nobody could measure")
+
+        rows = self.observed["dispositions"]["by_alternative"]
+        self.assertEqual("USER_SELECTION", rows["plate-seated"]["basis"])
+        self.assertEqual("UNRESOLVED_EVIDENCE", rows["as-drawn"]["basis"])
+
+    def test_the_retained_fallback_is_one_whose_verification_no_longer_binds(self) -> None:
+        """Recorded beside the decision, because it is a property of the decision.
+
+        The harness takes declared decisions only when every formulation wrote a
+        final status -- which `as-drawn` did. Its verdict is nonetheless `STALE`:
+        the model under it moved afterwards. Retaining a stale concept as the
+        fallback is right, and it is the reason the fallback exists, but a
+        recording that showed `FALLBACK` without showing that would let a reader
+        believe the part behind it is ready to ship. It would need re-verifying
+        first, and `STALE` is the pipeline saying so.
+        """
+        self.assertEqual("FALLBACK",
+                         self.observed["dispositions"]["by_alternative"]
+                         ["as-drawn"]["disposition"])
+        self.assertEqual("STALE",
+                         self.observed["formulations"]["as-drawn"]["derived"]
+                         ["derived_status"])
+        self.assertEqual("UNKNOWN_STALE",
+                         self.observed["comparison"]
+                         ["mandatory_per_formulation"]["as-drawn"]["verdict"])
+
+    def test_the_job_ends_parked_on_the_fallback_and_the_recording_says_so(self) -> None:
+        """Which formulation `design-tool run` would pick up next.
+
+        It is the fallback, not the preferred one: `_derive_all` leaves the
+        project on the last formulation it activated and `FALLBACK` is runnable,
+        so `--disposition` has no reason to move off it. Deterministic, fixed by
+        the order the case declares. Recorded because it decides what happens
+        next and was invisible until a review measured it -- not asserted to be
+        *right*. Whether preferring one formulation should also activate it is a
+        question for whichever slice touches lifecycle next.
+        """
+        self.assertEqual("as-drawn",
+                         self.observed["dispositions"]["active_alternative"])
+
+    def test_the_decision_is_journalled_as_a_transition_not_only_as_a_state(self) -> None:
+        """`project.json` says where the job stands; the journal says what happened.
+
+        Both are needed and they are different claims. A reader arriving later
+        finds `PREFERRED` in the project and has no way to tell whether somebody
+        chose it or it was always so -- 14.6's requirement that a disposition
+        carry its basis is about the decision, and a decision is an event.
+        """
+        from pipeline import lifecycle as LC
+        events = [row for row in LC.read(self.play.project_dir)
+                  if row.get("event") == "DISPOSITION"]
+        self.assertEqual(
+            [("plate-seated", "ACTIVE", "PREFERRED"),
+             ("as-drawn", "ACTIVE", "FALLBACK")],
+            [(row["alternative"], row["was"], row["now"]) for row in events],
+            "in the order they were taken, each naming what it moved from")
+        # Per alternative, not "one of these two". The loop already knows which
+        # row it is looking at, and a membership check would pass a journal that
+        # recorded the preference's basis against the fallback -- in a slice
+        # whose whole subject is making the basis mean something.
+        expected = {"plate-seated": "USER_SELECTION",
+                    "as-drawn": "UNRESOLVED_EVIDENCE"}
+        for row in events:
+            with self.subTest(alternative=row["alternative"]):
+                self.assertEqual(expected[row["alternative"]], row["basis"])
+
 
 class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
     """The false pass, tried for real, on the pair that makes it reachable.
@@ -690,6 +965,22 @@ class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
             for sibling in (project, project / "alternatives" / "plate-seated"):
                 self.assertTrue((sibling / "final_status.json").is_file(),
                                 "the refusal is the fallback's alone")
+
+            observed = RP.observe(case, run)
+            self.assertEqual(
+                {"plate-seated": {"disposition": "ACTIVE", "basis": "",
+                                  "superseded_by": ""},
+                 "as-drawn": {"disposition": "ACTIVE", "basis": "",
+                              "superseded_by": ""}},
+                observed["dispositions"]["by_alternative"],
+                "and nothing was decided: both are still in the state they were "
+                "branched into, with no basis. The case declares two decisions "
+                "and `design-tool branch --disposition` would have accepted "
+                "both -- a formulation need not have concluded to be retained "
+                "as a fallback -- so the harness declines to take them when a "
+                "declared formulation left no final status. A preference "
+                "recorded over a job that stopped is one nobody could have "
+                "formed from evidence that is not there.")
 
             failures = RP.binding(
                 RP.compare(RP.expected(self.CASE_ID), RP.observe(case, run)))

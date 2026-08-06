@@ -6,6 +6,208 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the seccomp syscall number was x86-64's, on a module that supports arm64
+
+`confine_posix` names `aarch64` as supported and carried one `NR_seccomp = 317`.
+That is the x86-64 number; arm64 takes the asm-generic 277. The consequence was
+not subtle: `unavailable_reason()` probes the number, an arm64 kernel answers
+`ENOSYS` for 317, the probe concludes seccomp is absent, and the boundary
+refuses on every arm64 machine — safe, and still wrong. Now keyed by the same
+`_ARCH` token as `_EXEC_SYSCALLS`, so a machine this module claims to support
+has an entry in both tables or in neither, and an unknown machine yields no
+number rather than a guess. Found by review, not by a run: this repository has
+no arm64 machine, so the tests are arithmetic on the tables and say so.
+
+
+### Fixed — a recorded path is parsed as it was written, not as the host would write it
+
+The thirteen L0 tests that failed on Linux were one defect in two places, not a
+platform exception: `Path` was the authority, and `Path` is whichever host is
+reading. `ExternalFile.name` returned the whole recorded string on Linux and a
+parent of `"."`, so the public record published a full Windows path through
+`SourceRef.name` and three wall tests searched every fixture's prose for `"."`.
+`conftest._executable_name` had the same shape, which left `git` — the one
+program L0 may start — unrecognisable when the event carried a Windows path.
+
+One rule each, stated once and never consulting the host: Windows for a drive
+letter, a UNC name or any backslash; POSIX otherwise. Both flavours are covered
+from either host, and both rules are mutation-proven -- seven attempted, seven
+caught. No fixture hash, evidence
+classification or request/reference assertion changed. Linux L0 went from 13
+failed to 0.
+
+### Added — the authoritative pre-merge gate builds the real Linux boundary
+
+`pre-merge` ran on a bare hosted runner as uid 1001 with no `CAP_SYS_ADMIN`, so
+the confinement could not be constructed and the tier reported on nothing. It
+now runs in a digest-pinned container with `--cap-add=SYS_ADMIN` and one
+measured AppArmor opt-out — the first hosted run held the capability and still
+failed `mount(None -> /, 0x44000)` with `EACCES`, which is AppArmor's answer and
+not seccomp's, so the syscall filter was left in place rather than loosened on a
+guess. A preflight prints the capability masks and `describe_confinement()`,
+fails with the exact `unavailable_reason()`, and builds one real confined child
+before pytest runs. Nothing is skipped or marked xfail, and the heavy suite is
+not split into a green hosted half and an unrun privileged half.
+
+
+### Fixed — the boundary's availability probe asked about uid, not the capability
+
+`confine_posix.unavailable_reason()` gated on `os.geteuid() != 0` as a stand-in
+for `CAP_SYS_ADMIN`. That is a different question, and it was wrong in both
+directions. A root process whose bounding set omits the capability — an ordinary
+container, including the `ubuntu-latest` shape this repository's own `pre-merge`
+job runs in — was told the boundary was **available**, and then failed with a
+bare `EPERM` out of `unshare`: exactly the raw failure this function exists to
+turn into a sentence, arriving after the point where it could be reported
+cleanly. In the other direction a process holding effective `CAP_SYS_ADMIN` at a
+nonzero uid was refused while holding precisely what the construction needs.
+
+**The capability is now read from the kernel**, through the same `capget` the
+drop verification already used: `_capability_sets()` returns the calling
+thread's effective and permitted masks, `_effective_capabilities()` is now one
+line over it, and `CAP_SYS_ADMIN` has a single named constant. No new
+dependency — no libcap, no `capsh`, no subprocess.
+
+**Effective, not permitted, and never raised.** A capability that is permitted
+but not effective does not authorise the `unshare`, so it is refused — and the
+reason says which of the two states it found, because that is what tells an
+operator whether to grant the capability or to raise it. It is reported rather
+than raised into the effective set: raising it would be a privilege escalation
+performed on the operator's behalf and unasked, which is the opposite of a
+boundary that says what it is. A `capget` that fails is unavailability too, not
+an exception to propagate — a capability that could not be read has not been
+established.
+
+Every existing probe is unchanged and still runs in the same order, before any
+candidate is staged. Three tests in `benchmarks/heavy/test_confine_posix_heavy.py`
+set the two identities for real in a child process rather than simulating them,
+because neither state is reachable from the test process itself: a capability
+dropped is not regained and a uid lowered is not raised. Both directions of the
+old proxy are killed by mutation — restoring the uid check fails all three, and
+accepting `permitted` in place of `effective` fails the case that separates them.
+
+
+### Fixed — the one L0 case that cannot answer in this process on Linux
+
+`ReviewEnvelopeTest.test_stale_verification_response_after_render_change_is_rejected`
+was the fourteenth L0 failure on Linux, against a documented allowance of
+thirteen. It failed the tier guard's **spawn** check rather than its own
+assertion: it is the single case in its class asking for `render=True`, and on
+Linux `preview` selects the EGL platform, PyOpenGL resolves the library through
+`ctypes.util.find_library`, and that shells out to `ldconfig` — plus `gcc` and
+`ld` when EGL is absent. Having EGL installed does not avoid it, because
+`find_library` runs `ldconfig` to answer at all, so no Linux machine escapes it
+and the case could never pass the commit gate there.
+
+**Moved to `benchmarks/heavy/`, which is what the guard's own failure text
+prescribes**, rather than widening the allowance to fourteen to accommodate a
+test in the wrong tier. The Linux L0 failure set is now exactly the thirteen
+Windows-assumption cases `ROADMAP.md` describes. No new regression fixture was
+added because the tier guard *is* the regression test — it is what caught this,
+and it still fails the same way if the case returns to the gate.
+
+The property under test is unaffected, and that was established by mutation
+rather than by watching it pass: where the renderer cannot import, `witness`
+records `renderer="unavailable: ..."` with no images, which is a different
+witness record from the `"none"` of a job that never asked, so the envelope
+still refuses the stale answer for the reason the case names. Leaving the second
+run's render flag unchanged makes that same stale answer accepted, which is the
+mutation the case kills. `_good_verification` became a module-level helper so
+both tiers read one fixture rather than two spellings of it.
+
+Found by running the full gate on Linux at `8ebfb80`; the failure predates the
+branch and reproduces identically at the branch point `62fe422`.
+
+### Fixed — two columns of one design are named as one (D28)
+
+`compare._identical_designs` grouped formulations by `bindings.current`, which
+reads the source digest off disk **now**. The block exists to stop a reader
+taking two identical columns for two designs independently reaching one answer
+— and it was silent on the only case in the repository that exercises it. On
+`benchmarks/replays/branch-knob-seat-fallback` the shared root and `as-drawn`
+were built from a byte-identical `model.py`, both receipts record
+`artifact_hashes.source = 1e9b9ea…` and the same candidate digest, and every
+measured value the comparison prints for them agrees — but `as-drawn`'s model
+was revised after its run concluded, so the key had moved and the two identical
+columns were printed side by side, unnamed.
+
+**Grouped on what the completed receipts establish**, because the columns being
+compared *are* the receipts and the working tree is not among them. The key is
+`final_status.artifact_hashes`: `source`, `stl`, and `step` where the job
+produced one.
+
+**Not the source digest alone, which is what the defect proposed.** One
+`model.py` builds different geometry under different parameters or different
+inputs, so a source-only key would group two genuinely different designs and
+print the strongest sentence in that file about them. The output digest is the
+half a source digest cannot carry. The converse is refused too: two different
+sources that emit byte-identical STLs are two implementations, and collapsing
+them would destroy a genuine independent agreement — the opposite of the error
+recorded here.
+
+**Missing digests do not form a group.** A formulation with no
+`final_status.json`, or a receipt carrying no source or no candidate digest, is
+one nobody completed; grouping it would state the strongest available claim
+about a run with no evidence, and two such formulations would group with each
+other on a pair of absences. `step` is exempt: absent is a real answer for it,
+two jobs that produced none still group, and a job that exported one never
+groups with a job that did not.
+
+**Grouping is not a claim about currency and did not become one.** `as-drawn`
+is still `STALE` and its mandatory verdict is still `UNKNOWN_STALE`; those come
+from `bindings.broken` and `status.derive`, which this does not touch. The
+group's note says so, and an L1 test asserts it.
+
+The L1 assertion that pinned the defect is inverted — its own message named the
+value it would become — and `branch-knob-seat-fallback`'s recording moves by
+exactly one field, `identical_designs` from `[]` to `[[".", "as-drawn"]]`.
+
+### Fixed — the support ceiling and the candidate are measured in one frame (D15)
+
+D15's last half, and the one its own fix's review found. Since `5ac852e` the
+*candidate's* overhang has been measured through `contract.printer_transform`.
+The ceiling it is measured against was still generated in whatever frame the
+template assumed, so on a `MODIFY` job declaring any reorientation the two sides
+of one inequality were two frames — and before the candidate half landed they
+had at least been wrong the same way.
+
+Three places each answered the frame question separately. `cli._print_plan`
+called `designer_toolkit.plan.direct_template` without the project's
+orientation, and `direct_template` wrote `IDENTITY_TRANSFORM` into its one
+support rule whatever the job had declared. `cli._plan_features` copied that
+rule's `downward_normal_z_max` and `bed_z_mm` into the contract row and dropped
+its `model_to_printer_matrix`, so the contract's orientation silently stood in
+for a declaration another artifact had made and nothing checked they agreed.
+And `cli._inherited_overhang` called `metrics.overhang_area` with no
+`transform=` at all, though that function documents the parameter for exactly
+this.
+
+**One authority chain, not a fourth transform reader.** `project.orientation` is
+the declaration. It reached the acceptance contract already; it now reaches the
+generated plan; the plan rule's copy travels into the contract feature row, so a
+frozen contract records which frame each ceiling was measured in; and
+`contract.preflight` refuses the run when the row and the orientation disagree
+about the matrix or the bed height, before any geometry is paid for and without
+preferring either declaration. Inherited overhang is measured under
+`printer @ alignment` — each source placed out of its own coordinates into the
+job's frame and then into the printer's. `contract.as_transform` is the single
+resolution all of them use, which is why `"identity"` and the 4×4 identity are
+one declaration in two spellings rather than a refusal.
+
+A frame that cannot be resolved makes that source a **named gap**, never a
+silent identity: crediting an allowance measured somewhere the source does not
+sit fails in the direction that passes a bad part. D18's controlled partial
+ceiling is unchanged, and a fixture pins that.
+
+Identity orientation emits byte-identical plans, so no recorded
+`print_plan_sha256` moved and the L1 replays passed unrecorded. The composition
+fixture is a non-commuting pair — the alignment turns about Z and translates,
+the printer turns about X — over a stepped source chosen because the five
+candidate mutations land on five distinct areas: the composition 100.0 mm²,
+the reversed product 0.0 mm², the alignment alone, the printer alone and no
+transform at all 300.0 mm² each. All five are mutation-tested in
+`test_orientation_ceiling.py`.
+
 ### Added — Release 3's context-budget foundation: what a job cost, and what it was allowed to cost
 
 `MISSION.md` makes efficiency a first-class objective and `ARCHITECTURE.md` 15.6

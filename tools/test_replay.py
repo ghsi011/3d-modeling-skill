@@ -31,8 +31,8 @@ def _write(path: Path, text: str) -> None:
 
 
 def _case(directory: Path, *, reviews=(), judgements=None, substitutions=None,
-          inputs=None, revisions=None, formulations=None, concludes="BUILT",
-          case_id="synthetic") -> Path:
+          inputs=None, revisions=None, formulations=None, dispositions=None,
+          concludes="BUILT", case_id="synthetic") -> Path:
     """A case on disk under a temporary CASES_ROOT, sealed and loadable.
 
     `inputs`, `revisions` and `judgements` take the case-relative path inside
@@ -61,6 +61,8 @@ def _case(directory: Path, *, reviews=(), judgements=None, substitutions=None,
         payload["reviews"] = list(reviews)
     else:
         payload["formulations"] = list(formulations)
+    if dispositions is not None:
+        payload["dispositions"] = list(dispositions)
     (room / RP.CASE_FILE).write_text(json.dumps(payload), encoding="utf-8")
     return room
 
@@ -224,13 +226,29 @@ class _FakeSurface:
         if argv[0] == "branch":
             payload = self._project()
             rows = list(payload.get("alternatives") or ())
+            if "--disposition" in argv:
+                wanted = argv[argv.index("--of") + 1]
+                state = argv[argv.index("--disposition") + 1]
+                basis = (argv[argv.index("--basis") + 1]
+                         if "--basis" in argv else "")
+                payload["alternatives"] = [
+                    {**row, "disposition": state, "basis": basis}
+                    if row.get("alternative_id") == wanted else row
+                    for row in rows]
+                self._save(payload)
+                return 0
             if "--activate" in argv:
                 wanted = argv[argv.index("--activate") + 1]
                 payload["active_alternative"] = (
                     None if wanted == RP.ROOT_ALTERNATIVE else wanted)
             else:
                 wanted = argv[argv.index("--id") + 1]
-                rows.append({"alternative_id": wanted})
+                # `ACTIVE` because that is what `cli.py` writes for a new
+                # alternative. A fake that left the field out would make
+                # "nothing was decided" look like `None` rather than like the
+                # state a formulation is branched into.
+                rows.append({"alternative_id": wanted, "disposition": "ACTIVE",
+                             "basis": ""})
                 payload["alternatives"] = rows
                 payload["active_alternative"] = wanted
             self._save(payload)
@@ -240,6 +258,16 @@ class _FakeSurface:
             print(json.dumps({"final_status": "NOT_RUN", "stored_status": None,
                               "stale": {}}))
             return 0
+        if argv[0] == "compare":
+            # The smallest report `_comparison_marks` can read. Everything it
+            # does not name is absent on purpose: a fake that filled in the
+            # whole payload would stop the marks function from having to cope
+            # with a report that is missing a block.
+            print(json.dumps({"compared": [RP.ROOT_ALTERNATIVE, "snap-fit"],
+                              "built_nothing": True,
+                              "ranking": None, "score": None,
+                              "axes": {"mandatory": {"verdict": "COMPARABLE"}}}))
+            return 0
         if argv[0] == "route":
             return 0
         work = RP.work_dir(self.project_dir)
@@ -247,6 +275,12 @@ class _FakeSurface:
         pending = work / "next_action.json"
         if action is None:
             pending.unlink(missing_ok=True)
+            # A run that stops with nothing pending has concluded, and the real
+            # one leaves a final status behind when it does. `_apply_dispositions`
+            # reads exactly that to decide whether the job finished, so a fake
+            # that skipped it would make every decision test vacuous.
+            (work / "final_status.json").write_text(
+                json.dumps({"final_status": "VERIFIED"}), encoding="utf-8")
         else:
             (work / "reviews").mkdir(parents=True, exist_ok=True)
             if action.get("kind") == "REVIEW":
@@ -380,6 +414,340 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
             ["branch", str(project), "--from", ".", "--id", "snap-fit",
              "--reason", "no fasteners"],
             [argv for argv in surface.calls if argv[0] == "branch"][0])
+
+    def test_the_comparison_is_issued_once_and_after_everything_else(self) -> None:
+        """A comparison of a job half-finished is a verdict about late evidence.
+
+        Position, not merely presence: `compare` reads the receipts on disk, so
+        issuing it between formulations would report `NOT_RUN` for every sibling
+        that had not had its turn yet and freeze that as the job's answer. Once,
+        because it is over the whole job rather than over a formulation.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners", "reviews": ["safety"]}],
+              judgements={"snap-fit/safety": {"decision": "PASS",
+                                              "summary": "fine"}})
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        surface = _FakeSurface(project, [(0, None),
+                                         (RP.NEEDS_ACTION, self.REVIEW),
+                                         (0, None)])
+        run = RP.play(case, project, invoke=surface)
+
+        verbs = [argv[0] for argv in surface.calls]
+        self.assertEqual(1, verbs.count("compare"))
+        self.assertEqual("compare", verbs[-1])
+        self.assertEqual("COMPARABLE", run.comparison["mandatory_verdict"])
+        self.assertIsNone(run.comparison["ranking"])
+
+    def test_a_ranking_under_any_name_at_all_moves_the_recording(self) -> None:
+        """ADR 0005 pinned by shape, not by two literal field names.
+
+        Measured by a review of the commit that added `_comparison_marks`:
+        adding `rank_order` and `overall_score` to the report left the whole
+        gate green -- 86 passed -- because `ranking` and `score` were pinned by
+        name and the payload's shape was not. A ranking arriving under a name
+        nobody thought to forbid is exactly the change this recording exists to
+        refuse, so the top-level key set is recorded and compared exactly.
+        """
+        honest = {"compared": ["."], "ranking": None, "score": None,
+                  "built_nothing": True, "axes": {}}
+        smuggled = {**honest, "rank_order": [".", "b"], "overall_score": 0.87}
+
+        self.assertEqual(["axes", "built_nothing", "compared", "ranking", "score"],
+                         RP._comparison_marks(honest)["payload_keys"])
+        differences = RP.compare(
+            {"formulations": {}, "comparison": RP._comparison_marks(honest)},
+            {"formulations": {}, "comparison": RP._comparison_marks(smuggled)})
+        self.assertTrue(
+            [row for row in differences
+             if row.severity == RP.BINDING and "payload_keys" in row.where],
+            "a report that grew a ranking under another name must move the "
+            "recording, or the guarantee is two field names rather than a rule")
+
+    def test_an_unbranched_case_issues_no_comparison_at_all(self) -> None:
+        """`compare` refuses a job with one formulation, and rightly.
+
+        So a harness that issued it anyway would record an error where the
+        branched cases record a report, and the two cases recorded before
+        formulations existed would have had to move to say nothing.
+        """
+        case, project, run = self._play([(0, None)])
+        self.assertEqual({}, run.comparison)
+        self.assertNotIn("comparison", RP.observe(case, run))
+
+    def _decided(self, dispositions, script=None, **kw):
+        """A two-formulation case that concludes, with decisions declared."""
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=dispositions, **kw)
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        surface = _FakeSurface(project, script or [(0, None), (0, None)])
+        return case, project, surface
+
+    def test_a_declared_decision_is_taken_through_the_verb_a_user_has(self) -> None:
+        """Gate 4.5's mechanism, at L0 speed.
+
+        One command per decision, after everything else, with the basis on the
+        command line -- because a disposition that reached `project.json` by any
+        other route would be a state this harness set rather than a decision the
+        product recorded.
+        """
+        case, project, surface = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}])
+        run = RP.play(case, project, invoke=surface)
+
+        self.assertEqual(
+            ["branch", str(project), "--disposition", "PREFERRED",
+             "--of", "snap-fit", "--basis", "USER_SELECTION"],
+            surface.calls[-1],
+            "last, so the comparison that informs it has already run")
+        self.assertEqual(
+            {"snap-fit": {"disposition": "PREFERRED",
+                          "basis": "USER_SELECTION", "superseded_by": ""}},
+            RP.observe(case, run)["dispositions"]["by_alternative"])
+
+    def test_nothing_is_decided_about_a_job_that_did_not_finish(self) -> None:
+        """The fail-closed half, and it is not what the product would do.
+
+        `design-tool branch --disposition` accepts a formulation that never
+        concluded -- retaining an unfinished alternative as a fallback is a
+        legitimate thing to want. But a *recording* that carried a preference
+        formed over a formulation with no final status would be evidence of a
+        decision nobody could have made, so the harness declines to take the
+        declared decisions at all.
+        """
+        case, project, surface = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}],
+            # The second formulation stops with an instruction still pending, so
+            # it writes no final status.
+            script=[(0, None), (RP.NEEDS_ACTION, {"kind": "OTHER"})])
+        run = RP.play(case, project, invoke=surface)
+
+        self.assertNotIn("--disposition", [a for argv in surface.calls for a in argv])
+        self.assertEqual(
+            {"snap-fit": {"disposition": "ACTIVE", "basis": "",
+                          "superseded_by": ""}},
+            RP.observe(case, run)["dispositions"]["by_alternative"],
+            "still in the state it was branched into, with no basis: the "
+            "recording says nobody decided rather than saying nothing")
+
+    def test_a_decision_the_product_refuses_stops_the_play(self) -> None:
+        case, project, _ = self._decided(
+            [{"alternative_id": "snap-fit", "disposition": "PREFERRED",
+              "basis": "USER_SELECTION"}])
+
+        class _Refuses(_FakeSurface):
+            def __call__(self, argv):
+                if "--disposition" in argv:
+                    self.calls.append(list(argv))
+                    return 2
+                return super().__call__(argv)
+
+        with self.assertRaises(RP.ReplayError) as caught:
+            RP.play(case, project, invoke=_Refuses(project, [(0, None), (0, None)]))
+        self.assertIn("--disposition", str(caught.exception))
+
+    def test_a_basis_the_pipeline_does_not_know_is_refused_at_load(self) -> None:
+        """Against `project.DISPOSITION_BASIS`, not a copy of it.
+
+        A harness holding its own list would let a case declare a basis the
+        product refuses, and the play would fail two commands later with a
+        message about `project.json` rather than about the case.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "PREFERRED",
+                             "basis": "IT_LOOKED_BETTER"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("IT_LOOKED_BETTER", str(caught.exception))
+
+    def test_a_decision_with_no_basis_is_refused_at_load(self) -> None:
+        """14.6: a disposition records why, or it records that somebody moved on."""
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "FALLBACK"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("basis", str(caught.exception))
+
+    def test_an_unbranched_case_may_not_declare_a_decision(self) -> None:
+        """There is nothing to decide between, and the root is not a candidate."""
+        _case(self.root, dispositions=[{"alternative_id": "snap-fit",
+                                        "disposition": "PREFERRED",
+                                        "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("no formulations", str(caught.exception))
+
+    def test_a_case_that_does_not_build_may_not_declare_a_decision(self) -> None:
+        """Otherwise the skip is permanent and silent.
+
+        `_apply_dispositions` takes nothing when a formulation left no final
+        status, and a case declaring `concludes: REFUSED` never leaves one. The
+        decisions would then be skipped on every play for ever, and the
+        recording would contradict the case that produced it with nothing red to
+        say so. Found by a review, which constructed exactly this case and
+        watched it load.
+        """
+        _case(self.root, concludes="REFUSED",
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "PREFERRED",
+                             "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("REFUSED", str(caught.exception))
+
+    def test_a_decision_about_a_formulation_the_case_never_declared_is_refused(self) -> None:
+        """Checked against the declared set, not only against the id's shape.
+
+        `_disposition` validated that the id *could* be a directory name and
+        nothing more, so a typo loaded cleanly and died two verbs later with a
+        message about `project.json` -- the failure that function's own docstring
+        says it exists to prevent. On a play where the decisions are skipped it
+        never failed at all.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snapfit",
+                             "disposition": "PREFERRED",
+                             "basis": "USER_SELECTION"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("snapfit", str(caught.exception))
+        self.assertIn("snap-fit", str(caught.exception),
+                      "and it names what there is")
+
+    def test_a_superseded_formulation_must_say_what_replaced_it(self) -> None:
+        """The product's second requirement, mirrored beside its first.
+
+        `BASIS_REQUIRED` was checked here and `SUCCESSOR_REQUIRED` was not, so a
+        `SUPERSEDED` row with no successor loaded and failed at the command
+        line. `SUPERSEDED` without one asserts that something better exists with
+        no way to find it.
+        """
+        def declare(**over):
+            _case(self.root,
+                  formulations=[{"alternative_id": "."},
+                                {"alternative_id": "snap-fit", "parent": ".",
+                                 "reason": "no fasteners"},
+                                {"alternative_id": "welded", "parent": ".",
+                                 "reason": "the successor"}],
+                  dispositions=[{"alternative_id": "snap-fit",
+                                 "disposition": "SUPERSEDED",
+                                 "basis": "STRONGER_CONCEPT", **over}])
+
+        declare()
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("successor", str(caught.exception))
+
+        self.raw.cleanup()
+        self.raw = tempfile.TemporaryDirectory()
+        self.addCleanup(self.raw.cleanup)
+        self.root = Path(self.raw.name)
+        RP.CASES_ROOT = self.root
+        declare(superseded_by="welded")
+        self.assertEqual(
+            ("welded",),
+            tuple(row.superseded_by for row in self._seal().dispositions),
+            "and a successor that is named loads, so the check is not a ban")
+
+    def test_a_successor_the_case_never_declared_is_refused(self) -> None:
+        """The same rule as the alternative id, one field over.
+
+        The first version of the id check looked at `alternative_id` and not at
+        `superseded_by` -- the omission it was written to fix, repeated in the
+        code fixing it, and found by a review probing the id rule's siblings.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "SUPERSEDED",
+                             "basis": "STRONGER_CONCEPT",
+                             "superseded_by": "ghost"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("ghost", str(caught.exception))
+
+    def test_a_formulation_may_not_supersede_itself(self) -> None:
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "SUPERSEDED",
+                             "basis": "STRONGER_CONCEPT",
+                             "superseded_by": "snap-fit"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("supersedes itself", str(caught.exception))
+
+    def test_a_successor_on_a_state_that_takes_none_is_refused(self) -> None:
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}],
+              dispositions=[{"alternative_id": "snap-fit",
+                             "disposition": "FALLBACK",
+                             "basis": "UNRESOLVED_EVIDENCE",
+                             "superseded_by": "welded"}])
+        with self.assertRaises(RP.ReplayError) as caught:
+            self._seal()
+        self.assertIn("successor", str(caught.exception))
+
+    def test_a_comparison_that_fails_stops_the_play_rather_than_recording_it(self) -> None:
+        """It dispatches nothing and builds nothing, so it has no way to be busy.
+
+        A non-zero code is the verb broken. Recording it would freeze the
+        breakage as the expectation, which is the one thing a recording must
+        never do.
+        """
+        _case(self.root,
+              formulations=[{"alternative_id": "."},
+                            {"alternative_id": "snap-fit", "parent": ".",
+                             "reason": "no fasteners"}])
+        case = self._seal()
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+
+        class _Broken(_FakeSurface):
+            def __call__(self, argv):
+                if argv[0] == "compare":
+                    self.calls.append(list(argv))
+                    return 2
+                return super().__call__(argv)
+
+        with self.assertRaises(RP.ReplayError) as caught:
+            RP.play(case, project,
+                    invoke=_Broken(project, [(0, None), (0, None)]))
+        self.assertIn("compare", str(caught.exception))
 
     def test_a_branch_that_will_not_be_created_stops_the_play(self) -> None:
         """A `branch` that fails leaves the project on the wrong formulation.
@@ -633,6 +1001,79 @@ class TheComparatorLayersTest(unittest.TestCase):
         far = {**recorded, "measured": {"seated": 420.0}}
         self.assertEqual([], RP.binding(RP.compare(recorded, near)))
         self.assertTrue(RP.binding(RP.compare(recorded, far)))
+
+    # The branched arm of `compare`. `BASE` above has no `formulations` key, so
+    # nothing else in this class reaches it -- which is how the `dispositions`
+    # guard came to be the one binding comparison in the whole harness with no
+    # mutation test behind it. A review deleted the call and measured the
+    # result: L0 identical, L1 identical, 121 passed either way. Deleting the
+    # sibling `comparison` line goes red at L0 in under a second, so the shape
+    # was already known and had been applied one level down and not one up.
+    BRANCHED = {
+        "schema_version": RP.EXPECTED_SCHEMA, "case_id": "x",
+        "exit_codes": [0], "reviews_answered": [],
+        "formulations": {},
+        "comparison": {"ranking": None, "score": None},
+        "dispositions": {
+            "active_alternative": "seated",
+            "by_alternative": {
+                "seated": {"disposition": "PREFERRED",
+                           "basis": "USER_SELECTION", "superseded_by": ""},
+                "as-drawn": {"disposition": "FALLBACK",
+                             "basis": "UNRESOLVED_EVIDENCE",
+                             "superseded_by": ""}}},
+    }
+
+    def _branched_diff(self, dispositions):
+        return RP.binding(RP.compare(
+            self.BRANCHED, {**self.BRANCHED, "dispositions": dispositions}))
+
+    def test_a_decision_that_moved_is_binding(self) -> None:
+        """The preference switched to the formulation nobody chose."""
+        rows = self.BRANCHED["dispositions"]["by_alternative"]
+        moved = {**self.BRANCHED["dispositions"], "by_alternative": {
+            "seated": {**rows["seated"], "disposition": "FALLBACK"},
+            "as-drawn": {**rows["as-drawn"], "disposition": "PREFERRED"}}}
+        found = self._branched_diff(moved)
+        self.assertTrue(found)
+        self.assertTrue(all("dispositions" in row.where for row in found), found)
+
+    def test_a_basis_that_started_overstating_is_binding(self) -> None:
+        """`USER_SELECTION` -> `STRONGER_CONCEPT` is the claim this repo refuses.
+
+        Nothing in the product forbids it while a comparison says preference is
+        inadmissible, so the recording is the only thing that would notice.
+        """
+        rows = self.BRANCHED["dispositions"]["by_alternative"]
+        louder = {**self.BRANCHED["dispositions"], "by_alternative": {
+            **rows, "seated": {**rows["seated"], "basis": "STRONGER_CONCEPT"}}}
+        found = self._branched_diff(louder)
+        self.assertTrue(found)
+        self.assertTrue(any("basis" in row.where for row in found), found)
+
+    def test_decisions_that_stopped_being_taken_are_binding(self) -> None:
+        """The regression the skip rule could otherwise hide.
+
+        A formulation that quietly stops concluding makes `_apply_dispositions`
+        skip, and every alternative goes back to `ACTIVE`. Without this the
+        recording would have to rely on another test noticing the missing final
+        status.
+        """
+        undecided = {"active_alternative": "seated", "by_alternative": {
+            key: {"disposition": "ACTIVE", "basis": "", "superseded_by": ""}
+            for key in self.BRANCHED["dispositions"]["by_alternative"]}}
+        self.assertTrue(self._branched_diff(undecided))
+
+    def test_the_formulation_the_job_ends_on_is_binding(self) -> None:
+        """It decides what `design-tool run` picks up next."""
+        moved = {**self.BRANCHED["dispositions"], "active_alternative": "as-drawn"}
+        found = self._branched_diff(moved)
+        self.assertTrue(any("active_alternative" in row.where for row in found),
+                        found)
+
+    def test_an_undecided_job_compares_clean(self) -> None:
+        """The guard must not fire on a job where nothing was decided."""
+        self.assertEqual([], RP.compare(self.BRANCHED, dict(self.BRANCHED)))
 
     def test_a_plan_digest_inside_a_measured_value_is_never_compared(self) -> None:
         """It moves with a plan-version bump, which is not a regression.

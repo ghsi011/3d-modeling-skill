@@ -48,10 +48,45 @@ The one authoritative description of a job, validated by
 [`pipeline/project.py`](../skills/3d-modeling/scripts/pipeline/project.py). It carries the
 job id, source mode, consequence and rationale, the manufacturing inputs, every
 requirement with its provenance (`STATED` / `INHERITED` / `MEASURED` / `CHOSEN`),
-source artifacts with hashes and classification, interfaces and who owns the other
-side of each, declared motion, edit scope, expected components, open questions,
+source artifacts with hashes, classification and — where the job says — the
+role each one plays, interfaces and who owns the other side of each, declared motion, edit scope, expected components, open questions,
 required reviews, and — only once the job has branched — its design alternatives
 and which one is active.
+
+A source artifact's `role` is one of `ARCHITECTURE.md` 6.2's eight, and
+declaring it is optional — a project that says nothing is a project nobody asked,
+not one granting permission. Four of them name geometry this job owns and may
+derive from: `BASE`, `DONOR`, `PRIOR_REVISION`, `ALTERNATIVE_CANDIDATE`. The
+other four name geometry it only reads: `MATING_OBJECT` (what the part fits),
+`MEASUREMENT_REFERENCE` (what it was measured against), `VISUAL_ENVELOPE` (the
+space it must fit inside) and `PRODUCTION_EXPORT` (a file already handed
+downstream). **Declaring one of those four forbids an edit scope over that
+artifact**, and the run is refused — because an edit scope compiles a
+preservation row, so the job would go on to measure whether somebody else's
+object survived its edit.
+
+Note that `role` on a source artifact and `role` on a component are different
+fields with different vocabularies: the first says what a supplied file is *for*
+and is one of the eight above; the second is free text naming what a printed
+body *is*.
+
+A component may name `inherited_from` — the declared source artifact this output
+body came out of — and `inherited_materials`, what the donor declared. The second
+is recorded and not acted on: `material` remains what this job will print, and a
+component honestly carries both without the receipt reading as a multi-material
+capability. `ARCHITECTURE.md` 6.8 is the obligation: imported intent the current
+job does not use is preserved rather than discarded.
+
+It also carries `datums` where a job declares any: a shared geometric reference
+with an identity, a value, a provenance, the artifact **revision** it was read on
+where it was read off geometry, and the artifacts, components or interfaces it is
+valid for. Coordinated edit scopes name one datum identity through `datum_ids`
+rather than each holding a copy of the number
+([ADR 0003](adr/0003-datum-provenance-and-authority.md)). A datum with no recorded
+provenance is permitted and is an assumption: it names an owner and the check that
+would settle it, and `design-tool status` reports it. Changing a datum's *value*
+currently invalidates nothing — see `ROADMAP.md` — which is why a job with an edit
+scope cannot claim success.
 
 There is no `status` and no `bindings` block. They mirrored one run's outcome —
 its stage, its final status, its allowed claim and its artifact digests — into
@@ -173,9 +208,10 @@ disk. A stored `COMMISSIONED` or `VERIFIED` whose receipts no longer bind derive
 | `stale` | each receipt that no longer binds, and which binding broke |
 | `state` | the binding values the receipts are being checked against |
 | `bindings` | this formulation's own artifact hashes, from its own final status |
+| `assumptions` | every declared datum nobody measured — its id, its provenance, who settles it, and what settling it means. The provenance is there because the two kinds are not the same: `CHOSEN` is a number somebody picked deliberately, and an empty one was never recorded at all, which is the distinction ADR 0003 decision 1 exists to keep. Empty on a job that declares none, and the terminal prints nothing. This is where an assumption is *findable*: it is deliberately not a `validate` finding, because every caller there refuses the run on a non-empty list and ADR 0003 says an assumption does not refuse the job |
 | `problems` | every reason the project cannot be routed, as sentences |
 | `findings` | the same list as structure — `code`, `where`, `severity`, `id` — so "which alternative and which field" is a match rather than a search |
-| `alternatives[].status` | the same derivation, run per alternative in its own directory, so switching branches is not the price of finding out where the other one stands |
+| `alternatives[]` | one row per formulation — the shared root **and** every declared alternative — each carrying `status`, `stored_status`, `stale` (the receipt **names** only -- the reasons stay on the top-level `stale`), `allowed_claim` and `reasons`, derived in that formulation's own directory, so switching branches is not the price of finding out where the other one stands. The root has no declared row in `project.json` and is synthesised into the report: it is a formulation by having a directory, a proposal, a contract and its own receipts. Iterating only the declared rows was `docs/defects.md` D26, where this block counted two formulations of the recorded knob and `cost` below counted three |
 | `run_id` | which run this formulation currently is — the digest of `state`, content-derived; see *Run identity* below |
 | `fallbacks` | every formulation the user declared `FALLBACK`, with its own derived status. The terminal names them only when `final_status` is not a claim, which is when the question is live |
 | `lifecycle` | `lifecycle.json`'s events, oldest first: the restarts and the disposition transitions |
@@ -444,6 +480,132 @@ compiles and hashes to exactly the bytes it did before branching existed. Every
 new field is *absent* when there is nothing to say and never `null`, no
 subdirectory appears, and `candidate.stl` is still written at the project root.
 
+### `design-tool compare` — what setting them side by side settles
+
+```bash
+uv run design-tool compare <project>
+uv run design-tool compare <project> --against .,plate-seated --json
+```
+
+Deterministic and free. It reads the receipts each formulation already wrote,
+writes `comparison.json` at the project root and prints a table. Zero dispatch,
+zero build, no new project field. Every number in it was measured by a run that
+had the part in front of it; the only thing added is the act of putting two of
+them side by side and being explicit about what that does and does not settle.
+
+**It has no score, no weight and no order, and it never selects.** `ranking` and
+`score` are fields in the output and both are always `null`; formulations are a
+JSON object keyed by id and never an array, because an array has an order and an
+order reads as a ranking. Choosing is `design-tool branch --disposition`, which
+records who chose and on what basis. See
+[ADR 0005](adr/0005-a-comparison-refuses-rather-than-scores.md).
+
+The default set is every formulation that may be worked under
+(`ACTIVE`, `PREFERRED`, `FALLBACK`) **plus the shared root**, which is a
+formulation with its own proposal, contract and receipts even though `branch`
+writes no row for it. `--against` names an explicit set, including concluded
+formulations — 6.14 keeps a rejected alternative available for reconsideration,
+it is just not what "compare this job" means by default.
+
+#### The first thing it reports: whether the verdicts are comparable at all
+
+The mandatory axis carries one of three verdicts, and the reason it is three
+rather than a boolean is [`docs/defects.md` D25](defects.md): on the authored
+lane a formulation's own `design_proposal.json` sets the rubric it will be
+graded against.
+
+| verdict | when | what it means |
+| --- | --- | --- |
+| `COMPARABLE` | same mandatory feature ids, same expectations, same bands | these verdicts may be read beside each other |
+| `INCOMPARABLE_CHECK_SETS` | the declared mandatory feature id sets differ | coverage is a ratio to a denominator each formulation chose, so 3-of-3 and 8-of-8 are both 1.0 and mean nothing against each other. The shared set is named, and so is what only one of them declared |
+| `INCOMPARABLE_EXPECTATIONS` | same ids, different frozen expectation or band | each `PASS` is a pass against a value that formulation declared for itself |
+
+The third is not hypothetical. On the recorded three-formulation knob, the root
+declares `bbox_mm.z = 50.0` and `plate-seated` declares `52.0`, each is checked
+against its own declaration to a band of `0.5`, and **both are `PASS`**. A report
+that printed `envelope PASS` beside `envelope PASS` would tell a reader they are
+equal on size. They are 2 mm apart by design, and that is the fork.
+
+The comparand is the feature-id **set** from `model_contract.json`, and
+deliberately never `coverage.fraction`: `covered` is not filtered to mandatory
+features (`commission.py:437`) so the fraction is not bounded by 1.0, and a
+fraction cannot say *which* check differs. Each formulation's own coverage is
+reported inside its own block, under the name `self_coverage`.
+
+The verdict scopes to the mandatory axis and not to the whole comparison. An
+unusable rubric must not delete the evidence axis, which is computable however
+badly two contracts disagree and is where a stale sibling is reported.
+
+#### `preference.admissible`
+
+False, with the reason named, when any of these holds:
+
+* a formulation did not pass its own mandatory checks, or has no current verdict
+  — 8.5, a preference criterion may not be weighed against a mandatory failure;
+* the rubrics disagree, per the table above;
+* a dimension this job *turns on* cannot be measured by this build at all.
+
+The measurements are printed in full in every one of those cases. Withholding a
+number somebody took would be its own dishonesty; what is withheld is the licence
+to read it as a reason.
+
+#### `not_compared` — the half that matters more
+
+One row per dimension this job exercises and this build cannot measure, each
+naming why and which release owns it. A comparison that silently omits the
+dimension nobody can measure is worse than none: it leaves a reader concluding
+two formulations are equivalent on an axis nothing looked at.
+
+Rows carry a `standing`. `CONTEXT` is true of any two solids — geometric
+difference between formulations (Release 6), print time and support toolpaths
+(no slicer adapter, permanently absent rather than pending), and the
+engineering-judgment dimensions that may only ever appear as a stated row
+attributed to whoever stated it. `DECIDING` means this job turns on it, and a
+`DECIDING` row that cannot be measured makes `preference.admissible` false.
+
+Criteria a job does not exercise are **absent**, not zero and not "1 vs 1"
+(6.14). A single-material one-piece pair emits no material-count, sequence,
+assembly or tooling row at all; a pair with more than one body emits one, marked
+`DECIDING`, owned by Release 8.
+
+On a `MODIFY` pair, `not_compared` is the entire finding: both formulations
+report `EXPERIMENTAL_UNAVAILABLE`, the axis that decides between them is
+preservation, and preservation fails twice — see [`docs/defects.md` D22](defects.md)
+and the undeclared sample density. The comparison says so and refuses preference.
+That output is correct and complete, not a failure to compare.
+
+#### The sentence it will not say
+
+The shared requirements are bound as a *digest* (`cli._requirement_hash`) and
+are never individually checked, and the contract's rows are geometric proxies a
+designer chose. So `shared.requirement_digest` is reported as a **binding**:
+
+> each formulation met the contract it froze, and all of them bind the same
+> requirement digest
+
+and never *"all of them meet the requirement"*. Where the digests differ, the
+formulations were frozen against different states of the shared job, and the
+report says that instead.
+
+#### What it records about its own evidence
+
+`comparison.json` is recomputable from disk at any moment, so there is nothing
+to resume and nothing to invalidate. It records, per formulation, the whole
+binding map, `bindings.identity` over it, the sha256 of every receipt it read,
+and `bindings.broken` verbatim. The identity covers *inputs*, so a corrected
+`commission_report.json` would move the comparison with no binding broken — which
+is why the receipt digests are there too.
+
+Two byte-identical siblings are grouped under `identical_designs` and named as
+one design under several ids. On the recorded knob the root and `as-drawn` share
+a source digest; without that block a reader takes their agreement for two
+independent designs reaching the same answer, and it corroborates nothing.
+
+Exit code is `0` whenever the report ran, and `2` for a project with fewer than
+two formulations or an unknown `--against` name. A comparison is never *waiting*
+for anything, so it never returns the needs-action code: a stale sibling is a
+finding in the output, not a state to resolve here.
+
 ### The authored lane: two artifacts, one commission
 
 A job whose plan names the `AUTHORED` builder -- every `CUSTOM` job, and any
@@ -548,6 +710,14 @@ the parent half of the protocol, and
 [`pipeline/build_child.py`](../skills/3d-modeling/scripts/pipeline/build_child.py)
 is the child.
 
+**There are two implementations, chosen by platform, and neither degrades.**
+`confine.py` is the Windows one and dispatches to
+[`pipeline/confine_posix.py`](../skills/3d-modeling/scripts/pipeline/confine_posix.py)
+everywhere else. A platform with neither refuses to execute the candidate at
+all; there is no unconfined path, and a boundary that quietly became an ordinary
+subprocess would be worse than none because the receipts would not say which one
+ran.
+
 **The confinement**, on Windows, with no new dependency (`ctypes` against
 `advapi32`/`kernel32`):
 
@@ -570,6 +740,30 @@ failing on purpose.
 Every privilege is deleted except `SeChangeNotifyPrivilege`, which is
 bypass-traverse-checking: `Everyone` holds it by default and it grants access to
 no object.
+
+**The confinement**, on Linux, also with no new dependency (`ctypes` against
+`libc`). Every row is re-measured by
+`benchmarks/heavy/test_confine_posix_heavy.py`, which runs a real confined child
+and has it try the thing:
+
+| mechanism | what it is | what it buys, measured |
+|---|---|---|
+| mount namespace | `MS_REC\|MS_PRIVATE` off the host's propagation, then `mount_setattr(AT_RECURSIVE, MOUNT_ATTR_RDONLY)` over `/`, then one read-write bind for the build directory | every write outside the build directory fails `EROFS` — the repository, `site-packages`, `/tmp`, `/etc`, `/root`. An allow-list of exactly one hole, so a mount nobody thought of is read-only because it is under `/` rather than because somebody remembered it |
+| network namespace | created with no interfaces, loopback never brought up | `connect()` answers `ENETUNREACH` and DNS does not resolve. **The Windows boundary cannot say this** — see D11 |
+| PID namespace | the boundary's supervisor is init | a grandchild that calls `setsid()` and sleeps is dead before the parent reads one output byte. There is no `CREATE_BREAKAWAY_FROM_JOB` to attempt: the namespace is a property of the process tree, not a handle |
+| empty capability set | bounding set cleared first, then effective/permitted/inheritable, plus `SECBIT_NOROOT` and `PR_SET_NO_NEW_PRIVS` | `CapEff` is `0000000000000000`; `mount(MS_REMOUNT)` over `/` answers `EPERM`, so the candidate cannot unmake the read-only tree from inside. A candidate that reaches a new user namespace still cannot: inherited mounts are locked, and that is measured rather than assumed |
+| seccomp-BPF | `EPERM` for `execve`/`execveat`, architecture-checked, installed by `build_child` immediately before the first candidate import | the candidate creates no process. Later than the other three by one function call, because the parent's last act is itself an `execve` — the honest statement is that it covers candidate code rather than the whole child process |
+
+The identity is **not** dropped, and that is deliberate: a `MODIFY` job's model
+legitimately reads the supplied artifact out of the project directory the parent
+owns. Becoming another user does not confine that read — the read-only mount
+already did — it only breaks it. Authority goes; identity stays; the same shape
+the Windows child has under a restricted token.
+
+The evidence that this is not the weaker boundary is not any single row: the L1
+replay suite produces **byte-identical goldens** through it, 57 passed and 43
+subtests against recordings frozen on Windows. A boundary that leaked would not
+reproduce a digest.
 
 **The workspace.** Two directories under a fresh sandbox, both with a protected
 DACL that inherits nothing:

@@ -32,18 +32,29 @@ a reviewer's answer to run *n* could not be checked against run *n+1*, so no
 could not be resumed, and it could not be finished.
 
 The plan is now derived from the two artifacts' own hashes, the declared region
-and the sample count, and laid out along a low-discrepancy sequence over meshes
+and the sample count, and laid out with a pinned SplitMix64 stream over meshes
 whose vertex and face order has been made canonical first. Identical inputs
 produce byte-identical evidence, and the plan's digest travels with the verdict
 so an answer can name the evidence it was written against.
 
-**Determinism is not sensitivity, and this file must not be read as claiming it
-is.** A plan that misses a 0.5 mm undeclared cube still misses it -- it now
-misses it identically on every run, which is what makes the round trip possible
-and is the whole of what this change buys. The density is still a fixed count
-rather than one derived from a declared minimum detectable defect size, real
-B-rep comparison is still not implemented, and both are owed by stage 5 of
-ADR 0002. The receipts say so in the words they use.
+**It was a low-discrepancy sequence, and that was a measured mistake.** See
+`_stream`: an independent review reimplemented the planner and counted patches
+of the size the derivation undertakes to find that contained no sample at all --
+13.10% at the default count and 21.99% at the count the recorded fixture uses,
+against the 1% promised. A Kronecker sequence's 2-D projections are striated, and
+the planner uses two of those coordinates to place a point inside its triangle,
+so the stripes land on the surface. Low discrepancy bounds a box's count against
+its volume; finding a defect needs bounded dispersion, which it does not bound.
+An independent stream satisfies the Poisson arithmetic the derivation actually
+uses, and `SAMPLE_PLAN_VERSION` is 3 because every plan digest moved.
+
+**Determinism is not sensitivity.** Reproducibility is what makes the review
+round trip possible; it says nothing about what the plan can find. Sensitivity is
+a separate property with a separate mechanism -- `derive_sample_count` from a
+declared `minimum_detectable_defect_mm`, measured end to end by
+`test_phase3.TheSamplePlanActuallyFindsWhatItPromisesTest` rather than argued
+from the arithmetic. Real B-rep comparison is still not implemented. The receipts
+say so in the words they use.
 
 **Determinism of the answer is not determinism of completing.** The plan was
 reproducible and the run was not: the same unchanged pair took 23 GiB and died on
@@ -66,6 +77,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
@@ -87,16 +99,113 @@ PRESERVATION_SCHEMA = 2
 # sits in the job's shared frame. It is the one edit-intent field that says which
 # geometry the plan is a plan *of*, and it used to be declared, validated, and
 # read by nothing.
-SAMPLE_PLAN_VERSION = 2
+SAMPLE_PLAN_VERSION = 3
 
-# How many points to sample on the preserved surface, per direction. Enough that
-# a missing feature of a few millimetres cannot fall between them on a part of
-# ordinary size, and small enough that the query stays milliseconds.
+# How many points to sample on the preserved surface, per direction, when a job
+# declares no minimum detectable defect size. Enough that a missing feature of a
+# few millimetres cannot fall between them on a part of ordinary size, and small
+# enough that the query stays milliseconds.
 #
-# It is a fixed count, not a density derived from a smallest defect this audit
-# undertakes to find. Deriving it is stage 5's work; until then the number is an
-# engineering choice and the receipt does not pretend otherwise.
+# A job that declares `minimum_detectable_defect_mm` does not use this: its count
+# is derived by `derive_sample_count` from the size it undertook to find. This
+# constant is the fallback for a job that declared nothing, and a run that used
+# it says so on the receipt rather than implying a sensitivity it never claimed.
 DEFAULT_SAMPLES = 20000
+
+# The probability that a defect of exactly the declared size is hit by at least
+# one sample. Not 1.0, because no finite sample plan can promise that: what a
+# density buys is a detection probability, and the honest receipt names it.
+#
+# 0.99 rather than 0.95 because the consumer is a preservation claim -- a missed
+# defect is a part reported unchanged that changed -- and the cost of the
+# stricter figure is a 1.5x sample count against a query already measured in
+# milliseconds.
+DEFAULT_DETECTION_CONFIDENCE = 0.99
+
+# The largest sample plan this audit will build. Beyond it the audit refuses and
+# names the size it *could* have found, rather than quietly sampling less finely
+# than the job asked for. Release 6's rule: a declared resource bound on every
+# query, with a controlled failure instead of an allocation attempt.
+#
+# 4,000,000 points is about 96 MB of float64 coordinates before any query
+# batching, which `_query_batch` then splits against the memory ceiling.
+MAX_DERIVED_SAMPLES = 4_000_000
+
+
+class SampleBudgetExceeded(ValueError):
+    """The declared defect size needs more samples than this audit will build.
+
+    Raised rather than clamped. Clamping would answer a question the job did not
+    ask -- "is this part preserved to 0.1 mm" answered with a plan that can only
+    see 0.4 mm -- and the answer would look identical to one that could.
+    """
+
+
+def derive_sample_count(area_mm2: float, minimum_detectable_defect_mm: float,
+                        *, confidence: float = DEFAULT_DETECTION_CONFIDENCE,
+                        ceiling: int = MAX_DERIVED_SAMPLES) -> int:
+    """How many surface samples it takes to find a defect of that size.
+
+    `_plan_points` is **area-weighted**, so the sample density is uniform over
+    the surface: `n / area` points per mm2 everywhere, whatever shape the part
+    is and whatever fraction of it a declared region occupies. That is what
+    makes this derivation possible at all -- the detectable size is a property
+    of the density, not of the region, so it does not have to be recomputed per
+    region and cannot be quietly different in the corner of the part nobody
+    looked at.
+
+    A defect of characteristic size `d` presents about `d^2` of surface. Treating
+    the plan as a Poisson process over the surface, the chance that at least one
+    of `n` points lands on a patch of area `a` is `1 - exp(-n * a / A)`, so
+    requiring that to reach `confidence` gives
+
+        n >= -ln(1 - confidence) * A / d^2
+
+    That is deliberately the *conservative* reading. The plan is a
+    low-discrepancy sequence, which is more evenly spread than a Poisson process
+    and therefore hits a small patch at least as often -- so a count derived
+    this way finds the declared size at least as reliably as the arithmetic
+    promises. Erring the other way would be a sensitivity claim the method
+    cannot keep.
+
+    Raises `SampleBudgetExceeded` rather than returning a clamped count: see the
+    exception.
+    """
+    area = float(area_mm2)
+    defect = float(minimum_detectable_defect_mm)
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be strictly between 0 and 1, "
+                         f"got {confidence!r}")
+    if not math.isfinite(area) or area <= 0.0:
+        raise ValueError(f"a sample plan needs a positive surface area, "
+                         f"got {area_mm2!r}")
+    if not math.isfinite(defect) or defect <= 0.0:
+        raise ValueError(f"minimum_detectable_defect_mm must be positive, "
+                         f"got {minimum_detectable_defect_mm!r}")
+    needed = math.ceil(-math.log(1.0 - confidence) * area / (defect * defect))
+    if needed > ceiling:
+        raise SampleBudgetExceeded(
+            f"finding a {defect} mm defect on {area:.1f} mm2 of surface at "
+            f"{confidence:.0%} confidence needs {needed:,} samples, over this "
+            f"audit's ceiling of {ceiling:,}. The smallest defect this ceiling "
+            f"can find on this part is "
+            f"{detectable_defect_mm(area, ceiling, confidence=confidence):.4f} mm. "
+            "Declare that size, or split the region.")
+    return max(1, needed)
+
+
+def detectable_defect_mm(area_mm2: float, samples: int, *,
+                         confidence: float = DEFAULT_DETECTION_CONFIDENCE) -> float:
+    """The smallest defect a plan of `samples` points can find, inverted.
+
+    The receipt carries this rather than only the count, because a count means
+    nothing to a reader without the surface it is spread over: 20,000 points is
+    dense on a 20 mm clip and sparse on a build plate.
+    """
+    area = float(area_mm2)
+    if samples <= 0 or not math.isfinite(area) or area <= 0.0:
+        return float("inf")
+    return math.sqrt(-math.log(1.0 - confidence) * area / float(samples))
 
 # The band a sampled comparison is allowed to call "unchanged". Not zero: two
 # tessellations of one surface disagree by the chord error of whichever is
@@ -286,9 +395,14 @@ def _load(path: Path) -> tuple[Any, dict[str, Any] | None]:
             # every sample near a hole reports a distance to geometry that is
             # missing rather than moved.
             raise BrepUnreadable(
-                f"{len(reading.failures)} of {reading.faces} face(s) of "
-                f"{path.name} cannot be tessellated, so there is no surface to "
-                f"measure against: " + "; ".join(reading.failures))
+                (f"{len(reading.failures)} of {reading.faces} face(s) of "
+                 f"{path.name} cannot be tessellated, so there is no surface to "
+                 f"measure against: " + "; ".join(reading.failures))
+                if reading.failures else
+                # No named faces to blame. Naming none and claiming a count
+                # would be the false clean one layer up. See `docs/defects.md`
+                # D23.
+                f"{path.name}: {reading.summary()}")
         return reading.mesh(), reading.as_dict()
 
     loaded = trimesh.load(str(path), force="mesh")
@@ -307,38 +421,23 @@ def _load(path: Path) -> tuple[Any, dict[str, Any] | None]:
 
 
 def _ordered(mesh):
-    """The same geometry, with vertex and face order made a function of it.
+    """The canonical ordering, which lives in `mesh_io` now.
 
-    A seeded plan is only reproducible if the thing it indexes into is. Face
-    order decides which face each sample lands on, and nothing guarantees that
-    two reads of one file -- through a different loader path, a scene rather than
-    a mesh, a concatenation whose order came from a dict -- present the faces in
-    the same order. Sorting them here removes the question rather than assuming
-    the answer.
+    Moved there because `diagnose` needs the same ordering to give a body a
+    stable handle, and a second ordering rule would be two authorities over one
+    question. The move is pure -- the function is byte-identical to the one that
+    was here -- and `test_body_identity.py` pins the ordering to a value,
+    because neither the plan digest nor the replay bands can see an ordering
+    change: `_seed_material` carries a sentence describing the rule rather than
+    the rule's output, and `tools/replay.py` excludes the plan digest from
+    comparison by design.
 
-    Winding is preserved: each triangle is rolled so its lowest vertex index
-    leads, which is a cyclic shift, and `signed_distance` reads winding for its
-    sign. This is defined up to exactly coincident vertices, which the merge in
-    `_load` is what removes.
+    Delegating rather than importing at module scope: `mesh_io` pulls in
+    `trimesh`, and an eager import here made `import pipeline.preservation` cost
+    0.60 s against 0.07 s. `commission` imports this module to read one integer.
     """
-    import trimesh
-    vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    faces = np.asarray(mesh.faces, dtype=np.int64)
-    if len(vertices) == 0 or len(faces) == 0:
-        return mesh
-
-    vertex_order = np.lexsort((vertices[:, 2], vertices[:, 1], vertices[:, 0]))
-    rank = np.empty(len(vertex_order), dtype=np.int64)
-    rank[vertex_order] = np.arange(len(vertex_order), dtype=np.int64)
-    faces = rank[faces]
-
-    roll = np.argmin(faces, axis=1)
-    columns = (np.arange(3, dtype=np.int64)[None, :] + roll[:, None]) % 3
-    faces = np.take_along_axis(faces, columns, axis=1)
-    face_order = np.lexsort((faces[:, 2], faces[:, 1], faces[:, 0]))
-
-    return trimesh.Trimesh(vertices=vertices[vertex_order],
-                           faces=faces[face_order], process=False)
+    import mesh_io
+    return mesh_io.canonical_order(mesh)
 
 
 def _generalized_golden(dimensions: int) -> float:
@@ -355,6 +454,58 @@ def _generalized_golden(dimensions: int) -> float:
 
 _ALPHA = np.array([1.0 / _generalized_golden(3) ** (j + 1) for j in range(3)],
                   dtype=np.float64)
+
+
+# SplitMix64. Ten lines, pinned here forever, and the reason it is here rather
+# than `numpy.random` is the reason the additive-recurrence sequence was here
+# before it: a library generator's stream is not something this file should have
+# to pin, because a plan that changes when a dependency changes invalidates every
+# review bound to it.
+#
+# **Why the sequence it replaces had to go.** It was an additive recurrence
+# (`t_i = frac(offset + i*alpha)`), chosen because low discrepancy sounded
+# strictly better than random. It is not, for this question. Discrepancy bounds
+# how far a *box's* sample count strays from its volume; what a defect hunt needs
+# is bounded *dispersion* -- no empty patch anywhere -- and low discrepancy does
+# not bound that. Worse, a Kronecker sequence's 2-D projections are striated, so
+# it misses patches thinner than its stripe spacing far more often than area
+# alone implies.
+#
+# Measured, by reimplementing the old planner and counting patches of area d^2
+# that contained no sample, at exactly the count `derive_sample_count` returns
+# for that d: 13.10% missed at 20,000 samples and 21.99% at 38,014, against the
+# 1% the derivation promises. Not a narrow resonance -- it spanned 10^4 to 10^5,
+# which is the whole operating band. A uniform draw through the same measurement
+# gives 1.06% against 1.00% theory, which is what the Poisson arithmetic in
+# `derive_sample_count` assumes and what this now supplies.
+#
+# So the trade is deliberate and the other way round from the original: an
+# equidistributed sequence that breaks the model, for an independent one that
+# satisfies it. Reproducibility is unchanged -- same seed, same bytes, forever.
+_SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
+_SPLITMIX_MASK = (1 << 64) - 1
+
+
+def _stream(seed: str, count: int) -> np.ndarray:
+    """`count` x 3 independent uniforms in [0, 1), deterministic from `seed`.
+
+    Vectorised SplitMix64: the state is `s0 + i*gamma` for i in 0..3n, which is
+    a pure function of the index, so the whole block is generated without a loop
+    and without carrying state between calls.
+    """
+    if count <= 0:
+        return np.zeros((0, 3), dtype=np.float64)
+    start = int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:8],
+                           "big")
+    index = np.arange(3 * count, dtype=np.uint64)
+    z = (np.uint64(start) + index * np.uint64(_SPLITMIX_GAMMA))
+    z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    z = z ^ (z >> np.uint64(31))
+    # 53 bits is exactly what a float64 mantissa holds, so every value is
+    # representable and the map to [0,1) is uniform rather than nearly so.
+    return ((z >> np.uint64(11)).astype(np.float64)
+            / float(1 << 53)).reshape(count, 3)
 
 
 def _offsets(seed: str) -> np.ndarray:
@@ -387,8 +538,7 @@ def _plan_points(mesh, count: int, seed: str) -> np.ndarray:
     cumulative = np.cumsum(areas) / total
     cumulative[-1] = 1.0
 
-    index = np.arange(1, count + 1, dtype=np.float64)
-    t = np.mod(_offsets(seed)[None, :] + index[:, None] * _ALPHA[None, :], 1.0)
+    t = _stream(seed, count)
 
     faces = np.searchsorted(cumulative, t[:, 0], side="left")
     faces = np.clip(faces, 0, len(areas) - 1)
@@ -422,8 +572,9 @@ def _seed_material(*, source_sha256: str, candidate_sha256: str, region: Region,
     for the release that made this deterministic. Binding it makes a changed
     transform invalidate the evidence; it does not make the audit frame-aware.
 
-    The other declared edit-intent fields -- `preserve`, `may_remove`, `add`,
-    `expected_body_delta`, `preserve_metadata`, `interface_ids` -- are
+    The other declared edit-intent fields -- `preserve`, `may_change`,
+    `may_remove`, `add`, `expected_body_delta`, `preserve_metadata`,
+    `interface_ids`, `datum_ids` -- are
     deliberately *not* here. They are promises about the edit rather than
     statements about where the geometry is, and none of them changes which points
     get sampled or what they are compared against. They are bound into the
@@ -479,6 +630,13 @@ def _sampled(source, candidate, region: Region, samples: int,
     for _, (_, target) in pairs:
         _query_batch(len(target.faces), ceiling_bytes)     # raises before any query
 
+    # The surface the plan is spread over, and therefore what its density means.
+    # The source's area rather than the candidate's: the plan is a plan of the
+    # geometry that must survive, and on a job that removed material by intent
+    # the candidate is smaller for a reason that is not a change in sensitivity.
+    sampled_area = float(source.area)
+    detectable = detectable_defect_mm(sampled_area, samples)
+
     for name, (a, b) in pairs:
         seed = _direction_seed(material, name)
         seeds[name] = seed
@@ -521,15 +679,24 @@ def _sampled(source, candidate, region: Region, samples: int,
         "samples_outside_region": tested,
         "sample_plan": plan,
         "directions": results,
+        # What this plan could have found, as a size rather than as a count. A
+        # count means nothing to a reader without the surface it is spread over
+        # -- 20,000 points is a 0.49 mm detector on a 20 mm clip and a 7 mm one
+        # on a build plate -- and a preservation claim is exactly the place that
+        # difference decides whether the claim is worth anything.
+        "detectable_defect_mm": S.canonical_number(detectable, 6),
+        "detection_confidence": DEFAULT_DETECTION_CONFIDENCE,
+        "sampled_area_mm2": S.canonical_number(sampled_area, 4),
         "claim_note": "a sampled comparison cannot establish exact preservation; "
                       "it establishes that no sampled point outside the declared "
                       f"region moved more than {tolerance_mm} mm. The plan is "
                       "derived from this pair of artifacts and carries no random "
-                      "draw, so the audit reruns byte-identically -- which is "
-                      "reproducibility and not sensitivity. The density is a fixed "
-                      "count rather than one derived from a declared minimum "
-                      "detectable defect size, so a defect these samples miss is "
-                      "missed identically on every run.",
+                      "draw, so the audit reruns byte-identically. Its density is "
+                      f"{samples} points over {sampled_area:.1f} mm2, which finds "
+                      f"a defect of {detectable:.4f} mm or larger with "
+                      f"{DEFAULT_DETECTION_CONFIDENCE:.0%} confidence; anything "
+                      "smaller than that can still be missed, and is missed "
+                      "identically on every run.",
     }
 
 

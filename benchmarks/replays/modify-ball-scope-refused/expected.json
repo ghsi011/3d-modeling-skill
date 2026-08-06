@@ -14,7 +14,28 @@
     2,
     2
   ],
+  "material": {
+    "bbox_mm": null,
+    "volume_mm3": null
+  },
   "measured": {},
+  "observed_keys": [
+    "acceptance",
+    "allowed_claim",
+    "case_id",
+    "checks",
+    "coverage",
+    "exit_codes",
+    "material",
+    "measured",
+    "outcome",
+    "reasons",
+    "receipts",
+    "reviews_answered",
+    "schema_version",
+    "screening_detail",
+    "tolerances"
+  ],
   "outcome": {
     "backend": null,
     "commission_verdict": null,
@@ -34,7 +55,7 @@
     "next_action.json",
     "project.json"
   ],
-  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
   "reviews_answered": [],
   "schema_version": 1,
   "screening_detail": {

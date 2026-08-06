@@ -2056,6 +2056,14 @@ def cli_module():
     return cli
 
 
+# Module level rather than a method, because one of this class's cases lives in
+# `benchmarks/heavy/` and needs the same response. Two spellings of one fixture
+# is how two tiers stop testing the same thing.
+def _good_verification_response():
+    return {"decision": "PASS", "defects": [], "unmet_requirements": [],
+            "missing_evidence": [], "summary": "ok"}
+
+
 class ReviewEnvelopeTest(unittest.TestCase):
     """A review response is only as good as the request it answers.
 
@@ -2087,8 +2095,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 "missing_evidence": [], "required_actions": [], "summary": "ok"}
 
     def _good_verification(self):
-        return {"decision": "PASS", "defects": [], "unmet_requirements": [],
-                "missing_evidence": [], "summary": "ok"}
+        return _good_verification_response()
 
     def test_evidence_paths_must_stay_project_relative(self) -> None:
         from . import review as R
@@ -2347,25 +2354,14 @@ class ReviewEnvelopeTest(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual("specification", result.stage)
 
-    def test_stale_verification_response_after_render_change_is_rejected(self) -> None:
-        """Changing whether images are rendered changes the witness record, so
-        an answer from the other setting must not be accepted."""
-        response = self._good_verification()
-        with tempfile.TemporaryDirectory() as raw:
-            out = Path(raw)
-            seen = []
-            def capture(packet):
-                seen.append(packet)
-                return {**response, "review_envelope": packet.payload["review_envelope"]}
-            runner.run(_full_request(out, verify_call=capture,
-                                     reviewer={"model_snapshot": "test"}))
-            stale = seen[0].payload["review_envelope"]
-            result = runner.run(_full_request(
-                out, render=True,
-                verify_call=lambda p: {**response, "review_envelope": stale},
-                reviewer={"model_snapshot": "test"}))
-            self.assertFalse(result.ok)
-            self.assertEqual("verification", result.stage)
+    # `test_stale_verification_response_after_render_change_is_rejected` is the
+    # one case in this class that asks for `render=True`, and it now lives in
+    # `benchmarks/heavy/test_pipeline_heavy.py`. It is an L0 test everywhere the
+    # render path answers in this process, and on Linux that path never does:
+    # `preview` selects the EGL platform, PyOpenGL resolves the library through
+    # `ctypes.util.find_library`, and that shells out to `ldconfig` -- whether or
+    # not the library is found. A spawn is the one thing the tier guard refuses,
+    # so the case belongs in the tier that permits one.
 
     def test_status_does_not_promote_unbound_safety_pass(self) -> None:
         """Even if a safety report somehow lacks the envelope, status must not

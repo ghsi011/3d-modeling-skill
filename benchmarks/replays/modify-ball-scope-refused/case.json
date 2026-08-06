@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "case_id": "modify-ball-scope-refused",
   "use_case": "MODIFY",
   "source_mode": "MODIFY",

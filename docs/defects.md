@@ -50,6 +50,26 @@ three-face edge and one four-face edge, asserted as three separate counts. A
 fixture asserting only the classification passes today and would pass after a
 wrong fix.
 
+**FIXED** at `4adbf11`. `diagnose.edge_manifold_counts` counts faces per edge
+off `edges_unique_inverse` — the face-use count directly, rather than anything
+inferred from an adjacency table's shape — and the report carries
+`boundary_edges` (now only edges used by exactly one face), `nonmanifold_edges`,
+`max_faces_per_edge` and the whole `faces_per_edge` distribution. Both branches
+that carried the expression are fixed: the mesh branch and the per-object 3MF
+branch. A non-manifold edge now raises its own finding, worded so a repairer is
+not sent at hole-filling: *"not a hole and cannot be closed by filling one"*. It
+fires whether or not the mesh is also open, because a closed mesh can carry a
+three-face edge — and that is precisely the case the old code was silent on, since
+`watertight` was true, the boundary finding never printed, and the wrong number
+was the only trace.
+
+Fixture: `pipeline/test_phase3.py::EdgeManifoldCountsTest`, two fans sharing no
+vertex — 16 unique edges, 14 used once, one used three times, one used four —
+so the arithmetic is checkable by hand, and the old expression's 16 is asserted
+to be exactly `boundary_edges + nonmanifold_edges`. Six mutations attempted, six
+caught. Verified on the real vendored `ball_male_17mm.stl`: 10,584 edges, all
+used by exactly two faces, `USABLE_MESH` unchanged.
+
 ## D2 — `make_3mf.py` writes vertices at `%.6g`
 
 **Where.** [`make_3mf.py`](../skills/3d-modeling/scripts/make_3mf.py), `mesh_xml`.
@@ -241,22 +261,6 @@ cone faces OCC cannot triangulate, not four, plus a seventh — a plane of
 whole first. The diagnosis was right and the count was not, and the artifact is
 still untessellatable, which is [D22](#d22--the-vent-mounts-cone-faces-are-still-untessellatable).
 
-## D15 — `orientation` is declared, validated, frozen, and read by nothing
-
-**Where.** `Contract.orientation`, validated in `contract.preflight`, carried into
-the frozen payload.
-
-**What is wrong.** Third instance of the shape D5 and D6 recorded: a field the
-schema takes seriously and no code consumes. `model_to_printer_matrix` and
-`bed_z_mm` reach no analysis, no screening, no manufacturing check.
-
-**What it can cause.** A job can declare a print orientation, have it validated
-and hashed into the acceptance contract, and have nothing whatsoever depend on
-it. Overhang, bridging and strength direction are all orientation-dependent.
-
-**Fixture that must fail first.** Two contracts differing only in orientation,
-asserted to produce different assessments.
-
 ## D21 — a lane cap that only downgrades a passing verdict
 
 **Where.** `pipeline/status.py`, the `lane_status` interaction.
@@ -276,7 +280,7 @@ qualifier.
 asserted to report both the failure and the lane's unavailability rather than one
 of them.
 
-## D22 — OCC cannot mesh five legal cone faces in the vent mount
+## D22 — OCC cannot mesh six legal cone faces in the vent mount
 
 **Where.** `benchmarks/fixtures/vent-ball-combine/public/sources/vent_mount.step`,
 and therefore `ROADMAP.md` Release 1's authentic exercise.
@@ -287,6 +291,27 @@ the honest statement is about the user's data or about our toolchain.
 `BRepMesh_IncrementalMesh` returns `IsDone() = True` with
 `GetStatusFlags() = 4` (`IMeshData_Failure`) on five cone faces of the
 hinge-pivot bore.
+
+**Two instruments, two counts, and the larger one is the one to fix against.**
+The five above are what the mesher's own status flags report. The per-face
+probe `mesh_io.tessellate_brep` runs — the one every consumer of this file
+actually goes through — reports **six**, measured at `0cb4302`:
+
+```
+face 93  (GeomType.CONE) at (19.150, 28.865, 53.305)
+face 107 (GeomType.CONE) at (-5.850, 28.865, 53.305)
+face 225 (GeomType.CONE) at (19.023, 28.744, 53.351)
+face 227 (GeomType.CONE) at (21.941, 28.744, 53.351)
+face 233 (GeomType.CONE) at (-5.977, 28.744, 53.351)
+face 235 (GeomType.CONE) at (-3.059, 28.744, 53.351)
+```
+
+All six are cones, all six raise `'NoneType' object has no attribute NbNodes`,
+and `design-tool diagnose` classifies the file `REPAIR_REQUIRED` on them. The
+discrepancy is not a regression — it is two different questions, one asked of
+the shape-wide mesher and one asked face by face — and it is recorded because a
+bounded repair will be measured against a count, and six is the number a repair
+has to clear.
 
 **Evidence that the faces are legal.** Every structural hypothesis was measured
 and refuted: `BRepCheck_Analyzer(face).IsValid()` is True for all of them;
@@ -323,7 +348,7 @@ triangles, in **metres**.
 (`BRepCheck_UnorientableShape`, wire `BRepCheck_SelfIntersectingWire`), and it is
 why the whole-shape check fails. gmsh independently refuses three surfaces — a
 BSpline patch and two planes 0.0066 mm and 0.0028 mm thick. Those slivers are
-real defects. They are not the five cones.
+real defects. They are not the six cones.
 
 **What it can cause.** Preservation cannot be measured against the repository's
 only `PHYSICALLY_PROVEN` source. Release 1's exercise completes with that row
@@ -347,22 +372,55 @@ file asserted to tessellate completely.
 
 ## D23 — the function built to prevent a false clean verdict returns one
 
+**FIXED.** The enumeration half, at `0cb4302`+1. The zero-volume half is
+restated below as what it actually is, and is not this defect.
+
 **Where.** `mesh_io.tessellate_brep`, and `validate_brep_tessellation` behind it.
 
-**What is wrong.** It returns `complete=True` for input whose faces it cannot
-enumerate. A shape it cannot walk produces no failures, and no failures reads as
-success.
+**What was wrong.** `BrepTessellation.complete` was `not self.failures`, and a
+shape the function cannot walk produces an empty failure list — so it returned
+`complete=True` for input whose faces it cannot enumerate. There are three
+answers, not two: every face read, some face failed, and *nobody looked*. The
+third is not a weaker version of the first.
 
 **Evidence.** Hit twice by accident while investigating D22:
-`build123d.Shape.cast` returns `None` for a `ShapeFix_Shape` result, and a
-zero-volume shape reported `complete=True` with 33,683 triangles.
+`build123d.Shape.cast` returns `None` for a `ShapeFix_Shape` result, and that
+`None` arrived here — `getattr(None, "faces", None)` is not callable, so the
+early return produced a clean reading of nothing.
 
-**What it can cause.** This is the exact function added in `a792b67` to stop
-`diagnose` calling an untessellatable STEP clean — a false clean in the
-false-clean detector.
+**What it could cause.** This is the exact function added in `a792b67` to stop
+`diagnose` calling an untessellatable STEP clean, so it was a false clean in the
+false-clean detector, and it reached all three consumers:
+`diagnose` classified such a file `USABLE_EXACT`; `validate_brep_tessellation`
+let it through the gate in front of every B-rep export; `preservation` proceeded
+to measure against it and died one line later on an empty vertex array. Two of
+those three are silent.
 
-**Fixture that must fail first.** A shape whose faces cannot be enumerated,
-asserted to report unknown rather than complete.
+**The fix.** `BrepTessellation` gains `enumerated`, and `complete` becomes
+`enumerated and faces > 0 and not failures` — three conjuncts, each of which was
+a false clean that reached a caller. `summary()` distinguishes all three states,
+and the receipt carries `enumerated` so a reader of the evidence can tell "this
+shape has no faces" from "this shape was never walked". `diagnose` and
+`preservation` stopped printing "0 of 0 face(s) cannot be tessellated".
+
+**Fixtures.** `test_mesh_io.BrepTessellationDiagnosticTest` — a `None` shape, a
+shape with no `faces()`, a shape whose `faces` is not callable, a shape
+enumerating zero faces, and the positive case that must still report complete.
+Seven mutations of the protection attempted, seven caught. Verified against real
+geometry: `vent_mount.step` still reports `REPAIR_REQUIRED` over 329 enumerated
+faces, and `design-tool selftest` still exports all five certified templates
+through `validate_brep_tessellation`.
+
+**Not fixed, and not this defect: a zero-volume shape reported `complete=True`
+with 33,683 triangles.** That reading is *correct* about tessellation — every
+face was walked and triangulated. What was wrong is a caller reading "every face
+tessellated" as "this is a usable solid". `complete` is a statement about
+coverage of the enumeration, and widening it to mean fitness would put a
+solidity judgement inside a function whose whole job is to report what it could
+read. Whatever gate should refuse a zero-volume export belongs beside the other
+integrity checks in `compute_integrity`, and nothing has yet established that
+this shape can reach an export path — so it is recorded here rather than
+promoted to a defect nobody has reproduced deliberately.
 
 ## D24 — coverage is a ratio against the contract that declared it
 
@@ -404,3 +462,447 @@ producing a number that reads as comparable. Coverage itself needs no change.
 **Fixture that must fail first.** Two formulations of one job with different
 mandatory feature sets, both at coverage 1.0, asserted to be reported as
 incomparable rather than equal.
+
+## D25 — a formulation is graded against the rubric its own proposal wrote
+
+**Where.** [`pipeline/acceptance.py`](../skills/3d-modeling/scripts/pipeline/acceptance.py):316-325
+and :357-359, reaching [`pipeline/runner.py`](../skills/3d-modeling/scripts/pipeline/runner.py):766-802.
+
+**What is wrong.** Nothing, within one run: an authored job has to get its
+expectations from somewhere, and the designer's proposal is the only thing that
+knows what the part is supposed to be. The proposal is frozen before any
+geometry exists, and the pipeline owns every band, so a formulation cannot
+loosen a gate after seeing its own result.
+
+It becomes a defect the moment two formulations are set beside each other. On
+the authored lane the proposal sets **three** things that the checks are then
+measured against, and all three are per-formulation while everything a reader
+assumes is shared is shared:
+
+1. **the check set.** `declared` is that formulation's own mandatory features
+   (`commission.py:436`). This is D24, and it is the face that needs a fixture
+   constructed — no committed case exercises it.
+2. **the expectation.** `expected_bbox_mm` and `expected_bodies` come from the
+   proposal (`acceptance.py:358-359`) and are what the always-present
+   `envelope`, `bodies` and `unit_scale` checks measure against.
+3. **the band.** A feature's tolerance is computed from the magnitude the
+   proposal declared — `contract.area_tolerance` is 0.5% of it, floored at
+   1 mm² — so declaring a larger number buys a looser band.
+
+**Evidence.** Face 2 is live in the only recorded branched case, with nothing
+constructed. In `benchmarks/replays/branch-knob-seat-fallback`, the root
+formulation's `design_proposal.json` declares `bbox_mm.z = 50.0` and
+`plate-seated`'s declares `52.0`. Each was checked against its own declaration
+to a band of 0.5, and `expected.json` records `envelope` as `PASS` for both.
+Face 3 is arithmetic on `contract.area_tolerance`: a row declaring 881.33 mm² is
+graded to ±4.41 and one declaring 2000.0 mm² to ±10.0. Both faces were found by
+building `design-tool compare` and asking what two PASSes actually assert.
+
+**What it can cause.** Any report that prints one formulation's verdicts beside
+another's asserts an equality nobody measured. "Both passed" is two separate
+self-assessments printed adjacently, and on the recorded knob it would tell a
+reader the two formulations are equal on envelope when one is 2 mm taller by
+design. It is `ARCHITECTURE.md` 8.5's rule one level down, in the place a
+weighted total is not needed to hide a mandatory difference — adjacency does it
+unaided.
+
+**What would close it.** Not a scoring fix and not a schema change. The
+comparison refuses: `INCOMPARABLE_CHECK_SETS` where the sets differ,
+`INCOMPARABLE_EXPECTATIONS` where the same check was measured against different
+expectations or bands, and it names which. Shipped for the comparison path in
+`pipeline/compare.py`. What is **not** closed is every other reader: nothing
+stops a person or an agent reading two `commission_report.json` files side by
+side and drawing the equality themselves, and no receipt says on its face that
+its expectations were self-declared. Closing that needs the requirement-to-check
+edge Release 4 has not built.
+
+**Fixture that must fail first.** Two formulations declaring different
+`bbox_mm`, both PASS on `envelope`, asserted to be reported
+`INCOMPARABLE_EXPECTATIONS` rather than equal —
+`pipeline/test_compare.py::TheRubricIsNotSharedTest`. Fifteen mutations of the
+protections in that file were attempted and fifteen were caught.
+
+## D26 — `status` reports two formulation counts for one job, and drops the root
+
+**Where.** [`pipeline/cli.py`](../skills/3d-modeling/scripts/pipeline/cli.py):1759
+against :1783.
+
+```python
+for row in project.alternatives:            # :1759 -- no row exists for the root
+for key in [ROOT_ALTERNATIVE] + [row.alternative_id
+                                 for row in project.alternatives]:   # :1783
+```
+
+**What is wrong.** `design-tool branch` never writes an `alternatives` row for
+the shared root (`cli.py:2026-2029`) — the root is a formulation by having a
+directory, a proposal, a contract and its own receipts, not by being declared.
+So the `alternatives` block in one `status --json` report iterates two
+formulations on the recorded knob while the `cost` block in the same report
+iterates three. The two disagree about what the job is.
+
+A second, quieter half: the loop calls `_derived_at` per sibling, which returns
+`derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons`, and
+keeps two of the five. `tools/replay.py:958-987` is the proof it is missed —
+to read per-formulation staleness the harness has to issue `branch --activate`
+and `status` once per formulation.
+
+**Evidence.** Found while building `design-tool compare`, by asking where a
+comparison should get its formulation set from. `compare` takes the union
+(`cli.py`, `compare`) rather than reading `report["alternatives"]`, and
+`pipeline/test_compare.py::TheCommandSurfaceTest::test_the_shared_root_is_one_of_the_formulations`
+asserts the root is compared.
+
+**What it can cause.** Any caller that takes its formulation set from
+`status --json`'s `alternatives` silently omits the shared root — which on the
+knob is one of the two designs. A comparison built that way would drop a
+formulation and report the remainder as the whole.
+
+**What would close it.** Iterate the union in `status` as `cost` already does,
+and stop discarding the three derived fields. Deliberately **not** done in the
+commit that found it, for a reason that has since expired: at the time the L1
+replay suite could not execute on Linux at all, and changing a golden-feeding
+command on a platform that cannot run the goldens is how a recording breaks.
+`pipeline/confine_posix.py` removed that constraint — the suite now runs here and
+reproduces its digests — so this is ordinary work on any platform, and what
+remains is only that nobody has done it.
+
+**Fixture that must fail first.** A branched project where
+`len(status_report["alternatives"]) + 1 == len(status_report["cost"]["by_alternative"])`,
+asserted to become equal.
+
+**Status: FIXED.** `cli.status` iterates the union -- the shared root plus every
+declared alternative -- and the root's row is synthesised in the report rather
+than written into `project.json`. That distinction is the whole of the fix's
+scope: a declared row for the root would make it a thing a user could reject or
+supersede, and would move what every existing project deserialises to. It goes
+through the same `Alternative.as_dict()` as any other row, so a basis nobody set
+is absent rather than empty, and the root is a formulation rather than a special
+case.
+
+The quieter half is closed too: all five fields `_derived_at` computes reach the
+report, so per-formulation staleness is readable from one call.
+
+**Fixture:** `pipeline/test_alternatives.py::OneJobHasOneFormulationCountTest`,
+three tests. Before the fix the counts are 3 against 4 and the `stale` field is
+absent; two mutations were attempted -- the root dropped from the union, and the
+three derived fields dropped again -- and both were caught.
+
+**What the fix did *not* move, which is worth recording.** The L1 recordings did
+not change. `tools/replay.py`'s `_derive_all` never read the broken block: it
+issues `branch --activate` and `status` once per formulation and reads
+`final_status`/`stored_status`/`stale` from each. So the harness's workaround is
+also the reason the goldens were never exposed to the defect. That workaround
+can now be one call, which would also stop a replay leaving the project parked
+on whichever formulation it activated last -- separate work, because it changes
+the recorded exit sequence.
+
+## D27 — the comparison's material axis read a shape no run has ever written
+
+**Where.** [`pipeline/compare.py`](../skills/3d-modeling/scripts/pipeline/compare.py):474,
+before this commit:
+
+```python
+volume = ((report.get("screening") or {}).get("detectors") or {}).get("volume") or {}
+```
+
+**What is wrong.** `screening.run` returns `detectors` as a **list** of rows,
+each carrying its own `detector` key (`screening.py:294`). Reading it as a
+mapping keyed by detector name raises `AttributeError` on a real receipt, so
+`compare`'s `volume_mm3` and `volume_detector` — the whole material axis
+`ROADMAP.md`'s Release 4 asks for — could never be produced.
+
+**Why nothing caught it.** Every fixture that exercised the line was authored
+against the reader rather than the writer. `test_compare.py:189` built
+`"detectors": {"volume": {...}}`, and twenty-two L0 fixtures then agreed with
+each other and with nothing the pipeline produces. The suite was green, the
+verb was "shipped", and the defect was one command away the whole time: the
+first `design-tool compare` pointed at the recorded knob raised inside a dict
+comprehension.
+
+**Evidence.** Found by running the verb on
+`benchmarks/replays/branch-knob-seat-fallback` while wiring the compare step
+into the L1 recording — the work `ROADMAP.md` listed as owed. Reproduced by
+reverting the reader with the fixtures left correct: 21 of 25 tests in
+`test_compare.py` fail, which is the measure of how much the fixtures were
+holding up on their own.
+
+**Status: FIXED**, in two goes, and the first go is worth recording because it
+made exactly the mistake this defect is about.
+
+The first fix added `screening.detector(report, name)` and called it "the single
+reader". An independent review found it was not: `tools/replay.py:1241` still
+built `screening_detail.detectors` with `for row in screening.get("detectors",
+())` — inside `_observe_dir`, the very function this record claimed had been
+routed through the pipeline's reader. One caller fixed and one caller left is
+not one reader; it is one reader and one place the next shape change surfaces as
+a bare `AttributeError`.
+
+So the reader is now `screening.detectors(report)`, returning the list, and
+`detector(report, name)` is a lookup built on top of it — neutering the first
+takes the second with it. Both live beside `screening.run`, the single writer.
+`detectors` raises `ScreeningShapeUnexpected` on a non-list rather than
+returning `[]`, because a reader that shrugged would have reported "no volume
+measured" on every job forever, and that is a sentence nobody thinks to doubt.
+`cli.compare` catches it beside `CompareError` and returns 2: loud is right,
+but gate 4.1 asks for controlled failure rather than a stack trace.
+
+Remaining subscript readers, deliberately: `test_pipeline.py:364` and three
+sites in `benchmarks/heavy/test_phase2_heavy.py`. They are tests asserting on a
+receipt they have just watched a run write, which is the one place reading the
+shape directly is the point.
+
+**What this is really evidence for.** A fixture written from a reader tests the
+reader against itself. The protection that catches this class is a tier that
+runs the verb against receipts a real pipeline wrote, which is what the compare
+step in the L1 recording now is.
+
+## D29 — a declared tolerance in the wrong shape is silently ignored by the replay band
+
+**Where.** [`tools/replay.py`](../tools/replay.py), `_band_for`:
+
+```python
+if isinstance(tolerance, dict):
+    declared = abs(float(tolerance.get("abs") or 0.0))
+```
+
+**What is wrong.** A check whose `tolerance` is a bare number rather than a
+`{"abs": …}` mapping falls through to the computed default. On
+`benchmarks/replays/branch-knob-seat-fallback` the `envelope` check records
+`tolerance: 0.5`, so the replay compares that measurement at 0.251 mm — the
+0.5% + 1e-3 default — rather than at the 0.5 mm the receipt declares.
+
+**Why it is recorded rather than fixed.** The direction is safe: the band in use
+is *tighter* than the declared one, so nothing passes that should fail, and
+"fixing" it would loosen a live protection by a factor of two. There is also a
+real question underneath it, which is whether a replay band should read an
+acceptance tolerance at all: a contract's tolerance says how far a part may be
+from its target and still be acceptable, while a replay band says how far a
+rerun may be from the recording and still be the same run. Those are different
+questions, and `_band_for` currently answers the second with the first's number
+where one happens to be in the expected shape.
+
+**Evidence.** Found by an independent review of Release 4 slice 2 while checking
+whether the new `material` band was real protection. Measured on the knob:
+`volume_mm3` band 237.63 mm³ against a 2266.6 mm³ signal between the two
+designs; `bbox_mm.z` band 0.251 mm. Probed — +200 mm³ passes, +300 mm³ fails;
++0.2 mm passes, +0.3 mm fails.
+
+**What it can cause.** Nothing today, and that is why it is a note rather than a
+repair. What it would cause is a maintainer reading `_band_for` and concluding
+that declared tolerances are honoured, then writing one as a bare float and
+believing they had widened a band they had not touched.
+
+**What would close it.** Decide the question above first. If a replay band
+should never read an acceptance tolerance, delete the branch and say so; if it
+should, accept both shapes. Either way the knob's recording moves, so it is a
+slice with a re-record and not a one-line change.
+
+**Deliberately not closed in the D15/D28 closure pass, and the reason is worth
+keeping.** The obvious "fix" — accept a bare float so that `_band_for` honours
+both shapes — would **widen a live band by a factor of two** on the one
+recording that exercises it, in exchange for making an input shape look
+consistent. A protection is not improved by being loosened to match the
+documentation of its own input. And the two numbers still answer different
+questions: an acceptance tolerance says how far a *part* may be from its target
+and remain acceptable, a replay band says how far a *rerun* may be from the
+recording and still be the same run. Until that question is settled, the
+conservative behaviour stands and this entry stays open rather than being
+converted into a change that trades protection for tidiness.
+
+## D30 — for some references the interface dimension *is* the answer dimension
+
+**Where.** [`benchmarks/corpus.json`](../benchmarks/corpus.json), and the whole
+blind-benchmark premise in [`tools/blind.py`](../tools/blind.py).
+
+**What is wrong.** A blind request states what the part must fit and withholds
+the part's own size. For `voron-deck-support` those are the same number. The
+part bolts flat against a 20 mm extrusion face, so it is 20 mm across: its
+x-extent *is* the interface. `extrusion_series: "2020"` was refused by the
+coincidence check for exactly this reason — 2020 states 20, and 20.0 mm is the
+answer — and removing it removed information the designer needed.
+
+**Evidence.** The first blind run, scored against the withheld reference:
+
+```
+OFF smallest  8.200 against  5.800  (+2.400, band 0.116)
+OFF middle   12.000 against 14.495  (-2.495, band 0.290)
+OFF largest  16.000 against 20.000  (-4.000, band 0.400)
+OFF volume   1023.19 against 1068.534         (4.2% out, band 2%)
+ok  bodies        1 against       1
+ok  watertight True against    True
+```
+
+The designer's own report named the cause before the score was run: *"No
+extrusion profile size is given (2020? 2040? 1515?). That is what actually sets
+how far the panel edge sits from the slot centreline, and therefore the pad
+length and the total X."* It also ranked, unprompted, the depth along the
+extrusion as its largest unconstrained axis: *"Nothing stated touches it. A
+reference at 8 or at 20 is equally consistent with the brief."*
+
+**What it can cause.** A benchmark that is unanswerable rather than hard, and
+reports the difference as a low score. Two of the three failing axes here are
+traceable to information the question could not carry: one because stating it
+would state the answer, one because nothing in the brief constrains it at all.
+A reader taking `OFF, OFF, OFF` as a measure of the designer is reading a
+property of the question.
+
+**What it is not.** A reason to hand the dimension over quietly. The coincidence
+check is right that `"2020"` on a 20 mm part is the answer; what is wrong is
+concluding that the request is therefore fine without it.
+
+**What would close it.** One of three, and the choice is a design decision
+rather than a repair:
+
+* **declare the disclosure.** State the extrusion series, record in the manifest
+  that the x-extent is thereby given, and score the remaining axes. This is
+  `request_vocabulary` from the second design returning in a principled form —
+  a *declared* disclosure rather than an exemption, with the score's denominator
+  shrinking to match.
+* **choose references whose interfaces do not fix their envelope.** A part that
+  clips into a slot without spanning a face has an interface that constrains it
+  without determining it. None of the four committed entries is clearly that.
+* **score what the question can constrain.** Drop the axis the interface fixes
+  from the comparison and say so, which makes the score narrower and honest
+  rather than wide and misleading.
+
+**Fixture that must fail first.** A test asserting that for each entry, every
+axis the score compares is constrained by something the request states — which
+fails today on `voron-deck-support`'s x, and would fail on its y for a different
+reason.
+
+**Partly closed, and the second run is why the rest is still open.** The first
+option is built: an entry may declare, in writing, which of the reference's own
+measurements the question gives away and why (`benchmarks/corpus.json`
+`discloses`, enforced in `corpus.request_view`). Declared coincidences are
+permitted, undeclared ones still refused, a disclosure that gives away nothing
+is refused as an exemption in disguise, and `blind.score` marks a disclosed axis
+`given` and reports how many axes were actually reconstructed.
+
+A second blind run — a fresh designer, the improved brief now stating
+`extrusion_series: 2020` — measured what that bought:
+
+```
+OFF smallest    10.000 against   5.800  (+4.200)     run 1: +2.400
+OFF middle      20.000 against  14.495  (+5.505)     run 1: -2.495
+giv largest     20.000 against  20.000  (+0.000)     given, not earned
+OFF volume    2826.376 against 1068.534              run 1: 1023.190
+```
+
+Two things follow, and the second is the finding.
+
+**The disclosure mechanism earns its place on first use.** The given axis came
+back exact. Without the `giv` mark that reads as a perfect row and an
+improvement over run 1; it is the question's own number reflected back, and
+crediting it would have been the flattering score the mark exists to refuse.
+
+**Stating the interface did not make the question answerable.** The two
+genuinely reconstructed axes got *worse*, and both designers — independently,
+with no shared context — named the same cause. Run 1: *"the depth along the
+extrusion is unconstrained by the brief. A reference at 8 or at 20 is equally
+consistent with the brief."* Run 2: *"the brief constrains the part's
+cross-section well and its plan size barely at all. A scorer weighting bbox
+extents is largely scoring whether I guessed the same lip overlap and foot
+length as the original author, which no amount of engineering recovers from the
+four stated numbers."*
+
+So the bounding box is mostly free parameters. What the brief does pin is the
+cross-section — rebate depth from `panel_stock`, bore from `fastener_thread`,
+key width from `extrusion_slot_opening` — and those are the dimensions a person
+means by *critical*. The benchmark currently scores the ones the question cannot
+constrain and cannot score the ones it can, because measuring a rebate depth on
+an arbitrary mesh is feature recognition and that is Release 6/7.
+
+**What remains open, restated.** Not "which of three options", but: the score
+compares an envelope the question does not determine. Until it can compare a
+feature, a low score on these entries is substantially a fact about the
+question. The honest interim is what the report now says — how many axes were
+reconstructed rather than given — and not a claim that the number measures a
+designer.
+
+## D31 — a datum's contents are not in the acceptance contract that depends on them
+
+**Where.** `pipeline/cli.py::_requirement_hash`, against
+`pipeline/cli.py:1229` where an edit scope freezes `datum_ids`.
+
+**What is wrong.** A scope records *which* datums it depends on and the
+requirement hash does not record *what they said*. `_requirement_hash` covers
+the brief, `STATED`/`INHERITED`/`MEASURED` requirements, the envelope, the
+interfaces, the components and the modifiers, and its docstring names its own
+subject as "the values somebody stated or measured". `project.datums` is not in
+it. So a datum that keeps its `datum_id` while its value, unit, provenance or
+`derived_from` revision changes leaves the frozen contract byte-identical, and
+a review answer bound to the old reference keeps binding.
+
+**Evidence.** Read rather than run: `_requirement_hash` builds its payload from
+six keys and `datums` is not among them, and `cli.py:1229` writes
+`{"datum_ids": list(scope.datum_ids)}` — identifiers, no contents.
+
+**What it can cause.** A stale acceptance revision that should have been cut.
+This is the D28 shape — a key that names a thing rather than what the thing
+established — and D15's — one question answered in two places. It is filed
+rather than fixed because the claim path it would corrupt is already capped:
+every job with an edit scope is held at `EXPERIMENTAL_UNAVAILABLE` because
+sample density is not derived from a declared minimum detectable defect size, so
+no successful preservation claim is reachable through it today. That cap is the
+current fail-closed, and it is the reason this is a defect and not a stop.
+
+**The fixture that must fail before the fix lands.** A project whose scope names
+one datum, run to a frozen contract; the datum's value changed with its id kept;
+the contract re-derived. The test must show the requirement hash moved and the
+stored review answer refused. It must fail against today's implementation.
+
+## D32 — the preservation detection limit is derived from one of the two surfaces sampled
+
+**Where.** `pipeline/preservation.py::_sampled`.
+
+**What is wrong.** The audit samples both directions — points planned on the
+source and points planned on the candidate — and derives the reported detection
+limit from `source.area` alone. The comment beside it argues the choice for the
+case where the edit *removed* material, and that argument is sound there. It
+does not cover the other direction: where an allowed edit adds substantial
+surface, the candidate-side pass spreads the same sample count over a larger
+surface and its in-region samples are then discarded, so the sensitivity
+actually achieved outside the region is worse than the figure reported beside
+it.
+
+**Evidence.** `sampled_area = float(source.area)` feeds
+`detectable_defect_mm(sampled_area, samples)`, while the second pair plans its
+points on the candidate. The docstring above it justifies only the
+smaller-candidate case.
+
+**What it can cause.** A reported detection limit that overstates what the
+candidate-direction sampling achieved, under `PRESERVED_WITHIN_TOLERANCE`. Same
+cap as D31 applies and is the reason this is filed rather than stopped: the
+`EXPERIMENTAL_UNAVAILABLE` ceiling means the figure is not currently load-bearing
+for a success claim.
+
+**The fixture that must fail before the fix lands.** A candidate whose area is a
+large multiple of its source's, with an unauthorised change outside the region;
+the reported limit must not claim a sensitivity the candidate-direction pass did
+not have. Reporting per-direction, or the conservative larger area, both satisfy
+it; the fixture should not pick one.
+
+## D33 — a JSON `null` unit becomes the string `"None"` and validates
+
+**Where.** `pipeline/project.py`, datum construction — `unit=str(row.get("unit", ""))`.
+
+**What is wrong.** `str(None)` is `"None"`, and the rule that requires a unit
+tests `if not str(self.unit).strip()`. A numeric datum declared with
+`"unit": null` therefore arrives carrying a unit of `"None"`, which is
+non-empty, and passes the check whose own message says "a number with no unit is
+a number two readers can read differently".
+
+**Evidence.** Measured, not read: constructing `Datum(value=12.5,
+unit=str(None), ...)` stores `unit='None'`, and `problems()` returns no
+`SCHEMA_REQUIRED` for the unit. The `.get(key, "")` default only covers an
+*absent* key; an explicit `null` passes through it.
+
+**What it can cause.** A unitless measurement recorded as though it had a unit,
+in a field that drives design. Narrower than D31 and D32 — it needs a
+hand-written `null` rather than an omitted key — and it defeats the check
+entirely when it happens.
+
+**The fixture that must fail before the fix lands.** A datum payload with
+`"unit": null` and a numeric value must produce the `SCHEMA_REQUIRED` finding.
+The same coercion appears on sibling string fields and the fixture should say
+whether they are in scope.

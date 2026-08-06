@@ -426,5 +426,175 @@ class BranchVerbTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class OneJobHasOneFormulationCountTest(unittest.TestCase):
+    """`docs/defects.md` D26: `status` counted the job two different ways.
+
+    `design-tool branch` writes no `alternatives` row for the shared root -- the
+    root is a formulation by having a directory, a proposal, a contract and its
+    own receipts, not by being declared. So the `alternatives` block iterated
+    `project.alternatives` and saw two formulations of the recorded knob while
+    the `cost` block in the same report iterated the union and saw three. One
+    report, two answers to "what is this job".
+
+    The quieter half is here too. `_derived_at` returns five fields --
+    `derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons` --
+    and the loop kept two, so per-formulation staleness was unreadable from the
+    report. `tools/replay.py` is the proof it was missed: to record what each
+    formulation currently supports the harness had to issue `branch --activate`
+    and `status` once per formulation, because one `status` call could not say.
+    """
+
+    def _status(self, directory: Path) -> dict:
+        import contextlib
+        import io
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(0, cli.status([str(directory), "--json"]))
+        return json.loads(stream.getvalue())
+
+    def _job(self, root: Path) -> Path:
+        directory = _laid_out(root)
+        _author(directory, "ancestor", **SCREW)
+        for name in ("snap-fit", "magnetic"):
+            self.assertEqual(0, _branch(directory, parent=".", name=name,
+                                        reason=f"the {name} concept"))
+        return directory
+
+    def test_the_two_blocks_of_one_report_count_the_same_formulations(self) -> None:
+        """The defect, as the arithmetic that exposed it.
+
+        Fails before the fix with 3 against 4: `cost.by_alternative` carries the
+        root and `alternatives` does not.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+
+            named = {row["alternative_id"] for row in report["alternatives"]}
+            costed = set(report["cost"]["by_alternative"])
+            self.assertEqual(
+                costed, named,
+                "one job, one set of formulations. A caller taking its set from "
+                "`alternatives` silently drops the shared root, which on the "
+                "recorded knob is one of the two designs")
+            self.assertIn(cli.ROOT_ALTERNATIVE, named,
+                          "the root is a formulation: it has a directory, a "
+                          "proposal, a contract and its own receipts")
+
+    def test_the_root_is_named_as_a_formulation_and_not_as_a_row_branch_wrote(self) -> None:
+        """It has no declared row, and `branch` must not start writing one.
+
+        The fix is to iterate the union in the report, not to invent an
+        `alternatives` entry in `project.json` -- that would make the root a
+        thing a user could reject or supersede, and change what every existing
+        project deserialises to.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = self._job(Path(raw))
+            report = self._status(directory)
+
+            self.assertEqual(
+                ("snap-fit", "magnetic"),
+                tuple(a.alternative_id for a in P.load(directory).alternatives),
+                "project.json still declares exactly the two branches")
+            root = next(row for row in report["alternatives"]
+                        if row["alternative_id"] == cli.ROOT_ALTERNATIVE)
+            self.assertEqual("ACTIVE", root["disposition"])
+            # Absent rather than empty, because that is what `Alternative.as_dict`
+            # does with a basis nobody set -- the rule that keeps a project from
+            # moving for a field it never carried. The root goes through the same
+            # serialisation as any other row rather than a second one written for
+            # it, which is the point: it is a formulation, not a special case.
+            self.assertNotIn("basis", root)
+
+    def test_each_formulation_reports_what_stopped_binding_and_not_only_its_status(self) -> None:
+        """The half `tools/replay.py` had to work around one command at a time."""
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+            for row in report["alternatives"]:
+                with self.subTest(formulation=row["alternative_id"]):
+                    for field in ("status", "stored_status", "stale",
+                                  "allowed_claim"):
+                        self.assertIn(field, row)
+                    self.assertIsInstance(row["stale"], list)
+
+    def test_each_row_carries_its_own_formulations_status_and_not_the_active_ones(self) -> None:
+        """The mutation that produces a false claim, and survived everything.
+
+        A review changed one line -- `derived if at is None or at ==
+        project.active_alternative` -- so the synthesised root row reported the
+        *active branch's* status, stored status, staleness and allowed claim.
+        That survived this test class and the entire L0 suite, because the
+        fixture above never runs anything: every formulation is `NOT_RUN`, so
+        every row's values are trivially equal and no assertion could tell one
+        formulation's status from another's.
+
+        `status --json` reporting the root as `VERIFIED` when no run ever
+        concluded there is the false-claim class, in the block this slice exists
+        to widen. So the receipts here are unequal on purpose: the root
+        concluded and the branch did not.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            _author(directory, "ancestor", **SCREW)
+            self.assertEqual(0, _branch(directory, parent=".", name="snap-fit",
+                                        reason="no fasteners"))
+            # The root has a concluded run; the branch has nothing. `branch`
+            # left `snap-fit` active, so a row that echoed the active
+            # formulation would report the root as NOT_RUN and the m3 mutation
+            # would report it as whatever the branch says.
+            (directory / "final_status.json").write_text(
+                S.canonical_json({"schema_version": 1, "final_status": "VERIFIED",
+                                  "allowed_claim": "the root concluded",
+                                  "artifact_hashes": {}}),
+                encoding="utf-8")
+
+            report = self._status(directory)
+            rows = {row["alternative_id"]: row for row in report["alternatives"]}
+            self.assertEqual("snap-fit", report["alternative"],
+                             "the branch is active, so an echoing row would "
+                             "carry its values")
+            self.assertEqual("VERIFIED", rows[cli.ROOT_ALTERNATIVE]["stored_status"],
+                             "the root reports what the root's own receipts say")
+            self.assertIsNone(rows["snap-fit"]["stored_status"],
+                              "and the branch reports that nothing concluded "
+                              "in its directory")
+
+    def test_an_unbranched_job_still_agrees_with_itself(self) -> None:
+        """D26's arithmetic on the case the fix changes most visibly.
+
+        The class above only ever builds a *branched* job. A review pointed out
+        that emitting the root row only when alternatives exist would pass every
+        test here while leaving `cost.by_alternative == ['.']` against
+        `alternatives == []` -- the same two-counts defect, on the job shape
+        nobody was asserting.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _laid_out(Path(raw))
+            _author(directory, "ancestor", **SCREW)
+            report = self._status(directory)
+            self.assertEqual(
+                set(report["cost"]["by_alternative"]),
+                {row["alternative_id"] for row in report["alternatives"]})
+
+    def test_the_synthesised_root_row_says_only_true_things(self) -> None:
+        """It is built here rather than read, so every field is an assertion.
+
+        `parents` and `reason` were unasserted: a review synthesised the root
+        with `parents=("snap-fit",)` and an empty reason and watched the whole
+        L0 suite stay green.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            report = self._status(self._job(Path(raw)))
+            root = next(row for row in report["alternatives"]
+                        if row["alternative_id"] == cli.ROOT_ALTERNATIVE)
+            self.assertEqual([], root["parents"],
+                             "the root was branched from nothing")
+            self.assertTrue(root["reason"].strip(),
+                            "and it says what it is, because every other row "
+                            "must and a blank one reads as a missing field")
+            self.assertNotIn("superseded_by", root)
+
+
 if __name__ == "__main__":
     unittest.main()

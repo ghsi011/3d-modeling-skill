@@ -127,10 +127,13 @@ Old completed projects are not migrated.
 
 ```
 design-tool doctor                 # what this interpreter can actually do
+design-tool selftest               # does this installation build what it certifies?
 design-tool init <project>         # write a project.json skeleton, nothing invented
 design-tool route <project>        # decide and record the route, with the rationale
 design-tool run <project>          # every deterministic stage available, then stop cleanly
 design-tool status <project>       # bindings, staleness, current status
+design-tool branch <project>       # declare, switch, or dispose of a formulation
+design-tool compare <project>      # what setting the formulations side by side settles
 design-tool diagnose <artifact>    # imported-file diagnosis and classification
 design-tool commission <project>   # the deterministic gate on the exported artifact
 design-tool audit <project>        # what a verifier can settle mechanically
@@ -138,6 +141,14 @@ design-tool motion <project>       # the declared-path sweep
 design-tool coupon <project>       # fit coupon from the declared interfaces
 design-tool package <project>      # 3MF / Bambu project draft
 ```
+
+The last five are decided and not yet built; the rest dispatch today. That gap
+is the roadmap, and it is the only direction the gap may run. A verb an agent
+can actually run and this block does not name is two authorities over one
+command surface, which is what this ADR exists to prevent — so
+`tools/test_documentation.py` refuses it. `branch` and `selftest` were added
+here after shipping in Release 3 without it, which is the drift that test now
+makes impossible; `compare` arrived with Release 4's first slice and this line.
 
 `run-job` remains as a deprecated alias of the `DIRECT`/`FITTED`/`FULL` runner so
 existing job directories keep working. `dt.py` and `team_tools` stay reachable

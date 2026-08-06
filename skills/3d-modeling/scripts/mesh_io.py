@@ -125,6 +125,14 @@ class BrepTessellation:
     reporting on the part. So the incomplete reading is *returned* rather than
     thrown away, and every caller has to decide in the open what to do with a
     partial one.
+
+    ``enumerated`` is the second thing this type has to be able to say, and it
+    was missing (`docs/defects.md` D23). ``complete`` was ``not failures``, and a
+    shape that cannot be walked at all produces an empty failure list -- so the
+    probe added to stop `diagnose` calling an untessellatable STEP clean
+    returned clean for the one input it can learn least about. There are three
+    answers here, not two: every face read, some face failed, and *nobody
+    looked*. The third is not a weaker version of the first.
     """
 
     faces: int
@@ -134,10 +142,21 @@ class BrepTessellation:
     angular_deflection: float
     vertices: Any = None
     triangles: Any = None
+    # False where the shape exposed no face enumeration this function could
+    # call. Defaulted True so that every construction site that *did* walk the
+    # shape keeps its meaning without restating it.
+    enumerated: bool = True
 
     @property
     def complete(self) -> bool:
-        return not self.failures
+        """Every face of a shape that had faces was read.
+
+        Three conjuncts, and each one is a false clean that reached a caller.
+        A shape nobody could walk is unknown. A shape with zero faces is not a
+        solid, and tessellating none of none is not a success. Only then does
+        the absence of failures mean what it says.
+        """
+        return self.enumerated and self.faces > 0 and not self.failures
 
     def as_dict(self) -> dict[str, Any]:
         """Receipt-shaped: what was read and how, never the arrays."""
@@ -145,6 +164,11 @@ class BrepTessellation:
             "method": "OCC per-face triangulation through build123d",
             "linear_deflection": self.linear_deflection,
             "angular_deflection": self.angular_deflection,
+            # On the receipt rather than inferred from `faces == 0`, so that a
+            # reader of the evidence can tell "this shape has no faces" from
+            # "this shape was never walked" without knowing which of the two
+            # produces a zero here.
+            "enumerated": self.enumerated,
             "faces": self.faces,
             "tessellated_faces": self.tessellated,
             "untessellatable_faces": len(self.failures),
@@ -152,6 +176,15 @@ class BrepTessellation:
         }
 
     def summary(self) -> str:
+        if not self.enumerated:
+            return ("B-rep faces could not be enumerated: the shape exposes no "
+                    "callable faces(), so nothing here has looked at it. This is "
+                    "not a clean reading -- it is no reading. A null shape from "
+                    "an OCC repair step arrives exactly like this.")
+        if self.faces == 0:
+            return ("B-rep tessellation found no faces to read. A shape with no "
+                    "faces is not a solid, and tessellating none of none is not "
+                    "a successful export.")
         return ("B-rep tessellation failed for affected face(s): "
                 + "; ".join(self.failures)
                 + ". Repair or remove the named face(s) before export.")
@@ -188,7 +221,13 @@ def tessellate_brep(shape: Any, *, tolerance: float, angular_tolerance: float,
     """
     faces_method = getattr(shape, "faces", None)
     if not callable(faces_method):
-        return BrepTessellation(0, 0, (), tolerance, angular_tolerance)
+        # Not a clean reading. `enumerated=False` is what stops the empty
+        # failure list below reading as success -- see `BrepTessellation` and
+        # `docs/defects.md` D23. Returned rather than raised because the shape
+        # -- including `None`, which is what an OCC repair step hands back when
+        # it could not produce one -- is the caller's to explain.
+        return BrepTessellation(0, 0, (), tolerance, angular_tolerance,
+                                enumerated=False)
 
     mesh_method = getattr(shape, "mesh", None)
     if callable(mesh_method):
@@ -290,6 +329,97 @@ def _duplicate_vertex_count(vertices: np.ndarray) -> int:
     if duplicated_groups.size == 0:
         return 0
     return int((duplicated_groups - 1).sum())
+
+
+def canonical_order(mesh):
+    """The same geometry, with vertex and face order made a function of it.
+
+    A seeded plan is only reproducible if the thing it indexes into is. Face
+    order decides which face each sample lands on, and nothing guarantees that
+    two reads of one file -- through a different loader path, a scene rather than
+    a mesh, a concatenation whose order came from a dict -- present the faces in
+    the same order. Sorting them here removes the question rather than assuming
+    the answer.
+
+    Winding is preserved: each triangle is rolled so its lowest vertex index
+    leads, which is a cyclic shift, and `signed_distance` reads winding for its
+    sign. This is defined up to exactly coincident vertices, which the merge in
+    `_load` is what removes.
+    """
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    if len(vertices) == 0 or len(faces) == 0:
+        return mesh
+
+    vertex_order = np.lexsort((vertices[:, 2], vertices[:, 1], vertices[:, 0]))
+    rank = np.empty(len(vertex_order), dtype=np.int64)
+    rank[vertex_order] = np.arange(len(vertex_order), dtype=np.int64)
+    faces = rank[faces]
+
+    roll = np.argmin(faces, axis=1)
+    columns = (np.arange(3, dtype=np.int64)[None, :] + roll[:, None]) % 3
+    faces = np.take_along_axis(faces, columns, axis=1)
+    face_order = np.lexsort((faces[:, 2], faces[:, 1], faces[:, 0]))
+
+    return trimesh.Trimesh(vertices=vertices[vertex_order],
+                           faces=faces[face_order], process=False)
+
+
+def body_identities(mesh: trimesh.Trimesh, *,
+                    bodies: Any = None) -> list[dict[str, Any]]:
+    """Every disconnected body, with a handle that is a function of its shape.
+
+    `diagnose` reported `bodies` as a count, and a count cannot be referenced:
+    a declaration selecting "the third body" resolves to whatever `split`
+    returned that run. The handle here is a digest over the body's own geometry
+    in canonical form, so it does not move when load order, vertex order or the
+    loader path does -- which is the property that lets a receipt name a body
+    and mean the same one next time.
+
+    Rows are ordered by handle rather than by split order, for the same reason:
+    two reads of one file must present the bodies in one order, or "the first"
+    is not a thing anybody can say. `bbox_mm` and `volume_mm3` ride along
+    because a list of digests is unreadable, and a person choosing which body
+    to keep would have to re-open the file to make the choice.
+    """
+    # No empty-mesh guard: `split` returns nothing for a mesh with no faces, so
+    # a guard here would be a second copy of that rule, and a mutation removing
+    # it survived because it could not change an answer.
+    # `bodies` lets a caller that has already split hand the result over:
+    # `diagnose` computes exactly this split one line above, and splitting
+    # twice was over half the cost this function added to an intake step.
+    rows: list[dict[str, Any]] = []
+    for body in (mesh.split(only_watertight=False)
+                 if bodies is None else bodies):
+        # Rounded and sign-normalised BEFORE canonicalising, which is the whole
+        # of the fix and not a detail. Rounding only the hash input left the
+        # sort reading unrounded coordinates, so noise of 1e-9 could flip a
+        # near-tie and permute the entire array before the rounding happened --
+        # and near-ties are the normal case, since every axis-aligned box has
+        # four vertices sharing an x. `+ 0.0` maps -0.0 to 0.0: the two are
+        # equal by every numeric test and differ in `tobytes`, and exporters
+        # really do write `v -0.0 -0.0 -0.0`.
+        #
+        # 6 places is a nanometre on a part measured in millimetres, far below
+        # anything this pipeline claims to resolve. It is applied here and never
+        # inside `canonical_order`, because that function's ordering is what
+        # every frozen sample plan was built on.
+        settled = np.round(np.asarray(body.vertices, dtype=np.float64), 6) + 0.0
+        ordered = canonical_order(trimesh.Trimesh(
+            vertices=settled, faces=body.faces, process=False))
+        digest = hashlib.sha256()
+        digest.update(np.asarray(ordered.vertices, dtype=np.float64).tobytes())
+        digest.update(np.asarray(ordered.faces, dtype=np.int64).tobytes())
+        low, high = ordered.bounds
+        rows.append({
+            "body_sha256": digest.hexdigest(),
+            "bbox_mm": [round(float(high[axis] - low[axis]), 4)
+                        for axis in range(3)],
+            "volume_mm3": (round(float(ordered.volume), 4)
+                           if ordered.is_watertight else None),
+            "faces": int(len(ordered.faces)),
+        })
+    return sorted(rows, key=lambda row: row["body_sha256"])
 
 
 def connected_component_count(mesh: trimesh.Trimesh) -> int:

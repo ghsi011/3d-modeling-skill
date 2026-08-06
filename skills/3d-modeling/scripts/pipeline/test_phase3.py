@@ -25,6 +25,7 @@ moved rather than weakened; `conftest.py` carries the rule and
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import tempfile
 import textwrap
@@ -38,6 +39,7 @@ import trimesh
 from . import acceptance as ACC
 from . import cli
 from . import diagnose as D
+from . import preservation as PR
 from . import project as P
 from . import route as RT
 
@@ -664,3 +666,407 @@ def _two_scopes_laid_out(root: Path) -> Path:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EdgeManifoldCountsTest(unittest.TestCase):
+    """docs/defects.md D1: one number was carrying three conditions.
+
+    `len(edges_unique) - len(face_adjacency)` counts every edge that is not
+    two-manifold -- open edges and edges shared by three or more faces alike --
+    and reported the total under a name that means only the first. A real source
+    artifact reported `boundary_edges: 332` whose actual condition was 322 open
+    edges, 9 edges shared by three faces and 1 shared by four. The number is what
+    a reader acts on, and "332 boundary edges" points a repairer at hole-filling,
+    which cannot close either of the other two.
+    """
+
+    @staticmethod
+    def _three_conditions() -> trimesh.Trimesh:
+        """One edge used by three faces, one by four, and open edges elsewhere.
+
+        Two fans that share no vertex, so the arithmetic is checkable by hand:
+        the three-fan contributes edge (0,1) used three times plus six edges used
+        once; the four-fan contributes edge (5,6) used four times plus eight used
+        once. 16 unique edges, none of them two-manifold.
+        """
+        vertices = np.array(
+            [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, -10, 0], [5, 0, 9],
+             [50, 0, 0], [60, 0, 0], [50, 10, 0], [50, -10, 0], [55, 0, 9],
+             [55, 0, -9]], dtype=float)
+        faces = np.array([[0, 1, 2], [0, 1, 3], [0, 1, 4],
+                          [5, 6, 7], [5, 6, 8], [5, 6, 9], [5, 6, 10]],
+                         dtype=np.int64)
+        return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+
+    def test_the_three_conditions_are_counted_separately(self) -> None:
+        mesh = self._three_conditions()
+        counts = D.edge_manifold_counts(mesh)
+
+        self.assertEqual(14, counts["boundary_edges"],
+                         "edges used by exactly one face")
+        self.assertEqual(2, counts["nonmanifold_edges"],
+                         "edges used by three or more faces")
+        self.assertEqual(4, counts["max_faces_per_edge"])
+        self.assertEqual({"1": 14, "3": 1, "4": 1}, counts["faces_per_edge"])
+
+        # The number the old expression produced, kept as the arithmetic that
+        # makes the defect legible: it is the sum of two different conditions.
+        self.assertEqual(
+            counts["boundary_edges"] + counts["nonmanifold_edges"],
+            len(mesh.edges_unique) - len(mesh.face_adjacency))
+
+    def test_a_sound_mesh_reports_no_edges_of_either_kind(self) -> None:
+        """The counter must be able to say zero, or it says nothing."""
+        counts = D.edge_manifold_counts(trimesh.creation.box(extents=(10, 10, 10)))
+        self.assertEqual(0, counts["boundary_edges"])
+        self.assertEqual(0, counts["nonmanifold_edges"])
+        self.assertEqual(2, counts["max_faces_per_edge"])
+
+    def test_an_open_mesh_reports_only_boundary_edges(self) -> None:
+        """A hole is a hole, and must not be inflated by the other condition."""
+        box = trimesh.creation.box(extents=(10, 10, 10))
+        box.update_faces(np.arange(len(box.faces)) != 0)
+        counts = D.edge_manifold_counts(box)
+        self.assertEqual(3, counts["boundary_edges"])
+        self.assertEqual(0, counts["nonmanifold_edges"])
+
+    def test_diagnose_reports_the_two_conditions_and_names_the_second(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "three-conditions.stl"
+            self._three_conditions().export(path)
+
+            report = D.diagnose(path)
+            self.assertEqual("REPAIR_REQUIRED", report["classification"])
+            self.assertEqual(14, report["boundary_edges"])
+            self.assertEqual(2, report["nonmanifold_edges"])
+            # A repairer told only about holes would reach for hole-filling,
+            # which cannot close an edge shared by three faces.
+            self.assertTrue(
+                any("3 or more face" in finding for finding in report["findings"]),
+                f"no finding named the non-manifold edges: {report['findings']}")
+
+
+class DerivedSampleDensityTest(unittest.TestCase):
+    """Release 6: a density derived from what the audit undertook to find.
+
+    The preservation lane has never been allowed to report a part COMMISSIONED
+    or VERIFIED, and the reason recorded on every one of its runs is this one:
+    the sample count was a fixed 20,000 rather than a density derived from a
+    declared minimum detectable defect size, "so a small undeclared addition
+    outside the edit region can still be missed, and is now missed identically
+    on every run."
+
+    Determinism was the previous slice and it is not sensitivity. This is
+    sensitivity: the count is now a function of the surface it is spread over
+    and the defect size the job declared, and the receipt can say what the plan
+    could find rather than how many points it used.
+    """
+
+    def test_the_count_inverts_to_the_size_it_was_derived_from(self) -> None:
+        """The two directions are one relation, so they must agree."""
+        for area in (100.0, 1027.8, 50_000.0):
+            for defect in (2.0, 1.0, 0.5, 0.25):
+                with self.subTest(area=area, defect=defect):
+                    count = PR.derive_sample_count(area, defect)
+                    back = PR.detectable_defect_mm(area, count)
+                    # Rounding up the count can only make the plan finer, never
+                    # coarser -- a detector that found *less* than it promised
+                    # would be the failure this whole slice exists to remove.
+                    self.assertLessEqual(back, defect + 1e-9,
+                                         f"{count} samples finds {back} mm, "
+                                         f"which is coarser than the declared "
+                                         f"{defect} mm")
+
+    def test_density_is_what_matters_not_the_count(self) -> None:
+        """Ten times the area needs ten times the points for the same size.
+
+        This is the property that makes the derivation legitimate at all:
+        `_plan_points` is area-weighted, so density is uniform over the surface
+        and the detectable size does not depend on which region a point landed
+        in. A count that did not scale with area would be a detector whose
+        sensitivity silently depended on how big the part was.
+        """
+        small = PR.derive_sample_count(1_000.0, 0.5)
+        large = PR.derive_sample_count(10_000.0, 0.5)
+        self.assertAlmostEqual(10.0, large / small, places=2)
+
+    def test_halving_the_defect_size_quadruples_the_samples(self) -> None:
+        """A defect presents an area, so the relation is quadratic, not linear."""
+        coarse = PR.derive_sample_count(1_000.0, 1.0)
+        fine = PR.derive_sample_count(1_000.0, 0.5)
+        self.assertAlmostEqual(4.0, fine / coarse, places=2)
+
+    def test_a_demand_over_the_ceiling_is_refused_and_names_what_it_could_find(self) -> None:
+        """A controlled failure, not a clamp, and not an allocation attempt.
+
+        Clamping would answer a question the job did not ask: "is this preserved
+        to 0.01 mm" answered by a plan that can only see 0.03 mm, and the answer
+        would look identical to one that could.
+        """
+        with self.assertRaises(PR.SampleBudgetExceeded) as caught:
+            PR.derive_sample_count(1027.8, 0.01)
+        message = str(caught.exception)
+        self.assertIn("0.01", message)
+        self.assertIn("ceiling", message)
+        # And it names the size that *is* reachable, so the refusal is
+        # actionable rather than only a refusal.
+        reachable = PR.detectable_defect_mm(1027.8, PR.MAX_DERIVED_SAMPLES)
+        self.assertIn(f"{reachable:.4f}", message)
+
+    def test_the_fixed_default_is_a_measurable_sensitivity_not_a_mystery(self) -> None:
+        """What 20,000 points actually bought, stated as a size.
+
+        The old constant was not wrong, it was unquantified -- 20,000 points is
+        dense on a 20 mm clip and sparse on a build plate. Now the same number
+        can be reported as the size it can find, which is what a reader of a
+        preservation claim needs.
+        """
+        clip = PR.detectable_defect_mm(1027.8, PR.DEFAULT_SAMPLES)
+        plate = PR.detectable_defect_mm(250_000.0, PR.DEFAULT_SAMPLES)
+        self.assertLess(clip, 0.6)
+        self.assertGreater(plate, 7.0)
+        self.assertGreater(plate, clip * 10,
+                           "the same fixed count is a very different detector "
+                           "on a small part and a large one, which is why a "
+                           "count alone cannot support a sensitivity claim")
+
+    def test_nonsense_inputs_are_refused_rather_than_producing_a_plan(self) -> None:
+        for area, defect in ((0.0, 1.0), (-5.0, 1.0), (100.0, 0.0),
+                             (100.0, -1.0), (float("nan"), 1.0)):
+            with self.subTest(area=area, defect=defect):
+                with self.assertRaises(ValueError):
+                    PR.derive_sample_count(area, defect)
+        with self.assertRaises(ValueError):
+            PR.derive_sample_count(100.0, 1.0, confidence=1.0)
+        with self.assertRaises(ValueError):
+            PR.derive_sample_count(100.0, 1.0, confidence=0.0)
+
+    def test_a_finer_declared_size_never_buys_fewer_samples(self) -> None:
+        """Monotonicity, which a rounding bug is exactly how you lose."""
+        counts = [PR.derive_sample_count(2_000.0, d)
+                  for d in (4.0, 2.0, 1.0, 0.8, 0.5, 0.3)]
+        self.assertEqual(counts, sorted(counts),
+                         "asking for a smaller defect must never reduce the plan")
+
+
+class ADeclaredDefectSizeReachesThePlanTest(unittest.TestCase):
+    """The declaration end of the derivation, and the silence at the other end.
+
+    `derive_sample_count` is arithmetic; this is the part that decides whether a
+    job can reach it. Two properties matter and they pull opposite ways: a job
+    that declares a size must get a plan derived from it, and a job that declares
+    nothing must produce byte-identical bytes to the ones it produced before this
+    field existed -- otherwise every frozen contract hash in the repository moves
+    for jobs that gained nothing.
+    """
+
+    def test_a_declared_size_reaches_the_contract_row(self) -> None:
+        scope = P.EditScope(artifact_id="ball", region="the flange",
+                            minimum_detectable_defect_mm=0.3)
+        self.assertEqual(0.3, scope.minimum_detectable_defect_mm)
+        self.assertEqual([], [i for i in scope.problems(0)
+                              if "minimum_detectable" in i.where])
+
+    def test_a_size_that_cannot_be_a_length_is_refused(self) -> None:
+        """The refusal side, which the accept side cannot stand in for.
+
+        Written because a mutation that deleted the whole validation branch went
+        uncaught: every other test here declares a *valid* size, so removing the
+        check that rejects an invalid one changed nothing any of them could see.
+        """
+        for value in (0.0, -1.0, "0.3", True, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                scope = P.EditScope(artifact_id="ball", region="r",
+                                    minimum_detectable_defect_mm=value)
+                codes = [i.code for i in scope.problems(0)
+                         if "minimum_detectable" in i.where]
+                self.assertEqual(["SCHEMA_RANGE"], codes,
+                                 f"{value!r} is not a length this audit can "
+                                 "undertake to find, and must be refused before "
+                                 "a plan is derived from it")
+
+    def test_an_undeclared_size_puts_no_key_in_the_row(self) -> None:
+        """Absent, not null. A key that is always there moves every old hash."""
+        from . import cli
+        project = P.Project(
+            job_id="j", updated_utc=UTC, source_mode="MODIFY",
+            consequence="INCONSEQUENTIAL", consequence_rationale="a test",
+            printer="p", material={"process": "FDM", "material": "PLA"},
+            nozzle={"diameter_mm": 0.4},
+            orientation={"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+            template=None, parameters={}, model="model.py",
+            envelope_mm={"x": 50.0, "y": 50.0, "z": 50.0},
+            reviewer={"model_snapshot": "t"},
+            source_artifacts=(P.SourceArtifact(artifact_id="ball",
+                                               path="ball.stl"),),
+            edit_scopes=(P.EditScope(artifact_id="ball", region="the flange"),))
+        rows = cli._preservation_feature(project)
+        self.assertEqual(1, len(rows))
+        self.assertNotIn("minimum_detectable_defect_mm", rows[0],
+                         "an undeclared size must leave the contract row exactly "
+                         "as it was, or every frozen hash moves for nothing")
+
+        declared = dataclasses.replace(project.edit_scopes[0],
+                                       minimum_detectable_defect_mm=0.25)
+        project.edit_scopes = (declared,)
+        rows = cli._preservation_feature(project)
+        self.assertEqual(0.25, rows[0]["minimum_detectable_defect_mm"])
+
+    def test_the_planner_prefers_declared_size_over_the_fixed_fallback(self) -> None:
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            area = float(trimesh.load(str(source), force="mesh",
+                                      process=True).area)
+
+            # Nothing declared: the fixed fallback, unchanged.
+            self.assertEqual(PR.DEFAULT_SAMPLES,
+                             commission._preservation_samples({}, source))
+            # An explicit count still wins -- the frozen fixtures set one.
+            self.assertEqual(4242,
+                             commission._preservation_samples({"samples": 4242},
+                                                              source))
+            # Declared: derived from this part's own surface.
+            planned = commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, source)
+            self.assertEqual(PR.derive_sample_count(area, 0.3), planned)
+            self.assertGreater(planned, PR.DEFAULT_SAMPLES,
+                               "0.3 mm on a 17 mm ball is finer than the fixed "
+                               "count, so the declaration must cost something")
+            self.assertLessEqual(PR.detectable_defect_mm(area, planned), 0.3)
+
+    def test_an_unreachable_declared_size_is_a_finding_not_a_crash(self) -> None:
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            with self.assertRaises(PR.SampleBudgetExceeded):
+                commission._preservation_samples(
+                    {"minimum_detectable_defect_mm": 0.0005}, source)
+
+
+class TheSamplePlanActuallyFindsWhatItPromisesTest(unittest.TestCase):
+    """The one property the whole derivation claims, measured on the planner.
+
+    Written after an independent review refuted the claim by measurement. Every
+    other test of `derive_sample_count` checks the *arithmetic* -- inversion,
+    area scaling, quadratic scaling in d, monotonicity, refusals -- and all of
+    them passed while the instrument missed a d-sized patch 13% of the time at
+    the default count and 22% at the count the recorded golden used.
+
+    The cause was the sample sequence, not the arithmetic. An additive-recurrence
+    (Kronecker) sequence was chosen because low discrepancy sounds strictly
+    better than random; it is not, for this question. Discrepancy bounds how far
+    a box's sample count strays from its volume. Finding a defect needs bounded
+    *dispersion* -- no empty patch anywhere -- which low discrepancy does not
+    bound, and a Kronecker sequence's 2-D projections are striated, so it misses
+    thin patches far more often than area implies.
+
+    So this test measures the thing the docstring promises rather than the
+    algebra behind it, and it is the test that would have caught it.
+    """
+
+    @staticmethod
+    def _miss_rate(count: int, seed: str, trials: int = 1500) -> float:
+        """Fraction of d-sized patches containing no sample, d from the count."""
+        side = PR.detectable_defect_mm(1.0, count)
+        points = PR._stream(seed, count)[:, :2]
+        # Patch corners on their own deterministic grid, so this test does not
+        # itself depend on a random draw.
+        corners = PR._stream(f"{seed}-probes", trials)[:, :2] * (1.0 - side)
+        missed = 0
+        for x, y in corners:
+            if not ((points[:, 0] >= x) & (points[:, 0] < x + side)
+                    & (points[:, 1] >= y) & (points[:, 1] < y + side)).any():
+                missed += 1
+        return missed / trials
+
+    def test_a_derived_plan_misses_at_about_the_declared_rate(self) -> None:
+        """1% promised, so the measured miss must be near 1% and not 13%."""
+        for count in (20_000, 38_014):
+            with self.subTest(samples=count):
+                missed = self._miss_rate(count, f"plan-{count}")
+                self.assertLess(
+                    missed, 0.04,
+                    f"{count} samples missed {missed:.2%} of patches of the size "
+                    f"the derivation says they find at "
+                    f"{PR.DEFAULT_DETECTION_CONFIDENCE:.0%}. The plan does not "
+                    "deliver the sensitivity the receipt reports.")
+
+    def test_the_stream_is_deterministic_and_pinned(self) -> None:
+        """Same seed, same bytes -- the property the sequence was chosen for."""
+        first = PR._stream("a-seed", 64)
+        again = PR._stream("a-seed", 64)
+        self.assertTrue((first == again).all())
+        self.assertFalse((first == PR._stream("another-seed", 64)).all())
+        self.assertEqual((64, 3), first.shape)
+        self.assertTrue(((first >= 0.0) & (first < 1.0)).all())
+
+    def test_the_stream_is_not_striated_in_its_projections(self) -> None:
+        """The specific failure of the sequence this replaced.
+
+        Every 2-D projection is checked, because the planner uses coordinate 0
+        for the face choice and 1 and 2 for the position inside the triangle --
+        so a projection with holes puts holes on the surface.
+        """
+        points = PR._stream("striation-probe", 20_000)
+        for a, b in ((0, 1), (1, 2), (0, 2)):
+            with self.subTest(projection=(a, b)):
+                cells = 40
+                grid = np.zeros((cells, cells), dtype=np.int64)
+                xs = (points[:, a] * cells).astype(int)
+                ys = (points[:, b] * cells).astype(int)
+                np.add.at(grid, (xs, ys), 1)
+                self.assertEqual(0, int((grid == 0).sum()),
+                                 f"projection {(a, b)} leaves empty cells, which "
+                                 "is how a sequence misses a defect that is "
+                                 "thinner than its stripe spacing")
+
+
+class ADeclarationMustNotBreakOrBeIgnoredTest(unittest.TestCase):
+    """Two ways a declared sensitivity went wrong, both found by review.
+
+    Declaring something the pipeline supports must never be the thing that
+    breaks a job, and must never be silently dropped. Both happened.
+    """
+
+    def test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
+        """A STEP source: `analysis.load` refuses it, `PR.audit` handles it.
+
+        So *declaring* a sensitivity turned a working audit into an uncaught
+        stage crash, on the one source class the module was extended to support.
+        """
+        from . import commission
+        step = (Path(__file__).resolve().parents[4] / "benchmarks" / "fixtures"
+                / "vent-ball-combine" / "public" / "sources" / "vent_mount.step")
+        if not step.is_file():                       # pragma: no cover
+            self.skipTest("the vendored STEP fixture is not on this machine")
+        with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+            commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, step)
+        self.assertIn("0.3", str(caught.exception))
+        self.assertIn(step.name, str(caught.exception))
+        # And it is not the other refusal: the two mean different things.
+        self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
+
+    def test_a_row_naming_both_a_count_and_a_size_is_refused(self) -> None:
+        """Previously the count won and the declaration vanished silently.
+
+        A job could ask for 0.3 mm, be handed a 0.8 mm plan, and read PRESERVED
+        with nothing on the receipt saying it had not got what it asked for.
+        """
+        from . import commission
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "ball.stl"
+            trimesh.creation.icosphere(radius=8.5).export(source)
+            with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+                commission._preservation_samples(
+                    {"samples": 20000, "minimum_detectable_defect_mm": 0.3},
+                    source)
+            self.assertIn("two different instructions", str(caught.exception))
+            # Each alone still works.
+            self.assertEqual(20000, commission._preservation_samples(
+                {"samples": 20000}, source))
+            self.assertGreater(commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, source), 20000)

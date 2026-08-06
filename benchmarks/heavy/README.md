@@ -35,6 +35,23 @@ expensive work themselves: the screening corpus (19 s a test), the STEP reads
 that go through a B-rep kernel, and the preservation and determinism fixtures
 that run a whole job more than once.
 
+One moved for a reason the seam above does not describe, and it is recorded here
+rather than left for the next reader to rediscover.
+`ReviewEnvelopeRenderTest` in [`test_pipeline_heavy.py`](test_pipeline_heavy.py)
+is the single case in its class that asks for `render=True`. That is cheap and
+answers in the parent process on Windows, and it cannot on Linux: `preview`
+selects the EGL platform there, PyOpenGL resolves the library through
+`ctypes.util.find_library`, and that shells out to `ldconfig` — and to `gcc` and
+`ld` when the library is missing. Finding EGL does not avoid it; `find_library`
+runs `ldconfig` to answer at all. So the case starts a child process on every
+Linux machine, which is the one thing the gating tier refuses, and it belongs in
+the tier that permits one. The property being tested is unaffected: a witness
+whose renderer failed to import records `renderer="unavailable: ..."` with no
+images, which is a different record from the `"none"` of a job that never asked,
+and the envelope binds either — so the case still refuses the stale answer for
+the reason it names. That was checked by mutation, not by watching it pass:
+leaving the second run's render flag unchanged makes the stale answer accepted.
+
 ## The rule a new test follows
 
 > Write the test beside the module it tests. Move it here when it starts a child

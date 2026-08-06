@@ -22,7 +22,7 @@ The architecture defines the intended destination. This roadmap may change whene
 
 ## 2. Current position
 
-The current branch already provides important foundations:
+The current baseline on `main` provides these foundations:
 
 * one command surface for running a job;
 * a canonical project representation;
@@ -42,7 +42,93 @@ The current branch already provides important foundations:
 * an L1 replay harness, and four recorded jobs — one authored, one modification, one branched three ways, one correctly refused — replayed through the command surface with no live AI call;
 * structurally separated public and private fixture material;
 * selected real benchmark artifacts;
-* reproducible packaging and toolchain identity.
+* reproducible packaging and toolchain identity;
+* a comparison of a job's formulations that refuses to rank them, and says which of their verdicts are not comparable and why.
+
+### Where this can be developed
+
+**The confined build boundary now has two implementations, and neither degrades.**
+`AGENTS.md` requires candidate code to be executed only through a boundary that
+reduces its authority *by the operating system* and bounds its lifetime. That
+was implemented for Windows only, so on any other platform the pipeline refused
+to execute a candidate at all — correctly, but it meant a Linux checkout could
+not run a single replay, could not record one, and could not touch the cache
+slice or anything else on the build path.
+
+`pipeline/confine_posix.py` is the second implementation. Four properties, each
+re-measured by `benchmarks/heavy/test_confine_posix_heavy.py` rather than
+asserted:
+
+| property | Windows | Linux |
+|---|---|---|
+| filesystem authority | restricted token + Low integrity label | mount namespace, `mount_setattr(AT_RECURSIVE, RDONLY)` over `/`, one read-write bind for the build directory |
+| network | **open** — `docs/defects.md` D11 | **closed** — network namespace with no interfaces; `ENETUNREACH` |
+| bounded lifetime | job object, `KILL_ON_JOB_CLOSE` | PID namespace; init exits and the kernel kills the rest, with no breakaway flag to attempt |
+| no child processes | `CHILD_PROCESS_RESTRICTED` before the process starts | seccomp-BPF refusing `execve`, installed by the child immediately before the first candidate import |
+| authority reduction | restricted token, same user | empty capability bounding set, same user |
+
+**Availability is decided from effective `CAP_SYS_ADMIN`, not from uid.** The
+probe used to ask `geteuid() == 0`, which is a different question and was wrong
+in both directions: a root process in a container whose bounding set omits the
+capability was told the boundary was available and then failed with a bare
+`EPERM` from `unshare`, and a process holding the capability at a nonzero uid was
+refused while holding exactly what the construction needs. The capability is now
+read from the kernel. Effective is what counts — permitted-but-not-effective is
+refused and named as such, and never raised into the effective set, because
+raising it would be an escalation performed unasked.
+
+Three states stay distinct and must not be collapsed into each other:
+
+* **unavailable and refused by name** — the boundary cannot be built here, the
+  reason says which mechanism is missing, and it is produced before a candidate
+  is staged. No candidate byte runs.
+* **available and re-measured** — the boundary was built and its four properties
+  were re-measured against the kernel rather than asserted from this table.
+* **candidate execution** — a candidate actually ran inside it.
+
+The pre-merge job is where the second and third are established rather than
+assumed. It runs in a digest-pinned container with `--cap-add=SYS_ADMIN` and a
+preflight that prints the capability masks, fails with the exact
+`unavailable_reason()` if there is one, and then builds a real confined child.
+Nothing there is skipped: a tier that cannot construct the boundary reports on
+nothing, and skipping the cases that need it would turn that into a green tick.
+
+The strongest evidence that the Linux boundary is not the weaker one is not any
+of those rows: it is that **the L1 replay suite reproduces every value the
+Windows recordings froze**. A boundary that leaked would not reproduce a digest.
+
+The exact shape of that evidence changed when Release 4's slice 2 landed, and
+saying so matters more than keeping the older, simpler sentence. This paragraph
+used to read "against recordings frozen on Windows and not re-recorded" — which
+was true until that slice re-recorded all four cases on Linux to add the compare
+step. The claim available now is different and stronger: the Linux re-record was
+diffed key by key against the Windows-frozen recordings and **changed no value
+any of them held** — 0 keys removed and 0 values changed across four cases,
+every difference an addition. Reproducing a recording is evidence; reproducing
+one you then rewrite and finding you rewrote nothing is the same evidence with
+the digests checked one at a time.
+
+The suite runs on a bare checkout, well inside its two-minute budget, and a
+case whose supplied artifact is not on the machine skips rather than passing
+quietly. Exact counts are reported in each commit and in the pull request that
+lands the slice, not pinned here: this line has said 61 and then 66 and then 67
+while nothing about what L1 covers changed, and a number that goes stale without
+going wrong is worse than no number.
+
+**Path and executable parsing is cross-platform, and the commit gate has no
+platform allowance left.** It used to have one: thirteen L0 tests failed on
+Linux and were filed as Windows assumptions rather than defects. They were
+defects, and one defect wearing two hats — `Path` was the authority in two
+places and `Path` is whichever host is reading. A path recorded on another
+machine is now parsed in the flavour it was written in, by a rule stated once in
+`tools/fixtures.py`, and a spawn event's executable is read the same way by a
+rule stated once in `conftest.py`: Windows for a drive letter, a UNC name or any
+backslash, POSIX otherwise, with the host never consulted. Windows and POSIX
+paths give the same basename on either machine, so a fixture manifest means one
+thing in two checkouts. Both rules are covered on Linux and Windows and both are
+mutation-proven. The gate is green on Linux with no expected-failure list, and
+counts are reported per commit rather than pinned here, where they go stale
+silently.
 
 The following work is already complete and is treated as the protected baseline.
 
@@ -81,8 +167,8 @@ that commit's defects along with its behaviour.
 
 The immediate unresolved blockers are:
 
-1. unchanged modification jobs cannot reliably complete review resumption while preservation evidence varies between runs;
-2. custom candidate code can still influence the criteria used to judge its own output;
+1. **closed.** Unchanged modification jobs complete review resumption. Preservation evidence is derived rather than drawn: identical inputs produce byte-identical evidence, the review envelope binds the packet, the sample plan, the audit digest, the execution plan and the acceptance revision, and a stored answer is refused when any one of them moves. Release 1's nine proofs are listed in the ledger below and were re-run from a clean pinned checkout. What is *not* closed is the strength of the preservation method itself — sample density is still not derived from a declared minimum detectable defect size — so a job with an edit scope still reports `EXPERIMENTAL_UNAVAILABLE` and still cannot claim success. That is the fifth blocker below, and it is a different sentence from this one;
+2. **closed.** Candidate code cannot reach the criteria that judge it. The acceptance contract is generated from the frozen proposal and system-owned inputs and written to disk before `model.py` is executed at all; `acceptance.generate` has no parameter a mesh could arrive through; and the build happens in a one-shot confined process handed a sealed source directory and nothing about acceptance, so the interpreter holding the contract, the bands and `status.decide` never runs candidate code. Section 4.2 records this as a pass. What remains open is narrower and is tracked as its own defect rather than as a blocker: an authored proposal still chooses the *rubric* it will be graded against, which is why `compare` refuses to call two formulations' verdicts comparable when their expectations differ;
 3. divergent design alternatives are now declarable and isolated, and the graph is not yet complete. `design-tool branch` records an alternative with an id, a **list** of parents, a reason and a disposition, and writes everything belonging to one formulation under `alternatives/<id>/` — proposal, model, artifacts, acceptance revision, reviews, receipts. Sibling isolation is structural rather than checked: each alternative freezes its own acceptance contract, so neither can cut a revision from the other's, and `alternative_id` joins the execution plan and the review envelope so a review answered for one branch is refused by the other even at the instant the two are still byte-identical copies. `candidate_strategy: PARALLEL` is retired in its favour. Status is no longer stored and repeated: `design-tool status` derives what the evidence on disk currently supports from the bindings each receipt records, weakening a stored success to `STALE` when they no longer hold and never re-adjudicating anything; invalidation removes what depended on the change rather than a fixed six-name tuple; `project.json` no longer mirrors either a run's outcome or its bindings; and `next_action.json` carries the state it was computed from, so a superseded instruction can say so. A project problem is data rather than prose: `Project.validate()` returns `Issue` values — the type `team_tools` already had, moved to `pipeline/findings.py` so both packages report through one — each carrying a code from a declared group, a field path that names a position (`edit_scopes[1].region_box`) rather than a name, a severity, and a stable `CODE@where` id no other finding in the report shares. The grouping rule is the prefix: `SCHEMA_` means correct a field, `REF_` means add or rename a row, `ARTIFACT_` means fix a file, `INTENT_` means make a decision. The English is unchanged and `next_action.unresolved` is still a list of sentences; the structure arrives beside it under `findings`, in the refusal instruction and in `design-tool status --json` alike. The lifecycle group is closed. All seven dispositions are honoured and each changes something rather than labelling: `PREFERRED` is at most one per project and switching it demotes the previous holder to `ACTIVE` rather than erasing it; `FALLBACK` is runnable — the vent-ball job had to record a genuinely retained fallback as `ACTIVE` because a build that would not run one gives "retained" and "abandoned" the same behaviour — and `design-tool status` names it as the option to fall back on exactly when the current formulation has no claim; `PAUSED` is not runnable and keeps its instruction, and resuming it is a recorded transition rather than a silent activation; `REJECTED`, `SUPERSEDED` and `MERGED` are concluded, clear the instruction in their directory and keep every receipt, and the last two must name the formulation that replaced them — `MERGED` refused unless that formulation's `parents` actually record the merge, so the state cannot be claimed ahead of the capability. Every state but `ACTIVE` must carry its basis from a closed vocabulary, which is what ARCHITECTURE.md 14.6 always required. `design-tool run` gained `--resume` and `--restart`: resume is what a bare run already did, said out loud and refusing when there is nothing to continue; restart discards *what this formulation concluded* — its receipts and its review answers — and keeps what it concluded from, which is the frozen contract, the proposal, the model, the content cache and every sibling. Its whole point is the case scoped invalidation is blind to by construction: a conclusion whose bindings still hold and that somebody no longer trusts. Run identity is decided rather than deferred and is content-derived — the digest of the whole binding map, so two formulations byte-identical at the instant one was branched from the other are still two runs, and a rerun on unchanged inputs is still byte-identical ([ADR 0004](docs/adr/0004-run-identity-is-content-derived.md)). `lifecycle.json` is the one file here ordered by when things happened rather than by what they contain, bound by nothing, holding the restarts and the transitions. What a job costs is now recorded rather than estimated. `pipeline/cost.py` writes `cost.json` in each formulation's own directory — one entry per invocation of `design-tool run`, bound by nothing, for the reason `lifecycle.json` is — holding the dispatches actually made, the canonical byte size of each context handed over, the deterministic seconds and the confined boundary's share of them, the builds and the builds beyond the first, the cache status and the builds a hit actually avoided, and every invocation that concluded nothing. `design-tool status --json` reports it per formulation under `cost`, with `incremental` naming what each formulation beyond the shared root added: on the recorded three-formulation `berlingo-knob` replay each sibling costs one dispatch, 23.8 kB of context, ~2.9 s and two builds, and `shared` is zero builds and zero reviews — the number the vent-ball exercise had to take with a stopwatch. Two things the counter it reuses had wrong are now visible: `llm_calls` never counted the designer commission, because `AGENT_COMMISSION` is written by `cli.py` before the runner is reached and is the live dispatch on the authored lane; and summed across a resumable job it counts a stored answer re-read by a later invocation as a fresh dispatch, so a `MODIFY` round trip reports three dispatches where two questions were asked. The ledger counts the question at the pause that wrote the packet and records the re-reads as `reviews_reused`. The budget is the compiled plan's: `cost.budget(plan)` is what one invocation may dispatch, a run that spends past it is refused with stage `cost`, and the per-route numbers are frozen in the shipped module the way `selftest.FROZEN_CONTRACTS` freezes a certified contract — which is what turns 3.4's "no release may add an AI round trip to an existing path as an accidental side effect" into a failing test. What is still owed: merge (several contributing parents), alternative comparison and scoring (Release 4 owns both), scoping below job-versus-alternative, capability-based execution, the lazy assessment registry, the context *packages* — task-specific assembly, which is the other half of the context-budget item and is untouched — and the dormant tolerance, material and operation fields;
 4. Multi-artifact edit intent is now declarable: `edit_scopes` supports several source artifacts, coordinated scopes may share existing interfaces through `interface_ids`, and the plan and gate preserve one obligation per scope. Multi-source candidate production and preservation measurement remain unavailable.
 5. preservation is not yet strong enough to support successful modification claims;
@@ -106,10 +192,28 @@ Several narrower gaps are carried forward from the completed consolidation work.
 * preservation also has one verdict for one box. The same job needed three dispositions over named regions — geometry that must not move, geometry permitted to change, and geometry the edit deliberately consumed — because the deviation its audit reported, an unfiltered global maximum of 1.797 mm, *was* the requested change: material consumed where the two parts now interpenetrate, in a band opened to 2.88 mm by design. One box and one band cannot tell that apart from a defect, so the checker fails a correct part.
 * there is no repair path at all. `design-tool diagnose` classifies an artifact `REPAIR_REQUIRED` and stops, so a supplied file with non-manifold or open geometry cannot be modified through this skill even though `MISSION.md` names repair as a required capability and `ARCHITECTURE.md` §11.4 specifies it.
 * nothing certifies what an export writer wrote. A clean float64 solid became 429 zero-area faces and 367 non-manifold edges when written as binary STL, and two halves of one job independently hand-wrote the same float32-weld and file-versus-memory checks. Preservation and commissioning measure a file, and no tool currently proves the file carries what the geometry in memory did.
-* datums carry no provenance and are not dependency bindings. [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) records the case: a hand-authored shared datum, one of whose fields described a part before that part was modified, was given blanket precedence by an agent brief, and the compliant action was to build three features that must not exist.
+* datums are not dependency bindings. They carry provenance now — the declaration obligation landed in Release 5 below, so a datum records where its number came from, the artifact revision it was read on, and the scope it is valid in, and coordinated scopes reference one identity instead of each holding a copy. What did not land is ADR 0003 decision 5: a datum is not in the §13.4 binding list, so **changing a datum's value invalidates nothing**. The acceptance contract binds which datum an edit was placed against, not what that datum says. [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) records the case: a hand-authored shared datum, one of whose fields described a part before that part was modified, was given blanket precedence by an agent brief, and the compliant action was to build three features that must not exist. Nothing has to stop today only because a job with an edit scope is capped at `EXPERIMENTAL_UNAVAILABLE` and cannot claim success — which is the ADR's own reason, and the cap may not lift before this closes.
 * a `FITTED` or `FULL` job built from authored geometry reports `UNSUPPORTED`. That is a limit of what this build can do, not a stage that is pending.
 
 Tolerances today are single numeric bands owned by the pipeline. There is no tolerance profile, no datum model beyond what a dimension names, no per-body material assignment, and no operation model. Those are introduced by the releases below, at the point where a real job needs them.
+
+### Release ledger
+
+One row per release, so that "what shipped" is readable without reading the
+release sections. `COMPLETE` means every applicable section 4 gate is met and
+the release's own proof list has evidence; `PARTIAL` means the capability works
+and a named gate does not; `BLOCKED` means a proof or gate fails. A release is
+not complete because its scope list is ticked — Release 1 is why that sentence
+is here — and a limitation in the last column is a real limit on what may be
+claimed, not a to-do.
+
+| Release | Status | Applicable section 4 gates | Supporting fixture or authentic job | Remaining limitation | Next permitted work |
+| --- | --- | --- | --- | --- | --- |
+| **1** — stable evidence and resumable review | `COMPLETE` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 pass · 4.6 pass | `benchmarks/heavy/test_phase3_heavy.py` (`DeterministicEvidenceTest`, `ModifyReviewRoundTripTest`, `ModifyRerunRejectionTest`, `ModifyCleanCloneTest`); L1 `modify-ball-flange-flat` over the real vendored `ball_male_17mm.stl` | The evidence is repeatable; the preservation **method** is still not sufficient for a successful modification claim, which the release scoped out explicitly. Sample density is not derived from a declared minimum detectable defect size, so every job with an edit scope is capped `EXPERIMENTAL_UNAVAILABLE`. D22 — OCC cannot mesh six legal cone faces in `vent_mount.step` — stays open and reaches the receipt as `UNAVAILABLE / PRESERVATION_UNMEASURABLE` by name. Release 1 promised neither STEP repair nor successful preservation. | Release 6 owns STEP repair (D22). Sample density derived from a declared defect size, and the lifting of the `EXPERIMENTAL_UNAVAILABLE` cap, remain owed and are not scheduled here. |
+| **2** — trustworthy ordinary custom design | `PARTIAL` | 4.1 pass · **4.2 pass** · 4.3 partial · 4.4 pass · 4.5 partial · 4.6 pass | L1 `custom-knob-sleeve`; `pipeline/test_acceptance.py`; the confined build boundary's own fixtures | 4.3: the release shipped with no replay of its own and the two cases that cover it were recorded afterwards, so its regression evidence is retrospective. 4.5: no candidate from this lane has been printed or physically fitted. An authored proposal still chooses the rubric it is graded against — `compare` refuses to call two formulations' verdicts comparable when their expectations differ, which contains the problem rather than solving it. | A live authored job printed and fitted would close 4.5. The rubric question is Release 4's `INCOMPARABLE_EXPECTATIONS` verdict and is not a defect to fix here. |
+| **3** — revision graph, branching, lifecycle, context budgets | `PARTIAL` | 4.1 partial · 4.2 pass · 4.3 partial · 4.4 **fail, measured** · 4.5 partial · 4.6 pass | L1 `branch-knob-seat-fallback` (three formulations, one preferred, one retained); `pipeline/test_lifecycle.py`; `benchmarks/heavy/test_lifecycle_heavy.py` | Merge with several contributing parents, capability-based execution, the lazy assessment registry and the context *package* half are unbuilt. 4.4 fails on one clause with a number: shared work is not reused across alternatives — `runner.run` calls `backend.build` before consulting the cache, so a hit confirms the bytes and saves nothing, and `builds_avoided` is zero on every path. Two of thirteen declared proofs have nothing behind them. | The cache-before-build inversion is a self-contained slice and is the cheapest way to move 4.4. Merge needs the graph work the release scoped and did not start. |
+| **4** — alternative formulation and comparative assessment | `PARTIAL` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 partial · 4.6 pass | L1 `branch-knob-seat-fallback`; `pipeline/test_compare.py` | Preference is admissible only when every formulation has a current verdict and the rubrics agree; on the one real job they do not, so the recorded reason is `USER_SELECTION` — a person chose, on no measured ground. The release proves the mechanism and the claim it carries is small. D24, D25, D26 and D27 remain open against it. | A job where the merits are measurable — every formulation current, rubric shared, deciding axis instrumented — is what 4.5 is reaching for. |
+| **5** — datum provenance and authority | `PARTIAL` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 not yet applicable · 4.6 pass | `pipeline/test_datums.py` (37 fixtures, 37 mutations attempted, 37 killed) | [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) decision 5 did not land: a datum is not in the §13.4 binding list, so **changing a datum's value invalidates nothing**. Decision 6, precedence between a datum and other evidence, is neither implemented nor enforced. Safe today only because every job that can rest on a datum is capped `EXPERIMENTAL_UNAVAILABLE`, asserted by a fixture so the day the cap lifts the test goes red. | Decisions 5 and 6 must close **before** the `EXPERIMENTAL_UNAVAILABLE` cap may lift. No authentic job has exercised a datum yet. |
 
 ### Release 3 measured against section 4
 
@@ -387,7 +491,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1050 against the 890 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1139 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -407,6 +511,35 @@ The outcome records:
 * which alternatives were explored;
 * why an alternative was preferred, paused, or rejected;
 * whether the roadmap or architecture should change.
+
+**Where this stands as of Release 4 slice 3, stated as two clauses because they
+are in different states.** Release 3 shipped branching and nobody had used it to
+settle anything; `benchmarks/replays/branch-knob-seat-fallback` now does, on a
+real vendored request — three formulations explored, one preferred and one
+retained as a fallback through the verb a user has, each carrying a basis from
+the closed set, with the decision, the state it left and the formulation the job
+ends parked on all frozen in the recording.
+
+* **"which alternatives were explored" — met.** Three formulations, each with
+  its own proposal, contract, receipts and recorded reason for existing.
+* **"why an alternative was preferred, paused, or rejected" — met in the weak
+  sense only, and it should not be read as more.** The reason recorded for the
+  preference is `USER_SELECTION`: a person chose, on no measured ground. That is
+  a true answer to "why", and it is the honest one for this job, because the
+  comparison declined to make preference admissible at all — one of the two
+  formulations has no current verdict. What the gate is *reaching for* is a
+  preference somebody can defend from evidence, and this job cannot supply one.
+
+A release that wants to say alternatives were preferred **on their merits**
+still owes a job where the merits were measurable: every formulation current,
+the rubric shared, and the deciding axis one this build has an instrument for.
+Until then the mechanism is proven and the claim it carries is small.
+
+And the clause names three verbs. Only *preferred* has been exercised on a real
+job: `PAUSED`, `REJECTED`, `SUPERSEDED` and `MERGED` appear in no committed
+case, so two of the seven lifecycle states carry all the evidence there is.
+`SUPERSEDED` and `MERGED` are refused at load by the replay harness unless they
+name a successor that exists, which is a guard and not an exercise.
 
 ### 4.6 Documentation gate
 
@@ -508,6 +641,73 @@ Required tests include:
 Use the vent-mount and 17 mm ball project to complete an evidence and review round trip.
 
 The final result remains limited by the current preservation capability.
+
+### Release 1: COMPLETE
+
+Ruled after D15 closed, from a clean worktree pinned at `f327687` and detached,
+with no writer touching that checkout during the run — `git status --short` was
+empty before and after. The authentic exercise is the vent-mount and 17 mm ball
+project: `benchmarks/replays/modify-ball-flange-flat`, driven end to end through
+`design-tool run` over the real vendored `ball_male_17mm.stl`, resolved and
+hash-verified through `tools/fixtures.py` before the job sees it, with both
+reviews answered from the recording and no live dispatch.
+
+The nine proofs the release names, each against the fixture that observes it:
+
+| # | Proof | Where it is observed | Result |
+| --- | --- | --- | --- |
+| 1 | repeated unchanged evidence | `DeterministicEvidenceTest::test_identical_inputs_produce_byte_identical_evidence`, with `test_a_changed_input_changes_the_evidence_hash` as its converse | PASS |
+| 2 | response accepted on unchanged rerun | `ModifyReviewRoundTripTest::test_a_modify_job_completes_the_review_round_trip` — packet answered, rerun accepts it, `verification_report.json` carries the same envelope | PASS |
+| 3 | changed source rejection | `ModifyRerunRejectionTest`, subtest `changed source` — the supplied plate 0.2 mm taller | PASS |
+| 4 | changed candidate rejection | same test, subtest `changed candidate` — a 16 mm seat with the declared parameters left alone, which a hash of the parameter dict would miss | PASS |
+| 5 | changed edit intent rejection | same test, seven subtests: `region_box`, `preserve`, `may_remove`, `add`, `expected_body_delta`, `preserve_metadata`, `interface_ids`. Edit intent is not one field, and the set is closed | PASS |
+| 6 | changed transform rejection | same test, subtest `changed transform` — `alignment_transform` moved 5 mm in x | PASS |
+| 7 | changed algorithm-version rejection | same test, subtest `changed algorithm version` (the sample-plan version, which lives in no file the job can edit), plus `test_an_answer_from_the_previous_protocol_is_refused_by_name` for the envelope-shape bump | PASS |
+| 8 | interrupted/resumed identity | L1 `ModifyBallFlangeFlatTest::test_the_round_trip_paused_twice_and_finished` and `::test_the_rerun_did_not_move_the_evidence_under_the_answer`; the heavy round trip asserts `commission_report.json` is byte-identical across the pause | PASS |
+| 9 | clean-clone identity | `ModifyCleanCloneTest::test_the_same_project_at_two_paths_measures_one_thing`, and L1 `::test_two_replays_of_one_case_produce_the_same_geometry_and_plan` | PASS |
+
+Every applicable section 4 gate is met.
+
+* **4.1 functional — pass.** The round trip runs through `design-tool run`,
+  pauses with an actionable `next_action.json`, resumes on the same command, and
+  reaches a final status. It produces receipts throughout, including on the run
+  that concludes `NEEDS_MORE_EVIDENCE`. Formulation directories cannot collide.
+* **4.2 authority — pass.** The review envelope binds the packet, the sample
+  plan, the audit digest, the execution plan and the acceptance revision, so an
+  answer is refused the moment any bound input moves; a refused answer leaves no
+  decision and no `final_status.json`. The claim the receipt carries is the
+  capped one.
+* **4.3 regression — pass.** L0 covers the mechanisms, `benchmarks/heavy`
+  carries the end-to-end proofs above, `modify-ball-flange-flat` is the L1
+  replay, and the eleven rejection subtests are themselves the adversarial
+  demonstration that the principal protection can fail — each changes exactly
+  one bound input and requires both a `ReviewError` and no final status.
+* **4.4 performance — pass.** Evidence is re-derived rather than cached, at
+  about two seconds, and `pipeline/cache.py` records why: the key for a
+  preservation audit is the sampling seed and acceptance revision this release
+  spent its effort binding, and getting it wrong serves a stale audit under a
+  fresh-looking receipt. The memory ceiling took the vent-ball pair from
+  23.24 GiB and a `MemoryError` to 2.16 GiB and a completed run.
+* **4.5 real job — pass.** The vent-ball combine exercise, on a real request and
+  a real supplied artifact that had been printed and fitted. What worked, what
+  failed, what could not be measured and what remains unresolved are all on the
+  receipt rather than in prose.
+* **4.6 documentation — pass.** `docs/tooling.md` describes the surface as it
+  behaves, and the limitation below is stated rather than implied.
+
+**D22 is named as a Release 6 limitation and does not block this ruling.**
+`vent_mount.step` has six legal cone faces OCC cannot mesh, so a preservation
+audit over it reports `UNAVAILABLE / PRESERVATION_UNMEASURABLE` — by name, in
+the check row, in `unavailable_checks`, and in the sentence a user reads.
+Release 1 promised neither STEP repair nor successful preservation; it promised
+that the evidence and review round trip is stable, and that an instrument which
+cannot measure says so instead of passing. Both hold. Repair is Release 6's.
+
+**What COMPLETE does not mean here.** The release's own explicit exclusions
+stand: preservation sample density is still not derived from a declared minimum
+detectable defect size, so every job declaring an edit scope is capped at
+`EXPERIMENTAL_UNAVAILABLE` and cannot claim a successful modification. That is
+the limit Release 1 wrote down in advance and deliberately did not undertake.
 
 ## Release 2 — Trustworthy ordinary custom design
 
@@ -920,6 +1120,180 @@ Confirm that:
 
 The skill can intentionally generate, develop, compare, select, pause, and revisit materially different design concepts.
 
+### Slice 1 — shipped, and what it changed about the release
+
+`design-tool compare <project>` reads the receipts each formulation already
+writes, emits `comparison.json` at the project root and a table, dispatches
+nothing, builds nothing, and adds no project field. [ADR 0005](docs/adr/0005-a-comparison-refuses-rather-than-scores.md)
+carries the decision and its reasoning; what follows is what the work *found*,
+because two of the three findings were not in anybody's plan.
+
+**The scoping document was judged, not adopted.** `docs/release-4-scope.md` was
+written by one agent in one pass and never reviewed. Its citations were checked
+one by one. Most held. Three did not survive as written, and they are recorded
+because a reader of that document needs them:
+
+* ~~its §4(C) material-use table — 47,526.263 mm³ against 49,792.874, the
+  single most load-bearing number in the document and the whole of its §5
+  argument — **exists nowhere in the repository.**~~ **Retired by slice 2, and
+  the numbers were right.** The finding was accurate when written: `expected.json`
+  recorded the volume detector's *result* and discarded its measurement, so
+  nothing committed could reproduce the figure. Slice 2 freezes it, and a replay
+  now produces 47526.263 against 49792.874 — the document's numbers to the
+  digit. What was wrong was the repository, not the citation. The other two
+  findings below stand;
+* its claim that `cli.py:1754` "builds a table over *every* formulation" is
+  false in a way that matters: the loop is over `project.alternatives` and
+  `branch` never writes a row for the shared root, so `status` reports two
+  formulations where `cost.compare` in the same report reports three. That is
+  now `docs/defects.md` D26;
+* it treats `docs/adr/0001`'s command list as an authority on the built surface.
+  It is a code block, and it had already drifted: `branch` and `selftest`
+  shipped in Release 3 without reaching it. Fixed, with a test that refuses the
+  drift in future.
+
+Its four re-scoping recommendations were **accepted**, three as written and one
+enlarged; each is recorded inline above, at the bullet it changes.
+
+**The measured case for building nothing was taken seriously and overruled.** An
+independent reading found that 44 of about 46 frozen per-formulation fields are
+identical across all three formulations of the recorded knob, that
+`INCOMPARABLE_CHECK_SETS` cannot fire on any committed fixture, and that eleven
+of the facts a comparison would print are already side by side in `status
+--json`. Its conclusion — thirty lines in an existing loop, no verb — is right
+about every fact and wrong about what they mean.
+
+The 44-of-46 is not evidence that the formulations are equivalent. It is the
+signature of self-grading. `docs/defects.md` **D25**: on the authored lane a
+formulation's own proposal sets its declared feature set, the `expected_bbox_mm`
+and `expected_bodies` its always-present checks are measured against, and —
+through the declared magnitude — each feature's tolerance band. On the recorded
+knob the root declares `bbox_mm.z = 50.0`, `plate-seated` declares `52.0`, and
+**both are recorded `PASS` on `envelope`**. Printing those two verdicts adjacent
+asserts an equality nobody measured, and the difference it conceals is the
+entire point of the fork. So the first thing `compare` reports is
+`INCOMPARABLE_EXPECTATIONS` — which, unlike `INCOMPARABLE_CHECK_SETS`, fires on
+the authentic case with nothing constructed.
+
+**`MODIFY` pairs are in, overruling the scoping.** It proposed comparing only
+from-scratch formulations because two modifications both report
+`EXPERIMENTAL_UNAVAILABLE` and discriminate nothing. Deferring the case that is
+hard to answer is Release 6 in disguise. Settling nothing *is* the correct
+output when the deciding axis cannot be measured, provided the comparison names
+that axis and refuses preference on those grounds — so `not_compared` rows carry
+`DECIDING` or `CONTEXT`, a `DECIDING` row makes `preference.admissible` false,
+and a fixture asserts it. That turns a paragraph into a mechanism.
+
+**Evidence.** 22 fixtures, all L0, none of which builds geometry — every
+formulation is laid down as the receipts a run would have written, so the set
+gates on a platform where the confined build boundary cannot run. 15 mutations
+of the protections were attempted and 15 were caught. The gate is 894 passing at
+`5c6ef9e` + this slice, up from 872, against a ceiling of 1050.
+
+**Still owed by slice 1, and blocked rather than skipped.** Both needed a
+Windows host, for the reason in §2. `pipeline/confine_posix.py` removed that
+constraint; the first is done, the second is not:
+
+* ~~the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
+  and its output frozen in `expected.json`~~ — **shipped as slice 2, below**;
+* ~~the two `design-tool branch --disposition` calls that prefer one formulation
+  and retain the other as `FALLBACK`~~ — **shipped as slice 3, below.** Release 4
+  owes nothing further.
+
+### Slice 2 — the comparison meets a receipt a run actually wrote
+
+`design-tool compare` now runs inside the L1 recording of
+`branch-knob-seat-fallback`, after every formulation has settled, and what it
+claims is frozen. So is the material measurement it is computed from.
+
+**It did not survive first contact, and that is the finding.** The verb shipped
+in slice 1 with twenty-two green L0 fixtures. Pointed at the recorded knob for
+the first time it raised `AttributeError`: `screening.detectors` is a *list* and
+`compare._measured` read it as a mapping keyed by detector name, so the material
+axis could never have produced a number on any real job. Every fixture that
+exercised the line had been authored against the reader rather than the writer,
+so twenty-two of them agreed with each other and with nothing the pipeline
+produces (`docs/defects.md` **D27**). Reverting the reader with the fixtures left
+correct fails 21 of 25 — the measure of how much the fixtures were holding up
+alone. The fix is one reader, `screening.detector`, beside the one writer, and
+it raises rather than returning `None`, because a reader that shrugged would have
+reported "no volume measured" forever.
+
+The general lesson, and the reason this slice was worth its cost: **a fixture
+written from a reader tests the reader against itself.** The tier that catches
+this class is one that runs the verb against receipts a real pipeline wrote.
+
+**What the recording now protects.** `material.volume_mm3` per formulation,
+compared inside a band because it comes off a tessellator, plus `bbox_mm` —
+which `measured.envelope` also carries, from a different writer, so the two
+agreeing is itself worth freezing. And the comparison's *claims*: the mandatory
+verdict, both verdicts per formulation, the compared set, `identical_designs`,
+`same_requirement_digest`, `preference.admissible`, the standing of each
+`not_compared` dimension the recorded job exercises, `ranking` and `score`
+pinned as `null`, and the payload's whole top-level key set. The report's prose
+is recorded by no key: a reworded explanation is not a regression.
+
+Three of those came from the independent review of this slice, and each closed
+something the slice had claimed and not delivered:
+
+* **ADR 0005 was pinned by name, not by shape.** Adding `rank_order` and
+  `overall_score` to the report left the entire gate green — 86 passed — so the
+  guarantee covered two literal field names rather than the rule. `payload_keys`
+  records `sorted(payload)` and is compared exactly, which is the anti-drift
+  shape already built for ADR 0001's verb list. Re-measured after the fix: the
+  same smuggled ranking now fails the recording.
+* **`not_compared` was keyed on its own English.** Rewording a dimension's
+  sentence turned the recording red — pinning the prose the harness had just
+  said it does not pin. Each row now carries a `dimension_id`.
+* **"the single reader" was false.** `tools/replay.py` still subscripted
+  `screening["detectors"]` by hand, inside the very function `docs/defects.md`
+  D27 said had been routed through the pipeline's reader. `screening.detectors`
+  is that reader and `detector` is a lookup on top of it.
+
+Two claims the review shortened. `material.volume_result` was deleted: it
+duplicated `screening_detail.detectors.volume`, and recording a value twice does
+not protect it twice. And of the five golden mutations reported, one — "the
+2 mm envelope fork erased" — was exercising `measured.envelope`, which was
+already frozen before this slice, so it demonstrated nothing new. The band it
+was measured against is 0.5% + 1e-3, which for this part is 237.63 mm³ against a
+2266.6 mm³ signal.
+
+**A second defect, found by the same first contact and fixed since.**
+`identical_designs` was empty on the knob, where the root and `as-drawn` are one
+design under two ids — their receipts carry the same `artifact_hashes.source`
+and every measured value agrees. It grouped on the digest *on disk now*, and the
+fallback's model was revised after its run. **D28**, closed: the key is what the
+completed receipts establish — source, candidate and STEP digests from
+`final_status.json` — and not the working tree. The L1 assertion that pinned the
+silence is inverted and the knob's recording moved by exactly that one field.
+See `CHANGELOG.md` for why the defect's own proposal, grouping on the source
+digest alone, was refused.
+
+**Evidence.** Re-recording all four cases moved no value any of them held: 0
+removed and 0 changed across the three unbranched cases, and on the branched one
+38 additions and a single change — the root formulation's receipt list gained
+`comparison.json`, which the verb writes at the project root, which is the root
+formulation's work directory. It joins `project.json` and `brief.md`, already
+listed there on the same footing. (`recorded_at` moves on every recording by
+construction; it is provenance and nothing compares it.)
+
+Mutations of the new golden, each caught: the frozen volume nudged 1%, a ranking
+introduced, the rubric verdict softened to `COMPARABLE`, the shared root dropped
+from the compared set. Then, after the review, a ranking smuggled in under names
+ADR 0005 does not spell — also caught, which it was not before.
+
+L1: 61 passed, 43 subtests, ~52 s. Heavy tier: 356 passed, 9 skipped, 183
+subtests, 11 min 40 s.
+
+`docs/defects.md` D26 is deliberately **not** fixed here for the same reason:
+`status --json` is read by the replay harness, and changing a golden-feeding
+command on a platform that cannot run the goldens is how a recording breaks.
+
+**Not touched by this slice**, and recorded so it is not read as improved: 4.4's
+"shared work is reused across alternatives — this clause now fails, measured".
+Comparison shares nothing because it builds nothing, and `builds_avoided` stays
+zero.
+
 **Scope**
 
 *Alternative formulation*
@@ -961,10 +1335,21 @@ Alternative generation is triggered only when:
 
 The planner limits:
 
-* number of active alternatives;
 * AI calls per alternative;
 * context duplication;
 * repeated deterministic work.
+
+**Re-scoped 2026-08-03, and three-quarters of it already shipped.** AI calls per
+alternative and context duplication are measured per formulation and *capped per
+invocation* by a ceiling the compiled plan declares (`cost.py:121`, frozen at
+`cost.py:114`); repeated deterministic work is measured (`repeated_builds`). So
+the honest statement of what this bullet asks for is **"exploration cost is
+measured per formulation and bounded per invocation"**, and it is done. A cap on
+the *number* of active alternatives is struck from Release 4 and moves to
+whichever release builds a generator: nothing in this build generates a branch —
+`design-tool branch` requires `--from`, `--id` and `--reason` and is refused
+without them (`cli.py:2015`) — so a numeric cap here would limit how much a
+person may type.
 
 *Comparative assessment*
 
@@ -1052,9 +1437,24 @@ The system can execute that without flattening the work into one linear sequence
 Required tests include:
 
 * materially different alternatives inherit the same mandatory intent;
-* cosmetic-only variants are not automatically treated as concept branches;
+* cosmetic-only variants are not automatically treated as concept branches
+  — **vacuous today, kept and marked rather than implemented.** Nothing in this
+  build generates a branch (`cli.py:2015`), so a cosmetic-variant classifier
+  would guard a mechanism that does not exist and would second-guess a decision
+  a person makes by typing `--reason`. It becomes real work in the same release
+  that builds a generator, and not before;
 * alternative-specific requirements remain scoped;
-* an alternative cannot loosen a shared mandatory tolerance to pass;
+* ~~an alternative cannot loosen a shared mandatory tolerance to pass~~
+  — **already structurally true; replaced by the proof that is not.** A proposal
+  may not declare a tolerance *at all* (`acceptance.py:246`); every band is
+  computed by the pipeline from the row's own magnitude and every frozen
+  contract records `tolerance_owner: "pipeline"` (`acceptance.py:364`). The
+  proof that was *not* true, and is now the first fixture of slice 1: **two
+  formulations measured against different mandatory check sets are reported
+  incomparable on those checks, not equal** (`docs/defects.md` D24). And its
+  larger sibling, found while building the slice and live on the recorded knob:
+  **two formulations measured against different expectations or bands for the
+  same check are reported incomparable, not equal** (`docs/defects.md` D25);
 * a comparison over single-material alternatives reports no material or sequence dimensions;
 * mandatory failure cannot be outweighed by preference scoring;
 * comparison reports unequal evidence;
@@ -1065,19 +1465,173 @@ Required tests include:
 
 **Authentic exercise**
 
-Use the bracket alternatives from Release 3.
+~~Use the bracket alternatives from Release 3.~~ **Struck 2026-08-03: it names a
+project that does not exist.** `benchmarks/fixtures/` holds `berlingo-knob`,
+`component-cycle`, `oneplus-case-x2d-asa`, `oneplus-drawer-dropin`,
+`pixel9-card-case` and `vent-ball-combine`. The bracket is a *proposed* exercise
+at `:665` and `:904` that was never built; Release 3's branching was actually
+exercised on `vent-ball-combine` and recorded on `berlingo-knob`. Its comparison
+list also named four dimensions this build has no instrument for — hardware
+requirements, assembly, adjustability, strength uncertainty — which
+`ARCHITECTURE.md` 8.5 says must be distinguishable from measurements and which
+this build can only ever carry as a stated row.
 
-Compare snap-fit and M3 concepts for:
+Use `benchmarks/replays/branch-knob-seat-fallback` instead. It is three
+formulations of one job on a real vendored request, its fork is the request's
+own recorded uncertainty rather than an invented preference — the base-plate
+height is a photo estimate its notes give as ±2 mm — and its comparison has a
+non-obvious answer that a score would destroy: every mandatory check passes on
+all three, they are measured against *different envelope expectations*, and the
+thing that actually decides is whether the mouth seats, which nobody has
+measured.
 
-* mandatory mounting compatibility;
-* hardware requirements;
-* printability;
-* assembly;
-* adjustability;
-* strength uncertainty;
-* material use.
+Compare them on the dimensions this build has an instrument for:
 
-Select one as preferred while retaining the other as fallback.
+**What the L1 tier does and does not cover, since the list below reads as
+though it covers all of it.** `branch-knob-seat-fallback` is the only branched
+replay case and its `source_mode` is `NEW`, so the only `not_compared` rows it
+exercises are the three unconditional `CONTEXT` ones. The two `DECIDING` rows —
+preservation of supplied geometry, and the assembly row — have L0 coverage only.
+Gate 4.3 is met; the recorded evidence is narrower than the dimension list.
+
+* mandatory check-set and expectation agreement (the rubric question);
+* evidence completeness and inequality — derived status, staleness, screening
+  calibration, whether anybody looked at an image;
+* material use, as solid volume;
+* support burden, against the print plan's own ceiling;
+* component count and envelope;
+* exploration cost per formulation, labelled as a fact about the process.
+
+Everything else the old list named goes in `not_compared` with its owner.
+
+Select one as preferred while retaining the other as fallback. **Still owed:**
+the two `design-tool branch --disposition` calls that do it, and the `compare`
+step in the replay recording. Both were blocked on a Windows host when this was
+written; `pipeline/confine_posix.py` unblocked them, and §2 now records that the
+L1 suite runs on Linux and reproduces its goldens. What is left is the work
+itself.
+
+### Slice 3 — somebody decides, and does not claim more than the comparison gave
+
+Gate 4.5 asked for a real part whose alternatives somebody actually decided
+between, and until now nothing in this repository had done it. The recorded knob
+now ends the way a job ends: three formulations built and verified, `status`
+deriving what each is still entitled to claim, `compare` saying what that
+establishes, and then two `design-tool branch --disposition` calls —
+`plate-seated` preferred on `USER_SELECTION`, `as-drawn` retained as `FALLBACK`
+on `UNRESOLVED_EVIDENCE`.
+
+**The basis is the slice.** Typing two commands is not the work; choosing a
+basis that does not overstate is.
+
+**And the first version of this paragraph got the mechanism wrong, which is the
+more useful thing to record.** It said preference was inadmissible because the
+three formulations are measured against different envelope expectations (D25),
+and because the axis that would actually decide — whether the mouth seats on a
+plate whose height is a photo estimate — cannot be measured. Both sentences
+describe real properties of this job, and neither is why `compare` refuses.
+`_preference` has three branches and returns on the first: **`as-drawn` has no
+current verdict**, because its model is revised after the run that verified it,
+so its mandatory verdict derives `UNKNOWN_STALE`. The rubric branch is never
+reached. The third branch is gated on a `DECIDING` row, and this job has none —
+all three `not_compared` rows are `CONTEXT`, so the build makes no claim that a
+deciding axis is unmeasurable. Preference is inadmissible because one of the two
+formulations being decided between cannot presently claim to have passed
+anything.
+
+The same wrong mechanism was asserted in the case's own notes and in an L1 test
+docstring: three documents, one unchecked claim, and no recording that could
+contradict any of them — because `_comparison_marks` froze `admissible: false`
+and not the reason. It freezes `preference_because` now, so the three branches
+are distinguishable and a change of reason moves a test.
+
+**The two bases differ, because the two decisions do.** `plate-seated` is
+preferred on `USER_SELECTION` — a person chose, on no measured ground, which is
+exactly what happened. `as-drawn` is retained on `UNRESOLVED_EVIDENCE` — the
+plate estimate may be wrong, and that is what a fallback is for. One basis on
+both rows, which is what shipped first, answers "why keep a fallback" and
+answers "why *this* one" not at all. What may not happen either way is a
+decision claiming support the comparison refused to give, and
+`STRONGER_CONCEPT` would have claimed exactly that.
+
+Nothing in the build *enforces* that agreement. A refusal — `--basis
+STRONGER_CONCEPT` rejected while `comparison.json` says preference is
+inadmissible — is a real mechanism and is deliberately not built here, because
+Release 4 asked for the decision and not for a new gate over it. It is a
+candidate for whichever release next touches lifecycle.
+
+**Fail-closed, against what the product allows.** `design-tool branch
+--disposition` accepts a formulation that never concluded, and retaining an
+unfinished alternative as a fallback is a legitimate thing to want. But the
+adversarial fixture plays this same case with a sibling's review answer offered
+to the fallback, and there the run stops and leaves no final status — so the
+harness declines to take the declared decisions at all when any declared
+formulation left none. A recorded preference formed over a job that stopped is
+evidence of a decision nobody could have made. The recording says `ACTIVE` with
+no basis, which is "nobody decided" rather than silence.
+
+That check asks whether a run *concluded*, not whether its conclusion still
+holds, and the distinction matters here: the retained fallback is `STALE` — its
+model was revised after the run that verified it, which is what this case
+exercises. Gating on `derived == stored` was the obvious repair and is the wrong
+one, because retaining a stale concept as the fallback is what a fallback is
+for. What was wrong was a docstring saying "concluded" where the code said "left
+a file behind". The staleness is now recorded beside the decision and asserted
+at L1, rather than left for a reader to discover.
+
+**Two things the review found that the harness had not enforced**, both now
+refused at load: a case that declares decisions and `concludes: REFUSED`, where
+the decisions would be skipped on every play for ever while the recording
+contradicted the case; and a decision naming a formulation the case never
+declared, which used to load cleanly and die two verbs later with a message
+about `project.json`. `SUCCESSOR_REQUIRED` is mirrored beside `BASIS_REQUIRED`
+too — only one of the product's two requirements had been.
+
+**Evidence.** Re-record: 0 removed and 0 changed on the three unbranched cases;
+on the knob, additions plus the restructure named above, and no value moved that
+was not meant to. (`recorded_at` moves on every recording by construction; it is
+provenance and nothing compares it.) Mutations of the recorded decisions, all
+caught: the preference switched to the other formulation, the basis upgraded to
+`STRONGER_CONCEPT`, decisions that stopped being taken, the formulation the job
+ends parked on. Mutations of the guards, all caught: the unfinished-job rule
+removed (red at L0 *and* in the L1 adversarial fixture), and the basis dropped
+from the command line.
+
+The `dispositions` comparison itself had **no** mutation test when it shipped —
+deleting it left L0 and L1 entirely green. It now has four, and deleting the
+guard goes red in under a second.
+
+**That closed a key and not the class, and a second review said so by
+exploiting it**: adding a new uncompared top-level key to `observe` — an ordered
+list of formulations, on every branched recording — left the whole suite green,
+132 passed. `compare` walks a hand-maintained whitelist, so a key nobody adds to
+it is a key nobody looks at. `observed_keys` freezes `sorted(payload)` and is
+compared exactly, which is `payload_keys` one level up and the same argument: a
+ranking must not be able to arrive under a name nobody thought to forbid. The
+first version of that fix set it on the branched arm only, leaving three of the
+four recordings uncovered by the guard written to close exactly that gap; it is
+on both arms now.
+
+**And the fix for the wrong-mechanism finding was itself wrong, in the way the
+file warns about four lines above it.** Freezing `preference.because` froze a
+230-character English sentence as a BINDING value — so improving that sentence's
+grammar, with no behaviour change, turned the golden red with no defect behind
+it. That is the pressure that trains somebody to re-record, and it is the
+regression `_comparison_marks`' own docstring says it avoids, sitting directly
+under the comment explaining that `not_compared` had already been fixed for it.
+`compare._preference` carries a stable `reason` code now —
+`NO_CURRENT_VERDICT` / `RUBRICS_DISAGREE` / `DECIDING_DIMENSION_UNMEASURED` —
+and the recording freezes that. Measured after: the reworded sentence passes,
+and a reason that changes branch still goes red.
+
+Case schema 2 → 3, because a case declaring decisions and played by a reader
+that did not know the key would look exactly like a case that declared none.
+
+L0 970 passed, 557 subtests, 13 failed (the Windows-assumption set). L1 66
+passed, 47 subtests. Heavy 357 passed, 183 subtests. Measured after the work,
+not before it — the first version of this slice published the pre-slice L0 count
+as its own evidence, which a review caught by subtracting the tests the slice
+adds.
 
 ## Release 5 — Multi-source edit and combination model
 
@@ -1087,6 +1641,92 @@ The skill can represent and execute genuine modification and combination jobs in
 
 Delivered early slice: Multi-artifact edit declaration, validation, shared-interface references, planning, and preservation-row gating landed in response to the OnePlus case-and-drawer job. The remaining Release 5 work includes source-role generalization, selected assembly components, inheritance semantics, and candidate production suitable for per-artifact preservation assessment.
 
+**Delivered slice: the datum declaration obligation ([ADR 0003](docs/adr/0003-datum-provenance-and-authority.md)).** A `Datum` is a declared row with an identity, a value, a unit, a provenance from the same closed set every other design-driving value uses, the artifact revision it was read on where it was read off geometry, and the scope it is valid in. `EditScope.datum_ids` references it, so two coordinated scopes name one identity instead of each holding a copy — which is decision 4, and the mechanism of the original failure rather than a style preference. A scope naming an undeclared datum is `REF_UNDECLARED`; two rows claiming one id is `REF_DUPLICATE`; a `valid_for` or a `derived_from.artifact_id` naming nothing the job declares is `REF_UNDECLARED`; a scope using a datum outside the scope it declares itself valid for is `INTENT_CONTRADICTION`, which is the stale reference moved one artifact sideways.
+
+**The revision rule is three rules, and the first version collapsed them into one and got it backwards.** Required of `INHERITED`, which means read out of a supplied artifact and therefore always has a revision to name. *Permitted* of `MEASURED`, which covers both of §6.5's measuring classes — off supplied evidence, and off generated geometry — where the second has a revision and the first may not, because calipers on a physical part have none to invent. Refused of the rest, where claiming one is a provenance the value cannot support. Refusing it on `MEASURED`, which is what shipped first, inverted the incentive on precisely the class the ADR was written from: the incident's bad field was measured off the job's own drawer, so the honest row recording the revision was rejected while the vague one validated clean, and the only way to record the revision at all was to relabel the number `INHERITED`.
+
+Assumptions are permitted and priced, per `ARCHITECTURE.md` 6.4. A number with **no recorded provenance** is the assumption the ADR names outright, and `CHOSEN` is the same thing with a label on it; neither is refused, both must name an owner and the check that would settle it, and `design-tool status` reports them. Not through `validate` — every caller there refuses the run on a non-empty findings list, warning severity included, and the ADR says plainly that a job whose datum has no provenance is not refused. The first version of this slice refused exactly that job while `cli.py` cited that sentence as its justification, so the code and its own comment disagreed and `status` managed to both refuse the job and hide the one thing the sentence is about. A measured or inherited number owes neither; it is already settled.
+
+The scope is checked against what the job declares, and against everything the edit is inside — the artifact it edits and the interfaces it realizes. Comparing against the artifact alone, which is what shipped first, refused the coordinated case the ADR exists for: a datum scoped to the interface that two scopes both realize was out of scope for both of them.
+
+**What this slice does not do, stated because the gap is load-bearing.** Decision 5 — datums join the 13.4 dependency-binding list — did not land. The acceptance contract binds *which* datum an edit was placed against, so re-placing an edit moves `contract_sha256` and the review answer written against the previous claim stops being current. It does not bind the datum's **value**, so correcting 12.4 mm to 12.9 mm leaves the hash where it was. What makes that safe today is not that it is a small gap: it is that a job with an edit scope is capped at `EXPERIMENTAL_UNAVAILABLE` and cannot claim success at all, which is the ADR's own reason nothing had to stop. A datum is only ever referenced from an edit scope, so every job that can rest on one is capped — and that is asserted by a fixture rather than written down here, so the day the cap lifts the test goes red. Decision 6, precedence between a datum and other evidence, is likewise not implemented; nothing in the code grants a datum authority over measured evidence, which is the state decision 6 asks for, but nothing enforces it either.
+
+**Evidence.** 37 L0 fixtures, none of which builds geometry. 37 mutations of the protections were attempted and 37 were killed, including the `EXPERIMENTAL_UNAVAILABLE` cap the paragraph above rests on. One mutation survived the first sweep — `is_assumption` carried a `not self.derived_from` clause no test could distinguish from its absence, because a `CHOSEN` datum naming a revision is already refused elsewhere — and the redundant clause was deleted rather than given a fixture, on the grounds that a second copy of a rule is a second authority over one question. The gate is 1066 passing at this slice, up from 1014, against the 13 pre-existing Linux platform failures which are unmoved: HEAD was run in a separate worktree in the same session and fails the identical 13. L0-heavy is 357 passed and 9 skipped in 680 s, which is where `test_the_shipped_goldens_are_untouched` proves the five pinned certified contracts did not move for the new contract key — the absent-when-empty rule holding, measured rather than argued. L1 replay is 66 passed and 47 subtests in 55 s, unchanged.
+
+**Delivered slice: D15 closed — the bed screen answered about a frame the job never declared.** Filed as "orientation is declared, validated, frozen, and read by nothing", the third instance of a field the schema takes seriously and no code consumes. Re-measuring made it something else: `model_to_printer_matrix` occurs in exactly four places, three shape checks and a selftest constant, and is applied to geometry nowhere — while `screening._bed_screen` decided whether the part reached below the bed from the lowest Z of the mesh *as authored*, with a signature of `(ctx)` that could not receive the contract even in principle. Measured before the fixture was written: a part authored at z 0..20, declared printed rotated to z −20..0, returned `bed-plane: CLEAR`.
+
+That is not an unused field. It is a detector issuing a clean verdict about a frame the job did not declare it was working in, which `AGENTS.md` requires to fail closed immediately rather than wait for the capability that would make the claim true.
+
+So the fix is a claim about the claim. `_bed_screen(ctx, contract)` transforms all eight corners of the model-frame box — a rotation does not keep the lowest corner lowest, so putting `bounds[0]` through the matrix would answer about a corner rather than a part — takes the minimum Z, and compares it against the declared `bed_z_mm`, which was ignored the same way. Every reason string names the frame it measured in. A matrix that cannot be applied is an anomaly, because falling back to the model frame is the defect with an extra step. The bound is conservative by construction: a transformed box bounds the transformed mesh, so it can read lower than the part goes and never higher, which turns an unlucky rotation into a look-again rather than a clean verdict.
+
+15 L0 fixtures; 11 mutations attempted and 11 killed. Two survived the first sweep and one of them found a fail-open **in the fix itself**: `NaN` is a `float`, so a NaN `bed_z_mm` passed the type check, and `NaN > 0.05` is `False` — straight through to `CLEAR`. A type check standing in for a validity check, which is structurally the same error as the defect being closed, and it is not shipping only because the sweep forced a case nobody had thought of. The other was that four "unusable matrix" cases contained no well-shaped 4×4 with a bad *entry*, which is the one case a shape check alone misses.
+
+**An independent review returned UNSAFE TO SHIP, and the sharper finding is that the fix opened a false-clean-verdict path of its own.** The eight-corner bound is conservative for an *affine* transform only. Under a projective matrix `w` is affine in the coordinates and can vanish inside the box while all eight corners sit far from zero, so the corner minimum reads **higher** than the part goes: measured, a corner bound of +0.5 mm against a true minimum near −49999 mm, returning `CLEAR` while naming the printer frame. That matrix passes `contract.preflight`, `cli._validate_orientation` and `project.validate`, all three of which check 4×4-of-finite-numbers and no more.
+
+The fix was not a fourth shape check. `team_preflight.is_finite_rigid` already exists and is strictly stronger — finite, last row exactly `[0,0,0,1]`, orthonormal rotation, determinant +1 — so reusing it closes the hole and resolves the proportionality objection at the same time: what had been written here was the weakest of four authorities over one question, and it was the one deciding the verdict. The `weights` block it needed became dead code and went.
+
+**What this did not close, and what closed it.** Three checks in `commission.py` read `ctx.bounds[0][2]` in the model frame — `seated`, `bed_contact` and `overhang` — and all three are *contract checks* that reach the commissioning verdict rather than screens that only escalate. On the case this slice's fixture tests, `commission` returned PASS while `screening` returned ANOMALY: one receipt, two contradictory answers, the stronger one wrong. `overhang` measured 0.0 mm² authored against 1293.3 mm² in the declared frame, on the `sections=64` cone the fixture actually builds — an earlier version of this line said 1294.4, which is the `sections=96` value and is the recurring citation defect at its smallest. Fixed at `5ac852e` and the follow-up its review demanded. What that review found still open was the overhang *ceiling*: `cli` computed it in the model frame while the candidate was measured in the declared one, so the two sides of one inequality sat in two frames. **That is closed too, and D15 with it** — the project's orientation now reaches the generated print plan, the plan rule's matrix travels into the contract feature row, `contract.preflight` refuses a run whose rule and orientation disagree, and inherited overhang is measured under `printer @ alignment`; five mutations, five caught, and `CHANGELOG.md` carries the account. Bridging and strength direction are orientation-dependent too and nothing measures them at all.
+
+`screening`'s own siblings check out: `_profile_screen` compares model-frame Z against marks that are model-frame on both sides, so it is self-consistent and issues no verdict about an undeclared frame, and `_volume_screen` and `_component_screen` are invariant under any rigid transform.
+
+**One citation corrected.** "It is never applied to geometry" dropped `docs/defects.md`'s *"anywhere in the pipeline"* qualifier, and the unqualified sentence is false: it is applied three times outside `pipeline/`, including a `_check_seated` that already takes exact transformed bounds against the declared bed height. That matters beyond pedantry — the correct implementation exists twice already, and the fix for the three checks above is to reach for it rather than write a third.
+
+**Delivered slice: a body has a handle.** The commit before this recorded why "selected components within source assemblies" could not be built: `diagnose` reported `bodies` as a count and nothing per body, so a declaration selecting "the third body" would resolve to whatever `split` returned that run. Identity first, selection after.
+
+`mesh_io.body_identities` returns one row per disconnected body — a `body_sha256` over the body's own geometry in canonical form, plus `bbox_mm`, `volume_mm3` and `faces` so a person choosing which body to keep does not have to re-open the file. Rows are ordered by handle rather than by split order, because two reads of one file must present the bodies in one order or "the first" is not a thing anybody can say. `_diagnose_mesh` reports them beside the count it already had, and `_diagnose_3mf` does too — per object, off the split it had already paid for to produce the count, so a body in a supplied assembly gets the same handle a loose mesh of that geometry gets. 3MF is the format Release 5's *"selected components within source assemblies"* is actually about, since it is the one carrying objects, components and build items.
+
+**STEP is still a bare count, and the reason is measured rather than assumed.** `read_step` on the one STEP fixture in this repository takes **7.4 s**, so any fixture exercising a per-solid handle is heavy-tier by construction, not L0. And a B-rep solid has no triangles until something tessellates it: a digest over its tessellation is a handle over `BREP_READ_LINEAR_DEFLECTION` as much as over the shape — a different kind of identity wearing the same name, which is the class of claim this release keeps having to retract. It needs a slice that says what the handle is *of*.
+
+**The canonicaliser moved rather than being rewritten.** `preservation._ordered` already made vertex and face order a function of geometry, for the same reason in a different job, so it is now `mesh_io.canonical_order` and preservation binds its old name to it. A second ordering rule would be two authorities over one question. The move carries a real hazard — `SAMPLE_PLAN_VERSION` is tied to the ordering and every review answer is bound to a plan digest — and the first version of this slice claimed L1 replay proved the move was pure. **It proves nothing of the kind.** A review reversed the face ordering outright and L0, L0-heavy and L1 replay all stayed green: `_seed_material` carries a *sentence* describing the ordering rather than the ordering, `tools/replay.py`'s `VOLATILE_KEYS` excludes the plan digest from comparison by design, and the one ordering-sensitive recorded number has a band of ±190 counts that an ordering change moves by 2. Only one replay case carries a preservation receipt at all, not four. So the hazard was real and the protection imaginary; the ordering is now pinned to a value in `test_body_identity.py`, which is the first golden that rule has ever had.
+
+Two more findings from the same review, both on the handle itself: it was not a function of the shape. `-0.0` and `0.0` are equal by every numeric test and differ in `tobytes`, so one shape got two handles — reachable from an ordinary OBJ, since exporters write `v -0.0 -0.0 -0.0`. And the rounding was applied to the hash input but not to the sort key, so `canonical_order` lexsorted *unrounded* coordinates and noise of 1e-9 could flip a near-tie and permute the whole array before the rounding happened — with near-ties the normal case, since every axis-aligned box has four vertices sharing an x. Both are fixed by rounding and sign-normalising before canonicalising, inside `body_identities` only, so the ordering every frozen sample plan was built on is untouched.
+
+14 L0 fixtures; 11 mutations attempted and 11 killed, including the ordering reversal that had survived every tier. Two further findings were cheap and worth naming: binding the moved function at module scope pulled `trimesh` in eagerly and took `import pipeline.preservation` from 0.075 s to 0.60 s — `commission` imports it to read one integer — so it delegates lazily and the test asserts identity of behaviour rather than of object, which is what had made the expensive import look required; and `diagnose` had already split the mesh one line above, so `body_identities` takes the split it was handed instead of repeating it. Three mutations survived the first sweep and each taught something different. The ordering mutation survived because the fixture's two boxes happened to split *in* digest order, making the rule untestable — the extents are now chosen so split order and digest order provably differ, verified rather than assumed. The topology mutation survived because two boxes differ in their points as well, so dropping faces from the digest changed nothing; the fixture is now two bodies with identical corners and different triangulation, which is what two exporters really produce. And the empty-mesh guard was deleted rather than fixtured: `split` already returns nothing for a mesh with no faces, so the guard was a second copy of a rule enforced elsewhere.
+
+**Delivered slice: output-component inheritance.** This section asks for "output-component inheritance" and for imported intent to survive the edit, in unusually blunt terms: *"A job that prints in one material does not thereby erase the two materials its donor declared. Discarding imported multi-material intent is a defect, not a simplification — the intent is recorded even when this release cannot act on it."* `ARCHITECTURE.md` 6.8 says the same, and its own bullet list names *"output components that inherit from the source"*.
+
+`Component` carried `component_id`, `role`, `count`, `material` and nothing else, so a two-source combination produced output bodies with no record of which donor each came from, and a donor that declared two materials was indistinguishable afterwards from one that declared none. The discard was not a decision anybody took — there was nowhere to write it down, so it happened by omission, which is precisely why the ROADMAP calls it a defect rather than a simplification.
+
+A component now names `inherited_from` (a declared source artifact; one naming nothing declared is `REF_UNDECLARED`, because an inheritance nobody can resolve is none wearing the appearance of provenance) and `inherited_materials` (what the donor said, still readable after an edit that does not use it; a material list with no donor is `INTENT_CONTRADICTION` — inherited from *what?*). **This records and does not act**: `material` is still what the job will print, and a fixture asserts that carrying two inherited materials is not a claim to print two, because a weaker method may not issue a stronger claim.
+
+The absent-when-empty rule is load-bearing here in a way it was not one slice earlier, and the difference is worth stating because the same sentence was wrong last time. `cli._requirement_hash` feeds `Component.as_dict()` straight into `S.payload_hash`, so an always-present key — even null — moves the requirement hash of every job declaring a component, and that hash is what the acceptance contract binds. `SourceArtifact.as_dict` reaches only `project.json`, which is deliberately unhashed. One serializer feeds a hash and the other does not, so the claim has to be checked per field rather than assumed from the shape — and here it is a fixture rather than a comment.
+
+**An independent review returned UNSAFE TO SHIP, and the findings landed on the sentence above.** Three blocking, all of them the citation defect: `ARCHITECTURE.md` 6.11 was cited four times for a sentence that lives in 6.8 — 6.11 is "Manufacturing, assembly, and service operations" and does not contain the word "inherit", while 6.8's own bullets say *"output components that inherit from the source"*, so the right citation was also the better one. `cli._request_hash` was cited three times and does not exist; the function is `_requirement_hash`, and `project.py` names it correctly 330 lines further down in the same file. And the paragraph claiming *"here it is a fixture rather than a comment"* pointed at a fixture whose first assertion compared `sorted(plain.as_dict())` to the same expression again — a tautology — with its other two assertions duplicating the test above it. The review severed the link entirely, deleting `"components"` from `_requirement_hash`, and the whole gate stayed green: nothing guarded the claim. The claim itself is true, measured both ways, which is exactly why it needed a test that computes a hash rather than a sentence asserting one.
+
+A fourth, non-blocking: `as_dict` tested truthiness where `problems` and `validate` tested `.strip()`, so `"   "` was emitted into `project.json` and into the requirement hash while both checks skipped it — a fail-open in the gap between two guards that disagreed about what empty means. `SourceArtifact.role` had inherited the same shape one slice earlier and is fixed with it.
+
+`tools/test_documentation.py` now resolves `ARCHITECTURE.md <n>.<m>` citations against the document's own headings. It is a floor, not a ceiling — it cannot check that a section says what a comment claims, only that the section exists — and it was itself wrong first: the pattern required the literal `ARCHITECTURE.md` while most comments here write `ARCHITECTURE 6.8`, so a deliberately broken citation passed. It is verified by mutation now, which is the point.
+
+11 L0 fixtures; 10 mutations attempted and 10 killed. One survived first: dropping the `.strip()` guard makes `artifact("")` return None, so every component in every recorded project — all of which inherit from nothing — would report `REF_UNDECLARED`. Every fixture that reached `validate` declared an inheritance, and the one that declared none never got there, which is the same gap shape the role slice's silence-stays-silence test closed.
+
+**Delivered slice: source-artifact roles.** This section asks for "source-specific roles" and names five; `ARCHITECTURE.md` 6.2 names eight and calls them typical. Neither was implemented, so every supplied file was the same kind of thing: geometry this job may do as it likes with.
+
+The fail-open, measured before the fixture was written, on a constructed case — no fixture here yet supplies a third-party mating object. A vent mount clips into a car's air vent; the vent is supplied so the mount can be fitted to it, and it is not ours to change. `Project.validate` on that job reported nothing at `edit_scopes[0].artifact_id`. That is not a tidy-declaration complaint — an edit scope compiles a preservation row, so the run would have gone on to measure *whether the car's vent survived our edit*: deterministic, reproducible, and about an object the job does not own. A receipt like that is worse than no receipt, because it reads as evidence.
+
+Where that is measured matters, and the first version of this paragraph got it wrong: it quoted `EditScope(...).problems()`, which returns empty for this scope **after** the fix too, because a scope alone cannot know what it is editing. The defect was real and the sentence described a surface the fix does not touch — the same wrong-surface error recorded two slices above, repeated in the next slice written.
+
+`SOURCE_ROLE` is 6.2's eight as a closed set, and `EDITABLE_ROLE` is the four whose geometry the job owns — base, donor, prior revision, alternative candidate. The other four exist to be read: what the part mates with, what it was measured against, the space it must fit inside, and a file already handed downstream. The role is **optional**, because every project recorded before the field existed declares none and requiring it would refuse all of them for a field they do not use; it is absent from `as_dict` when empty for the same reason. Silence stays silence — an artifact that declared no role is a question nobody asked, not permission granted. What the obligation buys is that a role *declared* is a role *kept*.
+
+A second finding closed here is older than this slice: `source_artifacts` had no duplicate-id check where requirements, datums and edit scopes all have one, and `Project.artifact()` returns the first row matching an id. So declaring one file twice — first `BASE`, then `MATING_OBJECT` — let an edit scope over it validate clean, and swapping the two rows refused it. Whether the vent could be edited depended on declaration order. The new rule rests entirely on identity, so the identity check is part of it.
+
+13 L0 fixtures; 8 mutations attempted and 8 killed. One survived first and the fix is worth recording: `test_every_architecture_role_is_accepted` iterated `SOURCE_ROLE` and asserted each member loads clean, which cannot fail — shrink the constant to three and the loop checks three, so a mutation dropping five roles survived. It now reads 6.2's bullet list out of `ARCHITECTURE.md` and asserts the constant equals it, in order: the anti-drift shape `test_documentation.py` already uses for ADR 0001's verb block, and the answer to two hand-written lists being two authorities over one vocabulary.
+
+**Delivered slice: the region disposition obligation.** The other half of the pair above, and the same shape of defect. An `EditScope` carried three lists of region names and nothing compared them, so one name could be declared must-preserve, removable and added at once and `problems()` returned empty — measured before the fixture was written. All of those lists reach the frozen acceptance contract, so the review envelope carried a declaration saying a region must survive *and* that it may go, while the preservation audit read one list and a person read the note. Two authorities over one region, which is ADR 0003's two copies of one number with a different noun.
+
+Every pair is now reported rather than the first, because fixing whichever collision a run happened to name would leave the job still contradicting itself and the next run would report the next pair — which reads as a new defect rather than the rest of the old one. `add` takes part in the comparison and is not one of the three dispositions: it says the geometry does not exist yet, so a name it shares with any disposition is a job claiming a region both does and does not exist.
+
+`may_change` is a new field because the vocabulary is three-way and the fields were two-way: `preserve` is must-preserve and `may_remove` is consumed-by-intent, and permitted-change — this section's *"source-specific editable regions"* — had nowhere to go, so a job meaning "this may be reshaped but must not disappear" had to say either nothing or something false. It reaches the acceptance contract like its siblings and is absent when empty, so the five pinned certified contracts do not move. It goes through `_ids` where its two siblings do not, and that asymmetry is scope rather than risk: the two recorded MODIFY replays both write `preserve` and `may_remove` as proper lists, so tightening those would not break a recording — it would be a second change riding along in a slice about dispositions. A field being added now starts right; the other two are a one-line slice of their own. 15 L0 fixtures; 9 mutations attempted and 9 killed, one of which — the `as_dict` normalisation — first survived because a tuple and a list serialize identically, and was fixtured by asserting the type directly rather than deleted, since every sibling on the row normalises the same way.
+
+**A second independent review, of the corrections themselves, returned SAFE TO SHIP with eight findings — and the most useful of them was about the evidence rather than the code.** Three mutations of the new datum protections survived the *whole gate*, the worst being deletion of `problems.extend(datum.problems(index))` — the single line wiring every row-level rule to a real `project.json`. Delete it and the gate stays green while `design-tool status` accepts a datum with no provenance, no value, no unit, no owner and no scope, because every one of those rules was only ever asserted by calling `Datum.problems()` directly. So "31 mutations, all killed" was a true sentence that measured the wrong surface; the sweep is 37 now and runs the invalid row through `Project.validate`. Two smaller ones: a test asserting only at `edit_scopes[N].datum_ids` stayed green while the refusal it should have caught *relocated* to `datums[0].valid_for`, and the component axis of the scope set had no fixture at all.
+
+Also closed: a malformed `derived_from` was coerced to `None` and, on a `MEASURED` row where the revision is optional, validated clean — the same read-as-clean failure `_ids` exists to stop, on the field the ADR calls *"the field that failed"*. `_ids` itself validated the container and never its elements, so a nested list reached a set membership test and came out of `design-tool status` as an unhandled `TypeError`. `status` called an unrecorded number "a chosen number", collapsing the two cases decision 1 exists to keep apart. And one docstring presented a sentence as a verbatim ADR quotation that the ADR does not contain — the same failure to check a citation as the two blocking findings below, this time inventing the source rather than misreading it.
+
+**One limit is now stated rather than implied.** `MEASURED` may name the revision it was read on, but `Project.validate` requires that artifact to be a declared *source* artifact, so a datum measured off geometry this job generated still cannot record its revision. That is the same incentive inversion one class over. It fails closed and a fixture asserts it, and closing it needs a build result to be an addressable artifact with a revision — Release 6.
+
+**An independent review returned UNSAFE TO SHIP on the first version of the datum slice, and three of its eleven findings were blocking.** They are worth recording because two of them are the same class of error: *a comment that justified a rule the code did not implement.* The `MEASURED` revision rule cited a convention `Requirement` sets, and `Requirement` sets only half of it — it requires `artifact_id` on `INHERITED` and never refuses it elsewhere, so the harmful half of the rule had no precedent at all. `cli.py` cited the ADR's *"a job whose datum has no provenance is not refused"* as its reason for reporting assumptions through `status`, while `project.py` refused exactly that job. The third was a guard this file wrote and then bypassed: `valid_for` did not go through `_ids`, so a bare string became one scope per letter and a non-list crashed `design-tool status` with an unhandled `TypeError`, one line away from two fields that fail closed on the same input. Also found and fixed: an interface-scoped datum was out of scope for both of the scopes realizing it; the value and unit the construct exists to carry were unvalidated; `derived_from.artifact_id` — *"the field that failed"* — had no referential check while every neighbouring id reference had one; four protections survived mutation; and the duplicate-datum message claimed to detect two copies of one number when what it detects is an id collision.
+
+**The commit-gate ceiling moved, deliberately.** `L0_COLLECTED_CEILING` refused this slice mid-way, at 1052 against 1050, which is the guard working. Raised to 1240 on the rule that set it originally — about 16% headroom over the 1066 the gate now holds — with the cost measured in one session so the machine's drift is common to every reading: 56.0 s at 1066 against 56.4 s at 1033 on the commit before this slice. The intermediate state measured 55.4 s and 56.4 s at 1052 — one commit, two readings, a full second apart and in the wrong direction. Thirty-three added fixtures are not measurable against that, which is the argument for counting tests rather than timing them.
+
 **Scope**
 
 Generalize the authoritative job model to support:
@@ -1094,7 +1734,7 @@ Generalize the authoritative job model to support:
 * zero, one, or many sources;
 * source-specific roles;
 * source-specific transforms;
-* selected components within source assemblies;
+* selected components within source assemblies — **blocked on identity, and the order matters.** `design-tool diagnose` reports `bodies` as a *count* and nothing per body: no name, no bbox, no volume, no stable handle. So a declaration selecting "the third body" would resolve to whatever trimesh's `split` or OCC's solid enumeration happened to return that run, which is a reference that means different geometry depending on something nobody declared — the failure [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) exists to stop, moved from datums to bodies. Selection must therefore follow a slice that gives a body an identity a receipt can carry, not precede it. Measured at `pipeline/diagnose.py` (`"bodies": int(len(components))` for meshes, `"bodies": len(solids)` for B-reps);
 * source-specific preserved regions;
 * source-specific removable regions;
 * source-specific editable regions;
@@ -1282,7 +1922,7 @@ A supplied artifact classified `REPAIR_REQUIRED` currently ends the job: diagnos
 * an assessment resting on repaired geometry says so and says which region, per architecture sections 6.2 and 8.4;
 * a defect the available methods cannot fix is reported as a limitation, never narrowed until it passes.
 
-Repair also depends on diagnosis naming the right defect class, which is not free: a report that calls nine three-face edges and one four-face edge "boundary edges" points a repairer at hole-filling, which cannot work on any of them ([`docs/defects.md`](docs/defects.md) D1).
+Repair also depends on diagnosis naming the right defect class, which is not free: a report that calls nine three-face edges and one four-face edge "boundary edges" points a repairer at hole-filling, which cannot work on any of them ([`docs/defects.md`](docs/defects.md) D1). **That prerequisite is now met** — `diagnose` reports `boundary_edges`, `nonmanifold_edges`, `max_faces_per_edge` and the full per-edge distribution, and raises a separate finding for the class hole-filling cannot touch — so this release inherits a diagnosis it can dispatch on rather than one it would have to re-derive.
 
 *Certified export*
 
@@ -2000,7 +2640,16 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 838 tests in 43 s.
+Run on every commit: `uv run pytest`, about a minute on this machine, and green
+on Linux with no expected-failure list -- measured on the hosted runner for
+Python 3.11 and 3.12, not only locally. The parsing rules it used to fail on are
+covered for both path flavours from either host; what has not been re-measured
+in this slice is a *Windows run*, where the last recorded one had two
+environmental failures of its own (a machine-speed tier-guard timeout and a
+mesh-library edge count), and neither is a platform assumption in the tests. The count moves with
+every slice and is reported in each commit rather than here; what is *enforced*
+is `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240, because a ceiling a
+slow machine cannot move is the only regression control that means anything.
 
 Which tier a test is collected in is structural. `testpaths` in `pyproject.toml`
 names `skills/3d-modeling/scripts` and `tools`; `benchmarks/heavy` and
@@ -2032,7 +2681,7 @@ Protect:
 **L0-heavy — the component fixtures that cost a process**
 
 Run on pull requests and before merge, on the same trigger as L1:
-`uv run pytest benchmarks/heavy`, 353 tests in about 15 minutes.
+`uv run pytest benchmarks/heavy`. Four runs of this tier in one session took 11 m 40 s, 13 m 21 s, 15 m 39 s and 17 m 19 s on the same commit range, so the honest figure is a band of roughly 12-17 minutes rather than a number -- wall clock on this hardware drifts by about 1.8x within a session, which is why the enforceable budget is a collected-test ceiling and not a duration. The counts move with every slice and are reported per commit. This is also the tier that needs the confined boundary, so it is the one the authoritative pre-merge job runs in a container that can actually build one; a run that could not is a run that measured nothing.
 
 Not a fourth rung. It is the part of L0 that cannot be paid on every commit — the
 two command surfaces, the confined build boundary, the packaging and bundle
@@ -2053,10 +2702,11 @@ envelope of the packet the current run issued and a recorded answer survives a
 protocol bump instead of being refused by one. A case may declare several
 formulations, in which case the harness reaches each through `design-tool branch`
 and reads what each one's receipts currently support through `design-tool
-status`. Three of the list below are covered today — original design,
-modification, and alternative *formulation* in the sense this release ships it
-(siblings isolated on disk and in the review bindings; not comparison, which
-Release 4 owns) — and the rest are recorded as the releases that build them land.
+status`. Four of the list below are covered today — original design, modification,
+alternative *formulation* (siblings isolated on disk and in the review
+bindings), and, since Release 4 slice 2, alternative *comparison*: the branched
+case runs `design-tool compare` after every formulation settles and freezes what
+it claims. The rest are recorded as the releases that build them land.
 
 Cover:
 
@@ -2078,6 +2728,78 @@ No live AI call occurs.
 **L2 — blind live evaluation**
 
 Run on demand and before significant releases.
+
+**Built, for reconstruction.** `tools/blind.py` asks and scores against the
+external reference corpus (`benchmarks/corpus.json`, Voron 2, GPL-3.0, never
+committed):
+
+    uv run python tools/blind.py --ask voron-deck-support --into /tmp/job
+    uv run design-tool run /tmp/job --no-render
+    uv run python tools/blind.py --score /tmp/job/candidate.stl \
+                                 --against voron-deck-support
+
+The question is the part's purpose plus the counterparts somebody measured --
+the extrusion slot, the panel stock, the fastener -- and a stated build
+envelope. Not the part's own geometry: that is the answer, `corpus.request_view`
+is the only door to question material, and it refuses any number coinciding
+with the reference's extents or volume.
+
+**What a score is, and it is narrow.** Four measurements: the three bounding-box
+extents *sorted*, the volume, the body count, whether the solid is closed.
+Sorting buys orientation-independence with no registration — a part modelled
+lying down still scores — and costs the axis identity with it. It is
+**dimensional agreement, not shape equivalence**, and that is measured rather
+than hedged: a plain slab with one rectangular pocket, sized to the deck
+support's bounding box and volume, agrees on every row, and so does the same
+slab with x and y swapped, which would not fit the extrusion the brief
+specifies. In the other direction two percent of that part's volume is about
+one small through-hole, so whether a *correct* reconstruction passes the volume
+row can turn on a feature the brief never dimensioned. Shape comparison is
+Release 6 and needs the registration this avoids.
+
+**The first blind run, and what it measured.** A designer agent with no access
+to this session was given the generated job and nothing else, and told not to
+open the corpus, the reference, or the web. It did not. Scored against the
+withheld reference:
+
+    OFF smallest  8.200 against  5.800  (+2.400, band 0.116)
+    OFF middle   12.000 against 14.495  (-2.495, band 0.290)
+    OFF largest  16.000 against 20.000  (-4.000, band 0.400)
+    OFF volume   1023.19 against 1068.534        (4.2% out, band 2%)
+    ok  bodies        1 against       1
+    ok  watertight True against    True
+
+Wrong on all three axes by 15–40%, and within **4.2% on volume**. Reasoning from
+function and wall thickness got the quantity of material nearly right while
+getting the shape wrong, which is the disclaimer above demonstrated rather than
+asserted.
+
+**Two findings the run produced that no test would have.**
+
+The designer reported, unprompted, that the brief was not fully blind: every
+requirement's `source` read "Voron 2 published hardware" and the purpose said
+"deck panel", so any model carrying Voron familiarity was handed the ecosystem,
+the part class and the hardware standard — *"which fixes the topology even
+though it withholds the sizes"*. Sources are non-identifying now. Worth noting
+what caught this: not a rule, a designer volunteering that its answer came
+partly from recall.
+
+And it named the deeper problem before the score was run — `docs/defects.md`
+**D30**: for this reference the interface dimension **is** the answer dimension.
+The part bolts flat to a 20 mm extrusion face, so it is 20 mm across.
+`extrusion_series: "2020"` was refused by the coincidence check because 2020
+states 20 and 20.0 mm is the answer — and removing it removed what the designer
+needed to derive the width. Its own largest unconstrained axis was the depth
+along the extrusion: *"Nothing stated touches it. A reference at 8 or at 20 is
+equally consistent with the brief."* Two of three failing axes trace to
+information the question could not carry, so `OFF, OFF, OFF` here is partly a
+property of the question rather than of the designer, and D30 records the three
+ways to close it.
+
+**What it does not yet do.** Run more than once, on more than one entry, or with
+D30 resolved — so there is no baseline, and one score is an anecdote. The
+envelope was checked as a possible signal and carries none: all four entries
+declare an identical 45×45×25.
 
 Use a small number of authentic jobs to measure:
 

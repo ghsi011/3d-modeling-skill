@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from . import authored as A
+from . import confine as C
 from . import schemas as S
 
 # 3: the manifest reports a `kernel` *token* and no engine prose. It used to
@@ -122,6 +123,15 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
     # already resolved: the candidate chooses what it imports, not what the
     # boundary does.
     sys.path.insert(0, str(input_dir))
+
+    # The last act of the boundary, and the last line before any candidate byte
+    # is imported. On Windows the process already cannot spawn -- the child
+    # policy was set before it started -- and this is a no-op. On Linux the
+    # parent's last act was an `execve`, so the filter could not exist until
+    # now; installing it here means it covers exactly the code the boundary is
+    # about. It is irrevocable: seccomp filters compose by intersection, so a
+    # candidate may add one and can never remove one.
+    C.seal_syscalls()
 
     started = time.perf_counter()
     model, builder = A.load(model_path)

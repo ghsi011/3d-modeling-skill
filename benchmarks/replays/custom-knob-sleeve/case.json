@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "case_id": "custom-knob-sleeve",
   "use_case": "FROM_SCRATCH",
   "source_mode": "NEW",

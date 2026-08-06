@@ -144,7 +144,7 @@ class TheWallBetweenRequestAndAnswer(unittest.TestCase):
                 secret = FX._REFERENCES[fixture_id]
                 text = _all_text(fixture_id)
                 for secret_string in (secret.sha256, secret.path, secret.name,
-                                      str(Path(secret.path).parent)):
+                                      str(FX.recorded_path(secret.path).parent)):
                     for form in _forms(secret_string):
                         self.assertNotIn(form, text, form)
 
@@ -185,7 +185,7 @@ class TheWallBetweenRequestAndAnswer(unittest.TestCase):
                     blob = b"\n".join(p.read_bytes() for p in staged)
                     for secret_string in (secret.sha256, secret.path,
                                           secret.name,
-                                          str(Path(secret.path).parent)):
+                                          str(FX.recorded_path(secret.path).parent)):
                         for form in _forms(secret_string):
                             self.assertNotIn(form.encode(), blob, form)
                     self.assertFalse([p for p in staged
@@ -205,7 +205,7 @@ class TheWallBetweenRequestAndAnswer(unittest.TestCase):
             for held in FX._REFERENCES.values():
                 with self.subTest(fixture=fixture_id, reference=held.name):
                     for secret_string in (held.sha256, held.path, held.name,
-                                          str(Path(held.path).parent)):
+                                          str(FX.recorded_path(held.path).parent)):
                         for form in _forms(secret_string):
                             self.assertNotIn(form, text, form)
 
@@ -628,6 +628,104 @@ class TheImmutableFiles(unittest.TestCase):
                          "a second Python file under the evidence tree is now "
                          "linted; if it is another immutable artifact it wants "
                          "its own documented subtree, not a wider exclusion")
+
+
+class TheRecordedPathFlavourTest(unittest.TestCase):
+    r"""A recorded path is parsed as it was written, on whatever host reads it.
+
+    `Path` is the host, and the host is not the authority on another machine's
+    path. On Linux `Path(r"C:\proj\knob.step")` has no separators in it, so
+    `.name` is the whole string and `.parent` is `"."`. Both were live defects
+    and neither was cosmetic: the basename went into `SourceRef.name` and
+    published a full Windows path in the public record, and the parent was what
+    three wall tests searched their material for -- so they searched every
+    fixture's prose for `"."`, found it, and reported a leak on all of them.
+
+    These cases are written against paths from the *other* OS on purpose. That
+    is the only arrangement in which a host-flavour regression is visible.
+    """
+
+    WINDOWS = r"C:\github\3D\Berlingo gear shift knob\v4-cadquery\knob_v4.step"
+    UNC = r"\\workshop\projects\3D\vent-mount\reference.stl"
+    POSIX = "/home/owner/projects/3d/vent-mount/reference.stl"
+
+    def _external(self, path: str) -> FX.ExternalFile:
+        return FX.ExternalFile(path=path, sha256="0" * 64, bytes=1)
+
+    def test_a_windows_drive_path_keeps_windows_semantics_here(self) -> None:
+        self.assertEqual("knob_v4.step", self._external(self.WINDOWS).name)
+        self.assertEqual(r"C:\github\3D\Berlingo gear shift knob\v4-cadquery",
+                         str(FX.recorded_path(self.WINDOWS).parent))
+
+    def test_a_unc_path_keeps_windows_semantics_here(self) -> None:
+        self.assertEqual("reference.stl", self._external(self.UNC).name)
+        self.assertEqual(r"\\workshop\projects\3D\vent-mount",
+                         str(FX.recorded_path(self.UNC).parent))
+
+    def test_a_posix_path_keeps_posix_semantics_here(self) -> None:
+        self.assertEqual("reference.stl", self._external(self.POSIX).name)
+        self.assertEqual("/home/owner/projects/3d/vent-mount",
+                         str(FX.recorded_path(self.POSIX).parent))
+
+    def test_the_flavour_is_chosen_by_the_recording_and_never_by_the_host(self) -> None:
+        """The rule itself, so a change to it has to be deliberate."""
+        for path in (self.WINDOWS, self.UNC, r"C:/proj/knob.step"):
+            with self.subTest(path=path):
+                self.assertIs(FX.PureWindowsPath, FX.recorded_flavour(path))
+        for path in (self.POSIX, "relative/dir/knob.step"):
+            with self.subTest(path=path):
+                self.assertIs(FX.PurePosixPath, FX.recorded_flavour(path))
+
+    def test_the_basename_is_the_same_answer_on_either_host(self) -> None:
+        """What `.name` must satisfy, written so it cannot pass by accident.
+
+        A host-`Path` implementation returns the whole recorded string on Linux
+        and the basename on Windows. Asserting the basename *and* that the
+        answer is shorter than the recording catches it either way round.
+        """
+        for path, expected in ((self.WINDOWS, "knob_v4.step"),
+                               (self.UNC, "reference.stl"),
+                               (self.POSIX, "reference.stl")):
+            with self.subTest(path=path):
+                name = self._external(path).name
+                self.assertEqual(expected, name)
+                self.assertNotIn("\\", name)
+                self.assertNotIn("/", name)
+                self.assertLess(len(name), len(path))
+
+    def test_every_leak_form_of_a_recorded_parent_is_searched(self) -> None:
+        """Raw, JSON-escaped and slash-normalised, which is three spellings.
+
+        A parent that arrives through `json.dumps` has its backslashes doubled
+        and a URL or POSIX normalisation turns them into forward slashes. The
+        wall tests search all three; this asserts there really are three for a
+        Windows recording, because a `"."` parent collapses them into one and
+        that is what the defect looked like.
+        """
+        parent = str(FX.recorded_path(self.WINDOWS).parent)
+        forms = _forms(parent)
+        self.assertEqual(3, len(forms), forms)
+        self.assertIn(parent, forms)
+        self.assertIn(parent.replace("\\", "\\\\"), forms)
+        self.assertIn(parent.replace("\\", "/"), forms)
+        self.assertNotIn(".", forms, "a bare '.' matches every file ever written")
+
+    def test_no_public_record_holds_a_reference_name_path_parent_or_digest(self) -> None:
+        """The wall, restated over the values this repair changed.
+
+        `.name` is what `SourceRef` publishes, so a regression here is a leak
+        into the public record rather than only a wrong string.
+        """
+        for fixture_id in FX.fixture_ids():
+            if not FX.has_reference(fixture_id):
+                continue
+            held = FX._REFERENCES[fixture_id]
+            text = _all_text(fixture_id)
+            with self.subTest(fixture=fixture_id):
+                for secret in (held.sha256, held.path, held.name,
+                               str(FX.recorded_path(held.path).parent)):
+                    for form in _forms(secret):
+                        self.assertNotIn(form, text, form)
 
 
 if __name__ == "__main__":

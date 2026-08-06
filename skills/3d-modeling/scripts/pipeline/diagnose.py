@@ -90,6 +90,48 @@ def _load_mesh(path: Path, *, process: bool):
             else loaded.dump(concatenate=True))
 
 
+def edge_manifold_counts(mesh) -> dict[str, Any]:
+    """How many faces use each edge, split into the conditions a repair differs on.
+
+    `len(edges_unique) - len(face_adjacency)` was one number carrying two
+    conditions (`docs/defects.md` D1). `face_adjacency` holds a pair only for an
+    edge shared by *exactly* two faces, so that expression counts every edge that
+    is not two-manifold -- open edges and edges shared by three or more faces
+    alike -- and reported the total as `boundary_edges`. A real artifact reported
+    332 whose condition was 322 open edges, 9 shared by three faces and 1 by
+    four.
+
+    The distinction is the whole value of the number. An open edge is a hole and
+    hole-filling closes it; an edge shared by three faces is not a hole, cannot
+    be filled, and is what actually stops every downstream tool. Telling a
+    repairer the first when the file has the second sends them at the wrong
+    repair with a number that looks like evidence.
+
+    Counted off `edges_unique_inverse`, which maps every per-face edge to its
+    unique edge, so this is the face-use count directly rather than anything
+    inferred from an adjacency table's shape.
+    """
+    # Function-local, as everywhere else in this module: a job that never
+    # touches a mesh must not pay the import.
+    import numpy as np
+
+    if len(mesh.faces) == 0:
+        return {"boundary_edges": 0, "nonmanifold_edges": 0,
+                "max_faces_per_edge": 0, "faces_per_edge": {}}
+    inverse = np.asarray(mesh.edges_unique_inverse).reshape(-1)
+    per_edge = np.bincount(inverse, minlength=len(mesh.edges_unique))
+    used, how_many = np.unique(per_edge, return_counts=True)
+    return {
+        "boundary_edges": int((per_edge == 1).sum()),
+        "nonmanifold_edges": int((per_edge >= 3).sum()),
+        "max_faces_per_edge": int(per_edge.max()),
+        # The whole distribution, string-keyed so it survives JSON. A repairer
+        # facing an edge shared by four faces is facing a different problem from
+        # one facing three, and the summary counts above cannot say which.
+        "faces_per_edge": {str(int(k)): int(v) for k, v in zip(used, how_many)},
+    }
+
+
 def _diagnose_mesh(path: Path) -> dict[str, Any]:
     """Two reads, because "as parsed" and "as interpreted" are different facts.
 
@@ -105,12 +147,14 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
     open), so both are reported and the merge is named.
     """
     raw = _load_mesh(path, process=False)
+    import mesh_io
+
     mesh = _load_mesh(path, process=True)
 
     faces = int(len(mesh.faces))
     degenerate = int((mesh.area_faces <= 1e-12).sum()) if faces else 0
-    boundary = (int(len(mesh.edges_unique) - len(mesh.face_adjacency))
-                if faces else 0)
+    edges = edge_manifold_counts(mesh)
+    boundary = edges["boundary_edges"]
     components = mesh.split(only_watertight=False) if faces else []
     extents = [round(float(v), 4) for v in mesh.extents] if faces else []
 
@@ -120,6 +164,14 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
     if faces and not mesh.is_watertight:
         findings.append(f"not watertight after merging coincident vertices: "
                         f"{boundary} boundary edge(s)")
+    # Named separately and always, not only when the mesh is open: a closed mesh
+    # can carry a three-face edge, and it is the condition hole-filling cannot
+    # touch. See `docs/defects.md` D1.
+    if edges["nonmanifold_edges"]:
+        findings.append(
+            f"{edges['nonmanifold_edges']} edge(s) shared by 3 or more faces "
+            f"(up to {edges['max_faces_per_edge']}), which is not a hole and "
+            "cannot be closed by filling one")
     if faces and not mesh.is_winding_consistent:
         findings.append("winding is inconsistent, so inside and outside are not "
                         "well defined")
@@ -139,6 +191,12 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
         "units_note": "the format carries no units; the bbox is reported as "
                       "authored and nothing has been converted",
         "bodies": int(len(components)),
+        # Every body it counted, by a handle that is a function of that
+        # body's geometry. A count cannot be referenced: a declaration
+        # selecting "the third body" resolves to whatever `split`
+        # returned that run, which is ADR 0003's unstable reference
+        # moved from datums to bodies.
+        "body_identities": mesh_io.body_identities(mesh, bodies=components),
         "faces": faces,
         "vertices": int(len(mesh.vertices)),
         "bbox_mm": extents,
@@ -147,6 +205,9 @@ def _diagnose_mesh(path: Path) -> dict[str, Any]:
         "winding_consistent": bool(mesh.is_winding_consistent),
         "degenerate_faces": degenerate,
         "boundary_edges": boundary,
+        "nonmanifold_edges": edges["nonmanifold_edges"],
+        "max_faces_per_edge": edges["max_faces_per_edge"],
+        "faces_per_edge": edges["faces_per_edge"],
         "as_parsed": {
             "vertices": int(len(raw.vertices)),
             "faces": int(len(raw.faces)),
@@ -210,13 +271,19 @@ def _diagnose_step(path: Path) -> dict[str, Any]:
     if invalid:
         findings.append(f"{invalid} face(s) have no usable area, which is what a "
                         "null tessellation looks like from here")
-    if not reading.complete:
+    if reading.failures:
         findings.append(
             f"{len(reading.failures)} of {reading.faces} face(s) cannot be "
             f"tessellated at {reading.linear_deflection} mm linear / "
             f"{reading.angular_deflection} rad angular deflection, so nothing "
             f"downstream can turn this file into a mesh: "
             + "; ".join(reading.failures))
+    elif not reading.complete:
+        # No named faces to blame, and not clean either: the probe could not
+        # walk the shape, or walked it and found nothing. "0 of 0 face(s) cannot
+        # be tessellated" is the sentence this branch exists to stop being
+        # printed. See `docs/defects.md` D23.
+        findings.append(reading.summary())
 
     classification = (
         "RECONSTRUCTION_REQUIRED" if not solids
@@ -332,8 +399,19 @@ def _mesh_facts(mesh) -> dict[str, Any]:
     if triangles == 0:
         return {"triangles": 0, "vertices": int(len(mesh.vertices)), "bbox_mm": [],
                 "watertight": False, "winding_consistent": False,
-                "volume_mm3": None, "bodies": 0, "boundary_edges": 0}
+                # Present and empty, not absent: a caller reading
+                # `body_identities` to check it against `bodies` would get a
+                # KeyError on the one object where the two are most obviously
+                # equal, and an early return that omits a key its own function
+                # promises is how a reader learns to use `.get`.
+                "volume_mm3": None, "bodies": 0, "body_identities": [],
+                "boundary_edges": 0,
+                "nonmanifold_edges": 0, "max_faces_per_edge": 0}
     watertight = bool(mesh.is_watertight)
+    edges = edge_manifold_counts(mesh)
+    import mesh_io
+
+    bodies = mesh.split(only_watertight=False) if len(mesh.faces) else []
     return {
         "triangles": triangles,
         "vertices": int(len(mesh.vertices)),
@@ -341,8 +419,21 @@ def _mesh_facts(mesh) -> dict[str, Any]:
         "watertight": watertight,
         "winding_consistent": bool(mesh.is_winding_consistent),
         "volume_mm3": round(float(mesh.volume), 4) if watertight else None,
-        "bodies": int(len(mesh.split(only_watertight=False))),
-        "boundary_edges": int(len(mesh.edges_unique) - len(mesh.face_adjacency)),
+        "bodies": len(bodies),
+        # Every body it counted, by the handle a loose mesh of the same geometry
+        # gets. A count cannot be referenced, and 3MF is the format Release 5's
+        # "selected components within source assemblies" is about -- so a
+        # declaration naming a body in a supplied assembly names one of these.
+        #
+        # The split is the one computed just above: `_mesh_facts` already paid
+        # for it to produce the count, and splitting twice would double the most
+        # expensive thing this function does.
+        "body_identities": mesh_io.body_identities(mesh, bodies=bodies),
+        # The same split as the mesh branch, for the same reason: one number
+        # here reported a hole and a three-face edge as the same condition.
+        "boundary_edges": edges["boundary_edges"],
+        "nonmanifold_edges": edges["nonmanifold_edges"],
+        "max_faces_per_edge": edges["max_faces_per_edge"],
     }
 
 
@@ -694,6 +785,12 @@ def _diagnose_3mf(path: Path) -> dict[str, Any]:
         if not geometry["watertight"]:
             findings.append(f"{where} is not watertight: "
                             f"{geometry['boundary_edges']} boundary edge(s)")
+            unsound = True
+        if geometry.get("nonmanifold_edges"):
+            findings.append(
+                f"{where} has {geometry['nonmanifold_edges']} edge(s) shared by "
+                f"3 or more faces (up to {geometry['max_faces_per_edge']}), "
+                "which is not a hole and cannot be closed by filling one")
             unsound = True
         if not geometry["winding_consistent"]:
             findings.append(f"{where} has inconsistent winding, so inside and "

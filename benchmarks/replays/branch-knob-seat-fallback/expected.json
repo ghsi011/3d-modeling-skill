@@ -1,5 +1,81 @@
 {
   "case_id": "branch-knob-seat-fallback",
+  "comparison": {
+    "built_nothing": true,
+    "compared": [
+      ".",
+      "as-drawn",
+      "plate-seated"
+    ],
+    "identical_designs": [
+      [
+        ".",
+        "as-drawn"
+      ]
+    ],
+    "mandatory_per_formulation": {
+      ".": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "PASS"
+      },
+      "as-drawn": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "UNKNOWN_STALE"
+      },
+      "plate-seated": {
+        "did_not_run": [],
+        "failed": [],
+        "stored_verdict": "PASS",
+        "verdict": "PASS"
+      }
+    },
+    "mandatory_verdict": "INCOMPARABLE_EXPECTATIONS",
+    "not_compared": {
+      "engineering-judgment": "CONTEXT",
+      "geometric-difference": "CONTEXT",
+      "print-time": "CONTEXT"
+    },
+    "payload_keys": [
+      "axes",
+      "built_nothing",
+      "compared",
+      "identical_designs",
+      "issued_against",
+      "job_id",
+      "not_compared",
+      "not_ranked",
+      "preference",
+      "ranking",
+      "schema_version",
+      "score",
+      "shared",
+      "source_mode"
+    ],
+    "preference_admissible": false,
+    "preference_reason": "NO_CURRENT_VERDICT",
+    "ranking": null,
+    "same_requirement_digest": true,
+    "score": null
+  },
+  "dispositions": {
+    "active_alternative": "as-drawn",
+    "by_alternative": {
+      "as-drawn": {
+        "basis": "UNRESOLVED_EVIDENCE",
+        "disposition": "FALLBACK",
+        "superseded_by": ""
+      },
+      "plate-seated": {
+        "basis": "USER_SELECTION",
+        "disposition": "PREFERRED",
+        "superseded_by": ""
+      }
+    }
+  },
   "exit_codes": [
     0,
     3,
@@ -11,6 +87,8 @@
     0,
     0,
     3,
+    0,
+    0,
     0
   ],
   "formulations": {
@@ -91,6 +169,14 @@
         "stale": [],
         "stored_status": "VERIFIED"
       },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "volume_mm3": 47526.263
+      },
       "measured": {
         "bodies": 1,
         "envelope": {
@@ -131,10 +217,12 @@
         "candidate.stl",
         "candidate_declaration.json",
         "commission_report.json",
+        "comparison.json",
         "design_proposal.json",
         "execution_plan.json",
         "final_status.json",
         "intent_manifest.json",
+        "lifecycle.json",
         "model.py",
         "model_contract.json",
         "print_plan_checks.json",
@@ -246,6 +334,14 @@
           "verification_report.json"
         ],
         "stored_status": "VERIFIED"
+      },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 50.0
+        },
+        "volume_mm3": 47526.263
       },
       "measured": {
         "bodies": 1,
@@ -396,6 +492,14 @@
         "stale": [],
         "stored_status": "VERIFIED"
       },
+      "material": {
+        "bbox_mm": {
+          "x": 38.0,
+          "y": 38.0,
+          "z": 52.0
+        },
+        "volume_mm3": 49792.874
+      },
       "measured": {
         "bodies": 1,
         "envelope": {
@@ -469,7 +573,16 @@
       }
     }
   },
-  "recorded_at": "2a56e5feadc82d35aa7be523aeaf99a240bcce37",
+  "observed_keys": [
+    "case_id",
+    "comparison",
+    "dispositions",
+    "exit_codes",
+    "formulations",
+    "reviews_answered",
+    "schema_version"
+  ],
+  "recorded_at": "395426209c31075f068911317df94b7def7c8a47",
   "reviews_answered": [
     "verification",
     "verification",

@@ -71,6 +71,14 @@
     3,
     3
   ],
+  "material": {
+    "bbox_mm": {
+      "x": 20.3,
+      "y": 26.3,
+      "z": 28.6107
+    },
+    "volume_mm3": 4044.628
+  },
   "measured": {
     "bodies": 1,
     "envelope": {
@@ -86,11 +94,12 @@
         "changed": false,
         "source": 1
       },
-      "evidence_sha256": "17f5cd5efc1fffc9bba7d99c2c38e9a3230152dbf3d9a497430916af4ba64ad1",
+      "detectable_defect_mm": 0.795678,
+      "evidence_sha256": "91ce860db28a6164cf7df00dafd977780cffe247166f660ea5ffcb9808525829",
       "max_deviation_mm": 0.0,
       "method": "sampled bidirectional surface distance",
-      "sample_plan_sha256": "e4ada22f2ca21a5fe923f513298fa1d4a2fe8e1860201784bb82dd77c776900a",
-      "samples_outside_region": 38014,
+      "sample_plan_sha256": "4d4c38bb55d191175a35d1d505d890c94c27a1ebd44bd7147c8fde03b06854c5",
+      "samples_outside_region": 37949,
       "verdict": "PRESERVED_WITHIN_TOLERANCE"
     },
     "repair": "none",
@@ -98,6 +107,23 @@
     "unit_scale": "mm",
     "watertight": true
   },
+  "observed_keys": [
+    "acceptance",
+    "allowed_claim",
+    "case_id",
+    "checks",
+    "coverage",
+    "exit_codes",
+    "material",
+    "measured",
+    "outcome",
+    "reasons",
+    "receipts",
+    "reviews_answered",
+    "schema_version",
+    "screening_detail",
+    "tolerances"
+  ],
   "outcome": {
     "backend": "authored",
     "commission_verdict": "PASS",
@@ -138,7 +164,7 @@
     "safety_verification_report.json",
     "verification_report.json"
   ],
-  "recorded_at": "4442921d9c8463fb0779d8ffbc63689060b7f6b1",
+  "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
   "reviews_answered": [
     "safety",
     "verification"

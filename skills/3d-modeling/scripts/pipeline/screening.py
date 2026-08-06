@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from .analysis import MeasurementFailed, MeshAnalysisContext
 from .contract import Contract
 
@@ -246,13 +248,82 @@ def _volume_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, An
             "expected_mm3": round(want, 3), "measured_mm3": round(got, 3)}
 
 
-def _bed_screen(ctx: MeshAnalysisContext) -> dict[str, Any]:
-    lowest = float(ctx.bounds[0][2])
-    if lowest < -0.05:
+def _printer_frame_low_z(bounds, transform) -> float | None:
+    """The lowest Z the part reaches once the declared orientation is applied.
+
+    All eight corners of the model-frame box, transformed, then the minimum -- a
+    rotation does not keep the lowest corner lowest, so putting `bounds[0]`
+    through the matrix would answer about a corner rather than about the part.
+
+    Conservative, and only because `contract.printer_transform` has already
+    established the matrix is rigid: a transformed box bounds the transformed
+    mesh under an affine map, so this reads lower than the part goes and never
+    higher, which turns an unlucky rotation into a look-again rather than a
+    clean verdict. Under a projective matrix that is false, and a review built
+    one that read +0.5 mm against a true minimum near -49999 mm.
+
+    The matrix is resolved by `contract.printer_transform` and not here. This
+    used to call `is_finite_rigid` itself, which made two readings of one
+    declaration -- the shape of the defect being fixed.
+    """
+    low, high = np.asarray(bounds, dtype=np.float64)
+    if not np.all(np.isfinite([low, high])):
+        return None
+    if transform is None:
+        return None
+    corners = np.array([[x, y, z] for x in (low[0], high[0])
+                        for y in (low[1], high[1])
+                        for z in (low[2], high[2])], dtype=np.float64)
+    moved = corners @ np.asarray(transform)[:3, :3].T + np.asarray(transform)[:3, 3]
+    return float(np.min(moved[:, 2]))
+
+
+def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
+    """Does the part reach below the bed -- in the frame it will be printed in?
+
+    This used to read `ctx.bounds[0][2]`, the lowest Z of the mesh *as
+    authored*, and its signature took no contract, so it could not see the
+    declared orientation even in principle. D15 (`CHANGELOG.md`) filed that as
+    an unused field; it is worse than that. A job could declare a rotation
+    putting the part below the bed, have the rotation validated and hashed into
+    the acceptance contract, and receive `bed-plane: CLEAR` -- a clean verdict
+    about a frame the job never said it was working in.
+
+    So the frame is named in every reason string, and a matrix that cannot be
+    applied is an anomaly rather than a fallback.
+    """
+    from .contract import declared_bed_z, printer_transform
+
+    transform = printer_transform(contract)
+    bed_z = declared_bed_z(contract)
+    if bed_z is None:
         return {"detector": "bed-plane", "result": "ANOMALY",
-                "reason": f"the part reaches {abs(lowest):.2f} mm below the bed, so no "
-                          "downward measurement on it means what it says"}
-    return {"detector": "bed-plane", "result": "CLEAR", "reason": f"lowest point {lowest:.3f} mm"}
+                "reason": "orientation.bed_z_mm is not a finite number, so there "
+                          "is no bed height to measure against and no downward "
+                          "measurement means what it says"}
+    lowest = _printer_frame_low_z(ctx.bounds, transform)
+    if lowest is None:
+        return {"detector": "bed-plane", "result": "ANOMALY",
+                "reason": "orientation.model_to_printer_matrix cannot be applied, "
+                          "so this part's height above the bed is unknown. "
+                          "Measuring the model frame instead would report a "
+                          "clean result about a frame the job did not declare"}
+    # Off the resolved transform, not by re-reading the declaration: a second
+    # read of one field, in the function this slice centralised, is the shape
+    # being fixed. It also removes the `matrix == "identity"` comparison that
+    # raised on a numpy array.
+    identity = bool(np.allclose(transform, np.eye(4)))
+    frame = ("model frame (the declared orientation is the identity)" if identity
+             else "printer frame (the declared orientation is applied)")
+    below = float(bed_z) - lowest
+    if below > 0.05:
+        return {"detector": "bed-plane", "result": "ANOMALY",
+                "reason": f"the part reaches {below:.2f} mm below the bed in the "
+                          f"{frame}, so no downward measurement on it means what "
+                          "it says"}
+    return {"detector": "bed-plane", "result": "CLEAR",
+            "reason": f"lowest point {lowest:.3f} mm against a bed at "
+                      f"{float(bed_z):.3f} mm, measured in the {frame}"}
 
 
 def reference_envelope(contract: Contract) -> dict[str, Any]:
@@ -288,6 +359,58 @@ def reference_envelope(contract: Contract) -> dict[str, Any]:
     return {"z": sorted(set(round(v, 3) for v in marks))}
 
 
+class ScreeningShapeUnexpected(ValueError):
+    """A commission report's screening block is not the shape `run` writes.
+
+    Loud rather than absent, and the reason is what happened without it.
+    `compare._measured` read `screening.detectors` as a mapping keyed by
+    detector name; `run` returns a *list*, and every L0 fixture that exercised
+    the comparison had been written to agree with the reader instead of with
+    this module. Twenty-two fixtures agreed with each other, the code passed,
+    and the first time the verb met a receipt an actual run had written it
+    raised `AttributeError` inside a dict comprehension.
+
+    A reader that shrugged and returned nothing would have been worse: the
+    comparison's material axis would have reported "no volume measured" on every
+    job forever, which is a sentence nobody would think to doubt.
+    """
+
+
+def detectors(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every detector row a commission report carries, in the order `run` wrote them.
+
+    The single reader, and it is this one rather than `detector` below: a review
+    of the commit that added `detector` pointed out that `tools/replay.py` still
+    reached into `screening["detectors"]` by hand -- inside the very function
+    `docs/defects.md` D27 claimed went through the pipeline's own reader. One
+    caller fixed and one caller left is not "one reader", it is one reader and
+    one place the next shape change surfaces as a bare `AttributeError`.
+
+    Empty for a report with no screening block, which is a job that did not get
+    that far. Raising for a report whose block is the wrong *type*, which is a
+    caller reading a shape no run has ever produced.
+    """
+    screening = report.get("screening") or {}
+    rows = screening.get("detectors")
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise ScreeningShapeUnexpected(
+            f"screening.detectors is {type(rows).__name__} and `screening.run` "
+            f"writes a list of rows, each carrying its own 'detector' key. A "
+            f"caller reading it as a {type(rows).__name__} is reading a shape "
+            "no run has ever produced.")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def detector(report: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """One detector's row, looked up by name, or `None` if it did not run."""
+    for row in detectors(report):
+        if row.get("detector") == name:
+            return row
+    return None
+
+
 def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     envelope = reference_envelope(contract)
     independent = _independent(contract)
@@ -295,7 +418,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
         _profile_screen(ctx, 2, envelope, "z", independent=independent),
         _volume_screen(ctx, contract),
         _component_screen(ctx, contract),
-        _bed_screen(ctx),
+        _bed_screen(ctx, contract),
     ]
     results = {d["result"] for d in detectors}
     # `NOT_APPLICABLE` is deliberately not in this ladder. It says a detector had

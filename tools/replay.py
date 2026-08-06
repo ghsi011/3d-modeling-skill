@@ -295,7 +295,12 @@ JUDGEMENT_DIR = "judgements"
 # whether the job reaches a final status or is refused before it builds. Both
 # are read by the loader, so a case written against schema 1 is refused by
 # version rather than silently played as an unbranched one that concludes.
-CASE_SCHEMA = 2
+# 3: a case may declare `dispositions` -- the decisions taken about its
+# formulations once the job is done and compared. Bumped rather than made
+# optional: a case declaring them, played by a reader that did not know the key,
+# would record a job nobody decided anything about and look exactly like a case
+# that declared none.
+CASE_SCHEMA = 3
 EXPECTED_SCHEMA = 1
 
 # Where a branched formulation's work directory sits, and how its id may be
@@ -407,6 +412,30 @@ class Formulation:
 
 
 @dataclasses.dataclass(frozen=True)
+class Disposition:
+    """One decision about one formulation, taken after the job is done.
+
+    A separate declaration from `Formulation` rather than a field on it, because
+    the two answer different questions and are taken at different times. A
+    formulation says what was *explored*; a disposition says what somebody
+    decided about it once the exploring finished and the results were set side
+    by side. Folding the second into the first would make the decision look like
+    a property the alternative was branched with, which is exactly the reading
+    `ARCHITECTURE.md` 14.6 refuses when it requires a disposition to carry its
+    own basis.
+
+    `basis` is one of `project.DISPOSITION_BASIS`. It is not free text and it is
+    not optional for anything but `ACTIVE`: a disposition with no basis records
+    that a decision happened and destroys why.
+    """
+
+    alternative_id: str
+    disposition: str
+    basis: str
+    superseded_by: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class ReplayCase:
     case_id: str
     use_case: str
@@ -437,6 +466,10 @@ class ReplayCase:
     recorded_at: str
     provenance: str
     notes: str
+    # The decisions taken once the job is done and compared, in order. Empty on
+    # every case that declares none, which is the shape every case had before
+    # this arrived. See `_apply_dispositions` for why they run last.
+    dispositions: tuple[Disposition, ...] = ()
 
     @property
     def directory(self) -> Path:
@@ -572,13 +605,106 @@ def load(case_id: str) -> ReplayCase:
         inputs_sha256=dict(payload["inputs_sha256"]),
         recorded_at=payload["recorded_at"],
         provenance=payload["provenance"],
-        notes=payload.get("notes", ""))
+        notes=payload.get("notes", ""),
+        dispositions=tuple(
+            _disposition(case_id, index, row)
+            for index, row in enumerate(payload.get("dispositions") or ())))
+    if case.dispositions and not declared:
+        raise ReplayError(
+            f"{case_id}: case.json declares dispositions and no formulations. "
+            "A disposition moves an alternative between lifecycle states, and "
+            "an unbranched job has none -- the shared root is what they were "
+            "branched from, not one of them.")
+    if case.dispositions and case.concludes != "BUILT":
+        raise ReplayError(
+            f"{case_id}: case.json declares dispositions and concludes "
+            f"{case.concludes!r}. `_apply_dispositions` takes no decision about "
+            "a job that did not finish, so these would be skipped on every play "
+            "for ever -- a recording that contradicts the case which produced "
+            "it, with nothing red to say so.")
+    known = {formulation.key for formulation in formulations}
+    for index, row in enumerate(case.dispositions):
+        if row.alternative_id not in known:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] names {row.alternative_id!r} "
+                f"and this case declares {sorted(known)}. Checked here rather "
+                "than left to the command, because the command's refusal is a "
+                "message about `project.json` two verbs later -- and on a play "
+                "where the decisions are skipped it never arrives at all.")
+        # The successor, by the same rule and for the same reason. The first
+        # version of this loop checked the id and not the successor -- the same
+        # omission it was written to fix, one field over, in the code fixing it.
+        if row.superseded_by and row.superseded_by not in known:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] says {row.alternative_id!r} "
+                f"was replaced by {row.superseded_by!r}, and this case declares "
+                f"{sorted(known)}. A successor nobody can find is what "
+                "`SUPERSEDED` exists not to assert.")
+        if row.superseded_by == row.alternative_id:
+            raise ReplayError(
+                f"{case_id}: dispositions[{index}] says {row.alternative_id!r} "
+                "supersedes itself.")
     if case.concludes not in CONCLUDES:
         raise ReplayError(
             f"{case_id}: concludes {case.concludes!r} is not one of "
             f"{list(CONCLUDES)}")
     _verify_inputs(case)
     return case
+
+
+def _disposition(case_id: str, index: int, row: dict[str, Any]) -> Disposition:
+    """One declared decision, checked before it reaches a command line.
+
+    The basis is checked against the pipeline's own closed set rather than a
+    copy of it: a harness holding its own list would let a case declare a basis
+    the product refuses, and the play would fail two commands later with a
+    message about `project.json` instead of about the case.
+    """
+    from pipeline import project as pipeline_project
+
+    alternative_id = str(row.get("alternative_id") or "")
+    if not ALTERNATIVE_ID.match(alternative_id):
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].alternative_id {alternative_id!r} "
+            f"must match {ALTERNATIVE_ID.pattern}. The shared root has no "
+            "declared row and no disposition applies to it.")
+    disposition = str(row.get("disposition") or "")
+    if disposition not in pipeline_project.ALTERNATIVE_DISPOSITION:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].disposition {disposition!r} is "
+            f"not one of {list(pipeline_project.ALTERNATIVE_DISPOSITION)}")
+    basis = str(row.get("basis") or "")
+    if basis and basis not in pipeline_project.DISPOSITION_BASIS:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}].basis {basis!r} is not one of "
+            f"{list(pipeline_project.DISPOSITION_BASIS)}")
+    if disposition in pipeline_project.BASIS_REQUIRED and not basis:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] moves {alternative_id!r} to "
+            f"{disposition} and declares no basis. Every state but ACTIVE needs "
+            "one -- a decision recorded without its reason is a decision nobody "
+            "can revisit.")
+    successor = str(row.get("superseded_by") or "")
+    if disposition in pipeline_project.SUCCESSOR_REQUIRED and not successor:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] moves {alternative_id!r} to "
+            f"{disposition} and names no successor. "
+            f"{list(pipeline_project.SUCCESSOR_REQUIRED)} must say what replaced "
+            "them: SUPERSEDED without one asserts that something better exists "
+            "with no way to find it. Checked beside the basis rule above, which "
+            "was here on its own until a review asked why only one of the "
+            "product's successor rules was mirrored. Four of the five are "
+            "mirrored now -- this, the inverse below, and the two id checks in "
+            "`load`. The fifth, that a MERGED successor's `parents` record the "
+            "merge, is not: `case.json` gives a formulation a single `parent`, "
+            "so this harness cannot express a merge to check.")
+    if successor and disposition not in pipeline_project.SUCCESSOR_REQUIRED:
+        raise ReplayError(
+            f"{case_id}: dispositions[{index}] names a successor and moves "
+            f"{alternative_id!r} to {disposition}, which is not one of "
+            f"{list(pipeline_project.SUCCESSOR_REQUIRED)}")
+    return Disposition(alternative_id=alternative_id, disposition=disposition,
+                       basis=basis, superseded_by=successor)
 
 
 def _formulation(case_id: str, index: int, row: dict[str, Any]) -> Formulation:
@@ -712,6 +838,10 @@ class Play:
     # Formulation key -> what `design-tool status` derives for it at the end of
     # the play. Empty unless the case declared formulations; see `observe`.
     derived: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    # What `design-tool compare` said about the whole job once every formulation
+    # had settled. Empty unless the case declared formulations -- a comparison
+    # needs two, and `compare` refuses a job with one.
+    comparison: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def work_dir(project_dir: Path) -> Path:
@@ -830,10 +960,12 @@ def play(case: ReplayCase, project_dir: Path,
             f"harness wrote {sorted(written)}. An answer nobody recorded reached "
             "the run.")
     derived = _derive_all(case, project_dir, step, invoke_surface, transcript)
+    comparison = _compare_all(case, project_dir, invoke_surface, transcript)
+    exit_codes += _apply_dispositions(case, project_dir, step)
     return Play(project_dir=project_dir, exit_codes=exit_codes,
                 reviews_answered=answered, responses_written=written,
                 transcript=transcript.getvalue(), work_dirs=work_dirs,
-                derived=derived)
+                derived=derived, comparison=comparison)
 
 
 def _select(case: ReplayCase, project_dir: Path, formulation: Formulation,
@@ -987,6 +1119,199 @@ def _derive_all(case: ReplayCase, project_dir: Path,
     return out
 
 
+def _apply_dispositions(case: ReplayCase, project_dir: Path,
+                        step: Callable[[list[str]], int]) -> list[str | int]:
+    """The decisions the case declares, through `design-tool branch`.
+
+    **After the comparison, and that ordering is the whole point.** Gate 4.5 asks
+    for a real part whose alternatives somebody actually decided between, and a
+    decision taken before the evidence was set side by side would be a decision
+    the comparison did not inform. The recording therefore holds them in the
+    order they happen: every formulation settles, `status` derives what each is
+    still entitled to claim, `compare` says what that establishes and -- on this
+    job -- what it refuses to settle, and only then does somebody choose.
+
+    Through the same verb a user has, and one command per decision. Preferring
+    one demotes the previously preferred one, which is a second journal entry
+    this harness does not issue and must not: it is a consequence the product
+    owns, and a harness that issued it would be recording its own behaviour.
+
+    **Nothing is decided about a job that left no verdict.** The adversarial
+    fixture plays this same case with a sibling's review answer offered to the
+    fallback; the run stops and leaves no final status, which is the whole point
+    of it. `design-tool branch --disposition` would nonetheless accept both
+    commands there -- a formulation does not have to have concluded to be
+    retained -- and the recording would then carry a preference formed over
+    evidence that does not exist. So the declared decisions are taken only when
+    every declared formulation wrote a `final_status.json`. Skipped rather than
+    refused, because a play that stopped early is a legitimate thing for a
+    fixture to produce and this is not the failure it is demonstrating; `load`
+    refuses the combination that would make the skip permanent.
+
+    **What this check is, exactly, and what it is not.** It asks whether a run
+    concluded, not whether its conclusion still holds. A review of the commit
+    that added it pointed out that the docstring said "actually concluded" while
+    the code said "left a file behind" -- and that on this very job the retained
+    fallback is `STALE`, because the case revises its model after the run to
+    exercise derived status. Gating on `derived == stored` was the obvious
+    repair and is the wrong one: retaining a stale concept as the fallback is
+    exactly what a fallback is for, and forbidding it would delete the decision
+    this slice exists to record. What was actually wrong was the sentence. So
+    the check stays, it is described as what it does, and the staleness is
+    *recorded beside the decision* rather than left for a reader to discover --
+    see `_observe_dispositions` and the L1 assertion that names it.
+    """
+    if not case.dispositions:
+        return []
+    unfinished = sorted(
+        formulation.key for formulation in case.formulations
+        if not (project_dir / formulation.relative_dir()
+                / "final_status.json").is_file())
+    if unfinished:
+        return []
+
+    codes: list[str | int] = []
+    for row in case.dispositions:
+        argv = ["branch", str(project_dir), "--disposition", row.disposition,
+                "--of", row.alternative_id]
+        if row.basis:
+            argv += ["--basis", row.basis]
+        if row.superseded_by:
+            argv += ["--superseded-by", row.superseded_by]
+        code = step(argv)
+        codes.append(code)
+        if code != 0:
+            raise ReplayError(
+                f"{case.case_id}: `design-tool branch --disposition "
+                f"{row.disposition} --of {row.alternative_id}` exited {code}. "
+                "A decision the case declares and the product refuses is a case "
+                "describing a lifecycle this build does not have.")
+    return codes
+
+
+def _compare_all(case: ReplayCase, project_dir: Path,
+                 invoke_surface: Callable[[list[str]], int],
+                 transcript: io.StringIO) -> dict[str, Any]:
+    """`design-tool compare`, over the whole job, once every formulation is done.
+
+    Last, and deliberately so. A comparison is what you do *after* the work, on
+    the receipts the work left; running it between formulations would compare a
+    job against itself half-finished and record a verdict about evidence that
+    was merely late.
+
+    Only for a branched case, for a stronger reason than `_derive_all`'s: the
+    verb refuses a job with fewer than two formulations, so an unbranched case
+    would record an error where the branched ones record a report.
+
+    What is kept is the report's *shape* -- the verdicts, the counts, the ids,
+    the standing of every dimension nobody could compare. Not the prose, and not
+    `issued_against`: it carries a receipt digest per formulation, and a digest
+    moves with the tessellator that produced the mesh, which is the same reason
+    `determinism_marks` exists as a separate thing compared between two runs of
+    one commit rather than against a recording frozen at another. (An earlier
+    version of this docstring said `outcome` already binds those hashes. It does
+    not -- `expected.json` contains no digest at all -- and the real reason is
+    the one above.) See `_compare_block` for which half is binding.
+    """
+    if not case.branched:
+        return {}
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured), \
+            contextlib.redirect_stderr(transcript):
+        code = invoke_surface(["compare", str(project_dir), "--json"])
+    transcript.write(captured.getvalue())
+    if code != 0:
+        raise ReplayError(
+            f"{case.case_id}: `design-tool compare` exited {code}. A comparison "
+            "is deterministic and free -- it dispatches nothing and builds "
+            "nothing -- so a non-zero code here is the verb failing, not a job "
+            "needing something.")
+    try:
+        payload = json.loads(captured.getvalue())
+    except json.JSONDecodeError as exc:
+        raise ReplayError(
+            f"{case.case_id}: `design-tool compare --json` printed no JSON "
+            f"report: {exc}") from exc
+    return _comparison_marks(payload)
+
+
+def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
+    """The claims a comparison makes, separated from the sentences it prints.
+
+    Every value here is a verdict, an id or a count. The report's prose --
+    `not_ranked`, `what_that_means`, each `not_compared` row's reason -- is
+    recorded by no key, because `docs/defects.md` and this harness agree that a
+    reworded explanation is not a regression, and pinning it makes a recording
+    that goes red on an improved sentence.
+
+    `ranking` and `score` are pinned as `None` on purpose. They are the two
+    fields ADR 0005 says must never acquire a value, and a recording that
+    watched everything except them would be silent about the one change that
+    would matter most.
+
+    `payload_keys` is why that pinning is not merely a gesture. A review of the
+    commit that added this function measured the hole: adding `rank_order` and
+    `overall_score` to `compare.report`'s payload left the L1 suite *and* the L0
+    suite entirely green -- 86 passed -- because two literal names were pinned
+    and the report's shape was not. So the whole top-level key set is recorded
+    and compared exactly, which is the anti-drift shape this repository already
+    built for ADR 0001's verb list. A ranking cannot now arrive under a name
+    nobody thought to forbid.
+    """
+    axes = payload.get("axes") or {}
+    mandatory = axes.get("mandatory") or {}
+    return {
+        "payload_keys": sorted(payload),
+        "compared": payload.get("compared"),
+        "built_nothing": payload.get("built_nothing"),
+        "ranking": payload.get("ranking"),
+        "score": payload.get("score"),
+        "mandatory_verdict": mandatory.get("verdict"),
+        # Both verdicts, because the difference between them is the whole of
+        # what `as-drawn` demonstrates: `stored_verdict` is what the receipt
+        # says and `verdict` is what it is still entitled to say now that the
+        # model under it moved. A recording that kept only one would be blind to
+        # a staleness weakening that stopped happening.
+        "mandatory_per_formulation": {
+            key: {"verdict": row.get("verdict"),
+                  "stored_verdict": row.get("stored_verdict"),
+                  "failed": row.get("failed"),
+                  "did_not_run": row.get("did_not_run")}
+            for key, row in sorted((mandatory.get("per_formulation")
+                                    or {}).items())},
+        "identical_designs": [sorted(row.get("members") or ())
+                              for row in payload.get("identical_designs") or ()],
+        "same_requirement_digest": (payload.get("shared")
+                                    or {}).get("same_requirement_digest"),
+        "preference_admissible": (payload.get("preference")
+                                  or {}).get("admissible"),
+        # The reason as a *code*. `_preference` has three refusing branches --
+        # a formulation with no current verdict, an unusable rubric, a DECIDING
+        # dimension nobody measured -- and they are different findings about the
+        # job. Freezing only `false` cannot tell them apart, and that cost was
+        # measured: ROADMAP, the case's own notes and an L1 docstring all
+        # attributed this job's inadmissible preference to the rubric branch,
+        # when what fires is the first one.
+        #
+        # The first repair froze `because`, the *sentence*. A review broke it
+        # immediately by improving that sentence's grammar with no behaviour
+        # change -- turning a golden BINDING-red with no defect behind it, which
+        # is the pressure that trains somebody to re-record. Exactly the
+        # regression the docstring above says this function avoids, four lines
+        # under the docstring saying it. `compare._preference` carries a stable
+        # `reason` code now and this freezes that, which is `dimension_id`'s
+        # move for `dimension`, one field over.
+        "preference_reason": (payload.get("preference") or {}).get("reason"),
+        # Keyed on `dimension_id`, not on `dimension`. The first version of this
+        # keyed on the English sentence, which a review demonstrated turns the
+        # recording BINDING-red on a reworded explanation -- exactly the
+        # regression the docstring above says this function avoids. The ids were
+        # added to `compare.not_compared` for this.
+        "not_compared": {row.get("dimension_id"): row.get("standing")
+                         for row in payload.get("not_compared") or ()},
+    }
+
+
 def _status_report(project_dir: Path,
                    invoke_surface: Callable[[list[str]], int],
                    transcript: io.StringIO) -> dict[str, Any]:
@@ -1064,11 +1389,80 @@ def observe(case: ReplayCase, run: Play) -> dict[str, Any]:
     }
     if not case.branched:
         payload.update(_observe_dir(run.project_dir))
+        payload["observed_keys"] = sorted(payload)
         return payload
     payload["formulations"] = {
         key: {**_observe_dir(directory), "derived": run.derived.get(key)}
         for key, directory in run.work_dirs.items()}
+    payload["comparison"] = run.comparison
+    payload["dispositions"] = _observe_dispositions(run.project_dir)
+    # Every key this function emits, frozen and compared exactly. `compare`
+    # walks a hand-maintained whitelist, so until this existed a new top-level
+    # key was simply not looked at: a review added
+    # `payload["smuggled_ranking"] = [...]` -- an ordered list of formulations,
+    # on every branched recording -- and the whole suite stayed green, 132
+    # passed. That is the same hole `_comparison_marks.payload_keys` closes one
+    # level down, and the argument transfers verbatim: a ranking must not be
+    # able to arrive under a name nobody thought to forbid. Last, so it
+    # describes the finished payload.
+    payload["observed_keys"] = sorted(payload)
     return payload
+
+
+def _observe_dispositions(project_dir: Path) -> dict[str, Any]:
+    """Where the job stands when the play finishes: what it is on, and what
+    was decided about each formulation.
+
+    Read off `project.json` rather than off the journal, because the journal
+    records *transitions* and this records the state a reader arriving now would
+    see. Both matter and they are different claims: `lifecycle.json` says a
+    decision was taken, this says what it left behind.
+
+    The shared root is absent rather than null. `branch` writes no row for it --
+    it is what the alternatives were branched from, not one of them -- and a key
+    saying so would be a key inviting a reader to look for the root's
+    disposition, which is the confusion `docs/defects.md` D26 is about.
+    """
+    payload = _read(project_dir, "project.json") or {}
+    return {
+        # What `design-tool run` would pick up next. It is the field that
+        # decides what happens after the decision, so a block claiming to be
+        # "the state a reader arriving now would see" that omitted it would be
+        # false. On the recorded knob it ends on the *fallback*, because
+        # `_derive_all` leaves the project on the last formulation and FALLBACK
+        # is runnable so nothing moves it off -- which is worth a reader
+        # knowing, and was invisible until a review measured it.
+        "active_alternative": payload.get("active_alternative"),
+        "by_alternative": {
+            str(row.get("alternative_id")): {
+                "disposition": row.get("disposition"),
+                "basis": row.get("basis", ""),
+                "superseded_by": row.get("superseded_by", "")}
+            for row in payload.get("alternatives") or ()
+            if row.get("alternative_id")},
+    }
+
+
+def _screening_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every detector row, through the pipeline's own reader.
+
+    Late import for the reason `command_surface` gives. The point of going
+    through `screening.detectors` rather than subscripting is that the harness
+    then reads the receipt the same way the product does -- which is exactly the
+    agreement `docs/defects.md` D27 turned out not to have. The first attempt at
+    that fix routed *this* function through the reader and left `_observe_dir`'s
+    `screening_detail` still subscripting the receipt by hand; a review caught
+    it, and both go through here now.
+    """
+    from pipeline import screening
+    return screening.detectors(report)
+
+
+def _volume_row(report: dict[str, Any]) -> dict[str, Any]:
+    for row in _screening_rows(report):
+        if row.get("detector") == "volume":
+            return row
+    return {}
 
 
 def _observe_dir(directory: Path) -> dict[str, Any]:
@@ -1094,6 +1488,29 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
         and path.name not in NOT_A_RECEIPT)
 
     return {
+        # `volume_mm3` is the one number `compare`'s material axis adds that no
+        # other block here already froze, and it is a block of its own because
+        # `screening_detail` below is compared exactly while this is a float off
+        # a tessellator. ROADMAP.md's Release 4 said the material figure stays
+        # unverifiable prose until it is frozen: `_observe_dir` recorded the
+        # volume detector's *result* and discarded its measurement, so the one
+        # number that discriminates the seated knob from the as-drawn one was
+        # frozen nowhere.
+        #
+        # `volume_result` and `bbox_mm` were here too until a review pointed out
+        # that both were already recorded -- the detector's result exactly under
+        # `screening_detail.detectors.volume`, and the envelope at band under
+        # `measured.envelope`. Recording a value twice does not protect it twice;
+        # it makes a reader who finds the two disagreeing unable to say which is
+        # the recording. `bbox_mm` stays only because `compare` reads it from
+        # `artifact_manifest.json` and `measured.envelope` comes off the
+        # commission report, so the two have different writers and agreeing is
+        # a fact worth freezing. The detector result had one writer and is gone.
+        "material": {
+            "volume_mm3": _volume_row(report).get("measured_mm3"),
+            "bbox_mm": (_read(directory, "artifact_manifest.json")
+                        or {}).get("bbox_mm"),
+        },
         "outcome": {
             "final_status": final.get("final_status"),
             "commission_verdict": final.get("commission_verdict"),
@@ -1117,7 +1534,7 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
             # four answers, so a detector that stopped running and one that
             # started clearing everything both leave it exactly where it was.
             "detectors": {row.get("detector"): row.get("result")
-                          for row in screening.get("detectors", ())},
+                          for row in _screening_rows(report)},
         },
         "acceptance": {
             "revision": frozen.get("revision"),
@@ -1237,7 +1654,13 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
     """Every layer, each by its own rule. See the module docstring for the argument."""
     out: list[Difference] = []
 
-    for field in ("exit_codes", "reviews_answered"):
+    # `observed_keys` first, because it is the one field that says whether the
+    # rest of this function is still looking at everything there is. Everything
+    # below walks a named whitelist; this is what refuses a key that was never
+    # added to it. On both arms of `observe` -- the first version set it only on
+    # the branched one, which left three of the four recordings uncovered by the
+    # guard written to close exactly that kind of gap.
+    for field in ("observed_keys", "exit_codes", "reviews_answered"):
         _compare_exact(field, recorded.get(field), observed.get(field), out)
 
     if "formulations" in recorded or "formulations" in observed:
@@ -1248,6 +1671,18 @@ def compare(recorded: dict[str, Any], observed: dict[str, Any]) -> list[Differen
                                   sorted(rows), sorted(seen)))
         for key in sorted(set(rows) & set(seen)):
             _compare_block(f"formulations.{key}.", rows[key], seen[key], out)
+        # Exact, every field: `_comparison_marks` has already dropped the prose,
+        # so what is left is verdicts, ids and counts, and none of those has a
+        # band. A comparison that started ranking is the single change this
+        # recording exists to refuse.
+        _compare_exact("comparison", recorded.get("comparison"),
+                       observed.get("comparison"), out)
+        # Exact, and binding. A decision is the one thing in a recording that
+        # was made by a person rather than measured by the pipeline, so a replay
+        # that produced a different one is not a rounding difference -- it is
+        # the job having been decided differently.
+        _compare_exact("dispositions", recorded.get("dispositions"),
+                       observed.get("dispositions"), out)
     else:
         _compare_block("", recorded, observed, out)
     return out
@@ -1284,6 +1719,14 @@ def _compare_block(prefix: str, recorded: dict[str, Any],
         _compare_value(f"{prefix}measured.{check_id}", recorded_measured[check_id],
                        observed_measured[check_id], tolerances.get(check_id), out)
 
+    # Banded, not exact: a volume and a bounding box come off a tessellator, and
+    # a recording that pinned their last digit would go red on a different
+    # OCC build without anything about the part having changed. The band is
+    # `_band_for`'s default -- no check declares a tolerance for these, because
+    # they are not checks.
+    _compare_value(f"{prefix}material", recorded.get("material"),
+                   observed.get("material"), None, out)
+
     for field in ("reasons", "allowed_claim"):
         _compare_exact(f"{prefix}{field}", recorded.get(field),
                        observed.get(field), out, severity=ADVISORY)
@@ -1313,8 +1756,14 @@ def record(case_id: str, destination: Path) -> dict[str, Any]:
     """
     _, _, observed = run_case(case_id, destination)
     payload = {**observed, "recorded_at": _head()}
+    # `newline="\n"` explicitly, and `.gitattributes` stores this tree verbatim
+    # (`-text`). Without it a re-record on a different platform rewrites every
+    # line, and the first cross-platform re-record turned a 69-line change into
+    # a 1025-line diff -- which is the opposite of what reviewing a re-record
+    # needs, since the whole question is which values moved.
     (CASES_ROOT / case_id / EXPECTED_FILE).write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="\n")
     return payload
 
 
@@ -1333,7 +1782,7 @@ def reseal(case_id: str) -> dict[str, str]:
     payload["inputs_sha256"] = digests
     payload["recorded_at"] = _head()
     path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n",
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     return digests
 
 

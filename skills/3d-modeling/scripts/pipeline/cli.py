@@ -50,11 +50,13 @@ import dataclasses
 import json
 import math
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
 from . import acceptance as ACC
 from . import bindings as B
+from . import compare as CMP
 from . import cost as COST
 from . import execution as EX
 from . import findings as F
@@ -64,6 +66,7 @@ from . import project as P
 from . import review as R
 from . import route as RT
 from . import runner, schemas as S
+from . import screening as SCR
 from . import status as STATUS
 
 JOB_FILE = "job.json"
@@ -921,6 +924,13 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     Regenerated on every run from the same inputs, so it is byte-stable, and
     refused if it does not validate -- an unbuildable plan discovered after a
     build is 39 archived minutes of nothing.
+
+    Generated *in the orientation the project declared*, which it was not. The
+    template wrote the identity into its support rule whatever the job said, so
+    the ceiling a candidate was gated against was measured in one frame while
+    the candidate was measured in another. `project.orientation` is the single
+    authority: it reaches the acceptance contract already, it reaches the plan
+    from here, and `contract.preflight` refuses the run if the two disagree.
     """
     from designer_toolkit.plan import direct_template, validate_plan
 
@@ -932,7 +942,8 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         material=str(project.material["material"]),
         bodies=max(1, sum(c.count for c in project.components) or 1),
         updated_utc=project.updated_utc,
-        consequence=project.consequence)
+        consequence=project.consequence,
+        orientation=project.orientation)
     problems = validate_plan(plan)
     if not problems:
         (work_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
@@ -978,10 +989,34 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
 
     `None` still means the generated zero, and now means what it says: not one
     declared source could be measured, so there is no evidence to credit at all.
+
+    **In the frame the candidate is measured in.** This called `overhang_area`
+    with no `transform=` while `commission` passes the contract's printer
+    transform, so the ceiling and the measurement it caps were two frames of one
+    inequality -- the last live half of D15. Each source is now placed the way
+    it is actually placed:
+
+        source's own coordinates --alignment_transform--> the job's design frame
+                                 --model_to_printer_matrix--> the printer's
+
+    which is one composition, `printer @ alignment`, in that order. The order is
+    not a convention to pick: `alignment_transform` maps *out of* the source's
+    frame and the printer matrix maps *out of* the design frame, so reversing
+    them applies the printer rotation to coordinates that are not in the design
+    frame yet. For a translating alignment and a rotating printer the two
+    products differ, and a fixture pins that.
+
+    An alignment or a rule matrix this cannot resolve makes that source an
+    unmeasured gap by name, never a silent identity. Substituting identity would
+    credit the candidate an allowance measured in the wrong place, which is the
+    direction that passes a part that should fail.
     """
     if not project.edit_scopes or project.source_mode != "MODIFY":
         return None
 
+    from .contract import as_transform
+
+    printer = as_transform(rule.get("model_to_printer_matrix", "identity"))
     measured: list[tuple[str, float]] = []
     unmeasured: list[tuple[str, str]] = []
     for scope in project.edit_scopes:
@@ -989,6 +1024,19 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
         if artifact is None:
             unmeasured.append((scope.artifact_id,
                                "no source artifact carries this id"))
+            continue
+        if printer is None:
+            unmeasured.append((artifact.path,
+                               "the print plan rule's model_to_printer_matrix "
+                               "is not a usable rigid transform, so there is no "
+                               "printer frame to measure this source in"))
+            continue
+        alignment = as_transform(scope.alignment_transform)
+        if alignment is None:
+            unmeasured.append((artifact.path,
+                               "alignment_transform is not a usable rigid "
+                               "transform, so where this source sits in the "
+                               "job's frame is unknown"))
             continue
         try:
             source = S.resolve_within(project_dir, artifact.path,
@@ -1000,7 +1048,8 @@ def _inherited_overhang(project_dir: Path, project: P.Project,
             area = float(M.overhang_area(
                 str(source),
                 threshold=float(rule.get("downward_normal_z_max", -0.73)),
-                bed_z=float(rule.get("bed_z_mm", 0.0))))
+                bed_z=float(rule.get("bed_z_mm", 0.0)),
+                transform=printer @ alignment))
         except Exception as exc:                      # noqa: BLE001 - one source
             unmeasured.append((artifact.path,         # that cannot be read is a
                                f"{type(exc).__name__}: {exc}"))   # named gap, not
@@ -1039,6 +1088,14 @@ def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
     novel part prints at all, and it is the rule the archived runs violated. The
     rest of the plan (edges, interfaces, coupons) is measured by
     `designer_toolkit.commission` and is not duplicated here.
+
+    The rule's `model_to_printer_matrix` travels with its threshold and its bed
+    height, where it used to be dropped. Dropping it did not make the row
+    frameless; it made the contract's orientation silently stand in for a
+    declaration another artifact had made, with nothing checking the two agreed.
+    Carried here, the frozen contract records which frame each ceiling was
+    measured in, and `contract.preflight` has both numbers in one place to
+    refuse a disagreement before any geometry is built.
     """
     rows: list[dict[str, Any]] = []
     for index, rule in enumerate(plan.get("support_rules") or []):
@@ -1063,6 +1120,8 @@ def _plan_features(plan: dict[str, Any], *, project_dir: Path | None = None,
             "downward_normal_z_max": float(
                 rule.get("downward_normal_z_max", -0.73)),
             "bed_z_mm": float(rule.get("bed_z_mm", 0.0)),
+            "model_to_printer_matrix": rule.get("model_to_printer_matrix",
+                                                "identity"),
             # Zero allowance on top of the ceiling. The plan's own number is the
             # band; adding a default one here would widen a threshold the plan
             # set deliberately.
@@ -1099,11 +1158,11 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     `preservation_tolerance_mm`, with `mesh_fallback_allowed` folded into `exact`
     -- so a job could change what it promised about the edit (what must survive,
     what may go, what is being added, how many bodies should result, whether the
-    source's metadata must, which interface the edit realizes, where the source
-    sits in the job's frame) without moving the contract hash, and keep the review
-    answer somebody wrote against the previous promise. Everything here reaches
-    the frozen acceptance revision and therefore `contract_sha256` in the review
-    envelope.
+    source's metadata must, which interface the edit realizes, which datum it is
+    placed against, where the source sits in the job's frame) without moving the
+    contract hash, and keep the review answer somebody wrote against the previous
+    promise. Everything here reaches the frozen acceptance revision and therefore
+    `contract_sha256` in the review envelope.
     """
     rows: list[dict[str, Any]] = []
     for scope in project.edit_scopes:
@@ -1125,10 +1184,18 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
                      "and the audit compares one source against the whole "
                      "candidate, so a coordinated multi-artifact edit is declared "
                      "here but not yet measurable by it)")
+        declared_size = scope.minimum_detectable_defect_mm
         rows.append({
             "feature_id": f"preservation-{scope.artifact_id}",
             "kind": "preservation",
             "source": artifact.path,
+            # Present only where the job declared one. An added key that is
+            # always there -- even as null -- is still an added key, and it would
+            # move the frozen contract hash of every job that predates this field
+            # and declares nothing new. Same rule `contract.Contract.source`
+            # follows for the same reason.
+            **({"minimum_detectable_defect_mm": float(declared_size)}
+               if declared_size is not None else {}),
             "region": scope.region_box,
             "tolerance_mm": scope.preservation_tolerance_mm,
             "exact": exact,
@@ -1138,13 +1205,28 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             # the review envelope: a job that changes what it claims to be doing
             # can no longer keep the answer somebody wrote against the previous
             # claim. Only `alignment_transform` goes on to the sampling seed --
-            # see `preservation._seed_material`. The other six say what the edit
+            # see `preservation._seed_material`. The others say what the edit
             # promised, not where the geometry is, so they must not move the plan
             # digest of a measurement they cannot change.
             "alignment_transform": scope.canonical_alignment_transform(),
             "preserve": list(scope.preserve),
+            # Absent where the job declares none, for the reason
+            # `minimum_detectable_defect_mm` gives above: the five pinned
+            # certified contracts declare no permitted-change region, and an
+            # always-present key would move all five for a field they do not use.
+            **({"may_change": list(scope.may_change)}
+               if scope.may_change else {}),
             "may_remove": list(scope.may_remove),
             "add": list(scope.add),
+            # Which declared datum this edit was placed against (ADR 0003), by
+            # the same argument as every other field in this block: re-placing an edit against a
+            # different reference changes what the job claims to be doing, and
+            # an answer written against the previous claim must not survive it.
+            # Absent where the job declares none, for the reason
+            # `minimum_detectable_defect_mm` gives above -- an always-present key
+            # would move the five pinned certified contracts for a field they do
+            # not use.
+            **({"datum_ids": list(scope.datum_ids)} if scope.datum_ids else {}),
             "expected_body_delta": int(scope.expected_body_delta),
             "preserve_metadata": bool(scope.preserve_metadata),
             "interface_ids": list(scope.interface_ids),
@@ -1756,12 +1838,33 @@ def status(argv: list[str]) -> int:
     # that directory's own bindings, so switching branches is not the price of
     # finding out where the other one stands.
     alternatives = []
-    for row in project.alternatives:
-        other = (derived if row.alternative_id == project.active_alternative
-                 else _derived_at(project_dir, project, row.alternative_id))
+    # The union: the shared root plus every declared alternative. `branch` writes
+    # no row for the root -- it is a formulation by having a directory, a
+    # proposal, a contract and its own receipts, not by being declared -- and
+    # iterating `project.alternatives` alone reported two formulations of the
+    # recorded knob while the `cost` block below reported three. One report, two
+    # answers to "what is this job". `docs/defects.md` D26.
+    #
+    # Synthesised here and not in `project.json`: a declared row for the root
+    # would make it a thing a user could reject or supersede, and would move
+    # what every existing project deserialises to.
+    root_row = P.Alternative(alternative_id=ROOT_ALTERNATIVE,
+                             reason="what the alternatives were branched from")
+    for row in (root_row, *project.alternatives):
+        at = None if row.alternative_id == ROOT_ALTERNATIVE else row.alternative_id
+        other = (derived if at == project.active_alternative
+                 else _derived_at(project_dir, project, at))
+        # All five, not two. `_derived_at` computes `allowed_claim`, `stale` and
+        # `reasons` as well, and dropping them made per-formulation staleness
+        # unreadable from the report -- `tools/replay.py` had to issue `branch
+        # --activate` and `status` once per formulation to recover what one call
+        # already knew.
         alternatives.append({**row.as_dict(),
                              "status": other["derived_status"],
-                             "stored_status": other["stored_status"]})
+                             "stored_status": other["stored_status"],
+                             "allowed_claim": other.get("allowed_claim"),
+                             "stale": sorted(other.get("stale") or {}),
+                             "reasons": list(other.get("reasons") or ())})
     # What FALLBACK means to a reader, which is the only thing that separates it
     # from ACTIVE. A retained formulation is the answer to "and if this one does
     # not work out", so it is named exactly when that question is live: the
@@ -1815,6 +1918,23 @@ def status(argv: list[str]) -> int:
         "route": project.route,
         "route_rationale": project.route_rationale,
         "required_reviews": list(project.required_reviews),
+        # ADR 0003 decision 1: an assumption is permitted and is *findable*.
+        # A datum somebody chose is not a defect, so `validate` says nothing
+        # about it -- every caller of it here refuses the run on a non-empty
+        # list, warning severity included, and the ADR says plainly that a job
+        # whose datum has no provenance is not refused. It belongs where a
+        # person asks what the job is resting on instead. Release 6 is where an
+        # assessment has to name the ones its conclusion rested on.
+        # Each row carries who settles it and what settling it means, because a
+        # list of bare ids is the `note` this replaced -- and its provenance,
+        # because the two kinds of assumption are not the same thing. A `CHOSEN`
+        # number was picked deliberately; a blank one was never recorded at all,
+        # and ADR 0003 decision 1 is about telling those apart. A row without it
+        # left no consumer able to.
+        "assumptions": [{"datum_id": row.datum_id,
+                         "provenance": row.provenance,
+                         "owner": row.owner, "settled_by": row.settled_by}
+                        for row in project.datums if row.is_assumption],
         "problems": F.messages(problems),
         "findings": [issue.to_dict() for issue in problems],
         "waiting_for": next_action,
@@ -1840,25 +1960,47 @@ def status(argv: list[str]) -> int:
         print(f"  job          {report['job_id']}")
         print(f"  source mode  {report['source_mode']}")
         print(f"  consequence  {report['consequence']}")
-        for row in report["alternatives"]:
-            mark = "*" if row["alternative_id"] == report["alternative"] else " "
-            parents = ", ".join(row["parents"]) or "(the shared root)"
-            state_of = row["disposition"]
-            if row.get("basis"):
-                state_of += f" on {row['basis']}"
-            if row.get("superseded_by"):
-                state_of += f" by {row['superseded_by']}"
-            print(f"  {mark} alternative {row['alternative_id']} "
-                  f"[{state_of}] {row['status']} "
-                  f"from {parents}: {row['reason']}")
-        if report["alternatives"] and report["alternative"] is None:
-            print("  * the shared root")
+        # Only a job that branched prints a formulation block. The JSON carries
+        # the root as a row -- D26, and a caller reading the set needs it -- but
+        # a person running `status` on a job with one formulation should see
+        # what they saw before branching existed, which is nothing here.
+        # ROADMAP.md 3.4: a job that declares no alternatives costs exactly what
+        # it cost before. The first version of the D26 fix printed
+        # `alternative . [ACTIVE] NOT_RUN from (the shared root)` on every
+        # unbranched job.
+        if project.alternatives:
+            for row in report["alternatives"]:
+                at = (None if row["alternative_id"] == ROOT_ALTERNATIVE
+                      else row["alternative_id"])
+                mark = "*" if at == report["alternative"] else " "
+                # The root has no parents and is not "from" anything; every
+                # other row names what it was branched from.
+                origin = (", ".join(row["parents"]) or "the shared root"
+                          if at is not None else None)
+                state_of = row["disposition"]
+                if row.get("basis"):
+                    state_of += f" on {row['basis']}"
+                if row.get("superseded_by"):
+                    state_of += f" by {row['superseded_by']}"
+                label = (f"alternative {row['alternative_id']}"
+                         if at is not None else "the shared root")
+                print(f"  {mark} {label} [{state_of}] {row['status']}"
+                      + (f" from {origin}" if origin else "")
+                      + f": {row['reason']}")
         print(f"  run          {report['run_id'][:12]}")
         print(f"  route        {report['route'] or '(not decided)'}")
         if report["route_rationale"]:
             print(f"  because      {report['route_rationale']}")
         if report["required_reviews"]:
             print(f"  reviews      {', '.join(report['required_reviews'])}")
+        # One line per assumption rather than a joined list: the settling check
+        # is a sentence, and four of them behind a comma is a paragraph nobody
+        # reads. A job with none prints nothing, as it did before ADR 0003.
+        for row in report["assumptions"]:
+            kind = ("a chosen number" if row["provenance"] == "CHOSEN"
+                    else "a number with no recorded provenance")
+            print(f"  assuming     {row['datum_id']} is {kind}. "
+                  f"{row['owner']} settles it: {row['settled_by']}")
         if report["stored_status"]:
             print(f"  status       {report['final_status']}")
             if report["final_status"] == report["stored_status"]:
@@ -2227,6 +2369,181 @@ def _activate(project_dir: Path, project: P.Project, wanted: str) -> int:
     return 0
 
 
+def compare(argv: list[str]) -> int:
+    """Set this job's formulations beside each other, on the receipts on disk.
+
+    Deterministic and free. It dispatches nothing, builds nothing and writes
+    nothing but its own report: every number in it was measured by a run that
+    had the part in front of it, and the only thing added here is the act of
+    putting two of them side by side.
+
+    It does not choose. `design-tool branch --disposition` does, and it records
+    who chose and on what basis; a comparison that also chose would be a second
+    authority over one decision, and the one with no person's name on it. So
+    there is no total, no weight and no order in the output -- see
+    `pipeline/compare.py` for why that is a structural guarantee rather than a
+    convention, and for the three ways a formulation's own proposal can set the
+    rubric it will be graded against.
+    """
+    parser = argparse.ArgumentParser(
+        prog="design-tool compare",
+        description="What setting this job's formulations beside each other "
+                    "establishes, and -- the more important half -- what it does "
+                    "not. No score, no ranking, no selection.")
+    parser.add_argument("project_dir", type=Path)
+    parser.add_argument("--against", default=None,
+                        help="a comma-separated list of formulations to compare, "
+                             f"{ROOT_ALTERNATIVE!r} for the shared root. The "
+                             "default is every formulation that may be worked "
+                             f"under ({list(P.RUNNABLE_DISPOSITION)}) plus the "
+                             "root, which is a formulation with its own "
+                             "proposal, contract and receipts even though it has "
+                             "no declared row")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    project_dir = args.project_dir.resolve()
+    project = _load_project(project_dir, adapt=False)
+
+    # The root plus every declared alternative. `status` carries the same union
+    # now -- it did not when this was written, and a comparison taking its
+    # formulation set from `report["alternatives"]` would have silently dropped
+    # one of the knob's three. That was `docs/defects.md` D26, fixed; this set
+    # is still built here rather than read from a report, because a comparison
+    # must not depend on another command's shape.
+    declared = {ROOT_ALTERNATIVE: None}
+    for row in project.alternatives:
+        declared[row.alternative_id] = row
+
+    if args.against is not None:
+        wanted = [name.strip() for name in args.against.split(",") if name.strip()]
+        unknown = [name for name in wanted if name not in declared]
+        if unknown:
+            sys.stderr.write(
+                f"design-tool: {', '.join(unknown)} names no formulation of this "
+                f"job; have {', '.join(declared)}\n")
+            return 2
+    else:
+        # Runnable, because a comparison is a thing you do before deciding, and
+        # REJECTED or SUPERSEDED formulations are ones the job has already
+        # finished with. They stay on disk and stay nameable with --against --
+        # 6.14 requires a rejected alternative to remain available for
+        # reconsideration -- they are just not what "compare this job" means.
+        wanted = [key for key, row in declared.items()
+                  if row is None or row.disposition in P.RUNNABLE_DISPOSITION]
+
+    readings: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    for key in wanted:
+        alternative_id = None if key == ROOT_ALTERNATIVE else key
+        where = _alternative_dir(project_dir, alternative_id)
+        if where is None or not where.is_dir():
+            missing.append(key)
+            continue
+        readings[key] = CMP.read(where, project_dir=project_dir,
+                                 alternative_id=alternative_id,
+                                 model_name=project.model)
+    for key in missing:
+        sys.stderr.write(f"design-tool: {key} has no directory on disk and is "
+                         "not compared\n")
+
+    events = LC.read(project_dir)
+    restarts = COST.restarts_by_alternative(events)
+    costs = {}
+    for key in readings:
+        totals = COST.totals_at(readings[key]["dir"])
+        costs[key] = {**totals, "restarts": restarts.get(key, 0)}
+
+    try:
+        payload = CMP.report(project, readings, costs)
+    except (CMP.CompareError, SCR.ScreeningShapeUnexpected) as exc:
+        # The second one is `docs/defects.md` D27's guard. It is deliberately
+        # loud, but loud is not the same as uncontrolled: `CompareError` is not
+        # a `ValueError` and `main` catches nothing, so without this a shape
+        # regression reached a user as a bare traceback while every other
+        # failure in this program reaches them as one `design-tool:` line. Gate
+        # 4.1 asks for controlled failure, not for a stack.
+        sys.stderr.write(f"design-tool: {exc}\n")
+        return 2
+
+    # Written before it is printed, and at the project root: a comparison is
+    # about several formulations, so it belongs to none of their directories,
+    # and writing it into one would put a sibling's artifact under another's
+    # work directory -- which is the scoping rule the work directory exists for.
+    (project_dir / CMP.COMPARISON_FILE).write_text(
+        S.canonical_json(payload) + "\n", encoding="utf-8")
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _compare_table(payload)
+    # Always zero on a report that ran. A comparison is never *waiting* for
+    # anything -- there is no answer a caller could write that changes it -- and
+    # a non-zero code would send a script round a loop that cannot terminate.
+    # A stale sibling is a finding in the output, not a state to resolve here.
+    return 0
+
+
+def _compare_table(payload: dict[str, Any]) -> None:
+    """The same report a person reads, in the shape `status` prints."""
+    axes = payload["axes"]
+    mandatory = axes["mandatory"]
+    print(f"  job          {payload['job_id']}")
+    print(f"  compared     {len(payload['compared'])} formulations, from receipts "
+          "alone -- nothing was built and nothing re-adjudicated")
+    print(f"  rubric       {mandatory['verdict']}")
+    for line in _wrapped(mandatory["note"]):
+        print(f"               {line}")
+    for check_id, row in sorted(mandatory.get("expectations", {}).items()):
+        print(f"               {check_id} was measured against")
+        for key in sorted(row["expected"]):
+            print(f"                 {key:14s} {json.dumps(row['expected'][key])}"
+                  f"  band {json.dumps(row['tolerance'][key])}"
+                  f"  {row['result'][key]}")
+    for key, rows in sorted(mandatory.get("only_in", {}).items()):
+        print(f"               only {key} declared {', '.join(rows)}")
+    # No marker on any row. `status` marks the active formulation because one of
+    # them is where work is happening; here, marking one would be the ordering
+    # this command exists not to imply.
+    for key in payload["compared"]:
+        own = mandatory["per_formulation"][key]
+        claim = axes["claim"]["per_formulation"][key]
+        print(f"  formulation  {key:14s} {claim['status'] or 'NOT_RUN':10s} "
+              f"mandatory {own['verdict']}"
+              + (f" ({own['stored_verdict']} when it ran)"
+                 if own["verdict"] == CMP.MANDATORY_UNKNOWN_STALE else ""))
+    for group in payload["identical_designs"]:
+        print(f"  same design  {', '.join(group['members'])} share source "
+              f"{str(group['source_sha256'])[:12]}; their agreement corroborates "
+              "nothing")
+    for key, row in sorted(axes["evidence"]["per_formulation"].items()):
+        if row["stale_receipts"]:
+            print(f"  stale        {key}: {', '.join(row['stale_receipts'])}")
+    print("  requirements bound as one digest"
+          + (", identical across all of them" if payload["shared"]["same_requirement_digest"]
+             else ", AND THEY DIFFER -- these formulations were frozen against "
+                  "different job states")
+          + ", and not checked row by row:")
+    print("               each formulation met the contract it froze, which is "
+          "not 'they meet the requirement'")
+    for row in payload["not_compared"]:
+        # The deciding ones are marked, because a dimension this build cannot
+        # measure and this job turns on is the finding rather than a footnote.
+        label = ("not compared!" if row["standing"] == CMP.DECIDING
+                 else "not compared")
+        print(f"  {label:12s} {row['dimension']} -- {row['owner']}")
+    print(f"  preference   {'admissible' if payload['preference']['admissible'] else 'none'}")
+    for line in _wrapped(payload["preference"]["because"]):
+        print(f"               {line}")
+    print("               this command compares and does not select; use "
+          "`design-tool branch --disposition`")
+
+
+def _wrapped(text: str, width: int = 62) -> list[str]:
+    """Prose at the width the rest of this surface prints at."""
+    return textwrap.wrap(text, width=width) or [""]
+
+
 def diagnose(argv: list[str]) -> int:
     from . import diagnose as _diagnose
     return _diagnose.main(argv)
@@ -2262,6 +2579,7 @@ COMMANDS = {
     "run": run,
     "status": status,
     "branch": branch,
+    "compare": compare,
     "diagnose": diagnose,
     "run-job": run_job,
 }

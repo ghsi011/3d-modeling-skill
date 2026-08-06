@@ -185,3 +185,90 @@ def test_imported_solids_have_explicit_provenance_guidance() -> None:
 def test_changelog_does_not_claim_risk_class_survives() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "risk_class" not in changelog
+
+
+def _documented_verbs(text: str) -> set[str]:
+    """The verbs ADR 0001's command block names."""
+    block = re.search(r"```\n(design-tool .*?)```", text, re.DOTALL)
+    assert block, "ADR 0001 no longer contains a design-tool command block"
+    return {line.split()[1] for line in block.group(1).splitlines()
+            if line.startswith("design-tool ")}
+
+
+def test_every_built_verb_is_named_by_the_adr_that_owns_the_command_surface() -> None:
+    """One command surface, one place that says what is on it.
+
+    ADR 0001 decided `design-tool` is the single agent-facing interface and
+    listed its verbs. `pipeline/cli.py::COMMANDS` is what the interpreter
+    actually dispatches. Two lists that can disagree are two authorities over
+    one question, and this one had already drifted: `branch` and `selftest`
+    shipped in Release 3 without reaching the ADR, so the block a reader trusts
+    was describing a surface that no longer existed.
+
+    Verbs the ADR lists and the build does not have are *not* a failure. They
+    are the decided command surface, and the gap between them and `COMMANDS` is
+    the roadmap. What may never happen is the reverse: a verb an agent can
+    actually run that the ADR does not name.
+
+    `run-job` is exempt because the ADR names it in prose, deliberately and
+    with its deprecation, rather than in the block of verbs to reach for.
+    """
+    import sys
+    sys.path.insert(0, str(ROOT / "skills" / "3d-modeling" / "scripts"))
+    from pipeline import cli
+
+    documented = _documented_verbs(
+        (ROOT / "docs" / "adr" / "0001-one-project-one-cli.md").read_text(
+            encoding="utf-8"))
+    built = set(cli.COMMANDS) - set(cli.DEPRECATED)
+    assert built <= documented, (
+        f"{sorted(built - documented)} can be run and are not named in "
+        "ADR 0001's command block. Add them there in the same commit that adds "
+        "them to COMMANDS, or the command surface has two authorities.")
+
+
+# The section-citation guard. Six defects in one session were a justification
+# citing something the author had not opened, and two of them were a section
+# number that named a different section entirely -- `ARCHITECTURE.md` 6.11
+# ("Manufacturing, assembly, and service operations") cited four times for a
+# sentence that lives in 6.8 ("Edit intent"). Nothing caught it because nothing
+# reads a citation as anything but prose.
+#
+# What this can check is narrow and worth having: a citation of the form
+# "ARCHITECTURE.md <n>.<m>" must name a section that exists. It cannot check
+# that the section says what the citing comment claims -- only a reader can --
+# so this is a floor, not a ceiling.
+# Matches "ARCHITECTURE.md 6.8", "`ARCHITECTURE.md` §6.8" and the bare
+# "ARCHITECTURE 6.8" this codebase's comments prefer. It deliberately does
+# NOT match a naked "6.8" -- most numbers in a comment are not citations,
+# and a guard with false positives is one somebody turns off. So this is a
+# floor: it catches the spelled-out form, which is the form the four wrong
+# citations used.
+_CITATION = re.compile(r"ARCHITECTURE(?:\.md)?`?\s+(?:§\s*)?(\d+\.\d+)")
+
+
+def _architecture_sections() -> set[str]:
+    text = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    return set(re.findall(r"^#{2,3}\s+(\d+\.\d+)\s", text, re.MULTILINE))
+
+
+def test_every_architecture_section_cited_by_name_exists() -> None:
+    sections = _architecture_sections()
+    assert "6.8" in sections, "the heading format changed; this guard is blind"
+
+    offenders: list[str] = []
+    for path in sorted(ROOT.rglob("*.py")) + sorted(ROOT.rglob("*.md")):
+        parts = path.relative_to(ROOT).parts
+        if parts[0] in (".venv", ".git", "build", "dist"):
+            continue
+        if path.name == "test_documentation.py":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for cited in _CITATION.findall(text):
+            if cited not in sections:
+                offenders.append(f"{path.relative_to(ROOT)} cites {cited}")
+
+    assert not offenders, (
+        "these cite an ARCHITECTURE.md section that does not exist:\n  "
+        + "\n  ".join(offenders)
+        + "\nA citation nobody resolved is the defect this guard exists for.")

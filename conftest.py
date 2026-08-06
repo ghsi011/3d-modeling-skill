@@ -59,9 +59,10 @@ convincingly as one that holds.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -77,12 +78,27 @@ _SPAWN_ALLOWED = frozenset({"git"})
 
 L0_TEST_CEILING_S = 5.0
 
-# The gate collected 890 when this was set. 1050 is about 18% headroom -- room
-# for a release's worth of ordinary fixtures without a conversation, and not so
-# much that the mechanism that took the gate to 997 s could return unnoticed.
-# Raising it is allowed and is meant to be deliberate: a raise is a line in a
-# diff saying the gate got bigger, which is the whole point.
-L0_COLLECTED_CEILING = 1050
+# The gate collected 890 when this was first set, and 1050 was about 18%
+# headroom -- room for a release's worth of ordinary fixtures without a
+# conversation. That headroom is spent: ADR 0003's datum fixtures took the gate
+# past it and this guard refused them, which is the guard working.
+#
+# Raised to 1240 on the same rule -- about 16% over the 1066 the gate held
+# when it was raised.
+# What that costs, measured in one session so the machine's own drift is common
+# to every reading: 56.0 s at 1066, against 56.4 s at 1033 on the commit before
+# this slice. An intermediate state of the same slice measured 55.4 s and 56.4 s
+# at 1052 -- one commit, two readings, a full second apart and in the wrong
+# direction. Thirty-three added fixtures are not measurable against that, which
+# is the argument for counting tests rather than timing them and is exactly why
+# this number and not the wall clock is the control.
+#
+# 174 tests of headroom cannot hide the mechanism that once took the gate to
+# 997 s: that was child interpreters at ~1.6 s each, and `_violation` refuses a
+# spawn inside the gate outright rather than pricing it. A raise stays deliberate
+# -- it is a line in a diff saying the gate got bigger, with what it costs beside
+# it.
+L0_COLLECTED_CEILING = 1240
 
 # Set by CI (or by hand) to profile without the gate refusing; the value is
 # printed in the failure text so a run that was let through says so.
@@ -107,14 +123,51 @@ def _executable_name(args: tuple) -> str:
         candidate = args[0] or ""
     if not candidate and len(args) > 1 and args[1]:
         argv = args[1]
-        candidate = argv[0] if isinstance(argv, (list, tuple)) else argv
-    if isinstance(candidate, str):
-        candidate = _first_word(candidate)
+        if isinstance(argv, (list, tuple)):
+            # An argv sequence. Element 0 is the program, whole -- splitting it
+            # on a space would take `C:\\Program Files\\...` apart at the word
+            # the caller never separated.
+            candidate = argv[0]
+        elif isinstance(argv, str):
+            # A joined command line, where the program ends at the first
+            # unquoted space. This is the only shape `_first_word` applies to,
+            # and keeping the two apart is what stops an argument being read as
+            # the program.
+            candidate = _first_word(argv)
+        else:
+            candidate = argv
     try:
-        name = Path(os.fsdecode(candidate)).name.lower()
+        decoded = os.fsdecode(candidate)
     except (TypeError, ValueError):
         return "<unreadable>"
+    name = _spawn_flavour(decoded)(decoded).name.lower()
     return name[:-4] if name.endswith(".exe") else name
+
+
+# The one rule, stated once, for which flavour a *spawn event* path is in.
+#
+# `Path` was the authority here and `Path` is the host, which is the wrong
+# question twice over: an audit event carries whatever the caller passed, and
+# these guards are also handed synthetic paths from the other OS by
+# `tools/test_tiers.py`. On Linux `Path(r"C:\\venv\\Scripts\\python.exe").name`
+# is the entire string, so a Windows spawn read as a POSIX name is a name no
+# allow-list can match -- `git` included, which is the one program L0 may start.
+#
+# `tools/fixtures.py` states the same shape of rule for *recorded fixture
+# paths*. It is deliberately not imported here: this module is the repository
+# root `conftest.py` and is loaded before `pythonpath` puts `tools/` anywhere,
+# so a guard that gates the whole suite would be gambling on import order. The
+# two answer different questions about different inputs and are tested apart.
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _spawn_flavour(decoded: str):
+    """Windows for a drive letter, a UNC name, or any backslash; POSIX else."""
+    if (_WINDOWS_DRIVE.match(decoded)
+            or decoded.startswith("\\\\")
+            or "\\" in decoded):
+        return PureWindowsPath
+    return PurePosixPath
 
 
 def _first_word(line: str) -> str:

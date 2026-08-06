@@ -81,9 +81,81 @@ def _unavailable_check(feature: Feature, title: str, reason: str, code: str,
         status="UNAVAILABLE", error_code=code, error_message=reason)
 
 
+class SampleAreaUnreadable(ValueError):
+    """The declared sensitivity cannot be turned into a plan on this source.
+
+    Distinct from `SampleBudgetExceeded`: that one means the job asked for more
+    than this audit will build, this one means the surface the count would be
+    derived from could not be read at all. Both become UNAVAILABLE checks, and
+    both name which.
+    """
+
+
+def _preservation_samples(expectation: dict[str, Any], source_path: Path) -> int:
+    """How many points this row's plan gets, and where the number came from.
+
+    A declared `minimum_detectable_defect_mm` derives the count from the source's
+    own surface area, so the plan is as fine as the job asked for on the part the
+    job actually has. Without one the fixed fallback stands -- unchanged, so a
+    contract written before this field existed plans exactly the points it always
+    did.
+
+    An explicit `samples` on the row wins over the fallback, because a contract
+    that names its own count must not have it recomputed under a receipt that
+    already published it. It does **not** win over a declared defect size: a row
+    carrying both used to return the count and drop the declaration on the floor,
+    with no finding and no receipt key, so a job could ask for 0.3 mm, be given a
+    0.8 mm plan, and read PRESERVED with nothing anywhere saying it had not got
+    what it asked for.
+
+    Found by review, along with the fact that the justification originally given
+    here -- "the frozen fixtures set one" -- was not true: no committed JSON in
+    this repository sets `samples`. A rule defended by a fact that is false is a
+    rule nobody can check.
+    """
+    declared = expectation.get("minimum_detectable_defect_mm")
+    if "samples" in expectation and declared is None:
+        return int(expectation["samples"])
+    if "samples" in expectation:
+        raise SampleAreaUnreadable(
+            f"this contract row names both an explicit sample count "
+            f"({expectation['samples']}) and a minimum detectable defect size "
+            f"of {declared} mm. They are two different instructions about the "
+            "same plan and this audit will not silently honour one: drop the "
+            "count and let the size derive it, or drop the size.")
+    from . import preservation as PR          # noqa: PLC0415 - kernel is lazy
+    if declared is None:
+        return PR.DEFAULT_SAMPLES
+    from . import analysis                      # noqa: PLC0415
+    # The *normalized* mesh, which is the one the plan is laid out over --
+    # `preservation._ordered` canonicalizes the same geometry, and measuring the
+    # density against the raw parse would describe a surface the plan never saw.
+    #
+    # `analysis.load` refuses a STEP: `trimesh.load` dispatches those to
+    # `cascadio`, which is not in this runtime, so it raises. `PR.audit` handles
+    # the same source fine -- it routes STEP through `mesh_io.read_step` -- which
+    # made this the sharpest possible failure: *declaring* a sensitivity turned a
+    # working audit into an uncaught stage crash, on the one source class the
+    # module was extended to support. Found by review.
+    #
+    # `SampleAreaUnreadable` rather than a bare raise, so the caller can turn it
+    # into an UNAVAILABLE check like every other measurement this file cannot
+    # take. A declaration must never be the thing that breaks a job.
+    try:
+        area = float(analysis.load(Path(source_path)).normalized.area)
+    except Exception as exc:                     # noqa: BLE001 - any read failure
+        raise SampleAreaUnreadable(
+            f"a minimum detectable defect size of {declared} mm was declared, "
+            f"and the surface area of {Path(source_path).name} could not be "
+            f"read to derive a sample count from it: "
+            f"{type(exc).__name__}: {exc}") from exc
+    return PR.derive_sample_count(area, float(declared))
+
+
 def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                    bed_contact_mm2: float | None,
-                   source_dir: Path | None = None) -> Check:
+                   source_dir: Path | None = None,
+                   contract: Contract | None = None) -> Check:
     exp = feature.expectation
     kind = feature.kind
 
@@ -230,8 +302,29 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         threshold = float(exp.get("downward_normal_z_max",
                                   M.DEFAULT_DOWNWARD_NORMAL_Z_MAX))
         bed_z = float(exp.get("bed_z_mm", M.DEFAULT_BED_Z_MM))
+        # In the frame the part prints in. `overhang_area` documents this
+        # parameter for exactly that -- "Pass the model-to-printer `transform`
+        # to screen in print orientation" -- and this call omitted it while
+        # `cli` copies the plan rule's threshold and bed height and drops its
+        # matrix. On a cone: 0.0 mm2 authored, 1294 mm2 in the declared frame.
+        from .contract import printer_transform
+
+        transform = None if contract is None else printer_transform(contract)
+        # No `contract is not None` conjunct. With it, a caller that omitted the
+        # argument skipped the refusal *and* measured the authored frame: on the
+        # cone fixture, PASS at 0.0 mm2 against FAIL at 1293 mm2, with a reason
+        # naming no frame. That is D15 verbatim, reachable by forgetting an
+        # optional argument -- the fallback this slice claims to have removed,
+        # kept as a default.
+        if transform is None:
+            return _unavailable_check(
+                feature, "Unsupported downward-facing area",
+                "orientation.model_to_printer_matrix cannot be applied, so the "
+                "print orientation this area would be measured in is unknown",
+                "ORIENTATION_UNUSABLE", allowed, tol)
         try:
-            got = M.overhang_area(ctx.normalized, threshold=threshold, bed_z=bed_z)
+            got = M.overhang_area(ctx.normalized, threshold=threshold,
+                                  bed_z=bed_z, transform=transform)
         except Exception as exc:                      # noqa: BLE001 - a measurement
             return _unavailable_check(                # that cannot run is a finding
                 feature, "Unsupported downward-facing area",
@@ -264,9 +357,24 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                 f"the declared source artifact {exp.get('source')!r} is not in "
                 f"{root}, so there is nothing to compare against",
                 "SOURCE_MISSING", tolerance_mm, tol)
+        # Derived where the job declared a size, fixed where it did not, and the
+        # receipt says which. `SampleBudgetExceeded` becomes an unavailable
+        # check rather than an exception: a job that asked for a sensitivity
+        # this audit cannot reach has made a declaration it cannot keep, and
+        # that is a finding about the job, not a crash.
+        try:
+            planned = _preservation_samples(exp, source)
+        except PR.SampleBudgetExceeded as exc:
+            return _unavailable_check(
+                feature, "Preservation outside the edit region", str(exc),
+                "PRESERVATION_DENSITY_UNREACHABLE", tolerance_mm, tol)
+        except SampleAreaUnreadable as exc:
+            return _unavailable_check(
+                feature, "Preservation outside the edit region", str(exc),
+                "PRESERVATION_SOURCE_UNREADABLE", tolerance_mm, tol)
         report = PR.audit(source_path=source, candidate_path=ctx.path,
                           region=region, tolerance_mm=tolerance_mm,
-                          samples=int(exp.get("samples", PR.DEFAULT_SAMPLES)),
+                          samples=planned,
                           exact=bool(exp.get("exact", False)),
                           # Where the edit scope declared this source sits in the
                           # job's frame. Read off the frozen contract row rather
@@ -291,6 +399,14 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                       "max_deviation_mm": report.get("max_deviation_mm"),
                       "samples_outside_region": report.get("samples_outside_region"),
                       "method": report.get("method"),
+                      # Beside `method` because it is a property of the method
+                      # and not of the part: the smallest defect this plan's
+                      # density could have found. A verdict of PRESERVED means
+                      # nothing without it -- 38,014 samples is a fine detector
+                      # on a 17 mm ball and a coarse one on a build plate, and
+                      # a reviewer reading only the verdict cannot tell which
+                      # they were handed.
+                      "detectable_defect_mm": report.get("detectable_defect_mm"),
                       # The plan that produced this number and the digest of the
                       # whole audit. Both travel onto the receipt so a review
                       # answer can be checked against the evidence it read
@@ -401,10 +517,7 @@ def run(ctx: MeshAnalysisContext, contract: Contract,
                         contract.expected_bodies, bodies, None,
                         "PASS" if bodies == contract.expected_bodies else "FAIL"))
 
-    lowest = float(ctx.bounds[0][2])
-    checks.append(Check("seated", None, "Part sits on the bed", True, "measured",
-                        0.0, round(lowest, 4), 0.05,
-                        "PASS" if abs(lowest) <= 0.05 else "FAIL"))
+    checks.append(_seated_check(ctx, contract))
 
     extents = [float(v) for v in ctx.extents]
     want = contract.expected_bbox_mm
@@ -423,11 +536,12 @@ def run(ctx: MeshAnalysisContext, contract: Contract,
                         f"extent ratio {ratio:.3f} against the contract",
                         "mm", "mm", None, "FAIL" if suspicious else "PASS"))
 
-    bed_contact = _bed_contact(ctx)
+    bed_contact = _bed_contact(ctx, contract)
     for feature in contract.features:
         if feature.kind == "fit_acceptance":
             continue
-        checks.append(_feature_check(ctx, feature, bed_contact, source_dir))
+        checks.append(_feature_check(ctx, feature, bed_contact, source_dir,
+                                     contract))
 
     for feature in contract.features:
         if feature.kind == "fit_acceptance":
@@ -498,10 +612,76 @@ def _evidence_digests(checks: list[Check]) -> dict[str, str]:
     return digests
 
 
-def _bed_contact(ctx: MeshAnalysisContext) -> float:
-    """Area of faces lying on the bed plane, in the part's own placement."""
-    mesh = ctx.normalized
-    z0 = float(ctx.bounds[0][2])
+def _placed(ctx: MeshAnalysisContext, contract: Contract):
+    """The mesh as it will be printed, or None if the declaration cannot say.
+
+    `designer_toolkit/orient.py` already applies a transform to a mesh and this
+    is the same call. No second arithmetic: two of those is how one receipt came
+    to hold two answers about one part.
+    """
+    from .contract import printer_transform
+
+    transform = printer_transform(contract)
+    if transform is None:
+        return None
+    placed = ctx.normalized.copy()
+    placed.apply_transform(transform)
+    return placed
+
+
+def _seated_check(ctx: MeshAnalysisContext, contract: Contract) -> Check:
+    """Does the part sit on the bed -- in the frame it will be printed in?
+
+    This read `ctx.bounds[0][2]` against a hard-coded 0.0, named no frame, and
+    could PASS. On a contract declaring a 180 degree flip it returned PASS at
+    measured 0.0 while `screening._bed_screen`, fixed one commit earlier,
+    returned ANOMALY at 14 mm below the bed. A screen escalates and a check
+    decides, so the receipt carried two answers and the deciding one was wrong.
+    """
+    from .contract import declared_bed_z
+
+    placed = _placed(ctx, contract)
+    bed_z = declared_bed_z(contract)
+    if placed is None or bed_z is None:
+        missing = "model_to_printer_matrix" if placed is None else "bed_z_mm"
+        return Check(
+            "seated", None, "Part sits on the bed", False,
+            f"orientation.{missing} cannot be used", None, None, None, "FAIL",
+            error_code="ORIENTATION_UNUSABLE",
+            error_message=(
+                f"orientation.{missing} cannot be used, so where this part sits "
+                "relative to the bed is unknown. Measuring the authored frame "
+                "instead would decide the verdict from a frame the job did not "
+                "declare"))
+    lowest = float(placed.bounds[0][2])
+    return Check("seated", None, "Part sits on the bed", True,
+                 "measured in the printer frame (the declared "
+                 "model_to_printer_matrix is applied)",
+                 round(bed_z, 4), round(lowest, 4), 0.05,
+                 "PASS" if abs(lowest - bed_z) <= 0.05 else "FAIL")
+
+
+def _bed_contact(ctx: MeshAnalysisContext, contract: Contract) -> float | None:
+    """Area of faces lying on the bed plane, in the frame the part prints in.
+
+    At the part's lowest plane *after* the declared orientation is applied.
+    Measured in its authored placement -- which is what this did -- that is a
+    different face entirely under any rotation.
+
+    `None`, never `0.0`, when the orientation cannot be applied. Zero contact
+    area is a legitimate measurement, so returning it for a refusal made the two
+    indistinguishable, and `_feature_check` published the refusal as
+    `ran: true, status: MEASURED, reason: "measured"` -- three false statements
+    on one row. Worse, `run` counts a check as covered when `feature_id and
+    ran`, so the fabricated row held coverage at 1.0: the gate that exists
+    because "a candidate shipped 31% too thick while three checks reported
+    SKIPPED and nothing counted them" was defeated by that exact mechanism. With
+    a small enough declared area it also PASSed.
+    """
+    mesh = _placed(ctx, contract)
+    if mesh is None:
+        return None
+    z0 = float(mesh.bounds[0][2])
     triangles = mesh.triangles
     on_bed = (abs(triangles[:, :, 2] - z0).max(axis=1) <= 0.02)
     down = mesh.face_normals[:, 2] <= -0.999

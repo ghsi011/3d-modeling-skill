@@ -61,6 +61,7 @@ from pipeline.test_isolation import (  # noqa: E402
     _substitute,
     _unlink_quietly,
     requires_confinement,
+    requires_windows_confinement,
 )
 
 
@@ -553,6 +554,7 @@ class NoCandidateProseReachesAReviewerTest(_AttackTest):
                                  "quarantined declaration is one attribute away")
 
 @requires_confinement
+@requires_windows_confinement
 class WhatTheConfinementEnforcesTest(_AttackTest):
     """Every property this boundary claims, measured by the candidate itself.
 
@@ -769,6 +771,7 @@ class TheOutputsAreValidatedTest(unittest.TestCase):
             self._accept(f"../{isolation.STL_NAME}")
         self.assertFalse((self.dest / isolation.STL_NAME).is_file())
 
+    @requires_windows_confinement
     def test_an_alternate_data_stream_on_the_artifact_is_refused(self) -> None:
         target = self.build_dir / isolation.STL_NAME
         with open(f"{target}:payload", "w", encoding="utf-8") as handle:
@@ -880,8 +883,14 @@ class TheChildContractTest(unittest.TestCase):
         command = isolation.child_command(Path("C:/a project/in/build_input.json"))
         self.assertIsInstance(command, list)
         self.assertEqual(["-m", isolation.CHILD_MODULE], command[1:3])
-        self.assertTrue(command[0].endswith(("python.exe", "python", "python3",
-                                             "pythonw.exe")), command[0])
+        # A versioned name is a real interpreter name: `sys._base_executable`
+        # is `/usr/bin/python3.11` on this Linux runtime and `python.exe` on
+        # Windows. The property under test is that the *base* interpreter is
+        # named rather than the virtual environment's trampoline (D12), and a
+        # suffix list that only knew Windows spellings asserted the platform
+        # instead of the property.
+        self.assertRegex(Path(command[0]).name,
+                         r"^python(w)?(\d+(\.\d+)*)?(\.exe)?$", command[0])
         # D12: never the virtual environment's `python.exe`, which is a launcher
         # that spawns the base interpreter -- and a child forbidden to create
         # processes cannot be started through one. Asserted against `sys.prefix`
@@ -1040,10 +1049,23 @@ class TheBuiltCandidateTest(_AttackTest):
         deletes, which is the step that makes deleting possible at all.
         """
         pattern = "design-tool-sandbox-*"
-        before = set(Path(tempfile.gettempdir()).glob(pattern))
+        temp = Path(tempfile.gettempdir())
+        before = set(temp.glob(pattern))
         _work, built = self._build()
         self.assertTrue(built.stl_path.is_file())
-        self.assertEqual(before, set(Path(tempfile.gettempdir()).glob(pattern)),
+
+        # Set difference in one direction only, and this is not fussiness. The
+        # sandbox name lives in a directory every process on the machine shares,
+        # so an equality here is an assertion about the whole machine: a build
+        # running anywhere else between the two globs fails this test with
+        # nothing wrong. That happened -- the heavy tier reported this red while
+        # an independent review was running the L0 and L1 suites in the same
+        # checkout, and it passed on a clean re-run and under a builder started
+        # deliberately alongside it, so the failure was never reproducible on
+        # demand and cost an investigation. What this test is entitled to say is
+        # that no sandbox *this build* created is still there.
+        survivors = set(temp.glob(pattern)) - before
+        self.assertEqual(set(), survivors,
                          "a build sandbox survived the build")
 
     def test_a_model_that_printed_before_it_failed_has_its_output_reported(self) -> None:

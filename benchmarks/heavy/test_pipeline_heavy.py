@@ -24,6 +24,7 @@ _SCRIPTS = _REPO_ROOT / "skills" / "3d-modeling" / "scripts"
 # The fixtures this half shares with the half that stayed behind,
 # imported rather than copied: two spellings of one fixture is how
 # two tiers stop testing the same thing.
+from pipeline import runner  # noqa: E402
 from pipeline.test_pipeline import (  # noqa: E402
     CLIP,
     RING,
@@ -33,6 +34,8 @@ from pipeline.test_pipeline import (  # noqa: E402
     TEST_PRINTER,
     _clean_clip,
     _contract,
+    _full_request,
+    _good_verification_response,
     _looked_at,
     _measure,
     _run,
@@ -209,3 +212,41 @@ class CalibrationTest(unittest.TestCase):
             tmp = Path(raw)
             _, _, screen = _measure(_clean_clip(), _contract(tmp), tmp)
             self.assertIn("cannot prove", screen["note"])
+
+
+class ReviewEnvelopeRenderTest(unittest.TestCase):
+    """The one `ReviewEnvelopeTest` case that asks the renderer for images.
+
+    It is here for the tier's own reason and not because it is slow. The render
+    path answers in the parent process on Windows, and never does on Linux:
+    `preview` selects the EGL platform there, PyOpenGL resolves the library
+    through `ctypes.util.find_library`, and that shells out to `ldconfig` --
+    whether or not the library is present, so no machine escapes it by having
+    EGL installed. The rest of the class stayed in the commit gate.
+
+    What the case still proves where the renderer is missing: `witness` records
+    a failed import as `renderer="unavailable: ..."` with no images, which is a
+    different witness record from the `"none"` of a job that never asked. The
+    envelope binds that record either way, so the stale answer is refused for
+    the reason the test names rather than by accident.
+    """
+
+    def test_stale_verification_response_after_render_change_is_rejected(self) -> None:
+        """Changing whether images are rendered changes the witness record, so
+        an answer from the other setting must not be accepted."""
+        response = _good_verification_response()
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            seen = []
+            def capture(packet):
+                seen.append(packet)
+                return {**response, "review_envelope": packet.payload["review_envelope"]}
+            runner.run(_full_request(out, verify_call=capture,
+                                     reviewer={"model_snapshot": "test"}))
+            stale = seen[0].payload["review_envelope"]
+            result = runner.run(_full_request(
+                out, render=True,
+                verify_call=lambda p: {**response, "review_envelope": stale},
+                reviewer={"model_snapshot": "test"}))
+            self.assertFalse(result.ok)
+            self.assertEqual("verification", result.stage)
