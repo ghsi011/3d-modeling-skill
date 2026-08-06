@@ -1011,6 +1011,41 @@ class TheContractBindsTheReferencedDatumsContentsTest(unittest.TestCase):
         self.assertIn("datums", cli._requirement_payload(self._placed(), self.BRIEF),
                       "and it is present the moment an edit is placed against one")
 
+    def test_the_bound_order_is_sorted_and_not_whatever_a_set_yielded(self) -> None:
+        """The assertion a surviving mutation asked for.
+
+        Dropping `sorted()` from the content block passed every other test here,
+        and the reason is worth stating because it is the trap: the referenced ids
+        are collected into a *set*, so the set has already discarded declaration
+        order and two projects differing only in that order iterate identically
+        within one process. Reordering fixtures therefore cannot see the
+        difference.
+
+        What they cannot see is that a set's iteration order is a function of
+        `PYTHONHASHSEED`. Unsorted, the same project would serialize differently
+        in two interpreters -- ending byte-identical reruns and clean-clone
+        reproduction, which are the two properties `bindings.identity` rests on --
+        while every comparison inside one run agreed. So this asserts the order
+        itself, over enough ids that a set coincidentally yielding sorted order is
+        not a thing to rely on. `benchmarks/heavy/test_datums_heavy.py` proves the
+        same property the expensive way, across two real interpreters with
+        different seeds.
+        """
+        project = self._placed()
+        ids = ("zeta-face", "alpha-face", "mid-face", "beta-face", "yankee-face",
+               "delta-face", "kilo-face", "omega-face")
+        many = dataclasses.replace(
+            project,
+            datums=tuple(_datum(datum_id=name, valid_for=("src", "drawer"))
+                         for name in ids),
+            edit_scopes=(dataclasses.replace(project.edit_scopes[0],
+                                             datum_ids=ids),
+                         project.edit_scopes[1]))
+        self.assertEqual(
+            sorted(ids), [row["datum_id"] for row in cli._referenced_datums(many)],
+            "the block is ordered by datum_id, not by whatever the set yielded "
+            "under this process's hash seed")
+
     def test_the_binding_is_computed_from_project_state_alone(self) -> None:
         """Items 17-19, at the only level a unit test can honestly claim them.
 
