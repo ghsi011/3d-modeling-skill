@@ -6,6 +6,37 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — a recorded path is parsed as it was written, not as the host would write it
+
+The thirteen L0 tests that failed on Linux were one defect in two places, not a
+platform exception: `Path` was the authority, and `Path` is whichever host is
+reading. `ExternalFile.name` returned the whole recorded string on Linux and a
+parent of `"."`, so the public record published a full Windows path through
+`SourceRef.name` and three wall tests searched every fixture's prose for `"."`.
+`conftest._executable_name` had the same shape, which left `git` — the one
+program L0 may start — unrecognisable when the event carried a Windows path.
+
+One rule each, stated once and never consulting the host: Windows for a drive
+letter, a UNC name or any backslash; POSIX otherwise. Both flavours are covered
+from either host, and both rules are mutation-proven -- seven attempted, seven
+caught. No fixture hash, evidence
+classification or request/reference assertion changed. Linux L0 went from 13
+failed to 0.
+
+### Added — the authoritative pre-merge gate builds the real Linux boundary
+
+`pre-merge` ran on a bare hosted runner as uid 1001 with no `CAP_SYS_ADMIN`, so
+the confinement could not be constructed and the tier reported on nothing. It
+now runs in a digest-pinned container with `--cap-add=SYS_ADMIN` and one
+measured AppArmor opt-out — the first hosted run held the capability and still
+failed `mount(None -> /, 0x44000)` with `EACCES`, which is AppArmor's answer and
+not seccomp's, so the syscall filter was left in place rather than loosened on a
+guess. A preflight prints the capability masks and `describe_confinement()`,
+fails with the exact `unavailable_reason()`, and builds one real confined child
+before pytest runs. Nothing is skipped or marked xfail, and the heavy suite is
+not split into a green hosted half and an unrun privileged half.
+
+
 ### Fixed — the boundary's availability probe asked about uid, not the capability
 
 `confine_posix.unavailable_reason()` gated on `os.geteuid() != 0` as a stand-in

@@ -22,7 +22,7 @@ The architecture defines the intended destination. This roadmap may change whene
 
 ## 2. Current position
 
-The current branch already provides important foundations:
+The current baseline on `main` provides these foundations:
 
 * one command surface for running a job;
 * a canonical project representation;
@@ -67,6 +67,32 @@ asserted:
 | no child processes | `CHILD_PROCESS_RESTRICTED` before the process starts | seccomp-BPF refusing `execve`, installed by the child immediately before the first candidate import |
 | authority reduction | restricted token, same user | empty capability bounding set, same user |
 
+**Availability is decided from effective `CAP_SYS_ADMIN`, not from uid.** The
+probe used to ask `geteuid() == 0`, which is a different question and was wrong
+in both directions: a root process in a container whose bounding set omits the
+capability was told the boundary was available and then failed with a bare
+`EPERM` from `unshare`, and a process holding the capability at a nonzero uid was
+refused while holding exactly what the construction needs. The capability is now
+read from the kernel. Effective is what counts — permitted-but-not-effective is
+refused and named as such, and never raised into the effective set, because
+raising it would be an escalation performed unasked.
+
+Three states stay distinct and must not be collapsed into each other:
+
+* **unavailable and refused by name** — the boundary cannot be built here, the
+  reason says which mechanism is missing, and it is produced before a candidate
+  is staged. No candidate byte runs.
+* **available and re-measured** — the boundary was built and its four properties
+  were re-measured against the kernel rather than asserted from this table.
+* **candidate execution** — a candidate actually ran inside it.
+
+The pre-merge job is where the second and third are established rather than
+assumed. It runs in a digest-pinned container with `--cap-add=SYS_ADMIN` and a
+preflight that prints the capability masks, fails with the exact
+`unavailable_reason()` if there is one, and then builds a real confined child.
+Nothing there is skipped: a tier that cannot construct the boundary reports on
+nothing, and skipping the cases that need it would turn that into a green tick.
+
 The strongest evidence that the Linux boundary is not the weaker one is not any
 of those rows: it is that **the L1 replay suite reproduces every value the
 Windows recordings froze**. A boundary that leaked would not reproduce a digest.
@@ -82,14 +108,27 @@ every difference an addition. Reproducing a recording is evidence; reproducing
 one you then rewrite and finding you rewrote nothing is the same evidence with
 the digests checked one at a time.
 
-Current: 61 passed, 43 subtests, ~52 s against a two-minute budget. The count
-moves with every slice and is reported in each commit.
+The suite runs on a bare checkout, well inside its two-minute budget, and a
+case whose supplied artifact is not on the machine skips rather than passing
+quietly. Exact counts are reported in each commit and in the pull request that
+lands the slice, not pinned here: this line has said 61 and then 66 and then 67
+while nothing about what L1 covers changed, and a number that goes stale without
+going wrong is worse than no number.
 
-Two things are still platform-bound and both are Windows assumptions in tests
-rather than defects: 13 L0 tests fail on Linux — 11 subtests in
-`tools/test_fixtures.py::TheWallBetweenRequestAndAnswer`, whose absolute-path
-detector looks for `C:\...`, and two in `tools/test_tiers.py::TheSpawnGuardTest`
-that construct a Windows command line. The rest of the gate passes; the count moves with every slice and is reported in each commit rather than pinned here, where it goes stale silently.
+**Path and executable parsing is cross-platform, and the commit gate has no
+platform allowance left.** It used to have one: thirteen L0 tests failed on
+Linux and were filed as Windows assumptions rather than defects. They were
+defects, and one defect wearing two hats — `Path` was the authority in two
+places and `Path` is whichever host is reading. A path recorded on another
+machine is now parsed in the flavour it was written in, by a rule stated once in
+`tools/fixtures.py`, and a spawn event's executable is read the same way by a
+rule stated once in `conftest.py`: Windows for a drive letter, a UNC name or any
+backslash, POSIX otherwise, with the host never consulted. Windows and POSIX
+paths give the same basename on either machine, so a fixture manifest means one
+thing in two checkouts. Both rules are covered on Linux and Windows and both are
+mutation-proven. The gate is green on Linux with no expected-failure list, and
+counts are reported per commit rather than pinned here, where they go stale
+silently.
 
 The following work is already complete and is treated as the protected baseline.
 
@@ -2601,9 +2640,16 @@ These are active throughout all releases.
 
 **L0 — component fixtures**
 
-Run on every commit: `uv run pytest`, 1139 tests in about 55 s on this
-machine. The count moves with every slice; what is enforced is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240.
+Run on every commit: `uv run pytest`, about a minute on this machine, and green
+on Linux with no expected-failure list -- measured on the hosted runner for
+Python 3.11 and 3.12, not only locally. The parsing rules it used to fail on are
+covered for both path flavours from either host; what has not been re-measured
+in this slice is a *Windows run*, where the last recorded one had two
+environmental failures of its own (a machine-speed tier-guard timeout and a
+mesh-library edge count), and neither is a platform assumption in the tests. The count moves with
+every slice and is reported in each commit rather than here; what is *enforced*
+is `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240, because a ceiling a
+slow machine cannot move is the only regression control that means anything.
 
 Which tier a test is collected in is structural. `testpaths` in `pyproject.toml`
 names `skills/3d-modeling/scripts` and `tools`; `benchmarks/heavy` and
@@ -2635,7 +2681,7 @@ Protect:
 **L0-heavy — the component fixtures that cost a process**
 
 Run on pull requests and before merge, on the same trigger as L1:
-`uv run pytest benchmarks/heavy`, 357 tests and 9 skipped. Four runs of this tier in one session took 11 m 40 s, 13 m 21 s, 15 m 39 s and 17 m 19 s on the same commit range, so the honest figure is a band of roughly 12-17 minutes rather than a number -- wall clock on this hardware drifts by about 1.8x within a session, which is why the enforceable budget is a collected-test ceiling and not a duration.
+`uv run pytest benchmarks/heavy`. Four runs of this tier in one session took 11 m 40 s, 13 m 21 s, 15 m 39 s and 17 m 19 s on the same commit range, so the honest figure is a band of roughly 12-17 minutes rather than a number -- wall clock on this hardware drifts by about 1.8x within a session, which is why the enforceable budget is a collected-test ceiling and not a duration. The counts move with every slice and are reported per commit. This is also the tier that needs the confined boundary, so it is the one the authoritative pre-merge job runs in a container that can actually build one; a run that could not is a run that measured nothing.
 
 Not a fourth rung. It is the part of L0 that cannot be paid on every commit — the
 two command surfaces, the confined build boundary, the packaging and bundle
