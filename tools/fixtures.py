@@ -380,10 +380,13 @@ _DECLARED: tuple[PublicFixture, ...] = (
             distribution=INTERNAL_ONLY,
             public_request="benchmarks/fixtures/oneplus-case-x2d-asa/public/"
                            "request.md",
-            notes="Damaged on purpose by history, not by us: 332 boundary edges "
-                  "and inconsistent winding on the body, beside a second object "
-                  "that is sound. The heavier 4,892-edge sibling is left out of "
-                  "L0."),
+            notes="Damaged on purpose by history, not by us: 322 boundary edges "
+                  "and 10 non-manifold edges (shared by three or four faces) "
+                  "with inconsistent winding on the body, beside a second object "
+                  "that is sound. The two edge counts are named separately "
+                  "because they want different repairs and this note used to "
+                  "carry only their 332 total. The heavier 4,892-edge sibling is "
+                  "left out of L0."),
         PublicFixture(
             fixture_id="vent-ball-combine",
             use_cases=("COMBINE", "MODIFY"),

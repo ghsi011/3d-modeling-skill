@@ -386,10 +386,22 @@ class L0Damaged(unittest.TestCase):
         geometry = {o["id"]: o["geometry"] for o in report["objects"]
                     if o["geometry"] is not None}
         self.assertFalse(geometry["1"]["watertight"])
-        self.assertEqual(332, geometry["1"]["boundary_edges"])
+        # 322 and 10, not the 332 this asserted until the numbers were split.
+        # `pipeline.diagnose.edge_manifold_counts` used to report every edge that
+        # was not two-manifold as `boundary_edges`, and this object's 332 was
+        # 322 open edges plus 10 shared by three or more faces. The two
+        # conditions want different repairs -- an open edge is a hole and filling
+        # closes it; a three-face edge cannot be filled at all -- so a test that
+        # pins only the total cannot tell the split landed from the split being
+        # reverted. Both halves are asserted here for that reason.
+        self.assertEqual(322, geometry["1"]["boundary_edges"])
+        self.assertEqual(10, geometry["1"]["nonmanifold_edges"])
         self.assertFalse(geometry["1"]["winding_consistent"])
 
-        self.assertTrue(any("object '1'" in f and "332 boundary edge(s)" in f
+        self.assertTrue(any("object '1'" in f and "322 boundary edge(s)" in f
+                            for f in report["findings"]), report["findings"])
+        self.assertTrue(any("object '1'" in f
+                            and "10 edge(s) shared by 3 or more faces" in f
                             for f in report["findings"]), report["findings"])
         self.assertTrue(any("object '1'" in f and "winding" in f
                             for f in report["findings"]), report["findings"])
