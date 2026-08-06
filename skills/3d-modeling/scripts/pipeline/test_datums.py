@@ -679,24 +679,31 @@ class TheContractBindsWhichDatumTheEditWasPlacedAgainstTest(unittest.TestCase):
                             "re-placing the edit against a datum has to move the "
                             "row, or the frozen answer survives the change")
 
-    def test_the_datums_own_value_is_not_bound_and_the_cap_is_why_that_is_safe(
+    def test_the_row_carries_the_reference_and_not_a_copy_of_the_contents(
             self) -> None:
-        """The honest limit of this slice, asserted rather than admitted in prose.
+        """Where the contents live, and where they deliberately do not.
 
-        The row binds *which* datum the edit was placed against. It does not
-        bind the datum's value, so correcting 12.4 to 12.9 leaves
-        `contract_sha256` where it was and a review answer written against the
-        old number stays current. That is ADR 0003 decision 5 -- datums join the
-        13.4 binding list -- and the ADR assigns it to Release 6: *"Release 6
-        carries the invalidation obligation, because that is where a `MODIFY`
-        job may claim success."*
+        This assertion used to be named for the D31 gap -- the row does not bind
+        the datum's value, so correcting 12.4 to 12.9 left `contract_sha256`
+        alone -- and it instructed its own deletion once ADR 0003 decision 5
+        landed. Decision 5 has now landed and the assertion survives, which is
+        worth being exact about rather than letting a green test carry a claim
+        that is no longer true.
 
-        What makes the gap safe today is not that it is small. It is that a job
-        with an edit scope is capped at `EXPERIMENTAL_UNAVAILABLE` and cannot
-        claim success at all -- the ADR's own reason nothing has to stop. A
-        datum is only ever referenced from an edit scope, so every job that can
-        rest on one is capped. If that ever stops being true this test goes red,
-        which is the point of asserting it here rather than writing it down.
+        The row still carries no contents, and that is now a design property
+        instead of a gap: the authoritative contents are bound once, in
+        `_requirement_hash`'s canonical datum block, because decision 4 says
+        coordinated scopes reference one object rather than each holding a copy.
+        Two scopes naming one datum must not put two copies of its number in one
+        contract. So the row keeps the reference, the block keeps the contents,
+        and `TheContractBindsTheReferencedDatumsContentsTest` is where the
+        binding itself is proved.
+
+        The cap assertion stays, and not as a leftover. A datum is only ever
+        reachable through an edit scope, so every job that can rest on one is
+        held at `EXPERIMENTAL_UNAVAILABLE`; D31 makes the binding correct and
+        does not lift that ceiling. If the cap ever goes away this goes red,
+        which is the point of asserting it rather than writing it down.
         """
         plain = self._pair()
         placed = dataclasses.replace(
@@ -708,13 +715,50 @@ class TheContractBindsWhichDatumTheEditWasPlacedAgainstTest(unittest.TestCase):
         corrected = dataclasses.replace(
             placed, datums=(_datum(value=12.9, valid_for=("src", "drawer")),))
         self.assertEqual(self._rows(placed), self._rows(corrected),
-                         "if this ever differs, decision 5 landed and this "
-                         "test is the one that should have been deleted")
+                         "the row reports the reference; a second copy of the "
+                         "number here would be the two-authorities failure ADR "
+                         "0003 decision 4 exists to stop")
         self.assertEqual("EXPERIMENTAL_UNAVAILABLE",
                          EX.compile_plan(placed).lane_status,
-                         "and this is the only reason the line above is not a "
-                         "defect: nothing resting on that datum may claim "
-                         "success while the cap holds")
+                         "D31 binds the contents correctly and lifts nothing: "
+                         "nothing resting on that datum may claim success while "
+                         "the cap holds")
+
+    def test_one_scopes_reference_list_is_sorted_but_never_deduplicated(self) -> None:
+        """Two different questions about one list, and only one is this row's.
+
+        Sorting is authorised because the field is a set of references to
+        declared identities rather than a precedence or an operation order, so
+        the order one scope lists two independent references in is not a fact
+        about the job. Deduplicating is not: a repeated id is a declaration
+        `Project.validate` owns, and collapsing it here would hide it behind a
+        contract that looks well-formed.
+        """
+        plain = self._pair()
+
+        def placed(ids: tuple[str, ...]) -> P.Project:
+            return dataclasses.replace(
+                plain,
+                datums=(_datum(valid_for=("src", "drawer")),
+                        _datum(datum_id="drawer-face",
+                               valid_for=("src", "drawer"))),
+                edit_scopes=(dataclasses.replace(plain.edit_scopes[0],
+                                                 datum_ids=ids),
+                             plain.edit_scopes[1]))
+
+        forward = self._rows(placed(("drawer-face", "magnet-pocket-face")))
+        reversed_ = self._rows(placed(("magnet-pocket-face", "drawer-face")))
+        self.assertEqual(forward, reversed_,
+                         "the same two references in the other order are the "
+                         "same declaration and must not move the contract")
+        self.assertEqual(["drawer-face", "magnet-pocket-face"],
+                         forward[0]["datum_ids"])
+
+        repeated = self._rows(placed(("magnet-pocket-face", "magnet-pocket-face")))
+        self.assertEqual(["magnet-pocket-face", "magnet-pocket-face"],
+                         repeated[0]["datum_ids"],
+                         "a duplicate reference is reported as written; this "
+                         "function does not get to silently repair it")
 
     def test_a_job_placing_no_edit_against_a_datum_gains_no_key(self) -> None:
         """The five pinned certified contracts declare no datum, and a key that
@@ -723,6 +767,264 @@ class TheContractBindsWhichDatumTheEditWasPlacedAgainstTest(unittest.TestCase):
         stated in the same block."""
         for row in self._rows(self._pair()):
             self.assertNotIn("datum_ids", row)
+
+
+class TheContractBindsTheReferencedDatumsContentsTest(unittest.TestCase):
+    """D31, and ADR 0003 decision 5: a datum is a dependency binding.
+
+    The sibling class above binds *which* datum an edit was placed against. This
+    one is about what the datum said. `_requirement_hash` pins "the values
+    somebody stated or measured" and `project.datums` was not among its six keys,
+    so correcting a referenced number while keeping its id left the frozen
+    contract byte-identical and a review answer written against the old number
+    still current.
+
+    That is the ADR's own incident with the blast radius moved once more: there
+    the file was rewritten mid-job and nothing was invalidated; here the
+    authoritative model is corrected and nothing is invalidated.
+    """
+
+    # A stand-in for the brief's digest. The subject is the datum payload, and a
+    # real brief hash would only add a constant to every value below.
+    BRIEF = "0" * 64
+
+    def _placed(self, **datum_over) -> P.Project:
+        from .test_execution_plan import (EDIT_SCOPE, POCKETS, SECOND_ARTIFACT,
+                                          SECOND_SCOPE, SOURCE_ARTIFACT)
+        plain = _project(
+            source_mode="MODIFY", model="model.py",
+            envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0},
+            interfaces=(POCKETS,),
+            source_artifacts=(SOURCE_ARTIFACT, SECOND_ARTIFACT),
+            edit_scopes=(dataclasses.replace(EDIT_SCOPE,
+                                             interface_ids=("magnet-pockets",)),
+                         SECOND_SCOPE))
+        # Overrides win, including over `valid_for` -- the validity-scope subtest
+        # changes exactly that field.
+        fields: dict = dict(valid_for=("src", "drawer"))
+        fields.update(datum_over)
+        return dataclasses.replace(
+            plain,
+            datums=(_datum(**fields),),
+            edit_scopes=(dataclasses.replace(plain.edit_scopes[0],
+                                             datum_ids=("magnet-pocket-face",)),
+                         plain.edit_scopes[1]))
+
+    def _hash(self, project: P.Project) -> str:
+        return cli._requirement_hash(project, self.BRIEF)
+
+    def test_a_referenced_datums_changed_value_moves_the_requirement_hash(self) -> None:
+        """The smallest statement of the defect: same id, corrected number."""
+        self.assertNotEqual(
+            self._hash(self._placed()),
+            self._hash(self._placed(value=12.9)),
+            "the scope names this datum and the number it names changed, so a "
+            "contract derived from it must not be byte-identical -- otherwise a "
+            "review answer written against 12.4 stays current against 12.9")
+
+    def test_an_unchanged_project_rederives_the_same_requirement_hash(self) -> None:
+        """The other half, and the one that makes the first meaningful.
+
+        A hash that moved on every call would satisfy the assertion above while
+        ending byte-identical reruns, which `bindings.identity` is built on.
+        """
+        self.assertEqual(self._hash(self._placed()), self._hash(self._placed()))
+
+    def test_every_authority_bearing_field_moves_the_hash(self) -> None:
+        """One subtest per field, because "the contents" is not one fact.
+
+        Each of these changes the meaning of the reference an edit was placed
+        against, and each is an existing `Datum` field -- D31 invents none. The
+        unit case is `mm -> cm` deliberately: two unquestionably valid units, so
+        this proves the D31 property without depending on D33's `null`-to-`"None"`
+        coercion or implying that `"None"` is a unit.
+        """
+        baseline = self._hash(self._placed())
+        for label, change in (
+                ("value", dict(value=12.9)),
+                ("unit", dict(unit="cm")),
+                ("provenance", dict(provenance="INHERITED",
+                                    derived_from={"artifact_id": "src",
+                                                  "revision": 1})),
+                ("source artifact", dict(provenance="INHERITED",
+                                         derived_from={"artifact_id": "drawer",
+                                                       "revision": 1})),
+                ("artifact revision", dict(provenance="INHERITED",
+                                           derived_from={"artifact_id": "src",
+                                                         "revision": 2})),
+                ("validity scope", dict(valid_for=("src",))),
+                ("assumption owner", dict(provenance="CHOSEN", owner="metrologist",
+                                          settled_by="calipers")),
+                ("settling check", dict(provenance="CHOSEN", owner="metrologist",
+                                        settled_by="a printed coupon")),
+                ("note", dict(note="measured after the pocket was cut")),
+        ):
+            with self.subTest(field=label):
+                self.assertNotEqual(
+                    baseline, self._hash(self._placed(**change)),
+                    f"changing {label} changes what the reference means, so a "
+                    "contract derived from it must move")
+
+    def test_the_bound_row_is_the_models_own_serialization(self) -> None:
+        """Equality against `as_dict()`, not a list of the fields I thought of.
+
+        This is the assertion that catches the next implementation rather than
+        this one: a payload rebuilt field by field would carry whatever its author
+        remembered and quietly drop `owner`, `settled_by`, `note`, or whichever
+        authority-bearing field is added after this test was written. Comparing
+        against the model's own serialization cannot drift from the model.
+        """
+        project = self._placed()
+        self.assertEqual([project.datums[0].as_dict()],
+                         cli._referenced_datums(project))
+
+    def test_a_datum_no_scope_references_does_not_participate(self) -> None:
+        """ARCHITECTURE.md 13.4: a binding a job does not use is not in its identity.
+
+        The other direction of the same rule as 13.5's "unrelated valid results
+        remain reusable" -- correcting a datum nothing was placed against must not
+        cut a revision on work that never read it.
+        """
+        project = self._placed()
+        with_spare = dataclasses.replace(
+            project,
+            datums=project.datums + (_datum(datum_id="unused-face", value=99.0,
+                                            valid_for=("src", "drawer")),))
+        moved = dataclasses.replace(
+            project,
+            datums=project.datums + (_datum(datum_id="unused-face", value=1.0,
+                                            valid_for=("src", "drawer")),))
+        self.assertEqual(self._hash(with_spare), self._hash(moved),
+                         "nothing is placed against unused-face, so its value "
+                         "cannot be part of this job's identity")
+        self.assertEqual([d["datum_id"] for d in cli._referenced_datums(moved)],
+                         ["magnet-pocket-face"])
+
+    def test_declaration_order_of_the_datums_list_is_not_a_fact_about_the_job(
+            self) -> None:
+        """Item 12: reordering unordered datum rows does not change bytes."""
+        project = self._placed()
+        rows = (project.datums[0],
+                _datum(datum_id="drawer-face", valid_for=("src", "drawer")))
+        forward = dataclasses.replace(
+            project, datums=rows,
+            edit_scopes=(dataclasses.replace(
+                project.edit_scopes[0],
+                datum_ids=("magnet-pocket-face", "drawer-face")),
+                project.edit_scopes[1]))
+        backward = dataclasses.replace(forward, datums=tuple(reversed(rows)))
+        self.assertEqual(self._hash(forward), self._hash(backward))
+
+    def test_reference_order_is_not_a_fact_either_but_which_ids_still_is(
+            self) -> None:
+        """Item 13 and its converse, together.
+
+        Order-insensitivity is only safe if identity-sensitivity survives it. A
+        hash that ignored reference order by ignoring the references would pass
+        the first assertion and be useless, so the second one replaces an id and
+        requires the hash to move.
+        """
+        project = self._placed()
+        rows = (project.datums[0],
+                _datum(datum_id="drawer-face", value=8.0,
+                       valid_for=("src", "drawer")))
+
+        def placed(ids: tuple[str, ...]) -> P.Project:
+            return dataclasses.replace(
+                project, datums=rows,
+                edit_scopes=(dataclasses.replace(project.edit_scopes[0],
+                                                 datum_ids=ids),
+                             project.edit_scopes[1]))
+
+        self.assertEqual(
+            self._hash(placed(("magnet-pocket-face", "drawer-face"))),
+            self._hash(placed(("drawer-face", "magnet-pocket-face"))),
+            "the same two references in the other order are one declaration")
+        self.assertNotEqual(
+            self._hash(placed(("magnet-pocket-face",))),
+            self._hash(placed(("drawer-face",))),
+            "replacing the reference re-places the edit, which must move")
+
+    def test_two_scopes_sharing_one_datum_bind_one_authoritative_copy(self) -> None:
+        """ADR 0003 decision 4, in the serialization rather than in prose.
+
+        The incident the ADR was written from was two copies of one number where
+        the second to be corrected was the one that shipped. A contract that
+        wrote the contents once per referencing scope would rebuild exactly that.
+        """
+        project = self._placed()
+        shared = dataclasses.replace(
+            project,
+            edit_scopes=(dataclasses.replace(project.edit_scopes[0],
+                                             datum_ids=("magnet-pocket-face",)),
+                         dataclasses.replace(project.edit_scopes[1],
+                                             datum_ids=("magnet-pocket-face",))))
+        bound = cli._referenced_datums(shared)
+        self.assertEqual(1, len(bound),
+                         "one identity, one authoritative entry, however many "
+                         "scopes name it")
+        self.assertNotEqual(self._hash(shared),
+                            self._hash(dataclasses.replace(
+                                shared,
+                                datums=(_datum(value=12.9,
+                                               valid_for=("src", "drawer")),))),
+                            "and correcting it moves the identity for both")
+
+    def test_a_job_with_no_referenced_datum_gains_no_key(self) -> None:
+        """Items 11 and 14, at the level the byte-identity actually depends on.
+
+        Every recorded case -- the five pinned certified contracts and all four
+        L1 replay goldens -- declares no datum. An always-present key, even an
+        empty list, would move all nine. The two `modify-ball-*` replays are the
+        sharp case and are represented here by `plain`: an edit scope, no datum.
+        """
+        from .test_execution_plan import (EDIT_SCOPE, POCKETS, SECOND_ARTIFACT,
+                                          SECOND_SCOPE, SOURCE_ARTIFACT)
+        plain = _project(
+            source_mode="MODIFY", model="model.py",
+            envelope_mm={"x": 40.0, "y": 30.0, "z": 10.0},
+            interfaces=(POCKETS,),
+            source_artifacts=(SOURCE_ARTIFACT, SECOND_ARTIFACT),
+            edit_scopes=(dataclasses.replace(EDIT_SCOPE,
+                                             interface_ids=("magnet-pockets",)),
+                         SECOND_SCOPE))
+        self.assertEqual([], cli._referenced_datums(plain))
+        declared_but_unused = dataclasses.replace(
+            plain, datums=(_datum(valid_for=("src", "drawer")),))
+        self.assertEqual(
+            self._hash(plain), self._hash(declared_but_unused),
+            "a datum nothing is placed against leaves the contract exactly "
+            "where it was, so no recorded golden can move because of it")
+
+        # The key must be ABSENT, not present and empty, and the two hash
+        # differently while comparing identical to each other. A digest cannot
+        # see the difference -- both projects above would carry `"datums": []`
+        # and still match -- so this reads the payload. Without it the only
+        # thing standing between an always-present key and nine moved goldens is
+        # the replay suite, which is not the commit gate.
+        for label, project in (("no datum at all", plain),
+                               ("declared but unreferenced", declared_but_unused)):
+            with self.subTest(project=label):
+                self.assertNotIn(
+                    "datums", cli._requirement_payload(project, self.BRIEF),
+                    "an unused key is still an added key")
+        self.assertIn("datums", cli._requirement_payload(self._placed(), self.BRIEF),
+                      "and it is present the moment an edit is placed against one")
+
+    def test_the_binding_is_computed_from_project_state_alone(self) -> None:
+        """Items 17-19, at the only level a unit test can honestly claim them.
+
+        `_referenced_datums` takes a `Project` and nothing else -- no directory,
+        no build result, no mesh, no digest -- so there is no parameter through
+        which a candidate could substitute content or supply its own digest, and
+        nothing for a post-freeze reread to read. The ordering that makes it
+        matter (`_requirement_hash` at call time, `ACC.freeze`, then
+        `ISO.build`) is `_run_authored`'s and is asserted in `test_frozen`.
+        """
+        import inspect
+        self.assertEqual(["project"],
+                         list(inspect.signature(cli._referenced_datums)
+                              .parameters))
 
 
 class ADatumSurvivesTheRoundTripTest(unittest.TestCase):
