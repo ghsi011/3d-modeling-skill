@@ -6,6 +6,37 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the one L0 case that cannot answer in this process on Linux
+
+`ReviewEnvelopeTest.test_stale_verification_response_after_render_change_is_rejected`
+was the fourteenth L0 failure on Linux, against a documented allowance of
+thirteen. It failed the tier guard's **spawn** check rather than its own
+assertion: it is the single case in its class asking for `render=True`, and on
+Linux `preview` selects the EGL platform, PyOpenGL resolves the library through
+`ctypes.util.find_library`, and that shells out to `ldconfig` — plus `gcc` and
+`ld` when EGL is absent. Having EGL installed does not avoid it, because
+`find_library` runs `ldconfig` to answer at all, so no Linux machine escapes it
+and the case could never pass the commit gate there.
+
+**Moved to `benchmarks/heavy/`, which is what the guard's own failure text
+prescribes**, rather than widening the allowance to fourteen to accommodate a
+test in the wrong tier. The Linux L0 failure set is now exactly the thirteen
+Windows-assumption cases `ROADMAP.md` describes. No new regression fixture was
+added because the tier guard *is* the regression test — it is what caught this,
+and it still fails the same way if the case returns to the gate.
+
+The property under test is unaffected, and that was established by mutation
+rather than by watching it pass: where the renderer cannot import, `witness`
+records `renderer="unavailable: ..."` with no images, which is a different
+witness record from the `"none"` of a job that never asked, so the envelope
+still refuses the stale answer for the reason the case names. Leaving the second
+run's render flag unchanged makes that same stale answer accepted, which is the
+mutation the case kills. `_good_verification` became a module-level helper so
+both tiers read one fixture rather than two spellings of it.
+
+Found by running the full gate on Linux at `8ebfb80`; the failure predates the
+branch and reproduces identically at the branch point `62fe422`.
+
 ### Fixed — two columns of one design are named as one (D28)
 
 `compare._identical_designs` grouped formulations by `bindings.current`, which
