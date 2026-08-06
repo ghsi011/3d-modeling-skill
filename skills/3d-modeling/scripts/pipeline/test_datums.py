@@ -28,20 +28,22 @@ what this file covers:
 4. coordinated scopes reference one datum identity rather than each holding a
    copy.
 
-**Decisions 5 and 6 are not implemented, and that is not an omission this file
-gets to be quiet about.** Decision 5 -- datums join §13.4's dependency-binding
-list, so changing one invalidates the results that rested on it -- is Release 6
-by the ADR's own Consequences: *"Release 6 carries the invalidation obligation,
-because that is where a `MODIFY` job may claim success."* What exists here is
-the near half of it: the acceptance contract binds *which* datum an edit was
-placed against, so re-placing an edit invalidates the answer, while changing the
-datum's **value** does not. Decision 6 -- that precedence between a datum and
-other evidence is a property of the authoritative model and not of the file --
-is satisfied by construction today, in that nothing grants a datum authority over
-measured evidence, and enforced by nothing. `ROADMAP.md`'s Release 5 section
-records both gaps and why the `EXPERIMENTAL_UNAVAILABLE` cap makes them safe;
-`TheContractBindsWhichDatumTheEditWasPlacedAgainstTest` asserts that cap rather
-than trusting it.
+**Decision 5 has landed; decision 6 has not, and that is not an omission this
+file gets to be quiet about.** Decision 5 -- datums join §13.4's
+dependency-binding list, so changing one invalidates the results that rested on
+it -- is `docs/defects.md` D31 and is covered by
+`TheContractBindsTheReferencedDatumsContentsTest` below: the acceptance contract
+binds *which* datum an edit was placed against **and** the canonical contents of
+exactly the datums referenced, so correcting a value with the id kept moves the
+requirement hash. The end-to-end half -- the stored review answer actually
+refused and the dependent receipts actually removed -- is
+`benchmarks/heavy/test_datums_heavy.py`, because it costs a build. Decision 6 --
+that precedence between a datum and other evidence is a property of the
+authoritative model and not of the file -- is satisfied by construction today, in
+that nothing grants a datum authority over measured evidence, and enforced by
+nothing. `ROADMAP.md`'s Release 5 section records that remaining gap and why the
+`EXPERIMENTAL_UNAVAILABLE` cap makes it safe; the cap is asserted here rather
+than trusted, and D31 lifted none of it.
 
 Decision 7 decides nothing to build. What is deliberately *not* here: measuring
 anything against a datum. These are declaration obligations, and a declaration
