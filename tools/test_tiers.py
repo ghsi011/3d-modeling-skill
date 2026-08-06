@@ -196,3 +196,90 @@ class TheAggregateCeilingTest(unittest.TestCase):
         headroom = GATE.L0_COLLECTED_CEILING - collected
         self.assertGreater(headroom, 100, "no room for a release of fixtures")
         self.assertLess(headroom, collected // 2, "that is not a ceiling")
+
+
+class TheExecutableNameFlavourTest(unittest.TestCase):
+    r"""The guard reads a spawn event whichever OS wrote the path in it.
+
+    `Path` was the authority and `Path` is the host. On Linux
+    `Path(r"C:\venv\Scripts\python.exe").name` is the entire string, so a
+    Windows spawn arrives as a name no allow-list can match -- including `git`,
+    the one program L0 may start, which is the failure mode that matters: the
+    guard stops recognising the permitted program rather than stops working.
+
+    Every case here is a path from the other OS, because a host-flavour
+    regression is invisible against paths the host would have written.
+    """
+
+    def test_a_windows_executable_is_read_with_windows_semantics(self) -> None:
+        self.assertEqual("python", GATE._executable_name(
+            (r"C:\venv\Scripts\python.exe", None)))
+        self.assertEqual("python", GATE._executable_name(
+            (r"C:\Program Files\Py\python.exe", None),
+        ), "an executable path is not split on the space inside it")
+
+    def test_a_unc_executable_is_read_with_windows_semantics(self) -> None:
+        self.assertEqual("python", GATE._executable_name(
+            (r"\\workshop\tools\Py\python.exe", None)))
+        self.assertEqual("git", GATE._executable_name(
+            (None, r"\\workshop\tools\git.exe rev-parse HEAD")))
+
+    def test_a_posix_executable_is_read_with_posix_semantics(self) -> None:
+        self.assertEqual("uv", GATE._executable_name(("/usr/bin/uv", None)))
+        self.assertEqual("git", GATE._executable_name(("/usr/bin/git", None)))
+
+    def test_the_flavour_is_chosen_by_the_path_and_never_by_the_host(self) -> None:
+        for path in (r"C:\venv\python.exe", r"\\host\share\python.exe",
+                     "C:/venv/python.exe"):
+            with self.subTest(path=path):
+                self.assertIs(GATE.PureWindowsPath, GATE._spawn_flavour(path))
+        for path in ("/usr/bin/uv", "uv"):
+            with self.subTest(path=path):
+                self.assertIs(GATE.PurePosixPath, GATE._spawn_flavour(path))
+
+    def test_a_sequence_and_a_joined_command_line_stay_different_shapes(self) -> None:
+        """The same bytes in the two shapes must not answer the same way.
+
+        `["git", "check-attr", "x.stl"]` is an argv sequence and its program is
+        element 0; `"git check-attr x.stl"` is a joined command line and its
+        program ends at the first space. Reading either as the other is how an
+        argument gets reported as the program.
+        """
+        self.assertEqual("git", GATE._executable_name(
+            (None, ["git", "check-attr", "-a", "--", "vent.stl"])))
+        self.assertEqual("git", GATE._executable_name(
+            (None, "git check-attr -a -- vent.stl")))
+        self.assertEqual("python", GATE._executable_name(
+            (None, r'"C:\Program Files\Py\python.exe" -m pytest')))
+        self.assertEqual("python", GATE._executable_name(
+            (None, [r"C:\Program Files\Py\python.exe", "-m", "pytest"])),
+            "element 0 of a sequence is the program whole, spaces and all")
+
+    def test_the_exe_suffix_is_normalised_away_and_only_at_the_end(self) -> None:
+        """`python.exe` and `python` are one program and must compare equal.
+
+        The allow-list holds bare names, so a suffix left on is a permitted
+        program that stops being recognised. Trimming it anywhere but the end
+        would be a different bug, so a name that merely contains `.exe` is
+        checked too.
+        """
+        self.assertEqual("python", GATE._executable_name((r"C:\py\python.exe", None)))
+        self.assertEqual("python", GATE._executable_name((r"C:\py\PYTHON.EXE", None)))
+        self.assertEqual("exeunt", GATE._executable_name(("/usr/bin/exeunt", None)))
+        self.assertEqual("git", GATE._executable_name((r"C:\tools\git.exe", None)))
+
+    def test_git_is_still_the_only_permitted_spawn_after_either_parse(self) -> None:
+        """The guard's decision, not just its string handling."""
+        self.assertEqual(frozenset({"git"}), GATE._SPAWN_ALLOWED)
+        for event in ((r"C:\Program Files\Git\bin\git.exe", None),
+                      ("/usr/bin/git", None),
+                      (None, ["git", "rev-parse", "HEAD"])):
+            with self.subTest(event=event):
+                self.assertIn(GATE._executable_name(event), GATE._SPAWN_ALLOWED)
+        for event in ((r"C:\venv\Scripts\python.exe", None), ("/usr/bin/uv", None)):
+            with self.subTest(event=event):
+                self.assertNotIn(GATE._executable_name(event), GATE._SPAWN_ALLOWED)
+
+    def test_an_unreadable_event_is_still_a_name_and_never_an_exception(self) -> None:
+        self.assertEqual("<unreadable>", GATE._executable_name((object(), None)))
+        self.assertEqual("<unreadable>", GATE._executable_name((None, [object()])))

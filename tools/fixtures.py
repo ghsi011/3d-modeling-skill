@@ -77,8 +77,9 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 import shutil
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import ClassVar
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -148,6 +149,42 @@ class LicenceWithheld(RuntimeError):
     """A redistributable bundle was asked for geometry that may not be shipped."""
 
 
+# A recorded path is data about another machine, so the machine reading it is
+# not the authority on how to parse it. `Path` is: it resolves to the host
+# flavour, so on Linux `Path(r"C:\\proj\\knob.step").name` is the whole string
+# and `.parent` is `"."` -- a basename that is a path and a parent that matches
+# every piece of text ever written. Both were live: `SourceRef.name` published a
+# full Windows path into the public record on Linux, and three wall tests
+# searched their material for `"."`.
+_RECORDED_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def recorded_flavour(recorded: str) -> type[PurePath]:
+    """The path flavour a recorded string was written in. One rule, stated once.
+
+    Windows if it opens with a drive letter (`C:\\...`, `C:/...`) or is a UNC
+    name (`\\\\server\\share\\...`), or if it contains a backslash at all -- a
+    backslash is a legal character in a POSIX filename and has never been one in
+    a path this project records, whereas reading `C:\\proj\\knob.step` as a
+    POSIX name is wrong every time. POSIX otherwise, which is what a recorded
+    `/home/...` and every repo-relative path is.
+
+    The host is not consulted. That is the whole point: the answer must be the
+    same on the machine that recorded the path and the machine that reads it,
+    or a fixture manifest means two different things in two checkouts.
+    """
+    if (_RECORDED_WINDOWS_DRIVE.match(recorded)
+            or recorded.startswith("\\\\")
+            or "\\" in recorded):
+        return PureWindowsPath
+    return PurePosixPath
+
+
+def recorded_path(recorded: str) -> PurePath:
+    """A recorded path parsed in its own flavour, on any host."""
+    return recorded_flavour(recorded)(recorded)
+
+
 @dataclasses.dataclass(frozen=True)
 class ExternalFile:
     """A file the repository points at and never contains.
@@ -162,11 +199,23 @@ class ExternalFile:
     vendored: ClassVar[bool] = False
 
     @property
+    def recorded(self) -> PurePath:
+        """The recorded path, parsed as it was written rather than as this host
+        would write it. Anything that needs a *part* of the path -- the basename,
+        the directory it sits in -- asks this and not `location`."""
+        return recorded_path(self.path)
+
+    @property
     def name(self) -> str:
-        return Path(self.path).name
+        return self.recorded.name
 
     @property
     def location(self) -> Path:
+        """Where to look on *this* machine, which is a different question.
+
+        Host-flavoured on purpose: this is the value handed to the filesystem.
+        A Windows path on Linux resolves to something that is not there, and
+        absence is the ordinary, documented outcome for an external file."""
         return Path(self.path)
 
 
