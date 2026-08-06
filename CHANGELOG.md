@@ -6,6 +6,62 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — a scope recorded which datums it depended on, not what they said (D31)
+
+ADR 0003 decision 5 says a datum is a dependency binding: changing one produces a
+new revision and invalidates the results that depended on it. Only the near half
+had landed. `cli._preservation_feature` carried `datum_ids` into the frozen
+contract, so re-placing an edit against a different reference moved
+`contract_sha256`, but `_requirement_hash` built its payload from six keys and
+`project.datums` was not among them — so correcting a referenced datum's value
+while keeping its id left the contract byte-identical and a review answer written
+against the old number stayed current. Measured before the fix, 12.4 → 12.9, same
+id: the identical hash `4149de15…b712` twice.
+
+`_referenced_datums` now binds `Datum.as_dict()` verbatim for exactly the datums
+some edit scope names — one entry per identity, sorted by `datum_id` — under a key
+that is absent when nothing references one. Only referenced datums participate
+(§13.4), and two scopes sharing one datum bind one entry, which is decision 4 held
+in the serialization rather than in prose. The contents deliberately do not go on
+each preservation row: that would write one datum's number twice into one
+contract, which is the two-authorities failure the ADR was written from. `note`,
+`owner` and `settled_by` are bound with everything else because the row is the
+model's own serialization, asserted by equality against `as_dict()` — a
+hand-maintained field list would drop whichever field is added next. Nothing is
+normalised: a datum declared `"unit": null` arrives as the string `"None"` (D33)
+and is bound as `"None"`, since whether identity follows the object the system
+accepted is a different question from whether the loader built the right object.
+The unit regression uses `mm → cm` and depends on neither.
+
+`datum_ids` is sorted in the contract row — a set of references to declared
+identities is not a precedence — and never deduplicated, because a repeated id is
+a declaration `Project.validate` owns. `project.json` order is untouched. The
+acceptance schema version is unchanged: the block exists only in the *input* to
+`requirement_sha256`, so `acceptance_contract.json` keeps the same top-level
+fields and stores only the resulting digest.
+
+Driven end to end rather than composed: correcting the datum cuts revision 2, the
+history's `changed` list holds exactly the `requirement_sha256` move and nothing
+else, four receipts bound to revision 1 are invalidated and removed, and the
+stored answer is refused with *"review envelope mismatch"*. No golden moved —
+selftest 11/11 pins the five certified contracts by hash and all four replay
+goldens pass unmodified.
+
+The `EXPERIMENTAL_UNAVAILABLE` cap is untouched and still asserted; this makes the
+binding correct and lifts nothing. ADR 0003 decision 6 remains open.
+
+One mutation survived the first sweep and is the most useful thing in the slice.
+Removing `sorted()` from the canonical block passed all fourteen fixtures, because
+the referenced ids are collected into a *set*: the set had already discarded
+declaration order, so two projects differing only in that order iterate
+identically inside one process, and every reordering fixture compares two projects
+in one interpreter. What none could see is that set iteration order is a function
+of `PYTHONHASHSEED` — unsorted, one project serializes differently in two
+interpreters, ending byte-identical reruns and clean-clone reproduction, which are
+claims about *different processes*. Closed by an L0 order assertion and a heavy
+fixture that runs the project in two children with seeds 0 and 1 and requires both
+the order and the digest to match.
+
 ### Fixed — the seccomp syscall number was x86-64's, on a module that supports arm64
 
 `confine_posix` names `aarch64` as supported and carried one `NR_seccomp = 317`.
