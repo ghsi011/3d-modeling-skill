@@ -80,6 +80,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # The heavy tier is the only place the Linux confinement is exercised, and
+    # on a bare hosted runner it could not be exercised at all: the job runs as
+    # uid 1001 with no `CAP_SYS_ADMIN`, so every confinement-dependent case
+    # failed with the boundary refusing to construct itself -- 81 of them. A
+    # tier that cannot run the thing it is for is a tier that reports on
+    # nothing, so the job is given exactly the authority the boundary needs and
+    # no more.
+    #
+    # `--cap-add=SYS_ADMIN` and nothing else. Not `--privileged`, which would
+    # hand over every capability plus device access to a job whose whole subject
+    # is a candidate that must not have them; and no `seccomp=unconfined`, which
+    # would be turning off a syscall filter speculatively to see if it helps.
+    # The preflight below measures what is actually blocked, so any further
+    # relaxation can be argued from an errno rather than from a hunch.
+    #
+    # The image is pinned by digest rather than by tag, because a tag is a
+    # moving target and this job's result is evidence. `ghcr.io/astral-sh/uv`
+    # was chosen for three reasons: it carries Python 3.12.12 and uv already, so
+    # the toolchain the gate measures is the toolchain the image ships; it is
+    # Debian bookworm and glibc-based, which `actions/checkout` and the runner's
+    # mounted node need; and it descends from the official Python image, so
+    # `git` is present and checkout does not fall back to a tarball. GHCR also
+    # avoids the anonymous pull-rate limit that makes Docker Hub a flaky
+    # dependency in CI.
+    container:
+      image: ghcr.io/astral-sh/uv:python3.12-bookworm@sha256:85d4cb1afa769a7338e095b927bee941cf5ec92266c7424b3f6c0f2748567248
+      options: --cap-add=SYS_ADMIN
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,6 +120,68 @@ jobs:
 
       - name: Install all dependencies (core + extras + dev)
         run: uv sync --frozen --all-extras
+
+      # Before pytest, and it fails the job rather than skipping anything. The
+      # failure this exists to prevent is the quiet one: `unittest.skipIf` on an
+      # unavailable boundary turns a runner that cannot confine into a green
+      # tick, and the confinement tests are exactly the ones nobody would notice
+      # missing. So the capability is asserted here, in the open, with the masks
+      # printed -- and then a real confined child is built, because `available`
+      # is a probe's opinion until something has actually run behind it.
+      - name: Preflight (the boundary is real, or this job stops)
+        run: |
+          uv run python - <<'PY'
+          import os
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          sys.path.insert(0, "skills/3d-modeling/scripts")
+          from pipeline import confine
+          from pipeline import confine_posix as CP
+
+          effective, permitted = CP._capability_sets()
+          print(f"uid={os.getuid()} euid={os.geteuid()}")
+          print(f"CapEff=0x{effective:016x}")
+          print(f"CapPrm=0x{permitted:016x}")
+          print(f"CAP_SYS_ADMIN (bit {CP.CAP_SYS_ADMIN}): "
+                f"effective={bool(effective >> CP.CAP_SYS_ADMIN & 1)} "
+                f"permitted={bool(permitted >> CP.CAP_SYS_ADMIN & 1)}")
+          for key, value in CP.describe_confinement().items():
+              print(f"describe_confinement.{key} = {value!r}")
+
+          reason = CP.unavailable_reason()
+          if reason is not None:
+              print(f"::error::the Linux boundary is unavailable on this runner: {reason}")
+              raise SystemExit(1)
+
+          with tempfile.TemporaryDirectory() as raw:
+              root = Path(raw)
+              build = root / "build"
+              build.mkdir()
+              canary = root / "canary.py"
+              canary.write_text(
+                  "import sys\n"
+                  "from pathlib import Path\n"
+                  "Path(sys.argv[1], 'built').write_text('ok')\n",
+                  encoding="utf-8")
+              confine.seal_read_only(canary)
+              confine.seal_writable(build)
+              result = confine.run([sys.executable, str(canary), str(build)],
+                                   cwd=build, env={"PATH": "/usr/bin:/bin"},
+                                   timeout=120)
+              built = (build / "built").is_file()
+              confine.unseal(root)
+
+          print(f"confined child: returncode={result.returncode} "
+                f"timed_out={result.timed_out} survivors={result.survivors} "
+                f"wrote_its_output={built}")
+          if result.returncode != 0 or result.timed_out or not built:
+              print("::error::the namespace was not constructed: a confined child "
+                    "could not run to completion and write its output")
+              raise SystemExit(1)
+          print("preflight: the boundary constructs and a candidate runs inside it")
+          PY
 
       # L0-heavy — the component fixtures that start a child interpreter: the
       # two command surfaces, the confined build boundary, the packaging and
