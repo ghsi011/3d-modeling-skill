@@ -168,10 +168,23 @@ class WhatTheLinuxConfinementEnforcesTest(unittest.TestCase):
         # asserted. What is asserted is that it buys nothing: the capability
         # set inside it may be full, and the mount stays read-only regardless,
         # because a mount inherited from an ancestor namespace is locked.
-        self.assertEqual("PermissionError:1", found.get("remount_after_userns"),
-                         f"a candidate that reached a user namespace "
-                         f"(caps {found.get('caps_after_userns')}) still may not "
-                         "remount the tree it inherited")
+        # Refused, and the *errno* is deliberately not pinned to one value.
+        # What this boundary promises is that reaching a user namespace buys
+        # nothing; which mechanism does the refusing is the host's business and
+        # it answers differently. The kernel's locked-mount rule refuses with
+        # `EPERM`, and a host that restricts unprivileged user namespaces
+        # through an LSM refuses with `EACCES` -- both were measured, `EPERM` on
+        # a plain container and `EACCES` on the hosted `ubuntu-latest` runner.
+        # Asserting one of them would make this case a test of the host policy
+        # rather than of the drop, and it would fail on a machine where the
+        # boundary is *more* strongly enforced, not less. Success is what may
+        # never happen, and success is still refused here by name.
+        self.assertIn(found.get("remount_after_userns"),
+                      {f"PermissionError:{errno.EPERM}",
+                       f"PermissionError:{errno.EACCES}"},
+                      f"a candidate that reached a user namespace "
+                      f"(caps {found.get('caps_after_userns')}) still may not "
+                      "remount the tree it inherited")
         self.assertEqual(f"OSError:{errno.EROFS}",
                          found.get("write_repo_after_userns"),
                          "and the repository is still read-only afterwards")
