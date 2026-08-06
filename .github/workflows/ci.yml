@@ -88,12 +88,33 @@ jobs:
     # nothing, so the job is given exactly the authority the boundary needs and
     # no more.
     #
-    # `--cap-add=SYS_ADMIN` and nothing else. Not `--privileged`, which would
-    # hand over every capability plus device access to a job whose whole subject
-    # is a candidate that must not have them; and no `seccomp=unconfined`, which
-    # would be turning off a syscall filter speculatively to see if it helps.
-    # The preflight below measures what is actually blocked, so any further
-    # relaxation can be argued from an errno rather than from a hunch.
+    # `--cap-add=SYS_ADMIN` plus one AppArmor opt-out, and nothing else. Not
+    # `--privileged`, which would hand over every capability and device access
+    # to a job whose whole subject is a candidate that must not have them.
+    #
+    # The AppArmor line is measured, not guessed. The first hosted run with only
+    # `--cap-add=SYS_ADMIN` got the capability -- the preflight printed
+    # `CapEff=0x00000000a82425fb`, `CAP_SYS_ADMIN (bit 21): effective=True`, and
+    # `describe_confinement.available = True` -- and then the real confined child
+    # still failed to build the namespace:
+    #
+    #     mount(None -> /, 0x44000): [Errno 13] Permission denied
+    #
+    # `0x44000` is `MS_REC|MS_PRIVATE`, the step that detaches the mount tree
+    # before anything is made read-only. Errno 13 is `EACCES`, and which errno
+    # it is decides which mechanism refused. Docker's default seccomp profile
+    # permits `mount` once `CAP_SYS_ADMIN` is in the capability set and answers
+    # `EPERM` when it does refuse; the `docker-default` AppArmor profile denies
+    # mount outright and answers `EACCES`. So seccomp is not what is blocking
+    # this, and `seccomp=unconfined` would have been the wrong knob turned on a
+    # hunch -- the syscall filter stays fully in place and is deliberately not
+    # relaxed here.
+    #
+    # If a later run shows a syscall refused with `EPERM` while the capability
+    # is effective, that is the evidence that would justify looking at seccomp,
+    # and the narrowest form of it. Nothing about this configuration is allowed
+    # to be inferred; the preflight prints the masks every run so the next
+    # change can be argued from an errno.
     #
     # The image is pinned by digest rather than by tag, because a tag is a
     # moving target and this job's result is evidence. `ghcr.io/astral-sh/uv`
@@ -106,7 +127,7 @@ jobs:
     # dependency in CI.
     container:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm@sha256:85d4cb1afa769a7338e095b927bee941cf5ec92266c7424b3f6c0f2748567248
-      options: --cap-add=SYS_ADMIN
+      options: --cap-add=SYS_ADMIN --security-opt apparmor=unconfined
 
     steps:
       - name: Checkout
