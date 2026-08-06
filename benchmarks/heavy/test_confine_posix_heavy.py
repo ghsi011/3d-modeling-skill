@@ -530,5 +530,49 @@ class TheRefusalIsReportedAndArrivesFirstTest(unittest.TestCase):
                          "nothing beyond the canary itself was created")
 
 
+class TheSyscallNumbersAreForThisMachineTest(unittest.TestCase):
+    """A syscall number is per-architecture, and one of these was not.
+
+    `seccomp(2)` is older than the convention that gives a new call the same
+    number everywhere: x86-64 numbers it 317 and arm64 takes the asm-generic
+    277. A single constant meant this module named `aarch64` as supported and
+    would have refused on every arm64 machine -- `unavailable_reason` probes the
+    number, an arm64 kernel answers `ENOSYS` for 317, and the probe concludes
+    seccomp is absent. Safe, and still wrong.
+
+    These cases are arithmetic on the tables rather than a run, deliberately:
+    this repository has no arm64 machine to measure on, and a test that claimed
+    to have checked one would be worth less than one that says what it checked.
+    What they hold is the property that survives that limitation -- the two
+    per-architecture tables answer for the same set of machines.
+    """
+
+    def test_every_architecture_this_module_claims_has_both_numbers(self) -> None:
+        self.assertEqual(set(CP._EXEC_SYSCALLS), set(CP._SECCOMP_SYSCALLS),
+                         "a machine with an exec pair and no seccomp number is "
+                         "one this module claims to support and would refuse on")
+
+    def test_the_two_architectures_do_not_share_a_seccomp_number(self) -> None:
+        """The regression itself: one constant for both is the defect."""
+        self.assertEqual(317, CP._SECCOMP_SYSCALLS[CP.AUDIT_ARCH_X86_64])
+        self.assertEqual(277, CP._SECCOMP_SYSCALLS[CP.AUDIT_ARCH_AARCH64])
+        self.assertNotEqual(CP._SECCOMP_SYSCALLS[CP.AUDIT_ARCH_X86_64],
+                            CP._SECCOMP_SYSCALLS[CP.AUDIT_ARCH_AARCH64])
+
+    def test_the_number_used_is_the_one_for_the_running_machine(self) -> None:
+        self.assertEqual(CP._SECCOMP_SYSCALLS.get(CP._ARCH), CP._nr_seccomp())
+
+    def test_an_unknown_machine_yields_no_number_rather_than_a_guess(self) -> None:
+        """Guessing is how a filter is installed against whatever call holds
+        that slot. The caller that cannot name the number must refuse."""
+        saved = CP._ARCH
+        try:
+            CP._ARCH = None
+            self.assertIsNone(CP._nr_seccomp())
+        finally:
+            CP._ARCH = saved
+        self.assertEqual(saved, CP._ARCH)
+
+
 if __name__ == "__main__":
     unittest.main()

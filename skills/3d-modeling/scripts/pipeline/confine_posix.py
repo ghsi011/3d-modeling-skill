@@ -144,11 +144,22 @@ MS_BIND = 0x1000
 MS_REC = 0x4000
 MS_PRIVATE = 0x40000
 
-# mount_setattr(2), x86_64. The modern way to set mount attributes recursively:
+# mount_setattr(2). The modern way to set mount attributes recursively:
 # `MS_REMOUNT` through mount(2) does not recurse, so a read-only remount of `/`
 # would leave every submount writable -- including the one the repository is on.
+# Added to the kernel long after the tables were split, so x86-64 and the
+# asm-generic table arm64 uses carry the same number.
 NR_mount_setattr = 442
-NR_seccomp = 317
+
+# seccomp(2) is older than that convention and its number is *not* shared:
+# x86-64 numbers it 317, and arm64 takes the asm-generic 277. A single constant
+# here was an x86-64 constant in a module that names `aarch64` as supported, and
+# it fails in a way worth spelling out: `unavailable_reason` probes the number,
+# an arm64 kernel answers `ENOSYS` for 317, and the probe concludes seccomp is
+# absent -- so the boundary refuses on every arm64 machine, which is safe and
+# still wrong. Keyed by the same `_ARCH` token as `_EXEC_SYSCALLS`, so the two
+# per-architecture tables cannot disagree about which machine this is.
+_SECCOMP_SYSCALLS: dict[int, int] = {}   # filled in below, once `_ARCH` exists
 AT_FDCWD = -100
 AT_RECURSIVE = 0x8000
 MOUNT_ATTR_RDONLY = 0x00000001
@@ -198,6 +209,23 @@ _EXEC_SYSCALLS = {
 
 _ARCH = {"x86_64": AUDIT_ARCH_X86_64, "aarch64": AUDIT_ARCH_AARCH64}.get(
     os.uname().machine if LINUX else "")
+
+# Beside `_EXEC_SYSCALLS` and keyed the same way, which is the point: a machine
+# this module claims to support has an entry in both tables or in neither.
+_SECCOMP_SYSCALLS = {
+    AUDIT_ARCH_X86_64: 317,
+    AUDIT_ARCH_AARCH64: 277,
+}
+
+
+def _nr_seccomp() -> int | None:
+    """The `seccomp(2)` number for this machine, or None if it has none.
+
+    None rather than a default: guessing a syscall number is how a filter gets
+    installed against whatever call happens to hold that slot, and the caller
+    that cannot name the number must refuse rather than proceed.
+    """
+    return _SECCOMP_SYSCALLS.get(_ARCH) if _ARCH is not None else None
 
 
 class _CapHeader(ctypes.Structure):
@@ -261,8 +289,13 @@ def unavailable_reason() -> str | None:
     denied = _sys_admin_unavailable()
     if denied is not None:
         return denied
+    nr_seccomp = _nr_seccomp()
+    if nr_seccomp is None:                                # pragma: no cover
+        return (f"no seccomp syscall number is recorded for "
+                f"{os.uname().machine!r}, so the no-child-processes property "
+                "cannot be enforced")
     for probe, what in ((NR_mount_setattr, "mount_setattr(2)"),
-                        (NR_seccomp, "seccomp(2)")):
+                        (nr_seccomp, "seccomp(2)")):
         if not _syscall_present(probe):
             return f"{what} is not available on this kernel"
     if not Path("/proc/self/ns/pid").exists():
@@ -468,7 +501,10 @@ def seal_syscalls() -> None:
                                                 ctypes.POINTER(_SockFilter)))
     if _libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         raise _oserror("prctl(PR_SET_NO_NEW_PRIVS)")
-    if _libc.syscall(NR_seccomp, ctypes.c_int(SECCOMP_SET_MODE_FILTER),
+    nr_seccomp = _nr_seccomp()
+    if nr_seccomp is None:                                # pragma: no cover
+        raise OSError(errno.ENOSYS, "no seccomp syscall number for this machine")
+    if _libc.syscall(nr_seccomp, ctypes.c_int(SECCOMP_SET_MODE_FILTER),
                      ctypes.c_uint(0), ctypes.byref(prog)) != 0:
         raise _oserror("seccomp(SECCOMP_SET_MODE_FILTER)")
 

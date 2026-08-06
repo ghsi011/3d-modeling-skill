@@ -6,6 +6,19 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the seccomp syscall number was x86-64's, on a module that supports arm64
+
+`confine_posix` names `aarch64` as supported and carried one `NR_seccomp = 317`.
+That is the x86-64 number; arm64 takes the asm-generic 277. The consequence was
+not subtle: `unavailable_reason()` probes the number, an arm64 kernel answers
+`ENOSYS` for 317, the probe concludes seccomp is absent, and the boundary
+refuses on every arm64 machine — safe, and still wrong. Now keyed by the same
+`_ARCH` token as `_EXEC_SYSCALLS`, so a machine this module claims to support
+has an entry in both tables or in neither, and an unknown machine yields no
+number rather than a guess. Found by review, not by a run: this repository has
+no arm64 machine, so the tests are arithmetic on the tables and say so.
+
+
 ### Fixed — a recorded path is parsed as it was written, not as the host would write it
 
 The thirteen L0 tests that failed on Linux were one defect in two places, not a

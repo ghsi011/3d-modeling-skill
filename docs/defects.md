@@ -818,3 +818,91 @@ feature, a low score on these entries is substantially a fact about the
 question. The honest interim is what the report now says — how many axes were
 reconstructed rather than given — and not a claim that the number measures a
 designer.
+
+## D31 — a datum's contents are not in the acceptance contract that depends on them
+
+**Where.** `pipeline/cli.py::_requirement_hash`, against
+`pipeline/cli.py:1229` where an edit scope freezes `datum_ids`.
+
+**What is wrong.** A scope records *which* datums it depends on and the
+requirement hash does not record *what they said*. `_requirement_hash` covers
+the brief, `STATED`/`INHERITED`/`MEASURED` requirements, the envelope, the
+interfaces, the components and the modifiers, and its docstring names its own
+subject as "the values somebody stated or measured". `project.datums` is not in
+it. So a datum that keeps its `datum_id` while its value, unit, provenance or
+`derived_from` revision changes leaves the frozen contract byte-identical, and
+a review answer bound to the old reference keeps binding.
+
+**Evidence.** Read rather than run: `_requirement_hash` builds its payload from
+six keys and `datums` is not among them, and `cli.py:1229` writes
+`{"datum_ids": list(scope.datum_ids)}` — identifiers, no contents.
+
+**What it can cause.** A stale acceptance revision that should have been cut.
+This is the D28 shape — a key that names a thing rather than what the thing
+established — and D15's — one question answered in two places. It is filed
+rather than fixed because the claim path it would corrupt is already capped:
+every job with an edit scope is held at `EXPERIMENTAL_UNAVAILABLE` because
+sample density is not derived from a declared minimum detectable defect size, so
+no successful preservation claim is reachable through it today. That cap is the
+current fail-closed, and it is the reason this is a defect and not a stop.
+
+**The fixture that must fail before the fix lands.** A project whose scope names
+one datum, run to a frozen contract; the datum's value changed with its id kept;
+the contract re-derived. The test must show the requirement hash moved and the
+stored review answer refused. It must fail against today's implementation.
+
+## D32 — the preservation detection limit is derived from one of the two surfaces sampled
+
+**Where.** `pipeline/preservation.py::_sampled`.
+
+**What is wrong.** The audit samples both directions — points planned on the
+source and points planned on the candidate — and derives the reported detection
+limit from `source.area` alone. The comment beside it argues the choice for the
+case where the edit *removed* material, and that argument is sound there. It
+does not cover the other direction: where an allowed edit adds substantial
+surface, the candidate-side pass spreads the same sample count over a larger
+surface and its in-region samples are then discarded, so the sensitivity
+actually achieved outside the region is worse than the figure reported beside
+it.
+
+**Evidence.** `sampled_area = float(source.area)` feeds
+`detectable_defect_mm(sampled_area, samples)`, while the second pair plans its
+points on the candidate. The docstring above it justifies only the
+smaller-candidate case.
+
+**What it can cause.** A reported detection limit that overstates what the
+candidate-direction sampling achieved, under `PRESERVED_WITHIN_TOLERANCE`. Same
+cap as D31 applies and is the reason this is filed rather than stopped: the
+`EXPERIMENTAL_UNAVAILABLE` ceiling means the figure is not currently load-bearing
+for a success claim.
+
+**The fixture that must fail before the fix lands.** A candidate whose area is a
+large multiple of its source's, with an unauthorised change outside the region;
+the reported limit must not claim a sensitivity the candidate-direction pass did
+not have. Reporting per-direction, or the conservative larger area, both satisfy
+it; the fixture should not pick one.
+
+## D33 — a JSON `null` unit becomes the string `"None"` and validates
+
+**Where.** `pipeline/project.py`, datum construction — `unit=str(row.get("unit", ""))`.
+
+**What is wrong.** `str(None)` is `"None"`, and the rule that requires a unit
+tests `if not str(self.unit).strip()`. A numeric datum declared with
+`"unit": null` therefore arrives carrying a unit of `"None"`, which is
+non-empty, and passes the check whose own message says "a number with no unit is
+a number two readers can read differently".
+
+**Evidence.** Measured, not read: constructing `Datum(value=12.5,
+unit=str(None), ...)` stores `unit='None'`, and `problems()` returns no
+`SCHEMA_REQUIRED` for the unit. The `.get(key, "")` default only covers an
+*absent* key; an explicit `null` passes through it.
+
+**What it can cause.** A unitless measurement recorded as though it had a unit,
+in a field that drives design. Narrower than D31 and D32 — it needs a
+hand-written `null` rather than an omitted key — and it defeats the check
+entirely when it happens.
+
+**The fixture that must fail before the fix lands.** A datum payload with
+`"unit": null` and a numeric value must produce the `SCHEMA_REQUIRED` finding.
+The same coercion appears on sibling string fields and the fixture should say
+whether they are in scope.
