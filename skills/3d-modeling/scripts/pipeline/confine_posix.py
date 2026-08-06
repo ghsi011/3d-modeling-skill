@@ -167,6 +167,12 @@ _LINUX_CAPABILITY_VERSION_3 = 0x20080522
 # the kernel's own last capability, and never has to match it.
 _CAP_LAST_CAP = 63
 
+# The one capability this module cannot construct the boundary without:
+# `unshare(CLONE_NEWNS)` and the `mount` that follows it both require it. Named
+# once, because a bare 21 in a mask is unreadable and a second spelling of it is
+# a second authority over which capability is being asked about.
+CAP_SYS_ADMIN = 21
+
 SECCOMP_SET_MODE_FILTER = 1
 SECCOMP_RET_KILL_PROCESS = 0x80000000
 SECCOMP_RET_ERRNO = 0x00050000
@@ -240,12 +246,21 @@ def unavailable_reason() -> str | None:
     if _ARCH is None:
         return (f"no seccomp filter is defined for {os.uname().machine!r}, so "
                 "the no-child-processes property cannot be enforced")
-    if os.geteuid() != 0:
-        # Unprivileged user namespaces would be the alternative and are not used
-        # here: they are disabled on a good fraction of hardened kernels, and a
-        # boundary with two construction paths has two things to keep measured.
-        return ("building the confinement needs CAP_SYS_ADMIN to create a mount "
-                f"namespace, and this process runs as uid {os.geteuid()}")
+    # The capability itself, read from the kernel. `geteuid() == 0` used to
+    # stand in for it and is not the same question in either direction: a root
+    # process in a container whose bounding set omits `CAP_SYS_ADMIN` was told
+    # the boundary was available and then failed with a bare `EPERM` from
+    # `unshare`, which is the failure this function exists to turn into a
+    # sentence; and a process with the capability and a nonzero uid was refused
+    # while holding exactly what the construction needs.
+    #
+    # Unprivileged user namespaces would be the alternative route to the
+    # capability and are still not used here: they are disabled on a good
+    # fraction of hardened kernels, and a boundary with two construction paths
+    # has two things to keep measured.
+    denied = _sys_admin_unavailable()
+    if denied is not None:
+        return denied
     for probe, what in ((NR_mount_setattr, "mount_setattr(2)"),
                         (NR_seccomp, "seccomp(2)")):
         if not _syscall_present(probe):
@@ -253,6 +268,37 @@ def unavailable_reason() -> str | None:
     if not Path("/proc/self/ns/pid").exists():
         return "this kernel has no PID namespaces"
     return None
+
+
+def _sys_admin_unavailable() -> str | None:
+    """Why `CAP_SYS_ADMIN` cannot be used to build the boundary, or None.
+
+    Effective is the set that is checked: a capability that is permitted but not
+    effective does not authorise the `unshare` this module is about. It is
+    reported rather than raised into the effective set, deliberately. Raising it
+    is a privilege escalation performed on the operator's behalf and without
+    their knowledge, and the boundary's whole argument is that it says what it
+    is rather than quietly arranging to be something else.
+
+    A `capget` that fails is unavailability too, not an exception to propagate:
+    a capability that could not be read has not been established, and the
+    fail-closed answer is the one that refuses.
+    """
+    try:
+        effective, permitted = _capability_sets()
+    except OSError as exc:
+        return ("building the confinement needs effective CAP_SYS_ADMIN to "
+                f"create a mount namespace, and the capability sets could not "
+                f"be read to establish it ({exc})")
+    if effective & (1 << CAP_SYS_ADMIN):
+        return None
+    where = ("it is permitted but not effective, and the namespace is created "
+             "with the effective set"
+             if permitted & (1 << CAP_SYS_ADMIN)
+             else "it is in neither the effective nor the permitted set")
+    return ("building the confinement needs effective CAP_SYS_ADMIN to create "
+            f"a mount namespace, and {where} for this process (uid "
+            f"{os.geteuid()})")
 
 
 def _syscall_present(number: int) -> bool:
@@ -520,13 +566,28 @@ def _drop_privilege() -> None:
         raise OSError(errno.EPERM, "the capability drop did not take")
 
 
-def _effective_capabilities() -> int:
-    """The effective set, read back. A drop nobody verified is a drop nobody made."""
+def _capability_sets() -> tuple[int, int]:
+    """This thread's (effective, permitted) sets, as 64-bit masks.
+
+    `pid` 0 in the header is the calling thread rather than the process, which
+    is the right subject: `unshare` and `mount` are checked against the
+    capabilities of the thread that calls them.
+
+    One reader for both sets, because the drop verification and the availability
+    probe are two questions about one kernel structure, and two `capget` callers
+    would be two places to keep the version constant right.
+    """
     header = _CapHeader(_LINUX_CAPABILITY_VERSION_3, 0)
     data = (_CapData * 2)()
     if _libc.capget(ctypes.byref(header), ctypes.byref(data)) != 0:
         raise _oserror("capget")
-    return data[0].effective | (data[1].effective << 32)
+    return (data[0].effective | (data[1].effective << 32),
+            data[0].permitted | (data[1].permitted << 32))
+
+
+def _effective_capabilities() -> int:
+    """The effective set, read back. A drop nobody verified is a drop nobody made."""
+    return _capability_sets()[0]
 
 
 def _namespace_pids() -> list[int]:

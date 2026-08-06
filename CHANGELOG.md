@@ -6,6 +6,43 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — the boundary's availability probe asked about uid, not the capability
+
+`confine_posix.unavailable_reason()` gated on `os.geteuid() != 0` as a stand-in
+for `CAP_SYS_ADMIN`. That is a different question, and it was wrong in both
+directions. A root process whose bounding set omits the capability — an ordinary
+container, including the `ubuntu-latest` shape this repository's own `pre-merge`
+job runs in — was told the boundary was **available**, and then failed with a
+bare `EPERM` out of `unshare`: exactly the raw failure this function exists to
+turn into a sentence, arriving after the point where it could be reported
+cleanly. In the other direction a process holding effective `CAP_SYS_ADMIN` at a
+nonzero uid was refused while holding precisely what the construction needs.
+
+**The capability is now read from the kernel**, through the same `capget` the
+drop verification already used: `_capability_sets()` returns the calling
+thread's effective and permitted masks, `_effective_capabilities()` is now one
+line over it, and `CAP_SYS_ADMIN` has a single named constant. No new
+dependency — no libcap, no `capsh`, no subprocess.
+
+**Effective, not permitted, and never raised.** A capability that is permitted
+but not effective does not authorise the `unshare`, so it is refused — and the
+reason says which of the two states it found, because that is what tells an
+operator whether to grant the capability or to raise it. It is reported rather
+than raised into the effective set: raising it would be a privilege escalation
+performed on the operator's behalf and unasked, which is the opposite of a
+boundary that says what it is. A `capget` that fails is unavailability too, not
+an exception to propagate — a capability that could not be read has not been
+established.
+
+Every existing probe is unchanged and still runs in the same order, before any
+candidate is staged. Three tests in `benchmarks/heavy/test_confine_posix_heavy.py`
+set the two identities for real in a child process rather than simulating them,
+because neither state is reachable from the test process itself: a capability
+dropped is not regained and a uid lowered is not raised. Both directions of the
+old proxy are killed by mutation — restoring the uid check fails all three, and
+accepting `permitted` in place of `effective` fails the case that separates them.
+
+
 ### Fixed — the one L0 case that cannot answer in this process on Linux
 
 `ReviewEnvelopeTest.test_stale_verification_response_after_render_change_is_rejected`

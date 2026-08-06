@@ -324,3 +324,116 @@ class BytesAttachedToAnArtifactAreRefusedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The identity the availability probe is about, set for real in a child rather
+# than simulated in this process. A fake capability set would test this file
+# against itself, which is the objection recorded at the top of this module; and
+# neither of these two states can be reached by the test process itself, because
+# both are one-way -- a capability dropped is not regained, and a uid lowered is
+# not raised.
+_CAP_PROBE_PRELUDE = """
+import ctypes, json, os, sys
+sys.path.insert(0, %r)
+from pipeline import confine_posix as C
+
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+PR_SET_KEEPCAPS = 8
+
+
+def write_caps(effective, permitted):
+    header = C._CapHeader(C._LINUX_CAPABILITY_VERSION_3, 0)
+    data = (C._CapData * 2)()
+    data[0].effective, data[1].effective = effective & 0xFFFFFFFF, (effective >> 32) & 0xFFFFFFFF
+    data[0].permitted, data[1].permitted = permitted & 0xFFFFFFFF, (permitted >> 32) & 0xFFFFFFFF
+    data[0].inheritable, data[1].inheritable = 0, 0
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        raise OSError(ctypes.get_errno(), "capset")
+
+
+def report(**extra):
+    effective, permitted = C._capability_sets()
+    print(json.dumps(dict(
+        euid=os.geteuid(),
+        effective_sys_admin=bool(effective & (1 << C.CAP_SYS_ADMIN)),
+        permitted_sys_admin=bool(permitted & (1 << C.CAP_SYS_ADMIN)),
+        reason=C.unavailable_reason(), **extra)))
+"""
+
+
+def _identity_probe(body: str) -> dict:
+    """Run `body` in a fresh interpreter and return the JSON it reports."""
+    import subprocess
+    import sys as _sys
+
+    scripts = str(Path(CP.__file__).resolve().parents[1])
+    done = subprocess.run(
+        [_sys.executable, "-c", (_CAP_PROBE_PRELUDE % scripts) + textwrap.dedent(body)],
+        capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+@unittest.skipIf(REASON is not None, f"the Linux boundary is unavailable: {REASON}")
+@unittest.skipIf(os.geteuid() != 0,
+                 "setting either identity needs a process that starts with the "
+                 "capability and CAP_SETUID")
+class TheAvailabilityProbeReadsTheCapabilityTest(unittest.TestCase):
+    """`unavailable_reason` asked `geteuid() == 0`, which is a different question.
+
+    Both directions were wrong and both are measured here. A root process
+    without the capability was told the boundary was available and then failed
+    with a bare `EPERM` out of `unshare` -- the raw failure this function exists
+    to replace with a sentence. A process holding the capability at a nonzero
+    uid was refused while holding exactly what the construction needs.
+    """
+
+    def test_root_without_the_capability_is_refused_by_name(self) -> None:
+        found = _identity_probe("""
+            effective, permitted = C._capability_sets()
+            drop = ~(1 << C.CAP_SYS_ADMIN)
+            write_caps(effective & drop, permitted & drop)
+            report()
+        """)
+
+        self.assertEqual(0, found["euid"], "still root -- the uid is not what changed")
+        self.assertFalse(found["effective_sys_admin"])
+        self.assertIsNotNone(found["reason"],
+                             "root without the capability must not be told the "
+                             "boundary is available")
+        self.assertIn("effective CAP_SYS_ADMIN", found["reason"])
+
+    def test_a_nonzero_uid_holding_the_capability_proceeds(self) -> None:
+        """The refusal must be about the capability and not about the uid."""
+        found = _identity_probe("""
+            libc.prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)
+            os.setresuid(65534, 65534, 65534)
+            # KEEPCAPS carries the permitted set across the uid change and clears
+            # the effective one; raising a capability already permitted needs no
+            # capability of its own.
+            effective, permitted = C._capability_sets()
+            write_caps(effective | (1 << C.CAP_SYS_ADMIN), permitted)
+            report()
+        """)
+
+        self.assertNotEqual(0, found["euid"], "the point of the case is a nonzero uid")
+        self.assertTrue(found["effective_sys_admin"])
+        self.assertIsNone(found["reason"],
+                          "a process holding effective CAP_SYS_ADMIN must not be "
+                          f"refused for its uid; got {found['reason']!r}")
+
+    def test_the_capability_is_reported_when_it_is_permitted_but_not_effective(self) -> None:
+        """Requirement and diagnosis are separate: the boundary needs it
+        effective, and an operator who has it permitted needs to be told that
+        rather than that it is missing outright. It is reported, never raised
+        here -- raising it would be an escalation performed unasked."""
+        found = _identity_probe("""
+            effective, permitted = C._capability_sets()
+            write_caps(effective & ~(1 << C.CAP_SYS_ADMIN), permitted)
+            report()
+        """)
+
+        self.assertFalse(found["effective_sys_admin"])
+        self.assertTrue(found["permitted_sys_admin"])
+        self.assertIsNotNone(found["reason"])
+        self.assertIn("permitted but not effective", found["reason"])
