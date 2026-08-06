@@ -322,9 +322,6 @@ class BytesAttachedToAnArtifactAreRefusedTest(unittest.TestCase):
 
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 # The identity the availability probe is about, set for real in a child rather
 # than simulated in this process. A fake capability set would test this file
@@ -437,3 +434,88 @@ class TheAvailabilityProbeReadsTheCapabilityTest(unittest.TestCase):
         self.assertTrue(found["permitted_sys_admin"])
         self.assertIsNotNone(found["reason"])
         self.assertIn("permitted but not effective", found["reason"])
+
+
+@unittest.skipIf(REASON is not None, f"the Linux boundary is unavailable: {REASON}")
+@unittest.skipIf(os.geteuid() != 0,
+                 "dropping the capability needs a process that starts with it")
+class TheRefusalIsReportedAndArrivesFirstTest(unittest.TestCase):
+    """A refusal has to be visible in the receipt and to land before the work.
+
+    `unavailable_reason` naming the missing capability is worth nothing if
+    `describe_confinement` -- the thing a receipt records -- still says the
+    boundary was available, and worth less than nothing if the candidate has
+    already run by the time anyone reads it. Both are measured here against a
+    real process that really lacks `CAP_SYS_ADMIN`.
+    """
+
+    def test_the_description_reports_unavailable_and_names_the_capability(self) -> None:
+        found = _identity_probe("""
+            effective, permitted = C._capability_sets()
+            drop = ~(1 << C.CAP_SYS_ADMIN)
+            write_caps(effective & drop, permitted & drop)
+            described = C.describe_confinement()
+            report(described_available=described["available"],
+                   described_reason=described["unavailable_reason"])
+        """)
+
+        self.assertIs(False, found["described_available"],
+                      "a receipt that says available while the capability is "
+                      "missing is the defect, not the diagnosis")
+        self.assertIsNotNone(found["described_reason"])
+        self.assertIn("effective CAP_SYS_ADMIN", found["described_reason"])
+        self.assertEqual(found["reason"], found["described_reason"],
+                         "the description must carry the same refusal the "
+                         "probe gives, not a second opinion about it")
+
+    def test_no_candidate_byte_runs_when_the_capability_is_missing(self) -> None:
+        """The canary: a candidate whose only job is to prove it started.
+
+        It writes a marker as its first statement, so the marker existing means
+        the boundary let something run before it established it could confine
+        it. Refusing *after* staging would still raise, and would still be
+        wrong, which is why the assertion is about the marker and the output and
+        not about the exception.
+        """
+        found = _identity_probe("""
+            import tempfile
+            from pathlib import Path
+
+            root = Path(tempfile.mkdtemp())
+            marker = root / "the-candidate-ran"
+            out = root / "candidate-output"
+            canary = root / "canary.py"
+            canary.write_text(
+                "from pathlib import Path\\n"
+                "Path(%r).write_text('ran')\\n"
+                "Path(%r).write_text('output')\\n" % (str(marker), str(out)))
+
+            effective, permitted = C._capability_sets()
+            drop = ~(1 << C.CAP_SYS_ADMIN)
+            write_caps(effective & drop, permitted & drop)
+
+            raised = None
+            try:
+                C.run([sys.executable, str(canary)], cwd=root, env={"PATH": "/usr/bin:/bin"},
+                      timeout=30.0)
+            except BaseException as exc:
+                raised = "%s: %s" % (type(exc).__name__, exc)
+            report(raised=raised,
+                   marker_exists=marker.exists(),
+                   output_exists=out.exists(),
+                   staged=sorted(p.name for p in root.iterdir()))
+        """)
+
+        self.assertIsNotNone(found["raised"], "the run must refuse, not proceed")
+        self.assertIn("ConfinementUnavailable", found["raised"])
+        self.assertIn("effective CAP_SYS_ADMIN", found["raised"])
+        self.assertFalse(found["marker_exists"],
+                         "the candidate ran: the refusal arrived after execution")
+        self.assertFalse(found["output_exists"],
+                         "the candidate produced output: it was not refused first")
+        self.assertEqual(["canary.py"], found["staged"],
+                         "nothing beyond the canary itself was created")
+
+
+if __name__ == "__main__":
+    unittest.main()
