@@ -31,7 +31,17 @@ longer held the code -- printing results the whole time while measuring nothing.
 raises `RestoreFailed` rather than continuing, because the alternative is production
 source left mutated in a tree somebody else may be reading.
 
-Three refusals, each because the failure it prevents reads like success:
+Five refusals, each because the failure it prevents reads like success:
+
+* tests that **already fail** on the unmutated tree are `BaselineFailed`. `KILLED`
+  means "the named tests failed under the mutation", so a test that fails either
+  way reports `KILLED` for every mutation including the ones nothing detects. The
+  harness proves the baseline itself; a convention in one fixture protects only
+  that fixture;
+* a check that **neither passed nor failed** is `RunnerAmbiguous`. `pytest` exits
+  non-zero for interruption, internal error, a node id matching nothing, and an
+  empty collection, and reading any of those as `KILLED` lets a stale selector
+  certify itself;
 
 * an anchor that matches **nothing** is `AnchorMissing`, not a silent no-op -- a
   replacement that did nothing reports the mutation as caught while nothing was
@@ -56,6 +66,16 @@ Usage:
 Exit code is 0 only when every mutation was killed. A survivor exits 1, because a
 sweep whose failure nobody notices is a sweep that reports every rule as held.
 
+**What the restore does not survive.** The guarantee is a `finally` in one process,
+so it holds for a body that returns, raises, or deletes the file, and it does not
+hold against `SIGKILL`, a machine losing power, or `os._exit`. Nor is it safe to run
+two sweeps over one file at once, or to edit the target while a sweep is running:
+the second reader would capture the first one's mutation as its "original", and the
+restore would faithfully put back bytes that were never yours. The `DirtyTarget`
+refusal is what makes the last of those unlikely rather than impossible. If a sweep
+is killed mid-run, `git diff` shows exactly what is still patched -- which is the
+recovery path, and the reason the harness insists the tree was clean beforehand.
+
 **What this does not do.** It does not write manifests for mutation claims already
 recorded in prose. Those were run against trees that no longer exist and cannot be
 reconstructed exactly; inventing entries for them would manufacture the very
@@ -71,7 +91,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -103,6 +123,29 @@ class DirtyTarget(MutateError):
 
 class RestoreFailed(MutateError):
     pass
+
+
+class BaselineFailed(MutateError):
+    """The named tests were already failing before anything was mutated.
+
+    Every verdict below such a test is meaningless: `KILLED` means "the tests
+    failed under the mutation", and tests that fail regardless report `KILLED`
+    for every mutation, including ones nothing detects. That is the harness
+    reporting a protection as proven at exactly the moment it has none, so it is
+    a refusal and no verdict is produced.
+    """
+
+
+class RunnerAmbiguous(MutateError):
+    """The check neither passed nor failed -- it could not say.
+
+    `pytest` exits non-zero for reasons that are not "a test failed": 2
+    interrupted, 3 internal error, 4 usage error, 5 nothing collected. Reading
+    any of those as `KILLED` is how a stale selector certifies itself: rename a
+    test class, leave the manifest pointing at the old name, and every mutation
+    reports as caught while nothing ran. Measured, not supposed -- a typo'd node
+    id exits 4 on this repository's pytest.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,6 +204,16 @@ def from_payload(payload: dict) -> Manifest:
         tests = row["tests"]
         if not isinstance(tests, list):
             raise ManifestError(f"mutations[{index}].tests must be a list")
+        if not tests:
+            # An empty list is not "no opinion", it is `pytest` with no argument:
+            # the whole suite. Then any unrelated failure anywhere reports this
+            # mutation as caught, and a suite that passes reports it as survived
+            # without the named protection ever being exercised. Neither answer is
+            # about the mutation.
+            raise ManifestError(
+                f"mutations[{index}] ({row.get('name', 'unnamed')}) names no "
+                "tests. An empty list runs the entire suite, so the verdict would "
+                "be about the repository rather than about this mutation.")
         mutations.append(Mutation(
             name=str(row["name"]), file=str(row["file"]),
             anchor=str(row["anchor"]), replacement=str(row["replacement"]),
@@ -207,9 +260,22 @@ def git_dirty(root: Path) -> tuple[str, ...]:
     return tuple(line[3:].strip() for line in done.stdout.splitlines() if line.strip())
 
 
+def _as_repo_path(raw: str) -> str:
+    """One spelling for one file, so the dirty check cannot be spelled around.
+
+    `git status --porcelain` says `tools/mutate.py`; a manifest may say
+    `./tools/mutate.py`, and a plain string intersection treats those as two
+    different files -- so the guard would find nothing and patch a dirty target.
+    `PurePosixPath` collapses `.` segments without touching the filesystem, which
+    matters because these paths are compared, not opened.
+    """
+    return PurePosixPath(raw.replace("\\", "/")).as_posix()
+
+
 def require_clean(root: Path, files: Iterable[str], *,
                   dirty: Sequence[str]) -> None:
-    modified = sorted(set(files) & {d.replace("\\", "/") for d in dirty})
+    modified = sorted({_as_repo_path(f) for f in files}
+                      & {_as_repo_path(d) for d in dirty})
     if modified:
         raise DirtyTarget(
             f"{modified} have uncommitted changes. A sweep measures a known "
@@ -227,7 +293,12 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
     The `finally` runs for a body that raised as well as one that returned, and the
     restore is verified rather than assumed.
     """
-    path = Path(root) / mutation.file
+    # Resolved once, before the body runs. A relative `root` is resolved against
+    # the current working directory *at use time*, so a runner that changes
+    # directory -- and a runner is somebody else's code -- would send the restore
+    # to a path under wherever it moved to, leaving the real file mutated while
+    # the digest check passed against the file it accidentally wrote.
+    path = (Path(root) / mutation.file).resolve()
     original = path.read_bytes()
     text = original.decode("utf-8")
     found = text.count(mutation.anchor)
@@ -255,8 +326,17 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
             f"{mutation.file}. Two matches mean the manifest does not say which "
             "one it is probing.")
     try:
-        path.write_text(text.replace(mutation.anchor, mutation.replacement, 1),
-                        encoding="utf-8")
+        # `write_bytes`, not `write_text`: text mode translates `\n` to the
+        # platform ending, so on Windows the mutated file came back as CRLF
+        # throughout -- every line changed, not the one the manifest named. The
+        # restore put the original bytes back, so this was invisible afterwards,
+        # but the tests ran against a file whose every line differed from the one
+        # under review, and a failure caused by that reports as `KILLED`. The
+        # patch has to be exactly the anchor swapped for the replacement and
+        # nothing else, which is the same byte-for-byte contract that makes
+        # `AnchorMissing` refuse rather than normalise.
+        mutated = text.replace(mutation.anchor, mutation.replacement, 1)
+        path.write_bytes(mutated.encode("utf-8"))
         yield path
     finally:
         try:
@@ -275,13 +355,30 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
 
 
 def pytest_runner(root: Path) -> Callable[[Sequence[str]], bool]:
-    """The real runner: True when the named tests pass, which means SURVIVED."""
+    """The real runner: True when the named tests pass, which means SURVIVED.
+
+    Only two exit codes are answers. 0 is "they passed" and 1 is "a test failed";
+    everything else means `pytest` never got as far as deciding, and calling that
+    `KILLED` is a lie in the safe-sounding direction. Verified rather than
+    assumed: a node id with a typo in it exits **4** on this repository's pytest,
+    so before this distinction existed a manifest pointing at a renamed test
+    reported every mutation as caught while running nothing at all.
+    """
 
     def run(tests: Sequence[str]) -> bool:
         done = subprocess.run([sys.executable, "-m", "pytest", "-q", *tests],
                               cwd=str(root), capture_output=True, text=True,
                               check=False)
-        return done.returncode == 0
+        if done.returncode == 0:
+            return True
+        if done.returncode == 1:
+            return False
+        raise RunnerAmbiguous(
+            f"pytest exited {done.returncode} for {list(tests)}, which is not "
+            "'passed' (0) or 'a test failed' (1) but interrupted (2), an "
+            "internal error (3), a usage error such as a node id that matches "
+            "nothing (4), or nothing collected (5). No verdict: the check did "
+            f"not run.\n{done.stdout[-600:]}\n{done.stderr[-300:]}")
 
     return run
 
@@ -292,8 +389,29 @@ def sweep(root: Path, manifest: Manifest, *,
     root = Path(root)
     require_clean(root, manifest.files,
                   dirty=git_dirty(root) if dirty is None else dirty)
+    # Which test sets have been shown to pass on the unmutated tree. Keyed by the
+    # `tests` tuple, so a manifest whose entries share a selector pays for the
+    # baseline once -- the sweeps here name the same class repeatedly, and a
+    # baseline run per mutation would double the cost of the slowest tier for an
+    # answer that cannot have changed.
+    proven: dict[tuple[str, ...], bool] = {}
     results = []
     for mutation in manifest.mutations:
+        # `tuple(...)` because `Mutation` is a plain dataclass: the annotation says
+        # tuple and `from_payload` builds one, but nothing stops a caller
+        # constructing a `Mutation` directly with a list -- and a test fixture
+        # promptly did, turning the cache lookup into an unhashable-type crash deep
+        # inside the sweep. Cheaper to accept both than to raise from here about a
+        # type the module never enforced.
+        key = tuple(mutation.tests)
+        if key not in proven:
+            proven[key] = runner(mutation.tests)
+        if not proven[key]:
+            raise BaselineFailed(
+                f"{mutation.name}: {list(mutation.tests)} do not pass before "
+                "anything is mutated, so no verdict about them means anything -- "
+                "a test that fails either way reports KILLED for every mutation, "
+                "including the ones nothing detects. Fix the tests, then sweep.")
         with patched(root, mutation):
             passed = runner(mutation.tests)
         results.append(Result(mutation=mutation,

@@ -76,7 +76,7 @@ def _project(root: Path, test_body: str) -> None:
 def _mutation() -> MU.Mutation:
     return MU.Mutation(
         name="drop-the-negative-guard", file="subject.py", anchor=ANCHOR,
-        replacement="", tests=["test_subject.py"],
+        replacement="", tests=("test_subject.py",),
         why="the clamp stops clamping, which a test that only tries positive "
             "numbers cannot see")
 
@@ -121,6 +121,27 @@ def test_the_real_runner_lets_a_mutation_no_test_notices_survive() -> None:
         assert [r.verdict for r in results] == [MU.SURVIVED], results
         assert MU.report(results) == 1, "a survivor has to fail the command"
         assert SOURCE == (root / "subject.py").read_text(encoding="utf-8")
+
+
+def test_a_selector_that_matches_nothing_is_refused_not_counted_as_killed() -> None:
+    """The failure that lets a manifest rot into a clean sheet.
+
+    Rename a test class, leave the manifest naming the old one, and `pytest` exits
+    non-zero -- 4, a usage error, measured on this repository. Read as a boolean
+    that is what "a test failed" looks like, so every mutation reports `KILLED`
+    while nothing ran. Only 0 and 1 are answers; this asserts the real runner
+    refuses the rest, and it needs a real process because the exit code *is* the
+    subject.
+    """
+    import pytest
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _project(root, WATCHFUL)
+        runner = MU.pytest_runner(root)
+        assert runner(["test_subject.py"]) is True, "the fixture itself passes"
+        with pytest.raises(MU.RunnerAmbiguous) as caught:
+            runner(["test_subject.py::test_this_name_does_not_exist"])
+        assert "did not run" in str(caught.value)
 
 
 def test_the_harness_kills_every_mutation_of_itself() -> None:

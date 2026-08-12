@@ -29,6 +29,7 @@ really invokes `pytest` lives in `benchmarks/heavy/test_mutate_heavy.py`.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import tempfile
 import unittest
@@ -44,6 +45,18 @@ SOURCE = f"""def _referenced_datums(project):
     referenced = set()
 {ANCHOR}
 """
+
+
+def _write(path: Path, text: str = SOURCE) -> None:
+    """LF, explicitly, because these fixtures stand in for repository source.
+
+    `Path.write_text` translates to the platform ending, so on Windows every
+    fixture here landed as CRLF -- and then an assertion that the patch changed
+    one line and no other cannot tell the harness's doing from the fixture's. The
+    repository stores source with LF (`.gitattributes`); writing bytes is what
+    makes the subject resemble the thing it stands for.
+    """
+    path.write_bytes(text.encode("utf-8"))
 
 
 def _manifest(**over) -> dict:
@@ -90,7 +103,7 @@ class AnchorMustMatchExactlyTest(unittest.TestCase):
         ):
             with self.subTest(anchor=label), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
-                (root / "src.py").write_text(text, encoding="utf-8")
+                _write(root / "src.py", text)
                 with self.assertRaises(expected):
                     with MU.patched(root, _mutation(anchor=anchor)):
                         pass
@@ -117,19 +130,55 @@ class TheBytesComeBackTest(unittest.TestCase):
             with self.subTest(body=label), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
                 path = root / "src.py"
-                path.write_text(SOURCE, encoding="utf-8")
+                _write(path)
                 if body is None:
                     with self.assertRaises(RuntimeError):
                         with MU.patched(root, _mutation()):
                             raise RuntimeError("the runner fell over")
                 else:
                     with MU.patched(root, _mutation()) as target:
-                        seen = target.read_text(encoding="utf-8")
+                        raw_bytes = target.read_bytes()
+                        seen = raw_bytes.decode("utf-8")
                         self.assertIn(REPLACEMENT, seen)
                         self.assertNotIn(ANCHOR, seen)
+                        # The patch is the anchor swapped for the replacement and
+                        # nothing else. Written in text mode this file came back
+                        # CRLF throughout on Windows -- every line changed, so a
+                        # test failing because of that reported KILLED for a
+                        # mutation it never saw. Asserted on bytes because that is
+                        # the only place the difference is visible.
+                        self.assertNotIn(b"\r\n", raw_bytes)
+                        self.assertEqual(
+                            SOURCE.replace(ANCHOR, REPLACEMENT).encode("utf-8"),
+                            raw_bytes)
                         body(target)
                 self.assertEqual(SOURCE, path.read_text(encoding="utf-8"),
                                  "the original bytes must come back exactly")
+
+    def test_a_runner_that_changes_directory_cannot_misdirect_the_restore(self) -> None:
+        """The target is decided before the body runs, because the body is not ours.
+
+        `runner` is injected on purpose, so it is somebody else's code, and a
+        relative `root` is resolved against the working directory *at the moment
+        the restore writes*. A runner that chdirs would send the original bytes to
+        a path under wherever it moved to -- where they would read back
+        identically, so the digest check would confirm a restore that never
+        touched the mutated file. Provoked with a real chdir rather than argued.
+        """
+        with tempfile.TemporaryDirectory() as raw, \
+                tempfile.TemporaryDirectory() as elsewhere:
+            root = Path(raw)
+            _write(root / "src.py")
+            before = Path.cwd()
+            os.chdir(root)
+            try:
+                with MU.patched(Path("."), _mutation()):
+                    os.chdir(elsewhere)
+            finally:
+                os.chdir(before)
+            self.assertEqual(SOURCE, (root / "src.py").read_text(encoding="utf-8"))
+            self.assertFalse((Path(elsewhere) / "src.py").exists(),
+                             "the restore must not land where the runner wandered")
 
     def test_a_restore_that_cannot_be_written_is_raised_not_swallowed(self) -> None:
         """The guard is reachable, which is the only way to know it is not dead.
@@ -142,7 +191,7 @@ class TheBytesComeBackTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             path = root / "src.py"
-            path.write_text(SOURCE, encoding="utf-8")
+            _write(path)
             try:
                 with self.assertRaises(MU.RestoreFailed):
                     with MU.patched(root, _mutation()) as target:
@@ -164,6 +213,90 @@ class ADirtyTargetIsRefusedTest(unittest.TestCase):
         MU.require_clean(Path("."), ("src.py",), dirty=("other.py",))
         with self.assertRaises(MU.DirtyTarget):
             MU.require_clean(Path("."), ("src.py",), dirty=("src.py",))
+        # One file, two spellings. Compared as raw strings these are different
+        # names, so the guard found nothing and patched a dirty target.
+        with self.assertRaises(MU.DirtyTarget):
+            MU.require_clean(Path("."), ("./src.py",), dirty=("src.py",))
+
+    def test_the_sweep_itself_refuses_and_not_only_the_helper(self) -> None:
+        """The seam above this one: `sweep` has to *call* the guard.
+
+        `test_only_a_modified_target_stops_the_sweep` proves `require_clean` says
+        no when asked. It says nothing about whether anybody asks -- delete the
+        call from `sweep()` and it still passes, which would leave the refusal
+        provable and unreachable at the same time. So this goes through `sweep`,
+        and it asserts the runner was never reached: a refusal that patched the
+        file first is not a refusal.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            _write(root / "src.py")
+            calls: list[tuple[str, ...]] = []
+            with self.assertRaises(MU.DirtyTarget):
+                MU.sweep(root, MU.from_payload(_manifest()),
+                         runner=lambda tests: calls.append(tuple(tests)) or True,
+                         dirty=("src.py",))
+            self.assertEqual([], calls, "nothing may run against a dirty target")
+            self.assertEqual(SOURCE, (root / "src.py").read_text(encoding="utf-8"))
+
+
+class TheBaselineIsProvenBeforeAnyVerdictTest(unittest.TestCase):
+    """`KILLED` from an already-red test is the harness's own false confidence.
+
+    The verdict means "the named tests failed under the mutation". Tests that were
+    failing beforehand fail under it too, so they report `KILLED` for every
+    mutation including ones nothing detects -- the sweep prints a clean sheet at
+    exactly the moment it is measuring nothing. The heavy fixture asserted its own
+    baseline before mutating, but a convention observed in one fixture protects
+    that fixture and no manifest anyone else writes, so the refusal belongs here.
+    """
+
+    def _project(self, root: Path) -> None:
+        _write(root / "src.py")
+
+    def test_tests_that_were_already_failing_produce_no_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self._project(root)
+            calls: list[tuple[str, ...]] = []
+
+            def always_fails(tests):
+                calls.append(tuple(tests))
+                return False
+
+            with self.assertRaises(MU.BaselineFailed):
+                MU.sweep(root, MU.from_payload(_manifest()),
+                         runner=always_fails, dirty=())
+            # The distinction that makes this a refusal and not a verdict: the
+            # baseline was the only thing run. Had the sweep gone on to patch and
+            # judge, this would be two calls and a KILLED.
+            self.assertEqual([("test_datums.py",)], calls)
+            self.assertEqual(SOURCE, (root / "src.py").read_text(encoding="utf-8"))
+
+    def test_a_passing_baseline_is_proven_once_per_test_set(self) -> None:
+        """And the mutation is still judged on its own run, not on the baseline.
+
+        Two mutations naming one selector: three runs, not four. The baseline is a
+        fact about the tree that cannot change between two mutations that both
+        started from it, and the slowest tier pays for every extra process.
+        """
+        second = _manifest()["mutations"][0] | {"name": "also-ids-only",
+                                                "anchor": "    referenced = set()",
+                                                "replacement": "    referenced = ()"}
+        payload = _manifest(mutations=[_manifest()["mutations"][0], second])
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            self._project(root)
+            calls: list[tuple[str, ...]] = []
+            # Passes clean, fails once patched: the ordinary case, so the verdict
+            # below is KILLED and the count is what proves the caching.
+            results = MU.sweep(
+                root, MU.from_payload(payload),
+                runner=lambda tests: calls.append(tuple(tests)) or
+                SOURCE == (root / "src.py").read_text(encoding="utf-8"),
+                dirty=())
+            self.assertEqual([MU.KILLED, MU.KILLED], [r.verdict for r in results])
+            self.assertEqual(3, len(calls), f"one baseline, two mutations: {calls}")
 
 
 class TheVerdictIsWhatTheCheckSaidTest(unittest.TestCase):
@@ -180,9 +313,20 @@ class TheVerdictIsWhatTheCheckSaidTest(unittest.TestCase):
                                       (True, MU.SURVIVED, 1)):
             with self.subTest(tests_pass=passes), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
-                (root / "src.py").write_text(SOURCE, encoding="utf-8")
+                path = root / "src.py"
+                _write(path)
+                # The runner answers `True` on the clean tree and `passes` once the
+                # file is patched. It cannot be a constant any more: a runner that
+                # always fails now stops the sweep with `BaselineFailed`, because a
+                # test failing either way cannot say anything about a mutation. So
+                # this reads the file to tell which run it is in -- which is also
+                # closer to what a real runner does.
+                def runner(tests, path=path, passes=passes):
+                    clean = path.read_bytes() == SOURCE.encode("utf-8")
+                    return True if clean else passes
+
                 results = MU.sweep(root, MU.from_payload(_manifest()),
-                                   runner=lambda tests: passes, dirty=())
+                                   runner=runner, dirty=())
                 self.assertEqual([verdict], [r.verdict for r in results])
                 self.assertEqual(code, MU.report(results))
 
@@ -200,7 +344,12 @@ class TheManifestIsCheckedBeforeItIsTrustedTest(unittest.TestCase):
         for label, payload in (("no mutations", _manifest(mutations=[])),
                                ("missing anchor", missing_field),
                                ("tests not a list", _manifest(mutations=[
-                                   {**_manifest()["mutations"][0], "tests": "t"}]))):
+                                   {**_manifest()["mutations"][0], "tests": "t"}])),
+                               # An empty list is not "no opinion": it is pytest
+                               # with no argument, so the verdict would be about
+                               # the whole repository and not this mutation.
+                               ("tests empty", _manifest(mutations=[
+                                   {**_manifest()["mutations"][0], "tests": []}]))):
             with self.subTest(manifest=label):
                 with self.assertRaises(MU.ManifestError):
                     MU.from_payload(payload)
