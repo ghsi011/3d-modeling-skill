@@ -244,6 +244,10 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
             "an edit-scope job must still be capped; D31 makes the binding "
             f"correct and lifts nothing, but this run says {status['lane_status']}")
 
+        # The bytes of the receipt that the datum correction must remove, taken
+        # while it is still the current one. Compared after the rerun below.
+        before_digest = S.sha256_file(work / "verification_report.json")
+
         # ---- the datum's value is corrected, its id kept --------------------
         _project(P, 12.9).save(work)
         stderr = io.StringIO()
@@ -275,10 +279,47 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
         assert "final_status.json" in invalidated, (
             "and the job's answer with it, since it rested on that review")
 
+        # The history must name the bytes it removed, not just the filename. This
+        # is the one half of the deletion claim this test can honestly carry.
+        assert invalidated["verification_report.json"]["sha256"] == before_digest, (
+            "the history must record the digest of the receipt it removed; it "
+            f"recorded {invalidated['verification_report.json']['sha256'][:12]} "
+            f"and the receipt was {before_digest[:12]}")
+
+        # Whether the file was *unlinked* is deliberately NOT asserted here, and
+        # the reason is worth writing down because the obvious assertion is a trap.
+        #
+        # An independent review pointed out that the checks above read only the
+        # history, which `acceptance.freeze` writes from `bindings.invalidate`'s
+        # return value -- so deleting `path.unlink()` from `invalidate` would leave
+        # them green. Correct. But asserting absence, or a changed digest, here does
+        # not close it: this run *regenerates* `verification_report.json` after the
+        # freeze -- as an error report recording the refusal -- so the revision-1
+        # bytes are gone from disk either way and any such assertion passes under
+        # the mutation too. Measured, not assumed: the mutation survived that
+        # assertion, which is why it is not in this file.
+        #
+        # Deletion is `bindings.invalidate`'s own contract and is owned where it
+        # belongs -- `benchmarks/heavy/test_bindings_heavy.py::ScopedInvalidationTest`
+        # asserts both that a receipt is reported removed and that it is no longer
+        # on disk. Verified against the same mutation: removing `path.unlink()`
+        # fails two tests there. Re-asserting it here would be a second authority
+        # over one question, and the version of it that fits this fixture cannot
+        # fail.
+
+
         # The refusal itself, which is the half the unit tests could only argue.
+        #
+        # One review called the message assertions brittle and suggested dropping
+        # them, since the structural checks above already prove the invalidation.
+        # Kept deliberately, because they prove a different thing: that the stored
+        # answer was *refused* rather than quietly re-used against the new
+        # contract. Nothing above would notice a run that accepted it. Brittleness
+        # to a reworded refusal is the intended cost -- rewording the sentence a
+        # reader relies on should make somebody re-read this test.
         assert "review envelope mismatch" in said, (
             "the stored response must be refused rather than reused against the "
             f"new contract. stderr was: {said[-600:]}")
         assert bound_to[:16] in said, (
-            "and the refusal must name the contract the answer was issued "
+            "and the refusal must name the envelope the answer was issued "
             f"against ({bound_to[:16]}); stderr was: {said[-600:]}")

@@ -55,6 +55,7 @@ import contextlib
 import dataclasses
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -833,37 +834,52 @@ class TheContractBindsTheReferencedDatumsContentsTest(unittest.TestCase):
         self.assertEqual(self._hash(self._placed()), self._hash(self._placed()))
 
     def test_every_authority_bearing_field_moves_the_hash(self) -> None:
-        """One subtest per field, because "the contents" is not one fact.
+        """One subtest per field, and each pair differs in *only* that field.
 
-        Each of these changes the meaning of the reference an edit was placed
-        against, and each is an existing `Datum` field -- D31 invents none. The
-        unit case is `mm -> cm` deliberately: two unquestionably valid units, so
-        this proves the D31 property without depending on D33's `null`-to-`"None"`
-        coercion or implying that `"None"` is a unit.
+        Written as pairs rather than as variations on one baseline, because the
+        first version was not isolating what it named. Two independent reviews
+        found the same hole: the `source artifact` and `artifact revision` cases
+        each flipped `provenance` *and* set `derived_from`, and the `owner` and
+        `settled_by` cases each flipped `provenance` too -- so provenance alone
+        moved the hash and all four subtests would have stayed green against an
+        implementation that dropped `derived_from`, `owner` and `settled_by`
+        entirely. Four assertions named four protections and tested one.
+
+        So each row below is `(label, left, right)` and the two sides differ in
+        exactly one key. The `derived_from` cases keep provenance fixed at
+        `INHERITED` on *both* sides; the assumption cases keep it at `CHOSEN` on
+        both. `test_the_bound_row_is_the_models_own_serialization` is the
+        backstop for a field nobody thought to pair here.
+
+        The unit case is `mm -> cm` deliberately: two unquestionably valid units,
+        so this proves the D31 property without depending on D33's
+        `null`-to-`"None"` coercion or implying that `"None"` is a unit.
         """
-        baseline = self._hash(self._placed())
-        for label, change in (
-                ("value", dict(value=12.9)),
-                ("unit", dict(unit="cm")),
-                ("provenance", dict(provenance="INHERITED",
-                                    derived_from={"artifact_id": "src",
-                                                  "revision": 1})),
-                ("source artifact", dict(provenance="INHERITED",
-                                         derived_from={"artifact_id": "drawer",
-                                                       "revision": 1})),
-                ("artifact revision", dict(provenance="INHERITED",
-                                           derived_from={"artifact_id": "src",
-                                                         "revision": 2})),
-                ("validity scope", dict(valid_for=("src",))),
-                ("assumption owner", dict(provenance="CHOSEN", owner="metrologist",
-                                          settled_by="calipers")),
-                ("settling check", dict(provenance="CHOSEN", owner="metrologist",
-                                        settled_by="a printed coupon")),
-                ("note", dict(note="measured after the pocket was cut")),
+        derived = dict(provenance="INHERITED",
+                       derived_from={"artifact_id": "src", "revision": 1})
+        assumed = dict(provenance="CHOSEN", owner="metrologist",
+                       settled_by="calipers")
+        for label, left, right in (
+                ("value", {}, dict(value=12.9)),
+                ("unit", {}, dict(unit="cm")),
+                # Provenance alone: `derived_from` stays None on both sides.
+                ("provenance", {}, dict(provenance="CHOSEN")),
+                ("source artifact", derived,
+                 {**derived, "derived_from": {"artifact_id": "drawer",
+                                              "revision": 1}}),
+                ("artifact revision", derived,
+                 {**derived, "derived_from": {"artifact_id": "src",
+                                              "revision": 2}}),
+                ("validity scope", {}, dict(valid_for=("src",))),
+                ("assumption owner", assumed, {**assumed, "owner": "designer"}),
+                ("settling check", assumed,
+                 {**assumed, "settled_by": "a printed coupon"}),
+                ("note", {}, dict(note="measured after the pocket was cut")),
         ):
             with self.subTest(field=label):
                 self.assertNotEqual(
-                    baseline, self._hash(self._placed(**change)),
+                    self._hash(self._placed(**left)),
+                    self._hash(self._placed(**right)),
                     f"changing {label} changes what the reference means, so a "
                     "contract derived from it must move")
 
@@ -1048,20 +1064,50 @@ class TheContractBindsTheReferencedDatumsContentsTest(unittest.TestCase):
             "the block is ordered by datum_id, not by whatever the set yielded "
             "under this process's hash seed")
 
-    def test_the_binding_is_computed_from_project_state_alone(self) -> None:
-        """Items 17-19, at the only level a unit test can honestly claim them.
+    def test_the_binding_does_not_read_the_directory_it_is_run_from(self) -> None:
+        """Items 17-19, tested behaviourally after the first attempt was theatre.
 
-        `_referenced_datums` takes a `Project` and nothing else -- no directory,
-        no build result, no mesh, no digest -- so there is no parameter through
-        which a candidate could substitute content or supply its own digest, and
-        nothing for a post-freeze reread to read. The ordering that makes it
-        matter (`_requirement_hash` at call time, `ACC.freeze`, then
-        `ISO.build`) is `_run_authored`'s and is asserted in `test_frozen`.
+        This asserted `list(inspect.signature(cli._referenced_datums).parameters)
+        == ["project"]` and nothing else. Both independent reviews called it
+        correctly: a one-parameter function can still read a module global, an
+        environment variable, or a file in the working directory, so the
+        assertion passed for an implementation that did exactly what it claimed
+        to forbid -- and it *failed* for an added unused keyword argument, which
+        is no regression at all. It tested a shape, not a property.
+
+        What it does now: run the same project from two different working
+        directories, one of which contains a plausibly-named override file that a
+        careless implementation might read, and require the same answer. That
+        catches the `Path.cwd() / "datum_overrides.json"` implementation the
+        signature check waved through.
+
+        It remains a floor rather than a proof. A candidate cannot reach this
+        function at all -- `acceptance.generate` has no parameter a mesh, digest
+        or build result can arrive through, and `_run_authored` freezes before
+        `ISO.build` runs, which `test_frozen` asserts. This test covers the
+        narrower question of ambient state, which is the half a unit test can
+        actually measure.
         """
-        import inspect
-        self.assertEqual(["project"],
-                         list(inspect.signature(cli._referenced_datums)
-                              .parameters))
+        project = self._placed()
+        expected = cli._referenced_datums(project)
+        with tempfile.TemporaryDirectory() as raw:
+            here = Path(raw)
+            # The bait: a file whose name an implementation reaching for ambient
+            # state would plausibly reach for.
+            (here / "datum_overrides.json").write_text(
+                json.dumps({"magnet-pocket-face": {"value": 999.0}}),
+                encoding="utf-8")
+            was = Path.cwd()
+            try:
+                os.chdir(here)
+                from_elsewhere = cli._referenced_datums(project)
+            finally:
+                os.chdir(was)
+        self.assertEqual(expected, from_elsewhere,
+                         "the bound contents are a function of the project and "
+                         "of nothing in the directory the run happens to start in")
+        self.assertEqual(12.4, from_elsewhere[0]["value"],
+                         "and specifically not of a file sitting next to it")
 
 
 class ADatumSurvivesTheRoundTripTest(unittest.TestCase):
