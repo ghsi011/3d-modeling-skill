@@ -14,7 +14,7 @@ See `docs/agents/issue-tracker.md`.
 ### Triage labels
 
 The five canonical role names, unmapped, reusing the existing `wontfix` label; nothing
-reads them until the `triage` skill is installed. See `docs/agents/triage-labels.md`.
+in this repository reads them. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
