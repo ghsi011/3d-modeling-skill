@@ -114,6 +114,36 @@
       "why": "pytest exits 4 for a node id that matches nothing, so a manifest naming a renamed test reports every mutation as caught while running none of them"
     },
     {
+      "name": "bytecode-not-invalidated-before-the-check",
+      "file": "tools/mutate.py",
+      "anchor": "        _invalidate_bytecode(path)\n        yield path",
+      "replacement": "        yield path",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_a_stale_pyc_cannot_decide_the_verdict"
+      ],
+      "why": "the child reuses a cached compile of the code being probed, so the verdict is decided by a .pyc timestamp rather than by the named tests -- measured: the self-sweep reported a false survivor on two of six consecutive runs from one clean tree"
+    },
+    {
+      "name": "bytecode-left-behind-after-the-restore",
+      "file": "tools/mutate.py",
+      "anchor": "        # runs unreproducibly.\n        _invalidate_bytecode(path)",
+      "replacement": "        # runs unreproducibly.\n        pass",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_a_sweep_leaves_no_compiled_copy_of_the_mutation_behind"
+      ],
+      "why": "a compiled copy of the mutation outlives the sweep, so later runs in a clean checkout execute code no file contains -- the cause of the intermittent failure that cost the most to diagnose here"
+    },
+    {
+      "name": "child-may-write-bytecode",
+      "file": "tools/mutate.py",
+      "anchor": "        env = {**os.environ, \"PYTHONDONTWRITEBYTECODE\": \"1\"}",
+      "replacement": "        env = {**os.environ}",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_the_child_is_told_not_to_write_bytecode"
+      ],
+      "why": "a child compiles the mutated file and leaves the result for the next process, which is the same channel pipeline/isolation.py:15 records being attacked through"
+    },
+    {
       "name": "survivor-exits-zero",
       "file": "tools/mutate.py",
       "anchor": "        return 1\n    return 0",

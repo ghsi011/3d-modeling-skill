@@ -88,6 +88,7 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -234,6 +235,50 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _invalidate_bytecode(path: Path) -> None:
+    """Drop any compiled copy of `path`, because bytes are not what runs.
+
+    The restore is verified in bytes. What a child interpreter *executes* is
+    bytecode, and CPython decides whether to reuse a `__pycache__` entry from two
+    fields only: the source's mtime **truncated to whole seconds** and its size. So
+    a mutation whose replacement is the same byte length as its anchor, written
+    inside the same second as the write the `.pyc` recorded, leaves both fields
+    matching -- and the child runs the *previous* code while the mutated bytes sit
+    on disk. The verdict is then a fact about a `.pyc` timestamp.
+
+    This is not hypothetical and it is not new to this repository. Two of the twelve
+    rows in `benchmarks/mutations/mutate-harness.json` preserve byte length, and
+    before this function existed the self-sweep reported `0 survived` on four runs
+    out of six and a false survivor on the other two, from one clean tree whose
+    `tools/mutate.py` had the same sha256 before and after every run. Worse, the
+    stale entry outlives the sweep: the mutated bytecode stayed loadable afterwards,
+    which is what made two later tests fail once and then pass seven times.
+
+    `pipeline/isolation.py:15` records the same channel used deliberately against
+    this project -- "a `__pycache__` entry stamped to the real file's mtime and
+    size, leaving the `.py` byte-identical, so hashing the source saw nothing" --
+    and answers it with `PYTHONDONTWRITEBYTECODE=1` (`isolation.py:418`). The digest
+    in `patched` is exactly the source-hashing that saw nothing.
+
+    A failure here is a refusal rather than a warning: if the stale copy cannot be
+    removed, the next verdict is about bytecode nobody chose.
+    """
+    cache = path.parent / "__pycache__"
+    if not cache.is_dir():
+        return
+    # Every interpreter tag and optimisation level, not just this interpreter's:
+    # the tier runs on 3.11 and 3.12, and a `.pyc` left by either would be read by
+    # its own interpreter later.
+    for stale in sorted(cache.glob(f"{path.stem}.*.pyc")):
+        try:
+            stale.unlink()
+        except OSError as exc:
+            raise MutateError(
+                f"{stale} could not be removed ({exc}), so a child may execute it "
+                f"instead of {path.name}. A verdict decided by a stale .pyc is not "
+                "a verdict about the mutation.") from exc
+
+
 def git_dirty(root: Path) -> tuple[str, ...]:
     """Paths with uncommitted changes, as git sees them.
 
@@ -337,6 +382,9 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
         # `AnchorMissing` refuse rather than normalise.
         mutated = text.replace(mutation.anchor, mutation.replacement, 1)
         path.write_bytes(mutated.encode("utf-8"))
+        # Before the check runs, so the child compiles the mutation instead of
+        # reusing a cached copy of the code being probed.
+        _invalidate_bytecode(path)
         yield path
     finally:
         try:
@@ -352,6 +400,11 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
                 f"{mutation.name}: {mutation.file} was restored and does not match "
                 f"what was read ({_digest(back)[:12]} against "
                 f"{_digest(original)[:12]}).")
+        # After the restore too, and this half is the one that bites hardest: a
+        # stale entry compiled from the mutation outlives the sweep, so every later
+        # run in this checkout can execute code no file contains. That is what made
+        # two tests fail once and then pass seven times, unreproducibly.
+        _invalidate_bytecode(path)
 
 
 def pytest_runner(root: Path) -> Callable[[Sequence[str]], bool]:
@@ -366,9 +419,15 @@ def pytest_runner(root: Path) -> Callable[[Sequence[str]], bool]:
     """
 
     def run(tests: Sequence[str]) -> bool:
+        # `PYTHONDONTWRITEBYTECODE=1` so a child cannot leave a compiled copy of a
+        # mutated file behind for the next child -- or for the next person to run
+        # the suite. Same answer `pipeline/isolation.py:418` gives to the same
+        # channel, and paired with `_invalidate_bytecode` because that clears what
+        # is already there while this stops more from appearing.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         done = subprocess.run([sys.executable, "-m", "pytest", "-q", *tests],
                               cwd=str(root), capture_output=True, text=True,
-                              check=False)
+                              check=False, env=env)
         if done.returncode == 0:
             return True
         if done.returncode == 1:

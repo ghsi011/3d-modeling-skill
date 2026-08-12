@@ -19,6 +19,10 @@ go: no CAD kernel, no build, no confinement.
 """
 from __future__ import annotations
 
+import importlib.util
+import os
+import py_compile
+import struct
 import subprocess
 import sys
 import tempfile
@@ -121,6 +125,116 @@ def test_the_real_runner_lets_a_mutation_no_test_notices_survive() -> None:
         assert [r.verdict for r in results] == [MU.SURVIVED], results
         assert MU.report(results) == 1, "a survivor has to fail the command"
         assert SOURCE == (root / "subject.py").read_text(encoding="utf-8")
+
+
+def test_a_stale_pyc_cannot_decide_the_verdict() -> None:
+    """The verdict must come from the mutated source, not from a cached compile.
+
+    The restore is verified in bytes, but a child interpreter executes *bytecode*,
+    and CPython reuses a `__pycache__` entry when two fields match: the source mtime
+    truncated to whole **seconds**, and its size. A mutation whose replacement is
+    the same byte length as its anchor, written inside the same second the `.pyc`
+    recorded, satisfies both -- so the child runs the old code and the harness
+    reports a verdict about a timestamp.
+
+    Two of the twelve rows in `benchmarks/mutations/mutate-harness.json` preserve
+    byte length, and this was measured, not feared: the self-sweep reported a false
+    survivor on two of six consecutive runs from one clean tree.
+
+    The collision is **forced** here with `os.utime` rather than raced, because a
+    test that waits for a sub-second window is a test that passes for timing
+    reasons. Both directions are asserted: with the cache invalidated the mutation
+    is seen and the row is `KILLED`; and the fixture proves the stale entry really
+    was loadable, so the assertion cannot pass because the trap failed to arm.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _project(root, WATCHFUL)
+        subject = root / "subject.py"
+
+        # `<` becomes `>`, so the clamp stops clamping negatives and the file size
+        # does not move by a single byte -- which is the only condition the stale
+        # cache needs, and the reason this fixture is written this way.
+        same_length = MU.Mutation(
+            name="equal-length", file="subject.py", anchor="if value < 0:",
+            replacement="if value > 0:", tests=("test_subject.py",),
+            why="the clamp stops clamping negatives, at identical file size")
+        assert len(same_length.anchor) == len(same_length.replacement), (
+            "this fixture is worthless unless the edit preserves length: that is "
+            "what makes the .pyc size field keep matching")
+
+        # Compile the ORIGINAL, and note the second its `.pyc` recorded.
+        py_compile.compile(str(subject), doraise=True)
+        cached = Path(importlib.util.cache_from_source(str(subject)))
+        assert cached.is_file(), "the trap has to be armed or this proves nothing"
+        recorded = struct.unpack("<4sIII", cached.read_bytes()[:16])[2]
+
+        # `patched` is driven directly rather than through `sweep`, because the trap
+        # has to be armed *after* the mutating write: that write sets mtime to now,
+        # which is what usually saves this by accident. Stamping the source back into
+        # the second the cache recorded is the same state a fast sweep reaches on its
+        # own -- forced, so the test does not depend on winning a sub-second race.
+        # An earlier version of this test stamped before entering the block and
+        # passed with the invalidation deleted, which is to say it tested nothing.
+        with MU.patched(root, same_length) as target:
+            os.utime(target, (recorded, recorded))
+            assert int(target.stat().st_mtime) == recorded, "the trap is armed"
+            passed = MU.pytest_runner(root)(["test_subject.py"])
+
+        assert passed is False, (
+            "the child ran a cached compile of the unmutated source: the clamp still "
+            "clamped, the watchful test passed, and this mutation would have been "
+            "recorded SURVIVED on the strength of a .pyc timestamp")
+        assert SOURCE == subject.read_text(encoding="utf-8")
+
+
+def test_a_sweep_leaves_no_compiled_copy_of_the_mutation_behind() -> None:
+    """The other half, and the one that poisoned this repository's own test runs.
+
+    A stale entry compiled from the mutation outlives the sweep. Nothing in the
+    working tree contains that code -- `git status` is clean and the source hash
+    matches -- and yet a later interpreter can still execute it. That is what made
+    two tests fail exactly once and then pass seven times, which cost more to
+    diagnose than everything else in this file put together.
+
+    Simulated by compiling the mutation deliberately inside the block, standing in
+    for any process that imported the file while it was patched. The assertion is
+    about what is left on disk afterwards.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _project(root, WATCHFUL)
+        subject = root / "subject.py"
+        cached = Path(importlib.util.cache_from_source(str(subject)))
+
+        with MU.patched(root, MU.Mutation(
+                name="equal-length", file="subject.py", anchor="if value < 0:",
+                replacement="if value > 0:", tests=("test_subject.py",),
+                why="the clamp stops clamping negatives")) as target:
+            py_compile.compile(str(target), doraise=True)
+            assert cached.is_file(), "the fixture must actually leave one behind"
+
+        assert not cached.is_file(), (
+            "a compiled copy of the mutation survived the restore, so every later "
+            "run in this checkout can execute code that no file contains")
+
+
+def test_the_child_is_told_not_to_write_bytecode() -> None:
+    """Asserted through the child's own eyes, the way `isolation.py` is.
+
+    `test_isolation_heavy.py:869` asserts the same variable on the env dict it
+    builds. `pytest_runner` builds its env internally, so the fixture's own test
+    reads `os.environ` and the runner's verdict carries the answer: a child that was
+    not told would fail this, and the runner would report `False`.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        _write(root / "test_env.py",
+               'import os\n\n\ndef test_bytecode_writing_is_off():\n'
+               '    assert os.environ.get("PYTHONDONTWRITEBYTECODE") == "1"\n')
+        assert MU.pytest_runner(root)(["test_env.py"]) is True, (
+            "the child was not told to stop writing bytecode, so it can leave a "
+            "compiled copy of a mutated file behind for the next process")
 
 
 def test_a_selector_that_matches_nothing_is_refused_not_counted_as_killed() -> None:
