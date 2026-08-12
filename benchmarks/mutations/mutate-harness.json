@@ -56,7 +56,7 @@
     {
       "name": "baseline-not-proven",
       "file": "tools/mutate.py",
-      "anchor": "        if not proven[mutation.tests]:",
+      "anchor": "        if not proven[key]:",
       "replacement": "        if False:",
       "tests": [
         "tools/test_mutate.py::TheBaselineIsProvenBeforeAnyVerdictTest"
