@@ -1029,6 +1029,32 @@ class TheContractBindsTheReferencedDatumsContentsTest(unittest.TestCase):
         self.assertIn("datums", cli._requirement_payload(self._placed(), self.BRIEF),
                       "and it is present the moment an edit is placed against one")
 
+    def test_reordering_one_datums_scope_list_changes_nothing(self) -> None:
+        """The canonicalization ruling, and the converse that keeps it honest.
+
+        `valid_for` is a membership set to the only code that reads it --
+        `Project.validate` intersects `set(datum.valid_for)` against the scope --
+        so two declarations differing only in the order of the same scopes are one
+        declaration. Before `Datum.as_dict` sorted the field they were two
+        contracts: `("src", "drawer")` hashed 50db5e539edbe65c and
+        `("drawer", "src")` hashed 0a239014a926045c, which cut a spurious
+        acceptance revision and refused a review answer over a difference the model
+        does not distinguish. Found by an independent review, not by this suite.
+
+        The converse matters as much: a hash that ignored scope *order* by ignoring
+        the scope *set* would pass the first assertion and mean nothing, so the
+        second one changes which scopes are named and requires the hash to move.
+        """
+        project = self._placed(valid_for=("src", "drawer"))
+        reordered = self._placed(valid_for=("drawer", "src"))
+        self.assertEqual(self._hash(project), self._hash(reordered),
+                         "the same two scopes in the other order are the same "
+                         "declaration, and must not move the contract")
+        narrowed = self._placed(valid_for=("src",))
+        self.assertNotEqual(self._hash(project), self._hash(narrowed),
+                            "but withdrawing a scope changes where the datum may "
+                            "be used, which must move it")
+
     def test_the_bound_order_is_sorted_and_not_whatever_a_set_yielded(self) -> None:
         """The assertion a surviving mutation asked for.
 
@@ -1150,7 +1176,26 @@ class ADatumSurvivesTheRoundTripTest(unittest.TestCase):
                                  .read_text(encoding="utf-8"))
             self.assertEqual(2, payload["datums"][0]["derived_from"]["revision"])
             self.assertEqual("print engineer", payload["datums"][1]["owner"])
-            self.assertEqual(rows, P.load(directory).datums)
+
+            # Canonical rather than literal, and only in `valid_for`. `as_dict`
+            # writes that field sorted, because `Project.validate` reads it as a
+            # membership set and identity must not distinguish two spellings of one
+            # set. So the trip returns the same *set* of scopes, not the same tuple
+            # order -- asserted here as the set, because asserting the tuple would
+            # be asserting an order the model does not have.
+            loaded = P.load(directory).datums
+            self.assertEqual(len(rows), len(loaded))
+            for before, after in zip(rows, loaded):
+                self.assertEqual(set(before.valid_for), set(after.valid_for))
+                self.assertEqual(dataclasses.replace(before, valid_for=()),
+                                 dataclasses.replace(after, valid_for=()),
+                                 "every field except the scope order survives the "
+                                 "trip unchanged")
+            self.assertEqual([sorted(r.valid_for) for r in rows],
+                             [list(d.valid_for) for d in loaded],
+                             "and what comes back is the canonical order, so a "
+                             "saved project reloads to one spelling rather than "
+                             "whichever the author happened to type")
 
 
 if __name__ == "__main__":
