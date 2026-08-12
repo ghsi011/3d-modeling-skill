@@ -27,11 +27,25 @@ each preservation row: that would write one datum's number twice into one
 contract, which is the two-authorities failure the ADR was written from. `note`,
 `owner` and `settled_by` are bound with everything else because the row is the
 model's own serialization, asserted by equality against `as_dict()` — a
-hand-maintained field list would drop whichever field is added next. Nothing is
-normalised: a datum declared `"unit": null` arrives as the string `"None"` (D33)
-and is bound as `"None"`, since whether identity follows the object the system
-accepted is a different question from whether the loader built the right object.
-The unit regression uses `mm → cm` and depends on neither.
+hand-maintained field list would drop whichever field is added next.
+
+The precise claim: **the contract binds `Datum.as_dict()` verbatim, and
+`Datum.as_dict()` canonicalizes the order of the set-valued `valid_for` field.**
+Datum values, units, provenance and D33's malformed-input behaviour are **not**
+normalized. `valid_for` is sorted because `Project.validate` reads it as a
+membership set — `set(datum.valid_for) & ({scope.artifact_id} | set(scope.interface_ids))`
+— so two declarations differing only in the order of the same scopes are one
+declaration, and identity was distinguishing a state the model does not: `("src",
+"drawer")` hashed `50db5e53…` against `("drawer", "src")`'s `0a239014…`, cutting a
+spurious acceptance revision. Canonicalized in `as_dict` rather than in the binding,
+so the bound row stays the model's own serialization and the equality assertion
+above keeps its force. One consequence: a project saved and reloaded gets
+`valid_for` back sorted, so the round-trip fixture asserts the set survives rather
+than the tuple order. Nothing else is touched — a datum declared `"unit": null`
+arrives as the string `"None"` (D33) and is bound as `"None"`, since whether
+identity follows the object the system accepted is a different question from whether
+the loader built the right object. The unit regression uses `mm → cm` and depends on
+neither.
 
 `datum_ids` is sorted in the contract row — a set of references to declared
 identities is not a precedence — and never deduplicated, because a repeated id is

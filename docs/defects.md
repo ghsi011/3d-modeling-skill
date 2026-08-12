@@ -866,11 +866,28 @@ into one contract — the two-authorities failure the ADR was written from,
 rebuilt. `as_dict()` is bound verbatim rather than field by field, because a
 hand-built projection carries the fields its author remembered and drops `owner`,
 `settled_by`, `note`, or whichever field is added next; a fixture asserts the
-bound row *equals* `Datum.as_dict()`. And nothing is normalised: a datum declared
-`"unit": null` reaches this code as the string `"None"` (D33) and is bound as
-`"None"`, because whether identity follows the object the system accepted is a
-different question from whether the loader built the right object. The unit
-regression uses `mm → cm` so it depends on neither.
+bound row *equals* `Datum.as_dict()`.
+
+The precise claim, third: **the contract binds `Datum.as_dict()` verbatim, and
+`Datum.as_dict()` canonicalizes the order of the set-valued `valid_for` field.**
+Datum values, units, provenance and D33's malformed-input behaviour are **not**
+normalized. `valid_for` is sorted because `Project.validate` reads it as a
+membership set — `set(datum.valid_for) & ({scope.artifact_id} | set(scope.interface_ids))`
+— so two declarations differing only in the order of the same scopes are one
+declaration to every check that consumes them, and identity was distinguishing a
+state the model does not. Measured: `("src", "drawer")` hashed `50db5e53…` and
+`("drawer", "src")` hashed `0a239014…`, which cut a spurious acceptance revision and
+refused a review answer over a difference that says nothing. Over-invalidation, so
+never a false success, and still a canonicalization defect. It is sorted in
+`as_dict` rather than in the binding so the bound row stays the model's own
+serialization — the property the equality fixture above rests on. The visible
+consequence is that a project saved and reloaded gets `valid_for` back sorted, so
+the round-trip fixture asserts the set survives rather than the tuple order.
+
+Nothing else is normalized. A datum declared `"unit": null` reaches this code as the
+string `"None"` (D33) and is bound as `"None"`, because whether identity follows the
+object the system accepted is a different question from whether the loader built the
+right object. The unit regression uses `mm → cm` so it depends on neither.
 
 `datum_ids` is now sorted in the contract row — a set of references to declared
 identities is not a precedence — but never deduplicated, because a repeated id is
