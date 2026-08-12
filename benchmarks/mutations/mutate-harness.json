@@ -1,0 +1,157 @@
+{
+  "target": "tools/mutate.py -- the mutation harness itself, including its restore path",
+  "note": "The harness sweeping itself. AGENTS.md says to prove a protection by mutating it, and the restore path is the one protection here that, left unproven, would leave production source patched -- so it is mutated first. Written before the implementation was trusted: every entry below was run against the real harness and observed to fail the named tests. Historical mutation claims recorded in prose elsewhere in this repository are deliberately NOT reconstructed here; they were run against trees that no longer exist, and inventing entries for them would manufacture the evidence this file exists to make real.",
+  "not_mutated_here": "One guard in tools/mutate.py is deliberately absent from this list: the mutation write uses write_bytes rather than write_text, so a patch changes the anchor and no other line. Replacing it with write_text is only detectable where text mode translates newlines. On a checkout whose native ending is LF the two calls emit identical bytes, so the mutation would be a genuine no-op there and would survive for a reason that is not a fixture gap. It is covered instead by an exact-bytes assertion in TheBytesComeBackTest, which holds on every platform and fails on Windows if the write goes back to text mode. Recorded rather than quietly omitted, because an unexplained absence in an evidence file is indistinguishable from an oversight.",
+  "mutations": [
+    {
+      "name": "no-restore",
+      "file": "tools/mutate.py",
+      "anchor": "        try:\n            path.write_bytes(original)\n            back = path.read_bytes()",
+      "replacement": "        try:\n            back = original",
+      "tests": [
+        "tools/test_mutate.py::TheBytesComeBackTest"
+      ],
+      "why": "the finally stops putting the bytes back, and reports success anyway -- the exact failure that destroyed an implementation in this repository"
+    },
+    {
+      "name": "missing-anchor-is-a-no-op",
+      "file": "tools/mutate.py",
+      "anchor": "    if found == 0:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::AnchorMustMatchExactlyTest"
+      ],
+      "why": "a replacement that matched nothing proceeds silently, so an unmutated run reports its mutation as caught"
+    },
+    {
+      "name": "ambiguous-anchor-allowed",
+      "file": "tools/mutate.py",
+      "anchor": "    if found > 1:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::AnchorMustMatchExactlyTest"
+      ],
+      "why": "two matches are patched at the first, so the manifest no longer says which line it probed"
+    },
+    {
+      "name": "dirty-target-ignored",
+      "file": "tools/mutate.py",
+      "anchor": "    if modified:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::ADirtyTargetIsRefusedTest"
+      ],
+      "why": "a sweep runs against a baseline nobody reviewed, so its verdict describes a state nobody has seen"
+    },
+    {
+      "name": "empty-manifest-accepted",
+      "file": "tools/mutate.py",
+      "anchor": "    if not isinstance(rows, list) or not rows:",
+      "replacement": "    if not isinstance(rows, list):",
+      "tests": [
+        "tools/test_mutate.py::TheManifestIsCheckedBeforeItIsTrustedTest"
+      ],
+      "why": "an empty manifest reports 0 attempted, 0 survived and exits 0, which reads exactly like a sweep that held"
+    },
+    {
+      "name": "baseline-not-proven",
+      "file": "tools/mutate.py",
+      "anchor": "        if not proven[key]:",
+      "replacement": "        if False:",
+      "tests": [
+        "tools/test_mutate.py::TheBaselineIsProvenBeforeAnyVerdictTest"
+      ],
+      "why": "tests that were already failing report KILLED for every mutation including ones nothing detects, so the sweep prints a clean sheet while measuring nothing -- the blocker found by review of PR #7, not by this author"
+    },
+    {
+      "name": "dirty-check-not-called-by-sweep",
+      "file": "tools/mutate.py",
+      "anchor": "    require_clean(root, manifest.files,\n                  dirty=git_dirty(root) if dirty is None else dirty)",
+      "replacement": "    pass",
+      "tests": [
+        "tools/test_mutate.py::ADirtyTargetIsRefusedTest"
+      ],
+      "why": "the guard still refuses when asked and nobody asks: the seam above require_clean, which the helper's own test cannot see"
+    },
+    {
+      "name": "path-spelling-bypasses-dirty-check",
+      "file": "tools/mutate.py",
+      "anchor": "    modified = sorted({_as_repo_path(f) for f in files}\n                      & {_as_repo_path(d) for d in dirty})",
+      "replacement": "    modified = sorted(set(files) & {d.replace(\"\\\\\", \"/\") for d in dirty})",
+      "tests": [
+        "tools/test_mutate.py::ADirtyTargetIsRefusedTest"
+      ],
+      "why": "one file spelled two ways is two names to a string intersection, so a manifest saying ./tools/mutate.py patches a dirty target"
+    },
+    {
+      "name": "empty-tests-accepted",
+      "file": "tools/mutate.py",
+      "anchor": "        if not tests:",
+      "replacement": "        if False:",
+      "tests": [
+        "tools/test_mutate.py::TheManifestIsCheckedBeforeItIsTrustedTest"
+      ],
+      "why": "an empty tests list is pytest with no argument, so the verdict is about the whole repository rather than about this mutation"
+    },
+    {
+      "name": "restore-target-not-resolved",
+      "file": "tools/mutate.py",
+      "anchor": "    path = (Path(root) / mutation.file).resolve()",
+      "replacement": "    path = Path(root) / mutation.file",
+      "tests": [
+        "tools/test_mutate.py::TheBytesComeBackTest"
+      ],
+      "why": "a runner that changes directory sends the restore somewhere else, where the bytes read back identically and the digest confirms a restore that never touched the mutated file"
+    },
+    {
+      "name": "ambiguous-exit-read-as-a-failure",
+      "file": "tools/mutate.py",
+      "anchor": "        if done.returncode == 1:\n            return False",
+      "replacement": "        if done.returncode != 0:\n            return False",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_a_selector_that_matches_nothing_is_refused_not_counted_as_killed"
+      ],
+      "why": "pytest exits 4 for a node id that matches nothing, so a manifest naming a renamed test reports every mutation as caught while running none of them"
+    },
+    {
+      "name": "bytecode-not-invalidated-before-the-check",
+      "file": "tools/mutate.py",
+      "anchor": "        _invalidate_bytecode(path)\n        yield path",
+      "replacement": "        yield path",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_a_stale_pyc_cannot_decide_the_verdict"
+      ],
+      "why": "the child reuses a cached compile of the code being probed, so the verdict is decided by a .pyc timestamp rather than by the named tests -- measured: the self-sweep reported a false survivor on two of six consecutive runs from one clean tree"
+    },
+    {
+      "name": "bytecode-left-behind-after-the-restore",
+      "file": "tools/mutate.py",
+      "anchor": "        # two tests fail once and then pass seven times, unreproducibly.\n        _invalidate_bytecode(path)",
+      "replacement": "        # two tests fail once and then pass seven times, unreproducibly.\n        pass",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_a_sweep_leaves_no_compiled_copy_of_the_mutation_behind"
+      ],
+      "why": "a compiled copy of the mutation outlives the sweep, so later runs in a clean checkout execute code no file contains -- the cause of the intermittent failure that cost the most to diagnose here"
+    },
+    {
+      "name": "child-may-write-bytecode",
+      "file": "tools/mutate.py",
+      "anchor": "        env = {**os.environ, \"PYTHONDONTWRITEBYTECODE\": \"1\"}",
+      "replacement": "        env = {**os.environ}",
+      "tests": [
+        "benchmarks/heavy/test_mutate_heavy.py::test_the_child_is_told_not_to_write_bytecode"
+      ],
+      "why": "a child compiles the mutated file and leaves the result for the next process, which is the same channel pipeline/isolation.py:15 records being attacked through"
+    },
+    {
+      "name": "survivor-exits-zero",
+      "file": "tools/mutate.py",
+      "anchor": "        return 1\n    return 0",
+      "replacement": "        return 0\n    return 0",
+      "tests": [
+        "tools/test_mutate.py::TheVerdictIsWhatTheCheckSaidTest"
+      ],
+      "why": "a survivor stops failing the command, so a sweep nobody reads reports every rule as held"
+    }
+  ]
+}
