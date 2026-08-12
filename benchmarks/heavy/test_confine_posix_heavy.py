@@ -33,6 +33,23 @@ from pipeline import confine_posix as CP
 
 REASON = CP.unavailable_reason()
 
+# Asked here rather than in a `skipIf` argument, because a decorator's arguments are
+# evaluated at *import* and `os.geteuid` does not exist off POSIX. Two classes below
+# used to ask `os.geteuid() != 0` inline, which raised `AttributeError` on Windows
+# while this module was being imported -- so the whole heavy tier failed
+# *collection* rather than skipping, and `pytest benchmarks/heavy` could not run at
+# all on a Windows machine. The `REASON is not None` guard stacked above them does
+# not help: decorator arguments are not short-circuited by a sibling decorator.
+#
+# `-1` is the not-root answer for a host that has no such concept, which is the
+# same shape `REASON` above already has -- `unavailable_reason()` returns early off
+# Linux rather than probing something that is not there.
+#
+# There is an irony worth leaving on the record: the class this protects is named
+# for the observation that `unavailable_reason` asked `geteuid() == 0`, "which is a
+# different question", and it was committing the same conflation at import time.
+_IS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
 
 def _run(body: str, *, timeout: float = 60.0) -> tuple[CP.Confined, dict]:
     """Run `body` inside the boundary and return what it reported.
@@ -385,7 +402,7 @@ def _identity_probe(body: str) -> dict:
 
 
 @unittest.skipIf(REASON is not None, f"the Linux boundary is unavailable: {REASON}")
-@unittest.skipIf(os.geteuid() != 0,
+@unittest.skipIf(not _IS_ROOT,
                  "setting either identity needs a process that starts with the "
                  "capability and CAP_SETUID")
 class TheAvailabilityProbeReadsTheCapabilityTest(unittest.TestCase):
@@ -450,7 +467,7 @@ class TheAvailabilityProbeReadsTheCapabilityTest(unittest.TestCase):
 
 
 @unittest.skipIf(REASON is not None, f"the Linux boundary is unavailable: {REASON}")
-@unittest.skipIf(os.geteuid() != 0,
+@unittest.skipIf(not _IS_ROOT,
                  "dropping the capability needs a process that starts with it")
 class TheRefusalIsReportedAndArrivesFirstTest(unittest.TestCase):
     """A refusal has to be visible in the receipt and to land before the work.
