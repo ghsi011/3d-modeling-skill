@@ -15,8 +15,11 @@ Read this before treating the issue tracker as the whole picture, because it is 
 - **Roadmap work lives in [`ROADMAP.md`](../../ROADMAP.md)** — release rows, slice
   ordering, and the evidence each release consumed. It is the authority on what is
   next, and no issue supersedes it.
-- **Defects live in [`docs/defects.md`](../defects.md)**, each with a `Status` and,
-  where one exists, the fixture that pins it.
+- **Defects live in [`docs/defects.md`](../defects.md)** — read it there rather than
+  from a description here. This file deliberately does not restate its shape: an
+  earlier version claimed each entry carries a `Status` field, which is not a schema
+  that file declares or consistently carries, and a pointer that invents structure is
+  worse than one that just points.
 - **Architectural decisions live in [`docs/adr/`](../adr/)**.
 - **Scope and priority rulings arrive out of band**, in a coordination conversation
   rather than in this repository. An issue does not change scope.

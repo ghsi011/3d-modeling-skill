@@ -3,10 +3,14 @@
 How the engineering skills should consume this repo's domain documentation when
 exploring the codebase.
 
-**Layout: single-context.** One `CONTEXT.md` at the root and one `docs/adr/`. There is
-no `CONTEXT-MAP.md` and there should not be one unless this repository grows genuinely
-separate contexts with their own vocabularies — it is a single Python package with one
-pipeline, not a monorepo.
+**Layout policy: single-context.** If and when a context document is materialised here,
+it is one `CONTEXT.md` at the root beside one `docs/adr/` — not a `CONTEXT-MAP.md` and
+per-context files, which this repository has no use for: it is a single Python package
+with one pipeline, not a monorepo.
+
+Today the vocabulary lives in [`ARCHITECTURE.md`](../../ARCHITECTURE.md), which is where
+this project's terms are actually defined and which the ADRs cite by section number
+(`§6.4`, `§13.4`). That is the file to read when you need the vocabulary.
 
 ## Before exploring, read these
 
@@ -19,13 +23,10 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 suggest creating them upfront. The `/domain-modeling` skill creates them lazily when
 terms or decisions actually get resolved.
 
-`CONTEXT.md` does not exist here yet, and that is the expected state, not an omission to
-correct. What would go in it is currently spread across
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md), which is where this project's vocabulary is
-actually defined and which the ADRs cite by section number (`§6.4`, `§13.4`, and so on).
-**Read `ARCHITECTURE.md` when you need the vocabulary.** If a `CONTEXT.md` is ever added
-it must not restate `ARCHITECTURE.md`, because two definitions of one term is the defect
-this project has repeatedly paid for.
+A `CONTEXT.md` added later must not restate `ARCHITECTURE.md`, because two definitions of
+one term is a defect this project has repeatedly paid for. It would carry what
+`ARCHITECTURE.md` does not: the working vocabulary of a single context, pointing at the
+architecture for the definitions rather than copying them.
 
 ## The ADRs here are decisions, and some of them are still open
 

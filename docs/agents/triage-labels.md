@@ -38,12 +38,13 @@ gh label create ready-for-human --description "Requires human implementation"   
 `gh label create` fails if the label already exists, which makes it safe to re-run as a
 check rather than something to guess about.
 
-## Nothing reads this file yet
+## Nothing in this repository reads this file
 
-The `triage` skill is **not installed** in this environment — the setup that produced
-this file found no `triage` among the available skills, and the other engineering skills
-here (`code-review`, `tdd`, `diagnosing-bugs`, `research`, `domain-modeling`,
-`codebase-design`, `prototype`, `grilling`, `resolving-merge-conflicts`) do not apply
-triage labels. So this table is a decision recorded ahead of the tool that consumes it,
-written because the vocabulary was asked for explicitly. It becomes live the moment
-`triage` is installed, with no further setup.
+No tooling here consumes it: it is configuration for a triage skill, to be read by that
+skill when one is available. Nothing in this repository's own gate, tests or CI applies
+these labels or depends on them, so the table is a decision recorded ahead of its
+consumer rather than a description of behaviour anything exhibits today.
+
+Which skills happen to be installed on a given machine is not a fact this file can carry
+truthfully — it changes without the repository changing, and durable documentation that
+asserts it goes stale silently.
