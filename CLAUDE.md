@@ -2,7 +2,7 @@ read AGENTS.md
 
 ## Agent skills
 
-Configuration for the installed engineering skills. These three files hold *where things
+Configuration for agent skills that look for it. These three files hold *where things
 live*; `AGENTS.md` holds the rules, and nothing below relaxes it.
 
 ### Issue tracker
