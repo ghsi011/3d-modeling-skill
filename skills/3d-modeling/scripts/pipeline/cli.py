@@ -1226,7 +1226,25 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
             # `minimum_detectable_defect_mm` gives above -- an always-present key
             # would move the five pinned certified contracts for a field they do
             # not use.
-            **({"datum_ids": list(scope.datum_ids)} if scope.datum_ids else {}),
+            #
+            # Sorted, and only here. This field is a set of references to declared
+            # `Datum` identities, not a precedence or an operation sequence, so
+            # which order one scope happens to list two independent references in
+            # is not a fact about the job -- and a contract that moved when it
+            # changed would refuse a review answer over a difference that says
+            # nothing. `edit_scopes` order stays authorial (`execution.compile_plan`
+            # deliberately does not sort them) because the order of *scopes* can be
+            # meaningful; the order inside one scope's reference list cannot.
+            #
+            # Sorted rather than deduplicated. A repeated id is a declaration this
+            # function does not get to silently rewrite -- `Project.validate` owns
+            # what a malformed reference list is -- and dropping one here would
+            # hide it behind a contract that looks well-formed. The canonical datum
+            # block in `_requirement_payload` does collapse duplicates, because
+            # ADR 0003 requires one authoritative object per identity; that is a
+            # different question from what this row reports the job as having
+            # written.
+            **({"datum_ids": sorted(scope.datum_ids)} if scope.datum_ids else {}),
             "expected_body_delta": int(scope.expected_body_delta),
             "preserve_metadata": bool(scope.preserve_metadata),
             "interface_ids": list(scope.interface_ids),
@@ -1238,25 +1256,103 @@ def _preservation_feature(project: P.Project) -> tuple[dict[str, Any], ...]:
     return tuple(rows)
 
 
+def _referenced_datums(project: P.Project) -> list[dict[str, Any]]:
+    """The authoritative contents of exactly the datums some edit is placed against.
+
+    ADR 0003 decision 5 -- a datum is a dependency binding, so changing one
+    invalidates the results that rested on it -- and `docs/defects.md` D31, which
+    was that only the near half of decision 5 had landed: a scope recorded *which*
+    datums it depended on and nothing recorded *what they said*. A datum could
+    keep its `datum_id` while its value, unit, provenance or derived revision
+    changed, the frozen contract stayed byte-identical, and a review answer
+    written against the old number kept binding.
+
+    **Referenced, not every declared datum.** ARCHITECTURE.md 13.4: "a binding
+    that a job does not use does not participate in its identity". Hashing every
+    row would make correcting an unrelated datum cut a revision on work that
+    never read it, which 13.5 forbids in the same breath as it requires the
+    opposite for work that did.
+
+    **One entry per identity, sorted by it.** Decision 4 is that coordinated
+    scopes naming one reference share one object rather than each holding a copy,
+    and the serialization has to say the same thing: two scopes referencing one
+    datum produce one entry here, so there is one authoritative copy of the number
+    in the contract and not two that can disagree. Sorting by `datum_id` is what
+    makes the declaration order of `Project.datums` and the order references
+    appear in both irrelevant, because neither is a fact about the job.
+
+    **`as_dict()` verbatim, not a field list.** Reconstructing the payload here
+    would be a second representation of the model, and its failure mode is
+    specific: it would carry the fields whoever wrote it was thinking about and
+    silently drop `owner`, `settled_by`, `note`, or whichever authority-bearing
+    field is added next. `test_datums` asserts the bound row *equals*
+    `Datum.as_dict()` for exactly that reason.
+
+    **What this does not do.** It does not normalise anything. A datum declared
+    with `"unit": null` arrives from the loader carrying the string `"None"`
+    (`docs/defects.md` D33) and is bound as `"None"`, because this function's
+    subject is whether identity follows the authoritative object the system
+    accepted, and D33's is whether the loader built the right object. Binding a
+    wrong-but-admitted value still moves the identity when it changes, which is
+    the property D31 owes; correcting it here would be a second authority over
+    what a unit means.
+    """
+    declared = {datum.datum_id: datum for datum in project.datums}
+    referenced = {
+        datum_id
+        for scope in project.edit_scopes
+        for datum_id in scope.datum_ids
+        # An id no row declares is `REF_UNDECLARED` and `Project.validate` refuses
+        # the job for it. Skipping it here rather than inventing an entry keeps
+        # this function's answer a statement about declared authority; the id
+        # itself still reaches the contract through the scope's own row.
+        if datum_id in declared
+    }
+    return [declared[datum_id].as_dict() for datum_id in sorted(referenced)]
+
+
+def _requirement_payload(project: P.Project, brief_hash: str) -> dict[str, Any]:
+    """The structure `_requirement_hash` hashes, separated so it can be read.
+
+    Split out for one reason, and it is a property the hash cannot support: the
+    rule that an unused key is *absent* rather than present-and-empty is
+    invisible through a digest. Two no-datum jobs both carrying `"datums": []`
+    hash equal to each other, so every comparison between two projects passes
+    while every recorded contract has silently moved -- the failure would only be
+    visible against the goldens, one tier up, and a rule that only the expensive
+    suite can check is a rule the commit gate does not hold. `test_datums` reads
+    this payload and asserts the key is missing.
+    """
+    datums = _referenced_datums(project)
+    return {
+        "brief_sha256": brief_hash,
+        "requirements": [r.as_dict() for r in project.requirements
+                         if r.provenance in ("STATED", "INHERITED", "MEASURED")],
+        # Absent when no edit is placed against a datum, which is every job in the
+        # recorded set. Same rule the preservation row's optional fields follow:
+        # an always-present key -- even as an empty list -- is still an added key,
+        # and it would move the five pinned certified contracts and all four
+        # replay goldens for a field they do not use.
+        **({"datums": datums} if datums else {}),
+        "envelope_mm": project.envelope_mm,
+        "interfaces": [i.as_dict() for i in project.interfaces],
+        "components": [c.as_dict() for c in project.components],
+        "modifiers": list(project.modifiers),
+    }
+
+
 def _requirement_hash(project: P.Project, brief_hash: str) -> str:
     """What the user asked for, hashed, so the contract binds to it.
 
     The designer's own `CHOSEN` values are deliberately out: they are the
     proposal, and the proposal is already bound by its own hash. What this pins
     is the half of the job that nobody on the design side owns -- the brief, the
-    values somebody stated or measured, the envelope, the interfaces and the
-    component list. A contract that survived a change to any of those would be
-    gating a part against a job that no longer exists.
+    values somebody stated or measured, the geometric references those values are
+    placed against, the envelope, the interfaces and the component list. A
+    contract that survived a change to any of those would be gating a part
+    against a job that no longer exists.
     """
-    return S.payload_hash({
-        "brief_sha256": brief_hash,
-        "requirements": [r.as_dict() for r in project.requirements
-                         if r.provenance in ("STATED", "INHERITED", "MEASURED")],
-        "envelope_mm": project.envelope_mm,
-        "interfaces": [i.as_dict() for i in project.interfaces],
-        "components": [c.as_dict() for c in project.components],
-        "modifiers": list(project.modifiers),
-    })
+    return S.payload_hash(_requirement_payload(project, brief_hash))
 
 
 def _source_artifact_hashes(project_dir: Path, project: P.Project) -> dict[str, str]:

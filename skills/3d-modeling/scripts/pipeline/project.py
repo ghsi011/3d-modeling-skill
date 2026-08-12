@@ -394,8 +394,36 @@ class Datum:
         return self.provenance == "CHOSEN" or not str(self.provenance).strip()
 
     def as_dict(self) -> dict[str, Any]:
+        """The model's own serialization, with `valid_for` in canonical order.
+
+        Sorted, because `valid_for` is a membership set and this class is the only
+        place that can say so once. `Project.validate` already reads it as one --
+        `set(datum.valid_for) & ({scope.artifact_id} | set(scope.interface_ids))`
+        -- so two declarations differing only in the order of the same scopes are
+        the same declaration to every check that consumes them.
+
+        Left unsorted, they were not the same thing to *identity*. D31 binds this
+        payload into the requirement hash, so `("src", "drawer")` and
+        `("drawer", "src")` produced different frozen contracts, cut a spurious
+        acceptance revision and refused a review answer over a difference the model
+        does not distinguish. Canonicalizing here rather than in the binding keeps
+        one representation: the contract binds `as_dict()` verbatim, and `as_dict()`
+        is the single authority on what a `Datum` looks like written down.
+
+        It is the same argument that sorts `datum_ids` in the preservation row, and
+        it stops at the same place. `datum_ids` is sorted but never deduplicated,
+        because a repeated reference is a declaration `Project.validate` owns; here
+        there is nothing to preserve, since a set has no order to lose. Nothing else
+        is normalised -- not the value, not the unit, not the provenance, and not
+        `docs/defects.md` D33's `null`-to-`"None"` unit coercion, which arrives
+        through the loader and is bound exactly as the model accepted it.
+
+        Round-tripping is therefore canonical rather than literal: a project saved
+        and reloaded gets `valid_for` back in sorted order, which is the same set it
+        declared. `test_datums` asserts that equality on the set, not on the tuple.
+        """
         payload = dataclasses.asdict(self)
-        payload["valid_for"] = list(self.valid_for)
+        payload["valid_for"] = sorted(self.valid_for)
         return payload
 
     def problems(self, index: int = 0) -> list[Issue]:

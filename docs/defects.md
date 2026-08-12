@@ -839,17 +839,90 @@ six keys and `datums` is not among them, and `cli.py:1229` writes
 
 **What it can cause.** A stale acceptance revision that should have been cut.
 This is the D28 shape — a key that names a thing rather than what the thing
-established — and D15's — one question answered in two places. It is filed
+established — and D15's — one question answered in two places. It was filed
 rather than fixed because the claim path it would corrupt is already capped:
 every job with an edit scope is held at `EXPERIMENTAL_UNAVAILABLE` because
 sample density is not derived from a declared minimum detectable defect size, so
-no successful preservation claim is reachable through it today. That cap is the
-current fail-closed, and it is the reason this is a defect and not a stop.
+no successful preservation claim is reachable through it today. That cap was the
+fail-closed, and it is the reason this was a defect and not a stop.
 
 **The fixture that must fail before the fix lands.** A project whose scope names
 one datum, run to a frozen contract; the datum's value changed with its id kept;
 the contract re-derived. The test must show the requirement hash moved and the
 stored review answer refused. It must fail against today's implementation.
+
+**Status: FIXED.** `cli._referenced_datums` binds `Datum.as_dict()` verbatim for
+exactly the datums some `EditScope.datum_ids` names — one entry per identity,
+sorted by `datum_id` — and `cli._requirement_payload` carries them under a key
+that is *absent* when nothing references one. Only referenced datums participate,
+which is §13.4's "a binding that a job does not use does not participate in its
+identity"; two scopes sharing one datum bind one entry, which is decision 4 held
+in the serialization rather than in prose.
+
+Three properties are worth recording because each was a choice rather than a
+consequence. The contents live in the requirement payload and *not* on the
+preservation row, because contents per row would write one datum's number twice
+into one contract — the two-authorities failure the ADR was written from,
+rebuilt. `as_dict()` is bound verbatim rather than field by field, because a
+hand-built projection carries the fields its author remembered and drops `owner`,
+`settled_by`, `note`, or whichever field is added next; a fixture asserts the
+bound row *equals* `Datum.as_dict()`.
+
+The precise claim, third: **the contract binds `Datum.as_dict()` verbatim, and
+`Datum.as_dict()` canonicalizes the order of the set-valued `valid_for` field.**
+Datum values, units, provenance and D33's malformed-input behaviour are **not**
+normalized. `valid_for` is sorted because `Project.validate` reads it as a
+membership set — `set(datum.valid_for) & ({scope.artifact_id} | set(scope.interface_ids))`
+— so two declarations differing only in the order of the same scopes are one
+declaration to every check that consumes them, and identity was distinguishing a
+state the model does not. Measured: `("src", "drawer")` hashed `50db5e53…` and
+`("drawer", "src")` hashed `0a239014…`, which cut a spurious acceptance revision and
+refused a review answer over a difference that says nothing. Over-invalidation, so
+never a false success, and still a canonicalization defect. It is sorted in
+`as_dict` rather than in the binding so the bound row stays the model's own
+serialization — the property the equality fixture above rests on. The visible
+consequence is that a project saved and reloaded gets `valid_for` back sorted, so
+the round-trip fixture asserts the set survives rather than the tuple order.
+
+Nothing else is normalized. A datum declared `"unit": null` reaches this code as the
+string `"None"` (D33) and is bound as `"None"`, because whether identity follows the
+object the system accepted is a different question from whether the loader built the
+right object. The unit regression uses `mm → cm` so it depends on neither.
+
+`datum_ids` is now sorted in the contract row — a set of references to declared
+identities is not a precedence — but never deduplicated, because a repeated id is
+a declaration `Project.validate` owns and collapsing it here would hide it.
+`project.json` order is untouched.
+
+**Measured, not argued.** Before: the same project with one datum corrected 12.4
+→ 12.9, id kept, produced the identical requirement hash
+`4149de157b6702cecd1f59f0cdcfb3ac495d842bbf0a47bdcde5740af9e7b712` twice. After,
+driven end to end by `benchmarks/heavy/test_datums_heavy.py`: the acceptance
+contract moves to revision 2, the history's `changed` list holds exactly one entry
+and it is the `requirement_sha256` move, four receipts bound to revision 1 are
+invalidated and removed — `artifact_manifest.json`, `commission_report.json`,
+`verification_report.json`, `final_status.json` — and the stored review answer is
+refused outright: *"review envelope mismatch: response bound to … but current
+request is …"*. That is the fixture this entry asked for, and it fails against the
+pre-fix implementation.
+
+The cap is untouched and still asserted. A datum is reachable only through an edit
+scope, so every job that can rest on one remains `EXPERIMENTAL_UNAVAILABLE`; this
+fix makes the binding correct and lifts nothing. ADR 0003 decision 6 — precedence
+between a datum and other evidence — is still neither implemented nor enforced,
+and both it and the sampling reason behind the cap remain open.
+
+The surviving mutation is the part worth reading. Removing `sorted()` from the
+canonical block passed all fourteen fixtures, because the referenced ids are
+collected into a *set*: the set had already discarded declaration order, so two
+projects differing only in that order iterate identically inside one process, and
+every reordering fixture compares two projects in one interpreter. What none of
+them could see is that a set's iteration order is a function of `PYTHONHASHSEED`,
+so unsorted the same project serializes differently in two interpreters — ending
+byte-identical reruns and clean-clone reproduction, which are claims about
+*different processes*. Two fixtures close it: an L0 order assertion, and a heavy
+one that runs the project in two children with seeds 0 and 1 and requires both the
+order and the digest to match.
 
 ## D32 — the preservation detection limit is derived from one of the two surfaces sampled
 
