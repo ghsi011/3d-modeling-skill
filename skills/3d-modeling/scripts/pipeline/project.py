@@ -1941,7 +1941,24 @@ def from_payload(payload: dict[str, Any]) -> Project:
                         provenance=str(row.get("provenance", "")),
                         source=str(row.get("source", "")),
                         note=str(row.get("note", "")),
-                        artifact_id=row.get("artifact_id"))
+                        artifact_id=row.get("artifact_id"),
+                        # Read back, or the link does not survive being written down.
+                        # `as_dict` emitted it and this loader dropped it, so a
+                        # project saved with an observation reloaded without one:
+                        # `datum_conflicts` then found no link, reported agreement,
+                        # and a real CLI run could claim success over exactly the
+                        # disagreement the in-memory fixture catches. The tests could
+                        # not see it because they built `Requirement` objects
+                        # directly and never crossed serialisation.
+                        #
+                        # `_text` rather than `str(...)`: coercing would turn a
+                        # number or a list into a datum id naming nothing, and
+                        # `validate` would then blame the reference instead of the
+                        # file. `required=False` keeps the absent case absent instead
+                        # of inventing an empty string, which `problems()` refuses.
+                        observes_datum_id=_text(row.get("observes_datum_id"),
+                                                "requirements[].observes_datum_id",
+                                                required=False))
             for row in _rows(payload.get("requirements"), "requirements")),
         source_artifacts=tuple(
             SourceArtifact(artifact_id=str(row.get("artifact_id", "")),

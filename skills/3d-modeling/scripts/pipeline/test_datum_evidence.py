@@ -33,6 +33,7 @@ from __future__ import annotations
 import unittest
 
 from . import project as P
+from . import schemas as S
 from . import status as ST
 from .contract import Contract
 
@@ -215,6 +216,42 @@ class TheLinkIsDeclaredAndCheckedTest(unittest.TestCase):
             self.assertNotIn("observes_datum_id", plain.as_dict())
             self.assertEqual("pocket-face",
                              _requirement().as_dict()["observes_datum_id"])
+
+        # And it has to survive being written down, which is where this slice was
+        # actually broken. `as_dict` emitted the link and `from_payload` dropped it,
+        # so a saved project reloaded without an observation: no link, no conflict,
+        # agreement reported, and a real CLI run free to claim success over the
+        # disagreement every assertion above catches. Nothing here saw it, because
+        # every fixture built `Requirement` objects in memory and never crossed
+        # serialisation. So the round trip is asserted on the *conflict*, not just on
+        # the field -- the field surviving is only interesting because the behaviour
+        # depends on it.
+        with self.subTest(case="the link and the conflict survive a round trip"):
+            before = _project()
+            reloaded = P.from_payload(before.as_payload())
+            self.assertEqual("pocket-face",
+                             reloaded.requirements[0].observes_datum_id)
+            self.assertEqual(P.datum_conflicts(before),
+                             P.datum_conflicts(reloaded),
+                             "a reloaded project must reach the same verdict")
+            self.assertEqual(1, len(P.datum_conflicts(reloaded)))
+
+        with self.subTest(case="an absent link stays absent across a round trip"):
+            plain_project = _project(requirements=(
+                _requirement(observes_datum_id=None),))
+            reloaded = P.from_payload(plain_project.as_payload())
+            self.assertIsNone(reloaded.requirements[0].observes_datum_id)
+            self.assertNotIn("observes_datum_id",
+                             reloaded.requirements[0].as_dict())
+
+        # Refused, not coerced. `str(4)` would make "4" a datum id that names
+        # nothing, and `validate` would then blame the reference rather than the file
+        # that carried it -- a misdirected error being worse than a clear refusal.
+        with self.subTest(case="a non-string id is refused rather than coerced"):
+            payload = _project().as_payload()
+            payload["requirements"][0]["observes_datum_id"] = 4
+            with self.assertRaises(S.SchemaError):
+                P.from_payload(payload)
 
 
 class AnUnresolvedConflictWithholdsTheClaimTest(unittest.TestCase):

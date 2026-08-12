@@ -13,6 +13,16 @@
       "why": "the derivation stops reading the declared link and pairs any measurement with whatever datum a scope references, so a MEASURED row that never claimed to observe anything withholds the job's claim -- an authority relationship invented by the tool, which is exactly what the ruling forbade"
     },
     {
+      "name": "the-loader-drops-the-observation-link",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "                        observes_datum_id=_text(row.get(\"observes_datum_id\"),\n                                                \"requirements[].observes_datum_id\",\n                                                required=False))",
+      "replacement": "                        )",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::TheLinkIsDeclaredAndCheckedTest"
+      ],
+      "why": "the production defect this slice shipped and review caught: as_dict writes the link and the loader dropped it, so a saved project reloads without an observation, datum_conflicts reports agreement, and a real CLI run claims success over the disagreement -- invisible to every fixture that built Requirement objects in memory"
+    },
+    {
       "name": "a-success-is-claimed-over-an-unresolved-conflict",
       "file": "skills/3d-modeling/scripts/pipeline/status.py",
       "anchor": "        if final in CLAIMS_SUCCESS:\n            final = \"NEEDS_MORE_EVIDENCE\"",
