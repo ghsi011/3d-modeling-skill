@@ -126,8 +126,8 @@
     {
       "name": "bytecode-left-behind-after-the-restore",
       "file": "tools/mutate.py",
-      "anchor": "        # runs unreproducibly.\n        _invalidate_bytecode(path)",
-      "replacement": "        # runs unreproducibly.\n        pass",
+      "anchor": "        # two tests fail once and then pass seven times, unreproducibly.\n        _invalidate_bytecode(path)",
+      "replacement": "        # two tests fail once and then pass seven times, unreproducibly.\n        pass",
       "tests": [
         "benchmarks/heavy/test_mutate_heavy.py::test_a_sweep_leaves_no_compiled_copy_of_the_mutation_behind"
       ],
