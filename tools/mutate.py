@@ -220,6 +220,19 @@ def patched(root: Path, mutation: Mutation) -> Iterator[Path]:
     text = original.decode("utf-8")
     found = text.count(mutation.anchor)
     if found == 0:
+        # Line endings are the first thing to suspect and the last thing anyone
+        # checks, so the message says it rather than leaving a reader to diff two
+        # strings that look identical. Diagnosed, deliberately not repaired: this
+        # function's contract is that the bytes it writes are the bytes the
+        # manifest asked for, and a harness that quietly normalised newlines in
+        # source it is about to patch would be editing more than the anchor names.
+        if mutation.anchor.replace("\n", "\r\n") in text:
+            raise AnchorMissing(
+                f"{mutation.name}: the anchor is not in {mutation.file} as written, "
+                "but it is there with CRLF line endings. The manifest is stored "
+                "with LF and this working copy has CRLF. Anchors are matched byte "
+                "for byte on purpose; normalise the checkout (see .gitattributes) "
+                "rather than the anchor.")
         raise AnchorMissing(
             f"{mutation.name}: the anchor is not in {mutation.file}. A patch that "
             "did not apply would report this mutation as caught while nothing was "
