@@ -211,7 +211,7 @@ claimed, not a to-do.
 | --- | --- | --- | --- | --- | --- |
 | **1** — stable evidence and resumable review | `COMPLETE` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 pass · 4.6 pass | `benchmarks/heavy/test_phase3_heavy.py` (`DeterministicEvidenceTest`, `ModifyReviewRoundTripTest`, `ModifyRerunRejectionTest`, `ModifyCleanCloneTest`); L1 `modify-ball-flange-flat` over the real vendored `ball_male_17mm.stl` | The evidence is repeatable; the preservation **method** is still not sufficient for a successful modification claim, which the release scoped out explicitly. Sample density is not derived from a declared minimum detectable defect size, so every job with an edit scope is capped `EXPERIMENTAL_UNAVAILABLE`. D22 — OCC cannot mesh six legal cone faces in `vent_mount.step` — stays open and reaches the receipt as `UNAVAILABLE / PRESERVATION_UNMEASURABLE` by name. Release 1 promised neither STEP repair nor successful preservation. | Release 6 owns STEP repair (D22). Sample density derived from a declared defect size, and the lifting of the `EXPERIMENTAL_UNAVAILABLE` cap, remain owed and are not scheduled here. |
 | **2** — trustworthy ordinary custom design | `PARTIAL` | 4.1 pass · **4.2 pass** · 4.3 partial · 4.4 pass · 4.5 partial · 4.6 pass | L1 `custom-knob-sleeve`; `pipeline/test_acceptance.py`; the confined build boundary's own fixtures | 4.3: the release shipped with no replay of its own and the two cases that cover it were recorded afterwards, so its regression evidence is retrospective. 4.5: no candidate from this lane has been printed or physically fitted. An authored proposal still chooses the rubric it is graded against — `compare` refuses to call two formulations' verdicts comparable when their expectations differ, which contains the problem rather than solving it. | A live authored job printed and fitted would close 4.5. The rubric question is Release 4's `INCOMPARABLE_EXPECTATIONS` verdict and is not a defect to fix here. |
-| **3** — revision graph, branching, lifecycle, context budgets | `PARTIAL` | 4.1 partial · 4.2 pass · 4.3 partial · 4.4 **fail, measured** · 4.5 partial · 4.6 pass | L1 `branch-knob-seat-fallback` (three formulations, one preferred, one retained); `pipeline/test_lifecycle.py`; `benchmarks/heavy/test_lifecycle_heavy.py` | Merge with several contributing parents, capability-based execution, the lazy assessment registry and the context *package* half are unbuilt. 4.4 fails on one clause with a number: shared work is not reused across alternatives — `runner.run` calls `backend.build` before consulting the cache, so a hit confirms the bytes and saves nothing, and `builds_avoided` is zero on every path. Two of thirteen declared proofs have nothing behind them. | The cache-before-build inversion is a self-contained slice and is the cheapest way to move 4.4. Merge needs the graph work the release scoped and did not start. |
+| **3** — revision graph, branching, lifecycle, context budgets | `PARTIAL` | 4.1 partial · 4.2 pass · 4.3 partial · 4.4 **fail, measured** · 4.5 partial · 4.6 pass | L1 `branch-knob-seat-fallback` (three formulations, one preferred, one retained); `pipeline/test_lifecycle.py`; `benchmarks/heavy/test_lifecycle_heavy.py` | Merge with several contributing parents, capability-based execution, the lazy assessment registry and the context *package* half are unbuilt. 4.4 fails on one clause with a number: shared work is not reused across alternatives — `runner.run` calls `backend.build` before consulting the cache, so a hit confirms the bytes and saves nothing, and `builds_avoided` is zero on every path. Two of thirteen declared proofs have nothing behind them. | The cache-before-build inversion is **not** a self-contained fix, and a slice that investigated it is how that was learned: certified backends have precomputable build identity while the authored lane has only post-execution confirmation, so 4.4 cannot be moved by reordering two calls — see the 4.4 clause below. Merge needs the graph work the release scoped and did not start. |
 | **4** — alternative formulation and comparative assessment | `PARTIAL` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 partial · 4.6 pass | L1 `branch-knob-seat-fallback`; `pipeline/test_compare.py` | Preference is admissible only when every formulation has a current verdict and the rubrics agree; on the one real job they do not, so the recorded reason is `USER_SELECTION` — a person chose, on no measured ground. The release proves the mechanism and the claim it carries is small. D24, D25, D26 and D27 remain open against it. | A job where the merits are measurable — every formulation current, rubric shared, deciding axis instrumented — is what 4.5 is reaching for. |
 | **5** — datum provenance and authority | `PARTIAL` | 4.1 pass · 4.2 pass · 4.3 pass · 4.4 pass · 4.5 not yet applicable · 4.6 pass | `pipeline/test_datums.py` (49 fixtures; 37 mutations attempted and killed for the declaration obligation, 14 more for D31's binding) · `benchmarks/heavy/test_datums_heavy.py` (the end-to-end refusal and the cross-process digest) | [ADR 0003](docs/adr/0003-datum-provenance-and-authority.md) decision 5 **landed** with `docs/defects.md` D31: a datum is in the §13.4 binding list, the acceptance contract binds the canonical contents of exactly the referenced datums, and correcting one cuts a revision, refuses the stored review answer and invalidates the receipts that rested on it — driven end to end rather than composed. Decision 6, precedence between a datum and other evidence, is still neither implemented nor enforced. Still capped `EXPERIMENTAL_UNAVAILABLE` for every job that can rest on a datum, asserted by a fixture so the day the cap lifts the test goes red. | Decision 6 must close **before** the `EXPERIMENTAL_UNAVAILABLE` cap may lift, and so must the sampling-density reason the cap exists for. No authentic job has exercised a datum yet. |
 
@@ -429,9 +429,45 @@ A test that only confirms a nominal verdict is insufficient when the underlying 
   content-addressed and the slot is `key.digest()`, so siblings collide on
   nothing and share correctly *in principle*. It is that `runner.run` calls
   `backend.build` **before** it looks the key up and never returns early, so a
-  hit confirms the bytes and saves nothing. Fixing it changes what every authored
-  job executes, so it wants its own slice rather than a patch here; recorded so
-  the clause is not read as unassessed.
+  hit confirms the bytes and saves nothing.
+
+  **This is not repairable by reordering those two calls, and a slice that tried
+  established why.** The two lanes differ in whether build identity can be known
+  before the work:
+
+  * **certified backends have precomputable identity.** `build123d_backend`
+    reports `backend_version` from the library version string and `tessellation`
+    from module constants; `trimesh_manifold` reports a version string and a
+    literal tessellation. Neither is a product of building, so on that lane the
+    key is computable before the build.
+  * **the authored lane has only post-execution confirmation.** `Cache.Key` binds
+    eight fields and two of them — `backend_version` and `tessellation` — are
+    derived in `isolation.py` from `_engine(built.get("kernel"))`, where `built` is
+    the child's *post-run* manifest. That token is candidate-authored, and nothing
+    the parent owns declares the kernel; absent a valid token `_engine` returns
+    `UNRECORDED_KERNEL`. `AuthoredBackend.build` does not build at all — it adopts
+    files the confined child already produced.
+
+  Substituting `module_sha256` and `input_sha256`, which the parent does compute
+  before the child exists, was considered and **refused**. They are additional
+  identity, not a proof that executing those bytes again yields the same geometry:
+  the authored lane runs arbitrary candidate code rather than a declarative recipe,
+  in a run-specific sandbox with a generated working directory, and the same source
+  may branch on runtime state, platform, time or randomness. The present cache is
+  safe *because* it is post-build confirmation — an incomplete predictive identity
+  cannot silently serve stale geometry when the candidate is rebuilt and its bytes
+  compared. Moving the hit ahead of execution would change what the cache claims
+  from "these newly produced bytes agree with stored bytes" to "these inputs
+  guarantee these output bytes", and this repository certifies no such determinism
+  for authored code. Having the child announce its kernel before building fails the
+  same test twice: it trusts candidate-controlled information earlier and still
+  does not show that two executions on one kernel produce identical geometry.
+
+  So **4.4 stays `fail, measured`** and the clause is now understood rather than
+  merely unmet: reuse across authored alternatives waits on a deterministic-build
+  guarantee that does not exist yet, not on a scheduling slot. A certified-lane-only
+  inversion was also refused, because it would leave the measured authored branch
+  untouched while reading as a fix.
 
 Provisional suite budgets on the reference machine:
 
