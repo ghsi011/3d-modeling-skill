@@ -1,0 +1,26 @@
+{
+  "target": "D33 -- the loader must distinguish an absent unit from a unit that is present and not a string",
+  "note": "The ruling for this slice required each strict loader edge to be mutation-reverted to the str(...) coercion it replaced, and killed. Both entries below do exactly that: they restore the original defect line by line. Each was run against the real code and observed to fail the named test. The rule has two halves and both are covered by that one test -- refusing a present non-string, and still defaulting an absent key -- so a mutation that reverted only the refusal is caught, and so would be a fix that broke the defaults. Run with: uv run python tools/mutate.py benchmarks/mutations/d33-unit-strictness.json",
+  "mutations": [
+    {
+      "name": "requirement-unit-coerced-again",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "                        unit=_unit(row, \"requirements[]\", default=\"mm\"),",
+      "replacement": "                        unit=str(row.get(\"unit\", \"mm\")),",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datums.py::AUnitThatIsPresentAndNotAStringIsRefusedTest"
+      ],
+      "why": "the original D33 coercion on the requirement row: an explicit JSON null becomes the non-empty string 'None' and satisfies the check that exists to stop a unitless number, so a measurement nobody gave a unit drives design wearing one"
+    },
+    {
+      "name": "datum-unit-coerced-again",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "                  unit=_unit(row, f\"datums[{index}]\", default=\"\"),",
+      "replacement": "                  unit=str(row.get(\"unit\", \"\")),",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datums.py::AUnitThatIsPresentAndNotAStringIsRefusedTest"
+      ],
+      "why": "the same coercion on the datum row, which is the one D33 was filed against -- and the row whose value is bound into the acceptance contract by D31, so a unitless number reaches the contract with a unit that reads as real"
+    }
+  ]
+}

@@ -1198,5 +1198,102 @@ class ADatumSurvivesTheRoundTripTest(unittest.TestCase):
                              "whichever the author happened to type")
 
 
+def _unit_payload(*, datum_unit="mm", requirement_unit="mm",
+                  omit_datum_unit=False, omit_requirement_unit=False) -> dict:
+    """The smallest `project.json` payload carrying one datum and one requirement.
+
+    Built as a payload and loaded through `from_payload`, never by constructing the
+    rows, because D33 lives in the loader: the coercion that defeats the unit check
+    is `str(row.get("unit", ...))`, and a test that hands `Datum(...)` a string has
+    already done by hand the one thing the loader gets wrong.
+    """
+    datum = {"datum_id": "pocket-face", "value": 12.5, "provenance": "MEASURED",
+             "valid_for": ["src"]}
+    if not omit_datum_unit:
+        datum["unit"] = datum_unit
+    requirement = {"name": "pocket-depth", "value": 11.4, "provenance": "STATED",
+                   "source": "the brief"}
+    if not omit_requirement_unit:
+        requirement["unit"] = requirement_unit
+    return {
+        "schema_version": 1, "job_id": "d33", "updated_utc": UTC,
+        "source_mode": "MODIFY", "consequence": "INCONSEQUENTIAL",
+        "consequence_rationale": "a desk block; failure wastes material",
+        "printer": "Test Printer",
+        "material": {"process": "FDM", "material": "PLA"},
+        "nozzle": {"diameter_mm": 0.4},
+        "orientation": {"model_to_printer_matrix": "identity", "bed_z_mm": 0.0},
+        "model": "model.py", "parameters": {},
+        "envelope_mm": {"x": 60.0, "y": 50.0, "z": 20.0},
+        "reviewer": {"model_snapshot": "test"},
+        "requirements": [requirement],
+        "source_artifacts": [{"artifact_id": "src", "path": "source.stl",
+                              "format": "STL", "classification": "USABLE_MESH"}],
+        "datums": [datum],
+        "edit_scopes": [{"artifact_id": "src", "region": "the pocket face",
+                         "region_box": {"min": [0.0, 0.0, 0.0],
+                                        "max": [5.0, 5.0, 5.0]},
+                         "datum_ids": ["pocket-face"],
+                         "preserve": ["everything outside the pocket"]}],
+    }
+
+
+class AUnitThatIsPresentAndNotAStringIsRefusedTest(unittest.TestCase):
+    """D33: `str(None)` is `"None"`, and `"None"` satisfies the check that exists to
+    stop a unitless number.
+
+    The rule requiring a unit tests `if not str(self.unit).strip()`. An explicit JSON
+    `null` arrives through `str(row.get("unit", ...))` as the four-character string
+    `None`, which is not empty -- so the check whose own message says *"a number with
+    no unit is a number two readers can read differently"* passes it.
+
+    The distinction the loader was missing is between two different rows: a key that
+    is **absent**, meaning "use the default", and a key that is **present and not a
+    string**, meaning somebody wrote a unit and it is not one. Only the second is
+    refused. That is why the defaults are asserted in the same test -- a fix that
+    refused the absent case too would satisfy the first subtests and break every
+    project that never mentioned a unit.
+
+    Deliberately not in scope, per the ruling: no unit vocabulary, no conversion, no
+    normalisation, and the literal string `"None"` somebody could still type is left
+    alone rather than made a second issue in this slice.
+    """
+
+    def test_only_a_present_non_string_unit_is_refused(self) -> None:
+        for label, kwargs in (
+                ("datum unit is JSON null", {"datum_unit": None}),
+                ("requirement unit is JSON null", {"requirement_unit": None}),
+                ("datum unit is a number", {"datum_unit": 4}),
+                ("requirement unit is a number", {"requirement_unit": 4}),
+                ("datum unit is a list", {"datum_unit": ["mm"]}),
+        ):
+            with self.subTest(case=label):
+                with self.assertRaises(S.SchemaError) as caught:
+                    P.from_payload(_unit_payload(**kwargs))
+                self.assertIn("unit", str(caught.exception).lower(),
+                              "the refusal has to name the field it is about")
+
+        # The other half of the rule, without which the five above would be
+        # satisfied by a loader that refused every unit it was not handed.
+        with self.subTest(case="an omitted requirement unit still defaults to mm"):
+            project = P.from_payload(_unit_payload(omit_requirement_unit=True))
+            self.assertEqual("mm", project.requirements[0].unit)
+
+        with self.subTest(case="an omitted datum unit keeps its existing behaviour"):
+            # Empty, not defaulted, and then caught by `problems()` as before: this
+            # slice does not redesign required-field handling.
+            project = P.from_payload(_unit_payload(omit_datum_unit=True))
+            self.assertEqual("", project.datums[0].unit)
+            self.assertTrue(any("unit" in p.where
+                                for p in project.datums[0].problems(0)),
+                            "the missing-unit finding must still be raised")
+
+        with self.subTest(case="a valid string unit survives verbatim"):
+            project = P.from_payload(_unit_payload(datum_unit="cm",
+                                                   requirement_unit="in"))
+            self.assertEqual("cm", project.datums[0].unit)
+            self.assertEqual("in", project.requirements[0].unit)
+
+
 if __name__ == "__main__":
     unittest.main()
