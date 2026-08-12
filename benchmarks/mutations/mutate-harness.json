@@ -1,0 +1,66 @@
+{
+  "target": "tools/mutate.py -- the mutation harness itself, including its restore path",
+  "note": "The harness sweeping itself. AGENTS.md says to prove a protection by mutating it, and the restore path is the one protection here that, left unproven, would leave production source patched -- so it is mutated first. Written before the implementation was trusted: every entry below was run against the real harness and observed to fail the named tests. Historical mutation claims recorded in prose elsewhere in this repository are deliberately NOT reconstructed here; they were run against trees that no longer exist, and inventing entries for them would manufacture the evidence this file exists to make real.",
+  "mutations": [
+    {
+      "name": "no-restore",
+      "file": "tools/mutate.py",
+      "anchor": "        try:\n            path.write_bytes(original)\n            back = path.read_bytes()",
+      "replacement": "        try:\n            back = original",
+      "tests": [
+        "tools/test_mutate.py::TheBytesComeBackTest"
+      ],
+      "why": "the finally stops putting the bytes back, and reports success anyway -- the exact failure that destroyed an implementation in this repository"
+    },
+    {
+      "name": "missing-anchor-is-a-no-op",
+      "file": "tools/mutate.py",
+      "anchor": "    if found == 0:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::AnchorMustMatchExactlyTest"
+      ],
+      "why": "a replacement that matched nothing proceeds silently, so an unmutated run reports its mutation as caught"
+    },
+    {
+      "name": "ambiguous-anchor-allowed",
+      "file": "tools/mutate.py",
+      "anchor": "    if found > 1:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::AnchorMustMatchExactlyTest"
+      ],
+      "why": "two matches are patched at the first, so the manifest no longer says which line it probed"
+    },
+    {
+      "name": "dirty-target-ignored",
+      "file": "tools/mutate.py",
+      "anchor": "    if modified:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_mutate.py::ADirtyTargetIsRefusedTest"
+      ],
+      "why": "a sweep runs against a baseline nobody reviewed, so its verdict describes a state nobody has seen"
+    },
+    {
+      "name": "empty-manifest-accepted",
+      "file": "tools/mutate.py",
+      "anchor": "    if not isinstance(rows, list) or not rows:",
+      "replacement": "    if not isinstance(rows, list):",
+      "tests": [
+        "tools/test_mutate.py::TheManifestIsCheckedBeforeItIsTrustedTest"
+      ],
+      "why": "an empty manifest reports 0 attempted, 0 survived and exits 0, which reads exactly like a sweep that held"
+    },
+    {
+      "name": "survivor-exits-zero",
+      "file": "tools/mutate.py",
+      "anchor": "        return 1\n    return 0",
+      "replacement": "        return 0\n    return 0",
+      "tests": [
+        "tools/test_mutate.py::TheVerdictIsWhatTheCheckSaidTest"
+      ],
+      "why": "a survivor stops failing the command, so a sweep nobody reads reports every rule as held"
+    }
+  ]
+}
