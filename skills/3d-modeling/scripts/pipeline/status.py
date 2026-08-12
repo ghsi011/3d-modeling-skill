@@ -14,6 +14,7 @@ cannot mistake one for the other.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from . import review as R
@@ -243,7 +244,8 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
            execution_plan_sha256: str | None = None,
            lane_status: str = "AVAILABLE", lane_note: str = "",
            safety_envelope: R.ReviewEnvelope | None = None,
-           verification_envelope: R.ReviewEnvelope | None = None) -> dict[str, Any]:
+           verification_envelope: R.ReviewEnvelope | None = None,
+           datum_conflicts: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
     reasons: list[str] = []
     verdict = commission_report["verdict"]
     witness = commission_report.get("witness") or {}
@@ -385,6 +387,32 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
                         reasons.append("verification saw no images; undeclared geometry "
                                        "is not covered by a numeric check")
 
+    if datum_conflicts:
+        # ADR 0003 decision 6. A datum and a measurement of it disagree, and §6.5
+        # says that stays a conflict until somebody resolves it deliberately. So
+        # the claim is withheld rather than picked: neither value is preferred,
+        # neither is overwritten, and both travel in the payload below.
+        #
+        # Shaped exactly like the lane cap underneath, and for the same reason. The
+        # reason is appended on every verdict, so a FAILED receipt still says the
+        # conflict is there -- a reader who only learns of it when the job would
+        # otherwise have succeeded learns it at the worst possible moment. But only
+        # a *successful* verdict is downgraded: FAILED and NEEDS_MORE_EVIDENCE are
+        # findings this run is entitled to report, and replacing them with a
+        # conflict notice would hide a real defect behind a bookkeeping one.
+        named = ", ".join(f"{row['datum_id']} vs {row['measurement_requirement']}"
+                          for row in datum_conflicts)
+        reasons.append(
+            f"{len(datum_conflicts)} datum/evidence conflict(s) unresolved: {named}")
+        if final in CLAIMS_SUCCESS:
+            final = "NEEDS_MORE_EVIDENCE"
+            claim = (
+                f"{len(datum_conflicts)} datum(s) disagree with a measurement of "
+                "the same quantity, and nothing has resolved which is right. What "
+                f"ran is on disk: {claim.rstrip('. ')}. Both values are recorded "
+                "under datum_conflicts; correct one of them, or say which is "
+                "authoritative, and re-run.")
+
     if lane_status != "AVAILABLE":
         # Recorded on every run of an experimental lane, whatever the verdict, so
         # the limitation is legible on a FAILED receipt too -- a reader who only
@@ -456,6 +484,12 @@ def decide(*, contract: Contract, commission_report: dict[str, Any],
         # Structured beside the sentence, so a caller that reads JSON does not
         # have to parse prose to find out which instrument failed.
         "unavailable_checks": unavailable,
+        # Both declarations, with no winner picked. ADR 0003 decision 6: a caller
+        # asking "why is this not COMMISSIONED" gets the two numbers and the two
+        # provenances rather than a sentence it would have to parse -- and, because
+        # the row carries `state: UNRESOLVED`, cannot mistake the report for a
+        # resolution.
+        "datum_conflicts": [dict(row) for row in datum_conflicts],
         "reasons": reasons,
         "artifact_hashes": {"contract": artifact["contract_sha256"],
                             "stl": artifact["stl_sha256"],

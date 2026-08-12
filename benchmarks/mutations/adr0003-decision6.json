@@ -1,0 +1,56 @@
+{
+  "target": "ADR 0003 decision 6 -- the declared datum/evidence observation link, and the claim it withholds",
+  "note": "The ruling for this slice named two protections that must be mutation-killed: the explicit observation link, and the success-withholding guard. Both are below, plus the three neighbouring rules whose failure would read as success -- the MEASURED-only restriction, the absent-key rule that keeps every stored contract hash still, and the do-not-overwrite-a-finding half of the withholding guard. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/adr0003-decision6.json",
+  "mutations": [
+    {
+      "name": "the-observation-link-is-inferred-not-declared",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "        observed = (requirement.observes_datum_id or \"\").strip()\n        if not observed or observed not in referenced:",
+      "replacement": "        observed = next(iter(sorted(referenced)), \"\")\n        if not observed:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::BothDeclarationsSurviveTest"
+      ],
+      "why": "the derivation stops reading the declared link and pairs any measurement with whatever datum a scope references, so a MEASURED row that never claimed to observe anything withholds the job's claim -- an authority relationship invented by the tool, which is exactly what the ruling forbade"
+    },
+    {
+      "name": "a-success-is-claimed-over-an-unresolved-conflict",
+      "file": "skills/3d-modeling/scripts/pipeline/status.py",
+      "anchor": "        if final in CLAIMS_SUCCESS:\n            final = \"NEEDS_MORE_EVIDENCE\"",
+      "replacement": "        if False:\n            final = \"NEEDS_MORE_EVIDENCE\"",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::AnUnresolvedConflictWithholdsTheClaimTest"
+      ],
+      "why": "the conflict is reported in the payload and the job says COMMISSIONED anyway, which is the worst combination a receipt can carry: a true claim about the geometry beside a disagreement nobody resolved"
+    },
+    {
+      "name": "a-conflict-overwrites-a-real-failure",
+      "file": "skills/3d-modeling/scripts/pipeline/status.py",
+      "anchor": "        named = \", \".join(f\"{row['datum_id']} vs {row['measurement_requirement']}\"",
+      "replacement": "        final = \"NEEDS_MORE_EVIDENCE\"\n        named = \", \".join(f\"{row['datum_id']} vs {row['measurement_requirement']}\"",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::AnUnresolvedConflictWithholdsTheClaimTest"
+      ],
+      "why": "a FAILED geometry becomes NEEDS_MORE_EVIDENCE because a datum disagrees, hiding a real defect behind a bookkeeping one -- the failure the lane cap's comment warns about, one guard over"
+    },
+    {
+      "name": "any-provenance-may-claim-to-observe-a-datum",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "            elif self.provenance != \"MEASURED\":",
+      "replacement": "            elif False:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::TheLinkIsDeclaredAndCheckedTest"
+      ],
+      "why": "a STATED or CHOSEN row may declare itself an observation of a datum, which makes the conflict a disagreement between two opinions rather than between a reference and evidence -- two authorities for one number, which is what 6.5 exists to prevent"
+    },
+    {
+      "name": "the-absent-key-becomes-a-null",
+      "file": "skills/3d-modeling/scripts/pipeline/project.py",
+      "anchor": "            payload.pop(\"observes_datum_id\")",
+      "replacement": "            pass",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_datum_evidence.py::TheLinkIsDeclaredAndCheckedTest"
+      ],
+      "why": "every requirement in the repository gains an observes_datum_id: null, and since requirements are covered by requirement_sha256 that moves every stored contract hash and every recorded replay -- for rows with nothing to do with this slice"
+    }
+  ]
+}

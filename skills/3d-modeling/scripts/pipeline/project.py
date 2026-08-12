@@ -214,9 +214,34 @@ class Requirement:
     note: str = ""
     # Set on INHERITED rows: which supplied artifact this was read out of.
     artifact_id: str | None = None
+    # ADR 0003 decision 6. Which declared datum this row is an observation *of*:
+    # this `MEASURED` number is somebody measuring the same quantity the named
+    # datum asserts. That is a narrower claim than it looks, and the narrowness is
+    # the point -- it is deliberately **not** "this dimension was measured from
+    # this datum", which is a different relationship and the reason the field is
+    # not called `datum_id`.
+    #
+    # It exists because there was previously no way to say that two rows are about
+    # one quantity, so a datum and a measurement could not disagree even in
+    # principle: nothing in the pipeline reads `Datum.value` at all, and a
+    # disagreement with a number nothing reads has no site. Optional, and never
+    # inferred -- matching names, units or source artifacts do not imply this
+    # relationship, and guessing it would manufacture an authority claim the job
+    # never made.
+    observes_datum_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        payload = dataclasses.asdict(self)
+        if self.observes_datum_id is None:
+            # Absent, not present-and-null. Every requirement is serialised into
+            # the payload `requirement_sha256` covers, so a key appearing on all of
+            # them would move every stored contract hash and every recorded replay
+            # in this repository -- for rows that have nothing to do with this
+            # slice. A digest cannot see the difference between a key that is
+            # missing and one that was never meant, which is why the absent case
+            # has to be the silent one.
+            payload.pop("observes_datum_id")
+        return payload
 
     def problems(self, index: int = 0) -> list[Issue]:
         where = f"requirement {self.name!r}"
@@ -248,6 +273,30 @@ class Requirement:
                 F.SCHEMA_REQUIRED, f"{path}.artifact_id",
                 f"{where}: an inherited value must name the artifact_id it was "
                 "read out of, or it is indistinguishable from a chosen one"))
+        if self.observes_datum_id is not None:
+            if not str(self.observes_datum_id).strip():
+                out.append(F.problem(
+                    F.SCHEMA_REQUIRED, f"{path}.observes_datum_id",
+                    f"{where}: observes_datum_id is present and blank, which names "
+                    "no datum. Omit the key rather than emptying it -- a blank "
+                    "reference reads as a declared relationship and resolves to "
+                    "nothing."))
+            elif self.provenance != "MEASURED":
+                # `MEASURED` only, because the field's meaning is "somebody
+                # measured the quantity this datum asserts". A `STATED` or `CHOSEN`
+                # row pointing at a datum is not an observation of it; it is either
+                # a copy of the datum, which 6.5 forbids as a second authority for
+                # one number, or a different relationship this field does not
+                # model. Refusing is what keeps the conflict below a fact about
+                # evidence rather than about two opinions.
+                out.append(F.problem(
+                    F.INTENT_CONTRADICTION, f"{path}.observes_datum_id",
+                    f"{where}: observes_datum_id names datum "
+                    f"{self.observes_datum_id!r}, but provenance is "
+                    f"{self.provenance!r}. Only a MEASURED row can be an "
+                    "observation of a datum's value; anything else claiming to "
+                    "observe one is a second copy of the number, not evidence "
+                    "about it."))
         return out
 
 
@@ -1391,6 +1440,18 @@ class Project:
                 problems.append(F.problem(F.REF_UNDECLARED, f"requirements[{index}].artifact_id",
                                           f"requirement {requirement.name!r}: artifact_id "
                                           f"{requirement.artifact_id!r} names no source artifact"))
+            # The observation must land on a datum this job declares, for the same
+            # reason `datum_ids` must: a reference resolving to nothing is a
+            # relationship nobody can check, and the conflict derivation would
+            # silently find no partner and report agreement.
+            observed = (requirement.observes_datum_id or "").strip()
+            if observed and not any(d.datum_id == observed for d in self.datums):
+                problems.append(F.problem(
+                    F.REF_UNDECLARED, f"requirements[{index}].observes_datum_id",
+                    f"requirement {requirement.name!r}: observes_datum_id "
+                    f"{observed!r} names no declared datum. An observation of "
+                    "nothing cannot disagree with anything, so it would read as "
+                    "agreement."))
 
         seen_artifacts: set[str] = set()
         for index, artifact in enumerate(self.source_artifacts):
@@ -1695,6 +1756,71 @@ class Project:
                     "merge -- and this build does not perform merges, so the row "
                     "has to be written before the state can be claimed"))
         return problems
+
+
+UNRESOLVED = "UNRESOLVED"
+
+
+def datum_conflicts(project: Project) -> tuple[dict[str, Any], ...]:
+    """Where a datum and a measurement of it disagree, with neither one winning.
+
+    ADR 0003 decision 6, and §6.5 before it: *"Conflicting values remain separate
+    until they are deliberately resolved"*, and *"a measured candidate value must
+    not replace the requirement it is being measured against"*. So this returns
+    **both** declarations and no verdict. There is no winner field, no resolution,
+    and nothing here writes to the project.
+
+    **Outside `validate()` on purpose.** A validation problem means the project is
+    malformed; both sides of one of these conflicts are perfectly valid
+    declarations, and a job whose evidence disagrees with its own reference is not
+    a job somebody typed wrong. Reporting it as an `Issue` would also have needed a
+    third severity beside `error` and `warning`, and `Issue` has exactly two on
+    purpose.
+
+    **Only datums an edit scope references.** §13.4 binds the datums a scope names,
+    and those are the ones this job's identity depends on. A disagreement about a
+    datum no scope references is real but is not this job's business -- it belongs
+    to whichever job edits against that datum -- and withholding this job's claim
+    for it would make an unrelated correction cut a revision here.
+
+    **Exact `(value, unit)` equality means no conflict.** Nothing is converted:
+    `10 mm` and `1 cm` stay in conflict rather than being silently declared equal.
+    That is deliberately conservative and keeps this slice clear of the tolerance
+    machinery ADR 0003 §7 explicitly did not decide. A comparison that "helpfully"
+    normalised units would be choosing a winner between two authorities by
+    arithmetic.
+    """
+    declared = {d.datum_id: d for d in project.datums}
+    referenced = {datum_id for scope in project.edit_scopes
+                  for datum_id in scope.datum_ids}
+    rows: list[dict[str, Any]] = []
+    for requirement in project.requirements:
+        observed = (requirement.observes_datum_id or "").strip()
+        if not observed or observed not in referenced:
+            continue
+        datum = declared.get(observed)
+        if datum is None:
+            # `validate()` already refuses this; skipped rather than crashed so a
+            # caller inspecting a half-built project gets a report instead of a
+            # traceback.
+            continue
+        if (datum.value, datum.unit) == (requirement.value, requirement.unit):
+            continue
+        rows.append({
+            "datum_id": datum.datum_id,
+            "measurement_requirement": requirement.name,
+            "datum_value": datum.value,
+            "datum_unit": datum.unit,
+            "measurement_value": requirement.value,
+            "measurement_unit": requirement.unit,
+            "datum_provenance": datum.provenance,
+            "measurement_source": requirement.source,
+            "state": UNRESOLVED,
+        })
+    # Sorted, so two runs over the same project produce the same rows in the same
+    # order and a receipt diff shows a changed conflict rather than a reordering.
+    return tuple(sorted(rows, key=lambda r: (r["datum_id"],
+                                             r["measurement_requirement"])))
 
 
 def _orientation_problems(orientation: Any) -> list[Issue]:
@@ -2023,6 +2149,11 @@ def to_job_request_fields(project: Project) -> dict[str, Any]:
         "nozzle": project.nozzle,
         "orientation": project.orientation,
         "modifiers": tuple(project.modifiers),
+        # Derived here because this is the one place that knows how a project maps
+        # onto the request, and both project-aware call sites go through it -- so
+        # neither can forget to compute it, which is how a withholding guard ends
+        # up live in one lane and absent in the other.
+        "datum_conflicts": datum_conflicts(project),
         "external_geometry": bool(project.external_interfaces
                                   if project.external_geometry is None
                                   else project.external_geometry),
