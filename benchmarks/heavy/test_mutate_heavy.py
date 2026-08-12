@@ -226,15 +226,31 @@ def test_the_child_is_told_not_to_write_bytecode() -> None:
     builds. `pytest_runner` builds its env internally, so the fixture's own test
     reads `os.environ` and the runner's verdict carries the answer: a child that was
     not told would fail this, and the runner would report `False`.
+
+    **And the variable has to be cleared from this process first**, which is not
+    fussiness -- it is the whole reason this test is worth having. The first version
+    omitted it and the mutation `child-may-write-bytecode` SURVIVED, deterministically,
+    for a lovely reason: during a sweep, *this* test runs inside a child that
+    `pytest_runner` already gave `PYTHONDONTWRITEBYTECODE=1`. So `{**os.environ}`
+    handed it down regardless and the fixture could not tell the difference. A test
+    whose subject is "does the runner add this variable" cannot inherit the answer
+    from its own environment.
     """
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         _write(root / "test_env.py",
                'import os\n\n\ndef test_bytecode_writing_is_off():\n'
                '    assert os.environ.get("PYTHONDONTWRITEBYTECODE") == "1"\n')
-        assert MU.pytest_runner(root)(["test_env.py"]) is True, (
-            "the child was not told to stop writing bytecode, so it can leave a "
-            "compiled copy of a mutated file behind for the next process")
+        saved = os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
+        try:
+            assert "PYTHONDONTWRITEBYTECODE" not in os.environ, (
+                "cleared, so the child can only have it if the runner set it")
+            assert MU.pytest_runner(root)(["test_env.py"]) is True, (
+                "the child was not told to stop writing bytecode, so it can leave a "
+                "compiled copy of a mutated file behind for the next process")
+        finally:
+            if saved is not None:
+                os.environ["PYTHONDONTWRITEBYTECODE"] = saved
 
 
 def test_a_selector_that_matches_nothing_is_refused_not_counted_as_killed() -> None:
