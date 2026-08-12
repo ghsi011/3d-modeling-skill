@@ -188,10 +188,22 @@ def git_dirty(root: Path) -> tuple[str, ...]:
     is separate from `require_clean`: the check takes the answer as an argument so
     it can be tested without a repository at all.
     """
-    done = subprocess.run(["git", "status", "--porcelain"], cwd=str(root),
-                          capture_output=True, text=True, check=False)
+    # `-c safe.directory=*`, for one read-only command, because a hosted container
+    # checks the repository out as a different uid than the job runs as and git then
+    # refuses to say anything at all: *fatal: detected dubious ownership*. Without
+    # this the harness cannot learn whether the tree is clean inside CI, and the two
+    # tempting ways round that are both worse -- passing `dirty=()` disables the one
+    # guard this function exists for, and skipping the sweep turns an environmental
+    # quirk into a green tick. Scoped to this invocation rather than written into
+    # global config, and `status` reads.
+    done = subprocess.run(
+        ["git", "-c", "safe.directory=*", "status", "--porcelain"],
+        cwd=str(root), capture_output=True, text=True, check=False)
     if done.returncode != 0:
-        raise MutateError(f"git status failed in {root}: {done.stderr.strip()}")
+        raise MutateError(
+            f"git status failed in {root}: {done.stderr.strip()}. A sweep needs a "
+            "known baseline, so an unanswerable question is a stop rather than an "
+            "assumption that the tree is clean.")
     return tuple(line[3:].strip() for line in done.stdout.splitlines() if line.strip())
 
 
