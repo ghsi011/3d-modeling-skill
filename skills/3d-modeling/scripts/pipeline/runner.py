@@ -46,6 +46,11 @@ class JobRequest:
     nozzle: dict[str, Any]
     orientation: dict[str, Any]
     modifiers: tuple[str, ...] = ()
+    # ADR 0003 decision 6, derived by `project.datum_conflicts` and carried
+    # rather than recomputed: the runner takes a flattened request and has no
+    # `Project` to ask, and a second derivation here could disagree with the
+    # one the project already made.
+    datum_conflicts: tuple[dict[str, Any], ...] = ()
     external_geometry: bool = False
     ambiguities: tuple[str, ...] = ()
     step: bool = False
@@ -707,7 +712,8 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
                           execution_plan_sha256=plan.plan_hash(),
                           lane_status=plan.lane_status, lane_note=plan.lane_note,
                           safety_envelope=safety_envelope if model_contract.consequence == "CONSEQUENTIAL" else None,
-                          verification_envelope=verification_envelope if request.verify_call is not None else None)
+                          verification_envelope=verification_envelope if request.verify_call is not None else None,
+                          datum_conflicts=request.datum_conflicts)
     written["final_status"] = _write(out / "final_status.json", final)
 
     timings["build"] = round(built.build_seconds, 4)
