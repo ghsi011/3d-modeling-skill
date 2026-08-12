@@ -6,6 +6,43 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
+
+The rule that requires a unit tests `if not str(self.unit).strip()`. The loader read
+units as `str(row.get("unit", default))`, and `str(None)` is the four-character
+string `None` — not empty. So a datum or requirement written with `"unit": null`
+arrived carrying a unit of `None` and satisfied the very check whose own message says
+a number with no unit is a number two readers can read differently. A unitless
+measurement then travelled through a field that drives design, wearing a unit; on the
+datum row that number is also bound into the acceptance contract by D31, so it
+reached the contract looking real. Reproduced through the production loader before
+the fix rather than by constructing a row: `from_payload` returned `unit='None'` with
+no finding about the unit.
+
+**The sibling was live too.** D33's own text asked whether the same coercion on
+neighbouring fields was in scope, and it is: `Requirement.unit` took
+`str(row.get("unit", "mm"))` at the same loader, so a requirement's null unit became
+`"None"` by the identical route.
+
+`_unit()` now separates the two rows that mean different things. A key that is
+**absent** means *use the default* and still does — `"mm"` for a requirement, empty
+for a datum, which keeps `problems()` raising the existing missing-unit finding. A key
+that is **present and not a string** means somebody wrote a unit and it is not one,
+and that is a `SchemaError` naming the field. Refusing the absent case as well would
+have broken every project that never mentioned a unit, which is why the defaults are
+asserted by the same test rather than trusted: the fixture failed on five refusal
+cases while the three default and verbatim cases passed, and a fix that over-refused
+would have satisfied the refusals and broken the defaults in silence.
+
+Deliberately not done, so the scope is legible later: no unit vocabulary, no
+conversion, no normalisation, and the literal string `"None"` — which somebody can
+still type — is left alone rather than made a second issue. No schema bump, no
+rebinding of D31's contract payload, no golden re-recorded.
+
+Both strict loader edges are mutation-proven by reverting each to the exact coercion
+it replaced: 2 attempted, 2 killed, 0 survived.
+
+
 ### Fixed — a scope recorded which datums it depended on, not what they said (D31)
 
 ADR 0003 decision 5 says a datum is a dependency binding: changing one produces a

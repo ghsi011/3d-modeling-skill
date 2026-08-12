@@ -870,8 +870,8 @@ bound row *equals* `Datum.as_dict()`.
 
 The precise claim, third: **the contract binds `Datum.as_dict()` verbatim, and
 `Datum.as_dict()` canonicalizes the order of the set-valued `valid_for` field.**
-Datum values, units, provenance and D33's malformed-input behaviour are **not**
-normalized. `valid_for` is sorted because `Project.validate` reads it as a
+Datum values, units and provenance are **not** normalized, and neither is the
+loader's malformed-input behaviour. `valid_for` is sorted because `Project.validate` reads it as a
 membership set — `set(datum.valid_for) & ({scope.artifact_id} | set(scope.interface_ids))`
 — so two declarations differing only in the order of the same scopes are one
 declaration to every check that consumes them, and identity was distinguishing a
@@ -884,10 +884,15 @@ serialization — the property the equality fixture above rests on. The visible
 consequence is that a project saved and reloaded gets `valid_for` back sorted, so
 the round-trip fixture asserts the set survives rather than the tuple order.
 
-Nothing else is normalized. A datum declared `"unit": null` reaches this code as the
-string `"None"` (D33) and is bound as `"None"`, because whether identity follows the
-object the system accepted is a different question from whether the loader built the
-right object. The unit regression uses `mm → cm` so it depends on neither.
+Nothing else is normalized, and one sentence here has since been overtaken by its own
+fix. A datum declared `"unit": null` *used to* reach this code as the string `"None"`
+and be bound as `"None"`; that was D33, and the loader now refuses a unit that is
+present and not a string, so such a project no longer loads at all -- the entry left
+this file when its fixture landed and the account is in `CHANGELOG.md`. What the
+paragraph was arguing survives unchanged: whether identity follows the object the
+system accepted is a different question from whether the loader built the right
+object, and this binding still normalizes nothing but `valid_for`. The unit regression
+uses `mm → cm`, so it depended on neither then and does not now.
 
 `datum_ids` is now sorted in the contract row — a set of references to declared
 identities is not a precedence — but never deduplicated, because a repeated id is
@@ -954,28 +959,3 @@ large multiple of its source's, with an unauthorised change outside the region;
 the reported limit must not claim a sensitivity the candidate-direction pass did
 not have. Reporting per-direction, or the conservative larger area, both satisfy
 it; the fixture should not pick one.
-
-## D33 — a JSON `null` unit becomes the string `"None"` and validates
-
-**Where.** `pipeline/project.py`, datum construction — `unit=str(row.get("unit", ""))`.
-
-**What is wrong.** `str(None)` is `"None"`, and the rule that requires a unit
-tests `if not str(self.unit).strip()`. A numeric datum declared with
-`"unit": null` therefore arrives carrying a unit of `"None"`, which is
-non-empty, and passes the check whose own message says "a number with no unit is
-a number two readers can read differently".
-
-**Evidence.** Measured, not read: constructing `Datum(value=12.5,
-unit=str(None), ...)` stores `unit='None'`, and `problems()` returns no
-`SCHEMA_REQUIRED` for the unit. The `.get(key, "")` default only covers an
-*absent* key; an explicit `null` passes through it.
-
-**What it can cause.** A unitless measurement recorded as though it had a unit,
-in a field that drives design. Narrower than D31 and D32 — it needs a
-hand-written `null` rather than an omitted key — and it defeats the check
-entirely when it happens.
-
-**The fixture that must fail before the fix lands.** A datum payload with
-`"unit": null` and a numeric value must produce the `SCHEMA_REQUIRED` finding.
-The same coercion appears on sibling string fields and the fixture should say
-whether they are in scope.
