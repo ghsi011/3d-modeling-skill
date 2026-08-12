@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -184,20 +183,29 @@ class TheBytesComeBackTest(unittest.TestCase):
         """The guard is reachable, which is the only way to know it is not dead.
 
         A restore that fails leaves production source mutated, so it has to be
-        loud. Provoked with a read-only file rather than described: the patch has
-        already been written when the body makes the target unwritable, so the
-        `finally` hits a real `PermissionError`.
+        loud -- and a guard nothing can reach is indistinguishable from one that
+        was deleted, so the failure is provoked rather than described.
+
+        The provocation is a **directory** where the file was, and that choice is
+        the whole point of this docstring. It was a read-only file first, and CI
+        found the flaw: the merge gate runs the heavy tier in a container, which
+        means **root**, and root writes to read-only files perfectly happily. So
+        `RestoreFailed` was unreachable in the one environment that gates merges,
+        and this test was red there -- which the new baseline refusal caught by
+        stopping the sweep instead of reporting a false `KILLED`. Nobody can write
+        bytes over a directory, root included, and it needs no `chmod` cleanup:
+        `IsADirectoryError` on POSIX, `PermissionError` on Windows, both `OSError`,
+        which is what the `finally` catches. One provocation, every platform, and
+        no privilege level where it silently stops provoking.
         """
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             path = root / "src.py"
             _write(path)
-            try:
-                with self.assertRaises(MU.RestoreFailed):
-                    with MU.patched(root, _mutation()) as target:
-                        target.chmod(stat.S_IREAD)
-            finally:
-                path.chmod(stat.S_IWRITE | stat.S_IREAD)
+            with self.assertRaises(MU.RestoreFailed):
+                with MU.patched(root, _mutation()) as target:
+                    target.unlink()
+                    target.mkdir()
 
 
 class ADirtyTargetIsRefusedTest(unittest.TestCase):
