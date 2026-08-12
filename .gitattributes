@@ -1,4 +1,31 @@
 # ---------------------------------------------------------------------------
+# Python source is stored and checked out with LF, on every platform.
+#
+# `tools/mutate.py` patches source by matching an anchor **byte for byte**, and
+# several anchors in `benchmarks/mutations/*.json` span more than one line. Those
+# anchors are written with LF, because that is how the repository stores them. A
+# default Git-for-Windows clone sets `core.autocrlf=true`, which would hand the
+# working copy CRLF -- so a multi-line anchor could not match, the harness would
+# refuse with `AnchorMissing`, and the heavy self-sweep would fail on a fresh
+# checkout that did nothing wrong. It fails safe rather than miscounting, which is
+# the harness working; it is still a tier that cannot run, and PR #5 exists
+# precisely because a tier nobody can run reports on nothing.
+#
+# Narrow on purpose: `*.py`, not `* text=auto`. A blanket normalisation would
+# reach every recorded byte in this repository, and several of those are pinned by
+# digest.
+#
+# This rule comes FIRST so the `-text` exceptions below override it -- the last
+# matching pattern wins. Eight `.py` files live inside those hash-pinned areas
+# (`benchmarks/references/vent-ball-combine/evidence/model.py`, six recorded
+# `model.py` inputs under `benchmarks/replays/`, and
+# `benchmarks/replays/test_l1_replay.py`). They are recorded content whose bytes
+# are digested into a `case.json`, not source anybody edits, and normalising them
+# is exactly the `CaseMismatch` this file was written to prevent.
+# ---------------------------------------------------------------------------
+*.py text eol=lf
+
+# ---------------------------------------------------------------------------
 # The vendored benchmark fixture is recorded by SHA-256 and must survive a round
 # trip through git unchanged.
 #
