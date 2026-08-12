@@ -1,0 +1,33 @@
+{
+  "$comment": [
+    "Denied because each of these silently discards uncommitted work, and one of",
+    "them already did. A mutation sweep reverted each patch with",
+    "`git checkout -- <file>` from a tree whose implementation was not yet",
+    "committed; the first revert restored HEAD and destroyed it, and the twelve",
+    "mutations after it reported a missing anchor against a file that no longer",
+    "held the code. AGENTS.md already named the sibling hazard for `commit`; this",
+    "is the same class, and a deny rule fires at the moment of the mistake rather",
+    "than in a document read once at the start of a session.",
+    "",
+    "`git switch` is deliberately NOT denied: branch work is legitimate and has a",
+    "non-destructive verb. To undo a change on purpose, commit first and revert,",
+    "or hold the original bytes and restore them -- which is what",
+    "a mutation harness must do instead of shelling out to git.",
+    "",
+    "These patterns are exercised rather than assumed. A deny rule that does not",
+    "match is a check that cannot fail, so `tools/test_documentation.py` asserts",
+    "the file parses and lists the verbs, and the refusal itself was verified by",
+    "attempting one denied form and observing Claude Code refuse it."
+  ],
+  "permissions": {
+    "deny": [
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git stash drop:*)",
+      "Bash(git stash clear:*)"
+    ]
+  }
+}

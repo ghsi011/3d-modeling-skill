@@ -342,16 +342,26 @@ uv run pytest
 The `bambu` extra adds multi-colour 3MF packing, which skips without it. `pyproject.toml` puts `skills/3d-modeling/scripts` on `pythonpath`,
 so the suites resolve their bare imports with no install step.
 
-That command is the **commit gate**: 838 tests in 43 s. It is not the whole
-suite. Two more tiers run before merge and a bare `pytest` collects neither,
+That command is the **commit gate**, and it runs in about a minute. It is not the
+whole suite. Two more tiers run before merge and a bare `pytest` collects neither,
 because `testpaths` is `skills/3d-modeling/scripts` and `tools` and they are in
 neither — the same structural separation, at both joints:
 
 ```bash
-uv run pytest                     # L0        838 tests,  43 s, every push
-uv run pytest benchmarks/heavy    # L0-heavy  350 tests, ~16 m, pull requests
-uv run pytest benchmarks/replays  # L1         55 tests,  68 s, pull requests
+uv run pytest                     # L0        ~1 m,  every push
+uv run pytest benchmarks/heavy    # L0-heavy  ~13 m, pull requests
+uv run pytest benchmarks/replays  # L1        ~1 m,  pull requests
 ```
+
+These carried exact test counts until they did not: the commit gate was described
+here as 838 tests long after it collected over 1200. A count in prose has no way to
+notice itself going stale, and pinning one with a test would only make a number that
+changes on every added fixture into a second thing to maintain — so the counts are
+gone rather than corrected. `conftest.py`'s `L0_COLLECTED_CEILING` is the budget
+that is actually enforced, and it is the one place a number belongs. Wall clock is
+approximate on purpose: `ROADMAP.md` §4.4 records the same suite measuring 43.3 s
+and then 76.9 s in one session, so a figure to the second here would be noise
+wearing precision.
 
 ### The commit gate, and what it will not carry
 
