@@ -24,9 +24,10 @@ manufacture an authority claim the job never made.
 Entirely L0 by ruling: no CAD, no child process, no heavy tier. `decide` is called
 directly with synthetic reports, the way the existing status tests do it.
 
-Subtests rather than a method per case, throughout: `conftest.py` caps what L0 may
-collect at 1240 and the first draft of this file put collection at 1246. The cases
-inside each method are variations on one rule, which is exactly what a subtest is for.
+Subtests rather than a method per case, throughout: `conftest.py` capped what L0 may
+collect at 1240 when this file was written, and the first draft put collection at
+1246. The cap has since been raised, but the reason to prefer a subtest has not: the
+cases inside each method are variations on one rule, which is exactly what a subtest is for.
 """
 from __future__ import annotations
 
