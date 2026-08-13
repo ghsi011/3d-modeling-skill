@@ -1,0 +1,66 @@
+{
+  "target": "the blind benchmark's shape descriptor -- normalised principal inertia, the one row that can see shape",
+  "note": "The ruling required the mutation that breaks the intrinsic inertia calculation to be killed by the L0 analytic fixture, so the correctness proof does not depend on an external corpus. Every entry below is killed by tools/test_blind.py, which needs no reference bytes. Each was run against the real code and observed to fail the named test. Run with: uv run python tools/mutate.py benchmarks/mutations/blind-inertia.json",
+  "mutations": [
+    {
+      "name": "normalised-by-volume-not-v-to-the-five-thirds",
+      "file": "tools/blind.py",
+      "anchor": "    scale = volume ** (5.0 / 3.0)",
+      "replacement": "    scale = volume",
+      "tests": [
+        "tools/test_blind.py::TheShapeDescriptorIsIntrinsicTest"
+      ],
+      "why": "the exponent is the whole point: at unit density inertia scales as length^5, so dividing by V leaves a quantity scaling as length^2 -- a second size check wearing a shape descriptor's name. The closed-form box fixture catches the value, and the scale-free fixture catches it again from the other side, because a box and the same box ten times larger stop agreeing"
+    },
+    {
+      "name": "a-degenerate-candidate-reports-a-number-anyway",
+      "file": "tools/blind.py",
+      "anchor": "    if not mesh.is_watertight or not (volume > 0.0):\n        return None",
+      "replacement": "    if False:\n        return None",
+      "tests": [
+        "tools/test_blind.py::TheShapeDescriptorIsIntrinsicTest"
+      ],
+      "why": "an open surface divides by a zero or meaningless volume and the descriptor becomes NaN or infinity, which formats into the report looking exactly like a measurement -- the failure this file exists to avoid"
+    },
+    {
+      "name": "the-table-recomputes-the-verdict-it-was-handed",
+      "file": "tools/blind.py",
+      "anchor": "    for row in report[\"inertia\"]:\n        mark = {True: \"ok \", False: \"OFF\", None: \"-- \"}[row[\"agrees\"]]",
+      "replacement": "    for row in report[\"inertia\"]:\n        mark = \"-- \" if row[\"agrees\"] is None else (\"ok \" if abs(row[\"delta\"]) <= row[\"band\"] else \"OFF\")",
+      "tests": [
+        "tools/test_blind.py::TheDefaultReportShowsTheShapeRowTest"
+      ],
+      "why": "the defect this contract exists to prevent, and the one review named: the payload publishes rounded figures, so a mark re-derived from them disagrees with the scorer at a band edge -- a delta of 0.0100004 against a band of 0.01 rounds to the band exactly and prints ok on a row scored False, so the two halves of one report contradict each other"
+    },
+    {
+      "name": "the-scorer-judges-the-rounded-numbers-it-published",
+      "file": "tools/blind.py",
+      "anchor": "            \"agrees\": abs(delta) <= band,",
+      "replacement": "            \"agrees\": abs(round(delta, 6)) <= round(band, 6),",
+      "tests": [
+        "tools/test_blind.py::TheShapeIsScoredOneMomentAtATimeTest"
+      ],
+      "why": "the same failure from the other side: rounding for display is a presentation decision, and letting it decide the verdict makes every band edge a function of how many digits the report happens to print"
+    },
+    {
+      "name": "the-delta-is-published-absolute-against-a-relative-band",
+      "file": "tools/blind.py",
+      "anchor": "            \"relative_delta\": (round(delta / want[index], 6)",
+      "replacement": "            \"relative_delta\": (round(delta, 6)",
+      "tests": [
+        "tools/test_blind.py::TheShapeIsScoredOneMomentAtATimeTest"
+      ],
+      "why": "the band is one percent OF THE REFERENCE MOMENT, so a delta published absolute under a name that promises relative leaves the reader to redo the division the band is already expressed in -- and reading 0.099 against a band called 1% invites exactly the wrong conclusion"
+    },
+    {
+      "name": "an-unavailable-descriptor-formats-anyway",
+      "file": "tools/blind.py",
+      "anchor": "        if row[\"agrees\"] is None:",
+      "replacement": "        if False:",
+      "tests": [
+        "tools/test_blind.py::TheDefaultReportShowsTheShapeRowTest"
+      ],
+      "why": "reaching the number-formatting branch with nothing to format is how a None, or a traceback, ends up in a column a reader takes for a measurement"
+    }
+  ]
+}

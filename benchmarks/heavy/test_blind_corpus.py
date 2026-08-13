@@ -28,6 +28,8 @@ envelope.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -119,7 +121,11 @@ class TheScoreDiscriminatesTest(unittest.TestCase):
         """
         report = blind.score(corpus.resolve(ENTRY), ENTRY)
         self.assertIsNone(report["score"])
-        self.assertIn("nothing about shape", report["what_this_is_not"])
+        # Was "nothing about shape", which the inertia row falsified. The claim it
+        # makes now is narrower and still a refusal: one descriptor can see shape,
+        # and three numbers do not certify one.
+        self.assertIn("not shape equivalence", report["what_this_is_not"])
+        self.assertNotIn("nothing about shape", report["what_this_is_not"])
 
     def _mesh(self, root: Path, name: str, mesh) -> Path:
         path = Path(root) / name
@@ -321,3 +327,99 @@ class TheWrittenJobNamesNoAnswerTest(unittest.TestCase):
                 "a number in the generated job measures the reference and is "
                 "not one the entry declares giving away")
 
+
+class TheShapeDescriptorRejectsAnImpostorTest(unittest.TestCase):
+    """The evidence half of the inertia descriptor: a real reference, a real impostor.
+
+    `tools/test_blind.py` proves the descriptor is *correct* against closed-form box
+    moments, which needs no corpus and therefore stays in the commit gate. What needs
+    the reference bytes is proof that it is *useful*: that it rejects the part the four
+    dimensional rows accept.
+
+    The impostor is the one `score`'s own report names -- a plain slab with one
+    rectangular pocket, sized to this reference's bounding box and volume. It has no
+    lip, no slot tongue and no bolt hole, so it cannot retain a panel or bolt to an
+    extrusion, and it agrees on every dimensional row. Built here rather than stored,
+    so it is derived from the reference's own measurements at run time and cannot go
+    stale against them.
+    """
+
+    def _impostor(self, root: Path, want: dict) -> Path:
+        import trimesh
+        x, y, z = sorted(want["sorted_extents_mm"], reverse=True)
+        hole_x = x * 0.6
+        hole_y = (x * y * z - want["volume_mm3"]) / (hole_x * z)
+        slab = trimesh.creation.box(extents=(x, y, z))
+        hole = trimesh.creation.box(extents=(hole_x, hole_y, z * 2.0))
+        path = root / "impostor.stl"
+        trimesh.boolean.difference([slab, hole], engine="manifold").export(path)
+        return path
+
+    def test_a_part_that_passes_every_dimensional_row_still_fails_on_shape(self) -> None:
+        if not _fetched():
+            self.skipTest("the corpus is not on this machine")
+        want = blind.measure(corpus.resolve(ENTRY))
+        with tempfile.TemporaryDirectory() as raw:
+            report = blind.score(self._impostor(Path(raw), want), ENTRY)
+
+        # First the premise, or the assertion below proves nothing: this really is a
+        # part the old four rows cannot fault.
+        extents = report["extents"]
+        self.assertTrue(all(e["agrees"] for e in extents),
+                        f"the impostor must match every extent: {extents}")
+        self.assertTrue(report["volume"]["agrees"], report["volume"])
+        self.assertTrue(report["bodies"]["agrees"], report["bodies"])
+        self.assertTrue(report["watertight"]["agrees"], report["watertight"])
+
+        # Then the point of the slice, read one moment at a time as the rows are
+        # scored: an aggregate would say only that something was wrong.
+        rows = report["inertia"]
+        self.assertEqual(3, len(rows))
+        for row in rows:
+            with self.subTest(moment=row["moment"]):
+                self.assertFalse(row["agrees"],
+                                 "the descriptor exists to catch exactly this part")
+                self.assertGreater(
+                    abs(row["delta"]), 10 * row["band"],
+                    "and not marginally: the miss is an order of magnitude outside "
+                    f"the band, {row['delta']} against {row['band']}")
+
+    def test_the_reference_agrees_with_itself_on_the_descriptor(self) -> None:
+        """The converse, without which the rejection above proves only strictness.
+
+        A band tight enough to reject everything is not a measurement. The reference
+        scored against itself has to agree on the descriptor as it does on every other
+        row.
+        """
+        if not _fetched():
+            self.skipTest("the corpus is not on this machine")
+        report = blind.score(corpus.resolve(ENTRY), ENTRY)
+        self.assertEqual([True, True, True],
+                         [row["agrees"] for row in report["inertia"]],
+                         report["inertia"])
+
+    def test_the_printed_score_a_reader_sees_carries_the_rejection(self) -> None:
+        """End to end, through the output `main` actually prints.
+
+        `tools/test_blind.py` proves `_table` renders an inertia row it is handed.
+        This proves the row a real score produces reaches a real reader: same
+        impostor, same scoring path, and the text `main` would print without
+        `--json`. Without this the descriptor could be correct, useful, and
+        invisible -- which is what the review caught.
+        """
+        if not _fetched():
+            self.skipTest("the corpus is not on this machine")
+        want = blind.measure(corpus.resolve(ENTRY))
+        with tempfile.TemporaryDirectory() as raw:
+            report = blind.score(self._impostor(Path(raw), want), ENTRY)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            blind._table(report)
+        text = buffer.getvalue()
+
+        self.assertIn("inertia", text)
+        self.assertEqual(3, text.count("OFF"), "the reader has to be told it failed")
+        for row in report["inertia"]:
+            self.assertIn(f"{row['candidate']:.6f}", text)
+        # And the prose under the table no longer contradicts the row above it.
+        self.assertNotIn("nothing about shape", text)

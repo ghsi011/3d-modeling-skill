@@ -20,6 +20,8 @@ loaded and measured in-process, which is L0's rule.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -130,6 +132,262 @@ class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
             row["request"].pop("build_envelope_mm", None)
         with self.assertRaises(corpus.CorpusLeak):
             blind.request(ENTRY, payload)
+
+
+class TheShapeDescriptorIsIntrinsicTest(unittest.TestCase):
+    """Normalised principal inertia: the one descriptor the evidence justified.
+
+    The four dimensional rows -- sorted extents, volume, bodies, watertight -- cannot
+    see shape, and `blind.score`'s own report says so. Measured rather than argued: a
+    plain slab with one rectangular pocket, sized to the deck-support reference's
+    bounding box and volume, passes **every** row while being incapable of the job --
+    no lip, no slot tongue, no bolt hole. Judged by the three descriptors proposed for
+    it, the per-body Euler tuple matched that impostor exactly and normalised surface
+    area sat within 1.7% of it, while the principal moments were 33% to 63% out. So
+    inertia is the whole slice: no Euler, no area.
+
+    **Why the expectations here are closed-form.** A solid box of extents a, b, c at
+    unit density has mass `V = abc` and principal moments `V(b^2+c^2)/12` and its two
+    partners, about the centre of mass. That comes from mechanics, not from this
+    repository and not from trimesh, so the assertion can disagree with the code. A
+    fixture that compared `measure()` against whatever trimesh returned would be a
+    snapshot: green forever, including on the day the normalisation is wrong.
+
+    **Why `V^(5/3)` and not `V`.** With unit density inertia scales as length^5, so
+    `I/V` still scales as length^2 -- a second size check wearing a shape descriptor's
+    name. `I/V^(5/3)` is dimensionless, which is what makes it say something the
+    extents and the volume do not.
+    """
+
+    BOX = (20.0, 14.0, 6.0)
+
+    def _analytic(self) -> list[float]:
+        a, b, c = self.BOX
+        volume = a * b * c
+        moments = sorted([volume * (b * b + c * c) / 12.0,
+                          volume * (a * a + c * c) / 12.0,
+                          volume * (a * a + b * b) / 12.0])
+        return [m / volume ** (5.0 / 3.0) for m in moments]
+
+    def test_a_solid_box_matches_its_closed_form_principal_moments(self) -> None:
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "box.stl"
+            trimesh.creation.box(extents=self.BOX).export(path)
+            got = blind.measure(path)["inertia_normalised"]
+        self.assertEqual(3, len(got))
+        self.assertEqual(sorted(got), list(got), "reported sorted, so orientation drops out")
+        for want, have in zip(self._analytic(), got):
+            self.assertAlmostEqual(want, have, places=6,
+                                   msg="the descriptor must agree with mechanics, "
+                                       "not merely with whatever the mesh library says")
+
+    def test_the_descriptor_is_scale_free(self) -> None:
+        """The property that makes it a *shape* descriptor.
+
+        A box and the same box at ten times the size are the same shape, so a
+        dimensionless descriptor has to give the same triple. If this ever fails while
+        the test above passes, the normalisation exponent is wrong -- which is exactly
+        the mistake `I/V` would have been.
+        """
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            small = Path(raw) / "small.stl"
+            large = Path(raw) / "large.stl"
+            trimesh.creation.box(extents=self.BOX).export(small)
+            trimesh.creation.box(extents=[v * 10 for v in self.BOX]).export(large)
+            a = blind.measure(small)["inertia_normalised"]
+            b = blind.measure(large)["inertia_normalised"]
+        for one, ten in zip(a, b):
+            self.assertAlmostEqual(one, ten, places=6)
+
+    def test_a_candidate_with_no_volume_reports_no_descriptor(self) -> None:
+        """`I/V^(5/3)` divides by volume, so a non-watertight candidate has none.
+
+        The report already models the idea: `score` prints `--` for the volume of an
+        open surface rather than a number nobody can stand behind. The descriptor goes
+        one step further and is absent at `measure` time, and the difference is not
+        fussiness. An open mesh still has *a* volume -- a defined float, merely
+        meaningless -- so `measure` reports it and `score` withholds it. Dividing by
+        that volume produces NaN or infinity, which is not a value being withheld but
+        no value at all, and a NaN formatted into a table reads exactly like a
+        measurement.
+        """
+        import numpy as np
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "sheet.stl"
+            vertices = np.array([[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0]], float)
+            trimesh.Trimesh(vertices=vertices, faces=np.array([[0, 1, 2], [0, 2, 3]]),
+                            process=False).export(path)
+            got = blind.measure(path)
+        self.assertFalse(got["watertight"])
+        # `volume_mm3` stays a float here on purpose: `measure` reports what it
+        # measured and `score` is what withholds it. Asserting `None` at this seam was
+        # my own first draft, and it was a claim about a design this file does not have.
+        self.assertIsInstance(got["volume_mm3"], float)
+        self.assertIsNone(got["inertia_normalised"])
+
+
+class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
+    """What a user actually reads has to carry the new row.
+
+    `--json` is the exception, not the interface: without it `main` prints `_table`,
+    so a descriptor computed and put in the payload but never printed is a capability
+    the tool has and the reader does not. That is how this nearly shipped -- the row
+    was in `score`'s dict, the table still listed four measurements, and nothing in
+    either tier looked at the printed output, because `_table` had no test at all.
+
+    The seam under test is report dict in, text out. It is the boundary `main`
+    itself uses, so a change to how a score is computed cannot break these, and a
+    change to what a reader sees cannot pass them.
+    """
+
+    def _report(self, inertia: list) -> dict:
+        """A report with one of everything, so the table has something to print."""
+        return {
+            "entry_id": "some-entry",
+            "extents": [{"axis": "smallest", "candidate_mm": 6.0, "reference_mm": 6.0,
+                         "delta_mm": 0.0, "band_mm": 0.12, "agrees": True,
+                         "given": False}],
+            "volume": {"candidate_mm3": 1680.0, "reference_mm3": 1680.0,
+                       "band_mm3": 33.6, "agrees": True, "given": False, "why": None},
+            "bodies": {"candidate": 1, "reference": 1, "agrees": True},
+            "watertight": {"candidate": True, "reference": True, "agrees": True},
+            "inertia": inertia,
+            "score": None,
+            "reconstructed_axes": 1,
+            "given_extents": [],
+            "given_volume": False,
+            "what_this_is_not": "an intentionally short stand-in.",
+        }
+
+    def _printed(self, report: dict) -> str:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            blind._table(report)
+        return buffer.getvalue()
+
+    def test_the_moments_reach_the_reader(self) -> None:
+        text = self._printed(self._report([
+            self._row("smallest", 0.155925, 0.155925, True),
+            self._row("middle", 0.346678, 0.346678, True),
+            self._row("largest", 0.445786, 0.445786, True)]))
+        self.assertIn("inertia", text)
+        for moment in ("0.155925", "0.346678", "0.445786"):
+            self.assertIn(moment, text,
+                          msg="a moment that is computed and not printed is a "
+                              "measurement the reader never receives")
+
+    def test_a_shape_that_disagrees_is_marked_off(self) -> None:
+        """The impostor's own numbers, so the mark under test is the one it earns."""
+        text = self._printed(self._report([
+            self._row("smallest", 0.254963, 0.155925, False),
+            self._row("middle", 0.462818, 0.346678, False),
+            self._row("largest", 0.664138, 0.445786, False)]))
+        self.assertEqual(3, text.count("OFF"))
+        self.assertIn("0.254963", text)
+
+    def test_the_mark_is_the_rows_verdict_and_not_a_second_comparison(self) -> None:
+        """The case a redone comparison gets wrong, which is why this exists.
+
+        The payload publishes rounded figures. A delta of 0.0100004 against a band of
+        0.01 rounds to exactly 0.01 -- within band by the published numbers, outside
+        it in fact. A table that re-derives the mark from what it printed would say
+        `ok` about a row the scorer scored False, and the two halves of one report
+        would disagree at the edge. The row carries the verdict; the table renders it.
+        """
+        row = self._row("smallest", 1.0100004, 1.0, False)
+        self.assertEqual(row["delta"], row["band"],
+                         "the fixture only tests this if the rounded delta and the "
+                         "band are indistinguishable")
+        lines = self._inertia_lines(self._printed(self._report([row] * 3)))
+        self.assertEqual(3, len(lines))
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertTrue(line.startswith("OFF"), line)
+
+    def test_an_unavailable_descriptor_prints_no_number(self) -> None:
+        """The volume row's own convention: `--`, and a reason, never a value.
+
+        A `None` formatted into the table would read as a measurement, which is the
+        failure the withholding exists to prevent.
+        """
+        text = self._printed(self._report(blind._inertia_rows(None, None)))
+        self.assertIn("inertia", text)
+        self.assertIn("--", text)
+        self.assertNotIn("None", text,
+                         msg="`None` printed into a column reads exactly like a "
+                             "value; the row must say it has none")
+        self.assertIn("no closed solid", text)
+
+    def _inertia_lines(self, text: str) -> list[str]:
+        """Just the descriptor block: the dimensional rows above it print marks too."""
+        after = text.split("inertia  I/V^(5/3)", 1)[1].split(chr(10), 1)[1]
+        return [line.strip() for line in after.splitlines()
+                if line.strip() and not line.strip().startswith("The question")][:3]
+
+    def _row(self, moment: str, candidate: float, reference: float,
+             agrees: bool) -> dict:
+        """One row as the scorer emits it: the verdict stated, not derived."""
+        delta = candidate - reference
+        return {"moment": moment, "candidate": round(candidate, 6),
+                "reference": round(reference, 6), "delta": round(delta, 6),
+                "relative_delta": round(delta / reference, 6),
+                "band": round(abs(reference) * blind.INERTIA_AGREEMENT_FRACTION, 6),
+                "agrees": agrees, "why": None}
+
+
+class TheShapeIsScoredOneMomentAtATimeTest(unittest.TestCase):
+    """Three rows with three verdicts, not one verdict over three numbers.
+
+    The argument `score` makes against a weighted total, one level down: a part right
+    about two of its principal axes and wrong about the third has a specific defect,
+    and a rolled-up boolean hides which. `extents` already has this shape -- one row
+    per axis -- and the descriptor that can see shape earns it more, not less.
+    """
+
+    def test_a_part_wrong_about_one_axis_says_which(self) -> None:
+        rows = blind._inertia_rows([0.20, 0.30, 0.50], [0.20, 0.30, 0.40])
+        self.assertEqual(["smallest", "middle", "largest"],
+                         [row["moment"] for row in rows])
+        self.assertEqual([True, True, False], [row["agrees"] for row in rows])
+
+    def test_the_delta_is_published_relative_because_the_band_is(self) -> None:
+        """One percent *of the reference moment*, so an absolute delta needs dividing.
+
+        Publishing only the absolute delta leaves the reader to redo the arithmetic
+        the band is already expressed in.
+        """
+        rows = blind._inertia_rows([0.22, 0.30, 0.40], [0.20, 0.30, 0.40])
+        self.assertAlmostEqual(0.10, rows[0]["relative_delta"], places=6)
+        self.assertAlmostEqual(0.0, rows[1]["relative_delta"], places=6)
+
+    def test_the_verdict_uses_exact_values_not_the_rounded_ones(self) -> None:
+        """A row whose published numbers cannot distinguish it from agreement.
+
+        `0.0100004` against a band of `0.01` is outside by four ten-millionths and
+        rounds to the band exactly. The verdict has to come from the measurement, or
+        a band edge is decided by display precision.
+        """
+        rows = blind._inertia_rows([1.0100004, 2.0, 3.0], [1.0, 2.0, 3.0])
+        self.assertEqual(rows[0]["delta"], rows[0]["band"],
+                         "published, this row is indistinguishable from agreement")
+        self.assertFalse(rows[0]["agrees"],
+                         "rounded, this row looks like agreement; it is not")
+        self.assertEqual([True, True], [row["agrees"] for row in rows[1:]],
+                         "and the two exact rows are unaffected")
+
+    def test_an_absent_side_still_answers_for_all_three_moments(self) -> None:
+        """Fail closed per moment, and name the reference where there is one."""
+        rows = blind._inertia_rows(None, [0.20, 0.30, 0.40])
+        self.assertEqual(3, len(rows))
+        for row in rows:
+            with self.subTest(moment=row["moment"]):
+                self.assertIsNone(row["candidate"])
+                self.assertIsNone(row["agrees"])
+                self.assertIn("no closed solid", row["why"])
+        self.assertEqual([0.2, 0.3, 0.4], [row["reference"] for row in rows])
 
 
 if __name__ == "__main__":
