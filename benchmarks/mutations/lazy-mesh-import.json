@@ -1,0 +1,46 @@
+{
+  "target": "the mesh stack stays out of a command that never touches geometry, and the walk that proves it",
+  "note": "Four guards, including the instrument itself: a graph test that silently stops walking asserts nothing while looking green, which is not hypothetical -- it is how the first draft of this test passed over `from . import compare`. The two deferred-import entries are named against tests that were MEASURED to execute the function, not assumed to: the first attempt named test_compare.py, which touches MeshAnalysisContext but calls `_slab_area` zero times, and the mutation survived. Tracing the whole gate then showed `_slab_area` runs 5524 times (test_bindings.py 70 of them) while `disc_area` runs ZERO -- test_pipeline.py:3126 replaces it with a stub -- so that one is proven in heavy, where the control calls it for real. Run with: uv run python tools/mutate.py benchmarks/mutations/lazy-mesh-import.json",
+  "mutations": [
+    {
+      "name": "the-type-checking-block-becomes-a-real-import",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "if TYPE_CHECKING:  # pragma: no cover - annotations only, never evaluated",
+      "replacement": "if True:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_import_cost.py::ANonGeometryCommandDoesNotPayForTheMeshStackTest"
+      ],
+      "why": "the defect exactly as it was: `trimesh` back in the module body, so `doctor`, `status`, `init` and `route` each wait ~1.3 s for a library they never call. The block is only free because TYPE_CHECKING is false at runtime, and nothing but this test says so"
+    },
+    {
+      "name": "a-deferred-import-that-is-not-there-when-it-is-needed",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "        import trimesh\n\n        span = float(max(self.extents)) * 4.0 + 10.0",
+      "replacement": "        span = float(max(self.extents)) * 4.0 + 10.0",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_bindings.py"
+      ],
+      "why": "moving an import into a function turns a startup cost into a deferred crash if it lands in the wrong one, and lint cannot see it because TYPE_CHECKING still binds the name. Every section measurement runs through `_slab_area`; test_bindings.py executes it 70 times, which is why it is named here and test_compare.py -- which executes it never -- is not"
+    },
+    {
+      "name": "the-disc-probe-loses-its-import",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "            import trimesh\n\n            window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,",
+      "replacement": "            window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,",
+      "tests": [
+        "benchmarks/heavy/test_import_graph.py::TheCommandLineDoesNotLoadTheMeshStackTest::test_every_deferred_import_still_resolves_when_it_is_needed"
+      ],
+      "why": "the function with no L0 coverage at all, which is exactly where a deferred import is most dangerous: `commission.py:247` calls it in production and the only test that names it replaces it with a stub. Proven in heavy instead, and named here so the gap is recorded rather than discovered by a real job"
+    },
+    {
+      "name": "the-walk-stops-at-from-dot-import",
+      "file": "skills/3d-modeling/scripts/pipeline/test_import_cost.py",
+      "anchor": "                elif node.level:\n                    # `from . import compare` -- the module is None and the siblings",
+      "replacement": "                elif False:\n                    # `from . import compare` -- the module is None and the siblings",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_import_cost.py::ANonGeometryCommandDoesNotPayForTheMeshStackTest"
+      ],
+      "why": "the instrument failing open. `cli.py` reaches everything through `from . import compare` / `from . import screening`, so without this branch the walk covers exactly one module, finds no mesh import and passes -- which is what the first draft did, until an assertion that the walk must reach `analysis` caught it"
+    }
+  ]
+}
