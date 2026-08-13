@@ -198,6 +198,38 @@ def _text(value: Any, what: str, *, required: bool = True) -> str | None:
     return value
 
 
+def _unit(row: dict[str, Any], what: str, *, default: str) -> str:
+    """The unit as written, or `default` when the key is absent.
+
+    D33. `str(row.get("unit", default))` conflated two rows that mean different
+    things. A key that is **absent** means "use the default". A key that is
+    **present and not a string** means somebody wrote a unit and it is not one --
+    and `str(None)` is the four-character string `None`, which is not empty, so it
+    satisfied the very check whose message says a number with no unit is a number
+    two readers can read differently. A unitless measurement then travelled through
+    a field that drives design, wearing a unit.
+
+    Only the second case is refused. Refusing the absent one too would break every
+    project that never mentioned a unit, which is why the defaults are part of this
+    rule rather than a concession beside it.
+
+    Deliberately not doing more: no unit vocabulary, no conversion, no
+    normalisation, and the literal string `"None"` -- which somebody can still
+    type -- is left alone. Each of those is a separate decision about what a unit
+    may say, and this function is only about whether one was written at all.
+    """
+    if "unit" not in row:
+        return default
+    value = row["unit"]
+    if not isinstance(value, str):
+        raise S.SchemaError(
+            f"{what}: unit is present and is {type(value).__name__} rather than a "
+            "string. An absent unit takes the default; a written one has to be "
+            "text. Coercing would make `null` into the non-empty string 'None', "
+            "which passes the check that exists to stop a unitless number.")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Rows
 # ---------------------------------------------------------------------------
@@ -1937,7 +1969,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
         envelope_mm=payload.get("envelope_mm"),
         requirements=tuple(
             Requirement(name=str(row.get("name", "")), value=row.get("value"),
-                        unit=str(row.get("unit", "mm")),
+                        unit=_unit(row, "requirements[]", default="mm"),
                         provenance=str(row.get("provenance", "")),
                         source=str(row.get("source", "")),
                         note=str(row.get("note", "")),
@@ -1985,7 +2017,7 @@ def from_payload(payload: dict[str, Any]) -> Project:
         datums=tuple(
             Datum(datum_id=str(row.get("datum_id", "")),
                   value=row.get("value"),
-                  unit=str(row.get("unit", "")),
+                  unit=_unit(row, f"datums[{index}]", default=""),
                   provenance=str(row.get("provenance", "")),
                   derived_from=_derivation(row.get("derived_from"),
                                            f"datums[{index}].derived_from"),
