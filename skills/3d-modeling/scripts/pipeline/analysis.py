@@ -17,10 +17,20 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
-import trimesh
+if TYPE_CHECKING:  # pragma: no cover - annotations only, never evaluated
+    # `from __future__ import annotations` above makes every annotation in this
+    # file a string, so these two names are wanted by a type checker and by nobody
+    # at runtime. Keeping them out of the module body is what stops a command that
+    # never loads a mesh from paying for the mesh stack: measured warm on 22c3b29,
+    # importing `pipeline.cli` cost 1546-1569 ms, of which `trimesh` was
+    # 1320-1336 ms -- 85%, reached only through this module, by `doctor`, `status`,
+    # `init` and `route`, none of which touch geometry. The runtime imports now sit
+    # in the six functions that actually call the library, which is the rule
+    # `diagnose.py` states and every backend already follows.
+    import numpy as np
+    import trimesh
 
 SLAB_MM = 0.02
 
@@ -104,6 +114,11 @@ class MeshAnalysisContext:
                 f"the candidate has no measurable section at z={z:.3f}",
                 code="SECTION_INSTRUMENT_EMPTY",
             )
+        # Above the `try`, not inside it: the handler below turns anything raised
+        # into a MeasurementFailed, and a missing dependency is not a measurement
+        # that failed.
+        import numpy as np
+
         try:
             points = np.vstack([np.asarray(path, dtype=float) for path in section.discrete])
             distances = np.linalg.norm(points[:, :2] - np.asarray(at, dtype=float), axis=1)
@@ -122,6 +137,10 @@ class MeshAnalysisContext:
         return value
 
     def _slab_area(self, z: float) -> float:
+        # Function-local, as everywhere else in this package: a job that never
+        # touches a mesh must not pay the import.
+        import trimesh
+
         span = float(max(self.extents)) * 4.0 + 10.0
         window = trimesh.creation.box(extents=(span, span, SLAB_MM))
         centre = self.normalized.centroid
@@ -138,6 +157,11 @@ class MeshAnalysisContext:
         part the engine cannot measure is a finding, and findings are written
         down.
         """
+        # Above the `try` for the same reason as in `section_bore_diameter_mm`: the
+        # handler turns anything raised into a MeasurementFailed, and an absent
+        # library is not the engine refusing a part.
+        import trimesh
+
         try:
             solid = trimesh.boolean.intersection([self.normalized, window],
                                                  engine="manifold")
@@ -161,6 +185,8 @@ class MeshAnalysisContext:
         """Material area inside one axis-aligned rectangle on a Z plane."""
         key = (round(z, 6), round(at[0], 6), round(at[1], 6), round(size[0], 6), round(size[1], 6))
         if key not in self._windows:
+            import trimesh
+
             window = trimesh.creation.box(extents=(float(size[0]), float(size[1]), SLAB_MM))
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
             solid = self._intersect(window, where=f"the window at z={z:.3f}")
@@ -174,6 +200,8 @@ class MeshAnalysisContext:
         """Material area inside a disc on a Z plane, cached like the rest."""
         key = ("disc", round(z, 6), round(at[0], 6), round(at[1], 6), round(diameter, 6))
         if key not in self._windows:
+            import trimesh
+
             window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,
                                                height=SLAB_MM, sections=192)
             window.apply_translation([float(at[0]), float(at[1]), float(z)])
@@ -206,6 +234,8 @@ class MeshAnalysisContext:
         span = float(max(self.extents)) * 4.0 + 10.0
         extents = [span, span, span]
         extents[axis] = SLAB_MM
+        import trimesh
+
         window = trimesh.creation.box(extents=tuple(extents))
         centre = list(self.normalized.centroid)
         centre[axis] = at
