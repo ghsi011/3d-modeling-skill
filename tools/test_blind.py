@@ -132,5 +132,100 @@ class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
             blind.request(ENTRY, payload)
 
 
+class TheShapeDescriptorIsIntrinsicTest(unittest.TestCase):
+    """Normalised principal inertia: the one descriptor the evidence justified.
+
+    The four dimensional rows -- sorted extents, volume, bodies, watertight -- cannot
+    see shape, and `blind.score`'s own report says so. Measured rather than argued: a
+    plain slab with one rectangular pocket, sized to the deck-support reference's
+    bounding box and volume, passes **every** row while being incapable of the job --
+    no lip, no slot tongue, no bolt hole. Judged by the three descriptors proposed for
+    it, the per-body Euler tuple matched that impostor exactly and normalised surface
+    area sat within 1.7% of it, while the principal moments were 33% to 63% out. So
+    inertia is the whole slice: no Euler, no area.
+
+    **Why the expectations here are closed-form.** A solid box of extents a, b, c at
+    unit density has mass `V = abc` and principal moments `V(b^2+c^2)/12` and its two
+    partners, about the centre of mass. That comes from mechanics, not from this
+    repository and not from trimesh, so the assertion can disagree with the code. A
+    fixture that compared `measure()` against whatever trimesh returned would be a
+    snapshot: green forever, including on the day the normalisation is wrong.
+
+    **Why `V^(5/3)` and not `V`.** With unit density inertia scales as length^5, so
+    `I/V` still scales as length^2 -- a second size check wearing a shape descriptor's
+    name. `I/V^(5/3)` is dimensionless, which is what makes it say something the
+    extents and the volume do not.
+    """
+
+    BOX = (20.0, 14.0, 6.0)
+
+    def _analytic(self) -> list[float]:
+        a, b, c = self.BOX
+        volume = a * b * c
+        moments = sorted([volume * (b * b + c * c) / 12.0,
+                          volume * (a * a + c * c) / 12.0,
+                          volume * (a * a + b * b) / 12.0])
+        return [m / volume ** (5.0 / 3.0) for m in moments]
+
+    def test_a_solid_box_matches_its_closed_form_principal_moments(self) -> None:
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "box.stl"
+            trimesh.creation.box(extents=self.BOX).export(path)
+            got = blind.measure(path)["inertia_normalised"]
+        self.assertEqual(3, len(got))
+        self.assertEqual(sorted(got), list(got), "reported sorted, so orientation drops out")
+        for want, have in zip(self._analytic(), got):
+            self.assertAlmostEqual(want, have, places=6,
+                                   msg="the descriptor must agree with mechanics, "
+                                       "not merely with whatever the mesh library says")
+
+    def test_the_descriptor_is_scale_free(self) -> None:
+        """The property that makes it a *shape* descriptor.
+
+        A box and the same box at ten times the size are the same shape, so a
+        dimensionless descriptor has to give the same triple. If this ever fails while
+        the test above passes, the normalisation exponent is wrong -- which is exactly
+        the mistake `I/V` would have been.
+        """
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            small = Path(raw) / "small.stl"
+            large = Path(raw) / "large.stl"
+            trimesh.creation.box(extents=self.BOX).export(small)
+            trimesh.creation.box(extents=[v * 10 for v in self.BOX]).export(large)
+            a = blind.measure(small)["inertia_normalised"]
+            b = blind.measure(large)["inertia_normalised"]
+        for one, ten in zip(a, b):
+            self.assertAlmostEqual(one, ten, places=6)
+
+    def test_a_candidate_with_no_volume_reports_no_descriptor(self) -> None:
+        """`I/V^(5/3)` divides by volume, so a non-watertight candidate has none.
+
+        The report already models the idea: `score` prints `--` for the volume of an
+        open surface rather than a number nobody can stand behind. The descriptor goes
+        one step further and is absent at `measure` time, and the difference is not
+        fussiness. An open mesh still has *a* volume -- a defined float, merely
+        meaningless -- so `measure` reports it and `score` withholds it. Dividing by
+        that volume produces NaN or infinity, which is not a value being withheld but
+        no value at all, and a NaN formatted into a table reads exactly like a
+        measurement.
+        """
+        import numpy as np
+        import trimesh
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "sheet.stl"
+            vertices = np.array([[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0]], float)
+            trimesh.Trimesh(vertices=vertices, faces=np.array([[0, 1, 2], [0, 2, 3]]),
+                            process=False).export(path)
+            got = blind.measure(path)
+        self.assertFalse(got["watertight"])
+        # `volume_mm3` stays a float here on purpose: `measure` reports what it
+        # measured and `score` is what withholds it. Asserting `None` at this seam was
+        # my own first draft, and it was a claim about a design this file does not have.
+        self.assertIsInstance(got["volume_mm3"], float)
+        self.assertIsNone(got["inertia_normalised"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,25 @@ import corpus                                                    # noqa: E402
 # the other.
 AGREEMENT_FRACTION = corpus.COINCIDENCE_FRACTION
 
+# The shape descriptor gets its own band, calibrated rather than inherited. Borrowing
+# `COINCIDENCE_FRACTION` would have been borrowing a *leak-detection policy* -- how near
+# a stated number may come to an answer before it is suspicious -- to answer a different
+# question: how much this descriptor moves for geometry that has not changed.
+#
+# Measured, on this machine, in one session. A cylinder tessellated at 24, 48, 96 and
+# 192 sections drifts 0.00%, 0.30%, 0.37% and 0.39% from the coarsest -- converging, as
+# a discretisation error should, on well under half a percent. A solid box exported to
+# STL and reloaded, which is the float32 round trip every candidate here makes, drifts
+# 0.0000%. So same-geometry noise is under 0.4%, and 1% leaves better than twice that in
+# hand while staying half the size of the 2% it replaces.
+#
+# It is deliberately the tighter number. The looser one would have let the impostor
+# through: a plain slab matching a reference's box and volume sits 33% to 63% out on
+# these moments, so the band is nowhere near the difference that matters -- but a band
+# chosen for the wrong reason stops being evidence the moment somebody asks where it
+# came from.
+INERTIA_AGREEMENT_FRACTION = 0.01
+
 
 class BlindError(RuntimeError):
     """The benchmark cannot be run as asked. Never a low score."""
@@ -180,19 +199,61 @@ def write_request(entry_id: str, into: Path,
 # --------------------------------------------------------------------------
 
 def measure(path: Path) -> dict[str, Any]:
-    """The four facts a score is made of, off one solid."""
+    """The facts a score is made of, off one solid and one load.
+
+    Four of them are dimensional -- the sorted extents, the volume, the body count and
+    whether the solid is closed -- and between them they cannot see shape. The report
+    says so in its own words, and it is demonstrable rather than cautious: a plain slab
+    with one rectangular pocket, sized to a reference's bounding box and volume, agrees
+    on every one of those rows while being incapable of the job the reference does.
+
+    `inertia_normalised` is the fifth and it is the one that notices. It is the three
+    principal moments of the solid about its own centre of mass at unit density,
+    sorted, each divided by `V**(5/3)`.
+    """
+    import numpy as np
     import trimesh
 
     mesh = trimesh.load(str(path), force="mesh")
     extents = sorted(float(v) for v in mesh.bounding_box.extents)
     raw = [float(v) for v in mesh.bounding_box.extents]
+    volume = float(mesh.volume)
     return {
         "sorted_extents_mm": extents,
         "extent_x": raw[0], "extent_y": raw[1], "extent_z": raw[2],
-        "volume_mm3": float(mesh.volume),
+        "volume_mm3": volume,
         "bodies": int(mesh.body_count),
         "watertight": bool(mesh.is_watertight),
+        "inertia_normalised": _normalised_inertia(mesh, volume, np=np),
     }
+
+
+def _normalised_inertia(mesh, volume: float, *, np) -> list[float] | None:
+    """Sorted principal moments over `V**(5/3)`, or nothing at all.
+
+    **Why the exponent.** At unit density inertia scales as length to the fifth, so
+    `I/V` still scales as length squared -- a second size check wearing a shape
+    descriptor's name, when the extents and the volume already own size. `V**(5/3)`
+    cancels the units exactly, which is what lets this say something the other rows
+    cannot.
+
+    **Why sorted.** The same part modelled lying down and standing up must compare
+    equal, and sorting the triple drops orientation without needing the registration
+    ROADMAP.md's Release 6 owns.
+
+    **Why `None` rather than a number.** An open surface still has *a* volume -- a
+    defined float, merely meaningless -- so `measure` reports it and `score` withholds
+    it. Dividing by it gives NaN or infinity, and that is not a value being withheld
+    but no value at all. A NaN formatted into a report reads exactly like a
+    measurement, which is the failure this whole file exists to avoid.
+    """
+    if not mesh.is_watertight or not (volume > 0.0):
+        return None
+    moments = np.asarray(mesh.principal_inertia_components, dtype=float)
+    if not np.all(np.isfinite(moments)):
+        return None
+    scale = volume ** (5.0 / 3.0)
+    return sorted(float(m) / scale for m in moments)
 
 
 def _given_positions(disclosed: set[str], want: dict[str, Any]) -> set[int]:
@@ -211,6 +272,28 @@ def _given_positions(disclosed: set[str], want: dict[str, Any]) -> set[int]:
         positions |= {index for index, extent in enumerate(order)
                       if abs(extent - value) <= 1e-6}
     return positions
+
+
+def _inertia_row(got: list[float] | None,
+                 want: list[float] | None) -> dict[str, Any]:
+    """Three sorted dimensionless moments, compared one at a time.
+
+    Per eigenvalue rather than as a single distance, for the reason `score` refuses a
+    total: a part that is right about two of its principal axes and wrong about the
+    third has a specific defect, and one rolled-up number hides which.
+    """
+    if got is None or want is None:
+        return {"candidate": got, "reference": want, "agrees": None,
+                "why": "at least one side has no closed solid to take moments of"}
+    deltas = [g - w for g, w in zip(got, want)]
+    bands = [abs(w) * INERTIA_AGREEMENT_FRACTION for w in want]
+    return {
+        "candidate": [round(v, 6) for v in got],
+        "reference": [round(v, 6) for v in want],
+        "delta": [round(v, 6) for v in deltas],
+        "band": [round(v, 6) for v in bands],
+        "agrees": all(abs(d) <= b for d, b in zip(deltas, bands)),
+    }
 
 
 def score(candidate: Path, entry_id: str,
@@ -280,6 +363,12 @@ def score(candidate: Path, entry_id: str,
         "watertight": {"candidate": got["watertight"],
                        "reference": want["watertight"],
                        "agrees": got["watertight"] == want["watertight"]},
+        # The only row that can see shape. Absent on either side means no verdict
+        # rather than a failed one: an open surface has no defensible moments, and
+        # reporting `agrees: False` for it would blame the candidate's shape for
+        # something the watertight row already says plainly.
+        "inertia": _inertia_row(got["inertia_normalised"],
+                                want["inertia_normalised"]),
         "score": None,
         "reconstructed_axes": sum(1 for row in axes if not row["given"]),
         "given_extents": given_extents,

@@ -1,0 +1,26 @@
+{
+  "target": "the blind benchmark's shape descriptor -- normalised principal inertia, the one row that can see shape",
+  "note": "The ruling required the mutation that breaks the intrinsic inertia calculation to be killed by the L0 analytic fixture, so the correctness proof does not depend on an external corpus. Both entries below are killed by tools/test_blind.py, which needs no reference bytes. Every entry was run against the real code and observed to fail the named test. Run with: uv run python tools/mutate.py benchmarks/mutations/blind-inertia.json",
+  "mutations": [
+    {
+      "name": "normalised-by-volume-not-v-to-the-five-thirds",
+      "file": "tools/blind.py",
+      "anchor": "    scale = volume ** (5.0 / 3.0)",
+      "replacement": "    scale = volume",
+      "tests": [
+        "tools/test_blind.py::TheShapeDescriptorIsIntrinsicTest"
+      ],
+      "why": "the exponent is the whole point: at unit density inertia scales as length^5, so dividing by V leaves a quantity scaling as length^2 -- a second size check wearing a shape descriptor's name. The closed-form box fixture catches the value, and the scale-free fixture catches it again from the other side, because a box and the same box ten times larger stop agreeing"
+    },
+    {
+      "name": "a-degenerate-candidate-reports-a-number-anyway",
+      "file": "tools/blind.py",
+      "anchor": "    if not mesh.is_watertight or not (volume > 0.0):\n        return None",
+      "replacement": "    if False:\n        return None",
+      "tests": [
+        "tools/test_blind.py::TheShapeDescriptorIsIntrinsicTest"
+      ],
+      "why": "an open surface divides by a zero or meaningless volume and the descriptor becomes NaN or infinity, which formats into the report looking exactly like a measurement -- the failure this file exists to avoid"
+    }
+  ]
+}
