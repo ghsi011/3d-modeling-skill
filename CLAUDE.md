@@ -1,5 +1,12 @@
 read AGENTS.md
 
+## Review workflow
+
+How a slice travels from measurement to merge, and what a review packet has to contain:
+`docs/agents/review-workflow.md`. It binds the implementer *and* the reviewer, and it is
+process rather than permission — nothing in it relaxes `AGENTS.md` or grants authority
+`AGENTS.md` withholds.
+
 ## Agent skills
 
 Configuration for agent skills that look for it. These three files hold *where things
