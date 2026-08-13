@@ -371,14 +371,18 @@ class TheShapeDescriptorRejectsAnImpostorTest(unittest.TestCase):
         self.assertTrue(report["bodies"]["agrees"], report["bodies"])
         self.assertTrue(report["watertight"]["agrees"], report["watertight"])
 
-        # Then the point of the slice.
-        self.assertFalse(report["inertia"]["agrees"],
-                         "the descriptor exists to catch exactly this part")
-        deltas = report["inertia"]["delta"]
-        bands = report["inertia"]["band"]
-        self.assertTrue(all(abs(d) > 10 * b for d, b in zip(deltas, bands)),
-                        "and not marginally: the miss is an order of magnitude "
-                        f"outside the band, {deltas} against {bands}")
+        # Then the point of the slice, read one moment at a time as the rows are
+        # scored: an aggregate would say only that something was wrong.
+        rows = report["inertia"]
+        self.assertEqual(3, len(rows))
+        for row in rows:
+            with self.subTest(moment=row["moment"]):
+                self.assertFalse(row["agrees"],
+                                 "the descriptor exists to catch exactly this part")
+                self.assertGreater(
+                    abs(row["delta"]), 10 * row["band"],
+                    "and not marginally: the miss is an order of magnitude outside "
+                    f"the band, {row['delta']} against {row['band']}")
 
     def test_the_reference_agrees_with_itself_on_the_descriptor(self) -> None:
         """The converse, without which the rejection above proves only strictness.
@@ -390,7 +394,9 @@ class TheShapeDescriptorRejectsAnImpostorTest(unittest.TestCase):
         if not _fetched():
             self.skipTest("the corpus is not on this machine")
         report = blind.score(corpus.resolve(ENTRY), ENTRY)
-        self.assertTrue(report["inertia"]["agrees"], report["inertia"])
+        self.assertEqual([True, True, True],
+                         [row["agrees"] for row in report["inertia"]],
+                         report["inertia"])
 
     def test_the_printed_score_a_reader_sees_carries_the_rejection(self) -> None:
         """End to end, through the output `main` actually prints.
@@ -412,8 +418,8 @@ class TheShapeDescriptorRejectsAnImpostorTest(unittest.TestCase):
         text = buffer.getvalue()
 
         self.assertIn("inertia", text)
-        self.assertIn("OFF", text, "the reader has to be told it failed")
-        for moment in report["inertia"]["candidate"]:
-            self.assertIn(f"{moment:.6f}", text)
+        self.assertEqual(3, text.count("OFF"), "the reader has to be told it failed")
+        for row in report["inertia"]:
+            self.assertIn(f"{row['candidate']:.6f}", text)
         # And the prose under the table no longer contradicts the row above it.
         self.assertNotIn("nothing about shape", text)

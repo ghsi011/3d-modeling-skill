@@ -286,26 +286,53 @@ def _given_positions(disclosed: set[str], want: dict[str, Any]) -> set[int]:
     return positions
 
 
-def _inertia_row(got: list[float] | None,
-                 want: list[float] | None) -> dict[str, Any]:
-    """Three sorted dimensionless moments, compared one at a time.
+def _inertia_rows(got: list[float] | None,
+                  want: list[float] | None) -> list[dict[str, Any]]:
+    """Three sorted dimensionless moments, each **its own scored row**.
 
     Per eigenvalue rather than as a single distance, for the reason `score` refuses a
     total: a part that is right about two of its principal axes and wrong about the
-    third has a specific defect, and one rolled-up number hides which.
+    third has a specific defect, and one rolled-up number hides which. Three rows with
+    three verdicts is that argument carried into the payload rather than stopping at
+    the docstring -- the same shape `extents` already has, one row per axis.
+
+    **Each row owns its verdict, and that is load-bearing.** An aggregate boolean plus
+    rounded arrays forces every reader -- `_table` included -- to redo the comparison
+    from published numbers, and at a band edge the redone comparison can disagree with
+    the one the scorer made: a delta of 0.0100004 against a band of 0.01 rounds to
+    0.01, which is *within* band by the published figures and outside it in fact. So
+    `agrees` here is computed from the exact values and printed rather than recomputed.
+
+    `relative_delta` because the calibration is relative -- one percent *of the
+    reference moment*. An absolute delta cannot be read against that without dividing
+    it again, which is the arithmetic a reader should not have to do.
     """
+    labels = "smallest middle largest".split()
     if got is None or want is None:
-        return {"candidate": got, "reference": want, "agrees": None,
-                "why": "at least one side has no closed solid to take moments of"}
-    deltas = [g - w for g, w in zip(got, want)]
-    bands = [abs(w) * INERTIA_AGREEMENT_FRACTION for w in want]
-    return {
-        "candidate": [round(v, 6) for v in got],
-        "reference": [round(v, 6) for v in want],
-        "delta": [round(v, 6) for v in deltas],
-        "band": [round(v, 6) for v in bands],
-        "agrees": all(abs(d) <= b for d, b in zip(deltas, bands)),
-    }
+        # Fail closed, per moment: no candidate number at all rather than a number
+        # with a caveat, since a figure in that column reads as a measurement.
+        why = "at least one side has no closed solid to take moments of"
+        return [{"moment": label, "candidate": None,
+                 "reference": round(want[index], 6) if want is not None else None,
+                 "delta": None, "relative_delta": None, "band": None,
+                 "agrees": None, "why": why}
+                for index, label in enumerate(labels)]
+    rows = []
+    for index, label in enumerate(labels):
+        delta = got[index] - want[index]
+        band = abs(want[index]) * INERTIA_AGREEMENT_FRACTION
+        rows.append({
+            "moment": label,
+            "candidate": round(got[index], 6),
+            "reference": round(want[index], 6),
+            "delta": round(delta, 6),
+            "relative_delta": (round(delta / want[index], 6)
+                               if want[index] else None),
+            "band": round(band, 6),
+            "agrees": abs(delta) <= band,
+            "why": None,
+        })
+    return rows
 
 
 def score(candidate: Path, entry_id: str,
@@ -376,12 +403,12 @@ def score(candidate: Path, entry_id: str,
         "watertight": {"candidate": got["watertight"],
                        "reference": want["watertight"],
                        "agrees": got["watertight"] == want["watertight"]},
-        # The only row that can see shape. Absent on either side means no verdict
+        # The only rows that can see shape. Absent on either side means no verdict
         # rather than a failed one: an open surface has no defensible moments, and
         # reporting `agrees: False` for it would blame the candidate's shape for
         # something the watertight row already says plainly.
-        "inertia": _inertia_row(got["inertia_normalised"],
-                                want["inertia_normalised"]),
+        "inertia": _inertia_rows(got["inertia_normalised"],
+                                 want["inertia_normalised"]),
         "score": None,
         "reconstructed_axes": sum(1 for row in axes if not row["given"]),
         "given_extents": given_extents,
@@ -429,22 +456,21 @@ def _table(report: dict[str, Any]) -> None:
         keys = [k for k in row if k.startswith("candidate")]
         ref = [k for k in row if k.startswith("reference")]
         print(f"  {mark} {name:8s} {row[keys[0]]!s:>9} against {row[ref[0]]!s:>9}")
-    # Printed per moment rather than as one verdict, for the reason `_inertia_row`
-    # compares them one at a time: a part right about two of its principal axes and
-    # wrong about the third has a specific defect, and a single mark hides which.
-    # This row is what a reader gets that the four above cannot give them, so it is
-    # printed by default -- `--json` is the exception, not the interface.
-    inertia = report["inertia"]
+    # These rows are what a reader gets that the four above cannot give them, so they
+    # are printed by default -- `--json` is the exception, not the interface. Each
+    # mark is the row's **own** verdict, never recomputed here: the payload publishes
+    # rounded figures, and at a band edge a comparison redone from them disagrees with
+    # the one the scorer made. The table's job is to show the verdict, not to re-reach
+    # it. Deltas are shown relative because the band is relative.
     print("\n  inertia  I/V^(5/3), sorted -- orientation-free and dimensionless")
-    if inertia["agrees"] is None:
-        print(f"  --  {inertia['why']}")
-    else:
-        for label, cand, ref_v, delta, band in zip(
-                "smallest middle largest".split(), inertia["candidate"],
-                inertia["reference"], inertia["delta"], inertia["band"]):
-            print(f"  {'ok ' if abs(delta) <= band else 'OFF'} {label:8s} "
-                  f"{cand:9.6f} against {ref_v:9.6f}  "
-                  f"({delta:+.6f}, band {band:.6f})")
+    for row in report["inertia"]:
+        mark = {True: "ok ", False: "OFF", None: "-- "}[row["agrees"]]
+        if row["agrees"] is None:
+            print(f"  {mark} {row['moment']:8s} {row['why']}")
+        else:
+            print(f"  {mark} {row['moment']:8s} {row['candidate']:9.6f} against "
+                  f"{row['reference']:9.6f}  ({row['relative_delta']:+.2%}, band "
+                  f"{INERTIA_AGREEMENT_FRACTION:.0%})")
     if report["given_extents"] or report["given_volume"]:
         parts = []
         if report["given_extents"]:

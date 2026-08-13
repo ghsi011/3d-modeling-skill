@@ -243,7 +243,7 @@ class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
     change to what a reader sees cannot pass them.
     """
 
-    def _report(self, inertia: dict) -> dict:
+    def _report(self, inertia: list) -> dict:
         """A report with one of everything, so the table has something to print."""
         return {
             "entry_id": "some-entry",
@@ -269,12 +269,10 @@ class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
         return buffer.getvalue()
 
     def test_the_moments_reach_the_reader(self) -> None:
-        text = self._printed(self._report(
-            {"candidate": [0.155925, 0.346678, 0.445786],
-             "reference": [0.155925, 0.346678, 0.445786],
-             "delta": [0.0, 0.0, 0.0],
-             "band": [0.001559, 0.003467, 0.004458],
-             "agrees": True}))
+        text = self._printed(self._report([
+            self._row("smallest", 0.155925, 0.155925, True),
+            self._row("middle", 0.346678, 0.346678, True),
+            self._row("largest", 0.445786, 0.445786, True)]))
         self.assertIn("inertia", text)
         for moment in ("0.155925", "0.346678", "0.445786"):
             self.assertIn(moment, text,
@@ -283,14 +281,31 @@ class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
 
     def test_a_shape_that_disagrees_is_marked_off(self) -> None:
         """The impostor's own numbers, so the mark under test is the one it earns."""
-        text = self._printed(self._report(
-            {"candidate": [0.254963, 0.462818, 0.664138],
-             "reference": [0.155925, 0.346678, 0.445786],
-             "delta": [0.099038, 0.116140, 0.218352],
-             "band": [0.001559, 0.003467, 0.004458],
-             "agrees": False}))
-        self.assertIn("OFF", text)
+        text = self._printed(self._report([
+            self._row("smallest", 0.254963, 0.155925, False),
+            self._row("middle", 0.462818, 0.346678, False),
+            self._row("largest", 0.664138, 0.445786, False)]))
+        self.assertEqual(3, text.count("OFF"))
         self.assertIn("0.254963", text)
+
+    def test_the_mark_is_the_rows_verdict_and_not_a_second_comparison(self) -> None:
+        """The case a redone comparison gets wrong, which is why this exists.
+
+        The payload publishes rounded figures. A delta of 0.0100004 against a band of
+        0.01 rounds to exactly 0.01 -- within band by the published numbers, outside
+        it in fact. A table that re-derives the mark from what it printed would say
+        `ok` about a row the scorer scored False, and the two halves of one report
+        would disagree at the edge. The row carries the verdict; the table renders it.
+        """
+        row = self._row("smallest", 1.0100004, 1.0, False)
+        self.assertEqual(row["delta"], row["band"],
+                         "the fixture only tests this if the rounded delta and the "
+                         "band are indistinguishable")
+        lines = self._inertia_lines(self._printed(self._report([row] * 3)))
+        self.assertEqual(3, len(lines))
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertTrue(line.startswith("OFF"), line)
 
     def test_an_unavailable_descriptor_prints_no_number(self) -> None:
         """The volume row's own convention: `--`, and a reason, never a value.
@@ -298,16 +313,81 @@ class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
         A `None` formatted into the table would read as a measurement, which is the
         failure the withholding exists to prevent.
         """
-        text = self._printed(self._report(
-            {"candidate": None, "reference": [0.155925, 0.346678, 0.445786],
-             "agrees": None,
-             "why": "at least one side has no closed solid to take moments of"}))
+        text = self._printed(self._report(blind._inertia_rows(None, None)))
         self.assertIn("inertia", text)
         self.assertIn("--", text)
         self.assertNotIn("None", text,
                          msg="`None` printed into a column reads exactly like a "
                              "value; the row must say it has none")
         self.assertIn("no closed solid", text)
+
+    def _inertia_lines(self, text: str) -> list[str]:
+        """Just the descriptor block: the dimensional rows above it print marks too."""
+        after = text.split("inertia  I/V^(5/3)", 1)[1].split(chr(10), 1)[1]
+        return [line.strip() for line in after.splitlines()
+                if line.strip() and not line.strip().startswith("The question")][:3]
+
+    def _row(self, moment: str, candidate: float, reference: float,
+             agrees: bool) -> dict:
+        """One row as the scorer emits it: the verdict stated, not derived."""
+        delta = candidate - reference
+        return {"moment": moment, "candidate": round(candidate, 6),
+                "reference": round(reference, 6), "delta": round(delta, 6),
+                "relative_delta": round(delta / reference, 6),
+                "band": round(abs(reference) * blind.INERTIA_AGREEMENT_FRACTION, 6),
+                "agrees": agrees, "why": None}
+
+
+class TheShapeIsScoredOneMomentAtATimeTest(unittest.TestCase):
+    """Three rows with three verdicts, not one verdict over three numbers.
+
+    The argument `score` makes against a weighted total, one level down: a part right
+    about two of its principal axes and wrong about the third has a specific defect,
+    and a rolled-up boolean hides which. `extents` already has this shape -- one row
+    per axis -- and the descriptor that can see shape earns it more, not less.
+    """
+
+    def test_a_part_wrong_about_one_axis_says_which(self) -> None:
+        rows = blind._inertia_rows([0.20, 0.30, 0.50], [0.20, 0.30, 0.40])
+        self.assertEqual(["smallest", "middle", "largest"],
+                         [row["moment"] for row in rows])
+        self.assertEqual([True, True, False], [row["agrees"] for row in rows])
+
+    def test_the_delta_is_published_relative_because_the_band_is(self) -> None:
+        """One percent *of the reference moment*, so an absolute delta needs dividing.
+
+        Publishing only the absolute delta leaves the reader to redo the arithmetic
+        the band is already expressed in.
+        """
+        rows = blind._inertia_rows([0.22, 0.30, 0.40], [0.20, 0.30, 0.40])
+        self.assertAlmostEqual(0.10, rows[0]["relative_delta"], places=6)
+        self.assertAlmostEqual(0.0, rows[1]["relative_delta"], places=6)
+
+    def test_the_verdict_uses_exact_values_not_the_rounded_ones(self) -> None:
+        """A row whose published numbers cannot distinguish it from agreement.
+
+        `0.0100004` against a band of `0.01` is outside by four ten-millionths and
+        rounds to the band exactly. The verdict has to come from the measurement, or
+        a band edge is decided by display precision.
+        """
+        rows = blind._inertia_rows([1.0100004, 2.0, 3.0], [1.0, 2.0, 3.0])
+        self.assertEqual(rows[0]["delta"], rows[0]["band"],
+                         "published, this row is indistinguishable from agreement")
+        self.assertFalse(rows[0]["agrees"],
+                         "rounded, this row looks like agreement; it is not")
+        self.assertEqual([True, True], [row["agrees"] for row in rows[1:]],
+                         "and the two exact rows are unaffected")
+
+    def test_an_absent_side_still_answers_for_all_three_moments(self) -> None:
+        """Fail closed per moment, and name the reference where there is one."""
+        rows = blind._inertia_rows(None, [0.20, 0.30, 0.40])
+        self.assertEqual(3, len(rows))
+        for row in rows:
+            with self.subTest(moment=row["moment"]):
+                self.assertIsNone(row["candidate"])
+                self.assertIsNone(row["agrees"])
+                self.assertIn("no closed solid", row["why"])
+        self.assertEqual([0.2, 0.3, 0.4], [row["reference"] for row in rows])
 
 
 if __name__ == "__main__":
