@@ -14,22 +14,34 @@ Nothing in this file lets the first reach what the second reads: it calls
 `corpus.question_ids` and `corpus.request_view` and never `corpus._entries`,
 so a path or a digest cannot arrive on the asking side even by accident.
 
-**What a score is, exactly.** Four measurements, and the claim stops there:
+**What a score is, exactly.** Four dimensional measurements and one shape
+descriptor, and the claim stops there:
 
 * the three bounding-box extents, **sorted** -- so a part modelled lying down
   and the same part standing up compare equal, and no registration or fitting
   is needed to say so. Orientation drops out; nothing else does;
 * the solid volume;
 * the body count;
-* whether the solid is closed.
+* whether the solid is closed;
+* the three principal moments of inertia about the solid's own centre of mass
+  at unit density, sorted and each divided by `V^(5/3)`. Dimensionless, so it
+  says something the four above cannot: how the material is distributed rather
+  than how much of it there is.
 
-That is **dimensional agreement, not shape equivalence.** Two quite different
-parts can share a bounding box and a volume -- a hollow shell and a lattice
-will, and so will a plate with the holes in the wrong places. A score here says
-the candidate is the right size and the right amount of material. It does not
-say it is the right part, and `ROADMAP.md`'s Release 6 owns the comparison that
-would: deterministic geometric difference, which needs the registration this
-deliberately avoids.
+The first four are **dimensional agreement, not shape equivalence.** Two quite
+different parts can share a bounding box and a volume -- a hollow shell and a
+lattice will, and so will a plate with the holes in the wrong places. Measured
+here rather than argued: a plain slab sized to the deck-support reference's
+bounding box and volume passes all four while being incapable of the job.
+Normalised inertia is what rejects that slab, which is why it is the fifth row
+and why it is the only one of the three descriptors proposed with it that
+shipped -- the per-body Euler tuple matched the impostor exactly and normalised
+area sat within 1.7% of it.
+
+Inertia narrows the claim; it does not close it. Three numbers cannot certify a
+shape, and distinct solids can share all three. `ROADMAP.md`'s Release 6 still
+owns the comparison that would settle it: deterministic geometric difference,
+which needs the registration this deliberately avoids.
 
 **Why the envelope is not taken from the reference.** `design-tool run` requires
 `envelope_mm` whenever geometry is authored -- it refuses rather than guessing.
@@ -298,12 +310,13 @@ def _inertia_row(got: list[float] | None,
 
 def score(candidate: Path, entry_id: str,
           payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """How close a blind reconstruction landed, on four measurements.
+    """How close a blind reconstruction landed, on four measurements and one descriptor.
 
     Never a single number. `ARCHITECTURE.md` 8.5's argument against a weighted
     total applies here as much as in `compare`: rolling "the right size" and
     "closed solid" into one figure hides which of them failed, and the answer a
-    reader acts on is which one.
+    reader acts on is which one. The inertia row extends that rather than
+    breaking it -- three moments compared one at a time, not one distance.
     """
     candidate = Path(candidate)
     if not candidate.is_file():
@@ -374,13 +387,19 @@ def score(candidate: Path, entry_id: str,
         "given_extents": given_extents,
         "given_volume": volume_given,
         "what_this_is_not": (
-            "dimensional agreement on four measurements, and nothing about "
-            "shape. Measured rather than asserted: a plain slab with one "
+            "dimensional agreement on four measurements, plus one "
+            "orientation-free shape descriptor -- and still not shape "
+            "equivalence. Measured rather than asserted: a plain slab with one "
             "rectangular pocket, sized to this reference's bounding box and "
-            "volume, agrees on every row -- and so does the same slab with x "
-            "and y swapped, which would not fit the extrusion the brief "
-            "specifies. Sorting the extents drops orientation and also drops "
-            "which axis is which. In the other direction the band is tight: two "
+            "volume, agrees on every dimensional row -- and so does the same "
+            "slab with x and y swapped, which would not fit the extrusion the "
+            "brief specifies. Sorting the extents drops orientation and also "
+            "drops which axis is which. Normalised principal inertia is what "
+            "rejects that slab, by 33 to 63 percent, and it is the only row "
+            "here that can see shape at all. It still cannot certify one: it is "
+            "three numbers, and distinct solids can share all three, so "
+            "agreement is evidence rather than proof. In the other direction "
+            "the band is tight: two "
             "percent of this part's volume is about one small through-hole, so "
             "whether a correct reconstruction passes the volume row can turn on "
             "a feature the brief never dimensioned. Deterministic geometric "
@@ -410,6 +429,22 @@ def _table(report: dict[str, Any]) -> None:
         keys = [k for k in row if k.startswith("candidate")]
         ref = [k for k in row if k.startswith("reference")]
         print(f"  {mark} {name:8s} {row[keys[0]]!s:>9} against {row[ref[0]]!s:>9}")
+    # Printed per moment rather than as one verdict, for the reason `_inertia_row`
+    # compares them one at a time: a part right about two of its principal axes and
+    # wrong about the third has a specific defect, and a single mark hides which.
+    # This row is what a reader gets that the four above cannot give them, so it is
+    # printed by default -- `--json` is the exception, not the interface.
+    inertia = report["inertia"]
+    print("\n  inertia  I/V^(5/3), sorted -- orientation-free and dimensionless")
+    if inertia["agrees"] is None:
+        print(f"  --  {inertia['why']}")
+    else:
+        for label, cand, ref_v, delta, band in zip(
+                "smallest middle largest".split(), inertia["candidate"],
+                inertia["reference"], inertia["delta"], inertia["band"]):
+            print(f"  {'ok ' if abs(delta) <= band else 'OFF'} {label:8s} "
+                  f"{cand:9.6f} against {ref_v:9.6f}  "
+                  f"({delta:+.6f}, band {band:.6f})")
     if report["given_extents"] or report["given_volume"]:
         parts = []
         if report["given_extents"]:

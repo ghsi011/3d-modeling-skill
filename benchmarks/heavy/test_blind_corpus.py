@@ -28,6 +28,8 @@ envelope.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -119,7 +121,11 @@ class TheScoreDiscriminatesTest(unittest.TestCase):
         """
         report = blind.score(corpus.resolve(ENTRY), ENTRY)
         self.assertIsNone(report["score"])
-        self.assertIn("nothing about shape", report["what_this_is_not"])
+        # Was "nothing about shape", which the inertia row falsified. The claim it
+        # makes now is narrower and still a refusal: one descriptor can see shape,
+        # and three numbers do not certify one.
+        self.assertIn("not shape equivalence", report["what_this_is_not"])
+        self.assertNotIn("nothing about shape", report["what_this_is_not"])
 
     def _mesh(self, root: Path, name: str, mesh) -> Path:
         path = Path(root) / name
@@ -385,3 +391,29 @@ class TheShapeDescriptorRejectsAnImpostorTest(unittest.TestCase):
             self.skipTest("the corpus is not on this machine")
         report = blind.score(corpus.resolve(ENTRY), ENTRY)
         self.assertTrue(report["inertia"]["agrees"], report["inertia"])
+
+    def test_the_printed_score_a_reader_sees_carries_the_rejection(self) -> None:
+        """End to end, through the output `main` actually prints.
+
+        `tools/test_blind.py` proves `_table` renders an inertia row it is handed.
+        This proves the row a real score produces reaches a real reader: same
+        impostor, same scoring path, and the text `main` would print without
+        `--json`. Without this the descriptor could be correct, useful, and
+        invisible -- which is what the review caught.
+        """
+        if not _fetched():
+            self.skipTest("the corpus is not on this machine")
+        want = blind.measure(corpus.resolve(ENTRY))
+        with tempfile.TemporaryDirectory() as raw:
+            report = blind.score(self._impostor(Path(raw), want), ENTRY)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            blind._table(report)
+        text = buffer.getvalue()
+
+        self.assertIn("inertia", text)
+        self.assertIn("OFF", text, "the reader has to be told it failed")
+        for moment in report["inertia"]["candidate"]:
+            self.assertIn(f"{moment:.6f}", text)
+        # And the prose under the table no longer contradicts the row above it.
+        self.assertNotIn("nothing about shape", text)

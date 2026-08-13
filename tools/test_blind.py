@@ -20,6 +20,8 @@ loaded and measured in-process, which is L0's rule.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -225,6 +227,87 @@ class TheShapeDescriptorIsIntrinsicTest(unittest.TestCase):
         # my own first draft, and it was a claim about a design this file does not have.
         self.assertIsInstance(got["volume_mm3"], float)
         self.assertIsNone(got["inertia_normalised"])
+
+
+class TheDefaultReportShowsTheShapeRowTest(unittest.TestCase):
+    """What a user actually reads has to carry the new row.
+
+    `--json` is the exception, not the interface: without it `main` prints `_table`,
+    so a descriptor computed and put in the payload but never printed is a capability
+    the tool has and the reader does not. That is how this nearly shipped -- the row
+    was in `score`'s dict, the table still listed four measurements, and nothing in
+    either tier looked at the printed output, because `_table` had no test at all.
+
+    The seam under test is report dict in, text out. It is the boundary `main`
+    itself uses, so a change to how a score is computed cannot break these, and a
+    change to what a reader sees cannot pass them.
+    """
+
+    def _report(self, inertia: dict) -> dict:
+        """A report with one of everything, so the table has something to print."""
+        return {
+            "entry_id": "some-entry",
+            "extents": [{"axis": "smallest", "candidate_mm": 6.0, "reference_mm": 6.0,
+                         "delta_mm": 0.0, "band_mm": 0.12, "agrees": True,
+                         "given": False}],
+            "volume": {"candidate_mm3": 1680.0, "reference_mm3": 1680.0,
+                       "band_mm3": 33.6, "agrees": True, "given": False, "why": None},
+            "bodies": {"candidate": 1, "reference": 1, "agrees": True},
+            "watertight": {"candidate": True, "reference": True, "agrees": True},
+            "inertia": inertia,
+            "score": None,
+            "reconstructed_axes": 1,
+            "given_extents": [],
+            "given_volume": False,
+            "what_this_is_not": "an intentionally short stand-in.",
+        }
+
+    def _printed(self, report: dict) -> str:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            blind._table(report)
+        return buffer.getvalue()
+
+    def test_the_moments_reach_the_reader(self) -> None:
+        text = self._printed(self._report(
+            {"candidate": [0.155925, 0.346678, 0.445786],
+             "reference": [0.155925, 0.346678, 0.445786],
+             "delta": [0.0, 0.0, 0.0],
+             "band": [0.001559, 0.003467, 0.004458],
+             "agrees": True}))
+        self.assertIn("inertia", text)
+        for moment in ("0.155925", "0.346678", "0.445786"):
+            self.assertIn(moment, text,
+                          msg="a moment that is computed and not printed is a "
+                              "measurement the reader never receives")
+
+    def test_a_shape_that_disagrees_is_marked_off(self) -> None:
+        """The impostor's own numbers, so the mark under test is the one it earns."""
+        text = self._printed(self._report(
+            {"candidate": [0.254963, 0.462818, 0.664138],
+             "reference": [0.155925, 0.346678, 0.445786],
+             "delta": [0.099038, 0.116140, 0.218352],
+             "band": [0.001559, 0.003467, 0.004458],
+             "agrees": False}))
+        self.assertIn("OFF", text)
+        self.assertIn("0.254963", text)
+
+    def test_an_unavailable_descriptor_prints_no_number(self) -> None:
+        """The volume row's own convention: `--`, and a reason, never a value.
+
+        A `None` formatted into the table would read as a measurement, which is the
+        failure the withholding exists to prevent.
+        """
+        text = self._printed(self._report(
+            {"candidate": None, "reference": [0.155925, 0.346678, 0.445786],
+             "agrees": None,
+             "why": "at least one side has no closed solid to take moments of"}))
+        self.assertIn("inertia", text)
+        self.assertIn("--", text)
+        self.assertNotIn("None", text,
+                         msg="`None` printed into a column reads exactly like a "
+                             "value; the row must say it has none")
+        self.assertIn("no closed solid", text)
 
 
 if __name__ == "__main__":

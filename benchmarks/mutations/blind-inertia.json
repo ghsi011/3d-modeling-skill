@@ -21,6 +21,26 @@
         "tools/test_blind.py::TheShapeDescriptorIsIntrinsicTest"
       ],
       "why": "an open surface divides by a zero or meaningless volume and the descriptor becomes NaN or infinity, which formats into the report looking exactly like a measurement -- the failure this file exists to avoid"
+    },
+    {
+      "name": "the-shape-row-says-nothing-to-the-reader",
+      "file": "tools/blind.py",
+      "anchor": "    inertia = report[\"inertia\"]",
+      "replacement": "    inertia = {\"agrees\": None, \"why\": \"unavailable\"}",
+      "tests": [
+        "tools/test_blind.py::TheDefaultReportShowsTheShapeRowTest"
+      ],
+      "why": "the milder form of the defect review caught on this branch: the descriptor is computed and put in the payload, and what the default table prints carries no measurement. A capability the tool has and its reader does not -- and `--json` is the exception, not the interface"
+    },
+    {
+      "name": "an-unavailable-descriptor-formats-anyway",
+      "file": "tools/blind.py",
+      "anchor": "    if inertia[\"agrees\"] is None:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_blind.py::TheDefaultReportShowsTheShapeRowTest"
+      ],
+      "why": "reaching the number-formatting branch with nothing to format is how a `None`, or a traceback, ends up in a column a reader takes for a measurement"
     }
   ]
 }
