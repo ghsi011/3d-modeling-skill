@@ -188,11 +188,12 @@ class TheAggregateCeilingTest(unittest.TestCase):
         # raised, and that has a side effect worth naming rather than
         # discovering: the permitted band is a *fraction* of the basis, so
         # raising the basis widens the largest ceiling this test will accept --
-        # from 1334 to 1598 here. That is the intended shape (a band anchored to
-        # a number the gate outgrew would eventually reject every ceiling that
-        # leaves the gate room), but it means this guard gets looser as the suite
-        # grows, and it is the ceiling *raise* that stays the deliberate act.
-        collected = 1066  # what the gate held when the ceiling was last set
+        # from 1334 to 1598, and now to 1857. That is the intended shape (a band
+        # anchored to a number the gate outgrew would eventually reject every
+        # ceiling that leaves the gate room), but it means this guard gets looser
+        # as the suite grows, and it is the ceiling *raise* that stays the
+        # deliberate act.
+        collected = 1238  # what the gate held when the ceiling was last set
         headroom = GATE.L0_COLLECTED_CEILING - collected
         self.assertGreater(headroom, 100, "no room for a release of fixtures")
         self.assertLess(headroom, collected // 2, "that is not a ceiling")

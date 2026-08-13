@@ -98,7 +98,28 @@ L0_TEST_CEILING_S = 5.0
 # spawn inside the gate outright rather than pricing it. A raise stays deliberate
 # -- it is a line in a diff saying the gate got bigger, with what it costs beside
 # it.
-L0_COLLECTED_CEILING = 1240
+#
+# Raised to 1440 with the user's explicit permission, on the same rule -- about
+# 16% over the 1238 the gate held when it was raised. The blind-inertia slice
+# took it to 1238 of 1240, two slots short of refusing the next fixture, and a
+# ceiling reached is the conversation this guard exists to force rather than a
+# number to route around.
+#
+# The rule's *justification* was re-measured rather than inherited, since a
+# borrowed reason is how a guard keeps a number after the argument for it has
+# expired. Three readings of the same unchanged tree in one session: 64.1 s,
+# 58.2 s, 59.2 s -- 5.9 s of spread with nothing changing at all. What a fixture
+# costs against that: 55.4 s of call time over 1238 collected tests, so ~45 ms
+# on average, a median below a millisecond, p90 60 ms, p99 460 ms -- the mean is
+# carried by a handful and the typical test is free. The last three slices added
+# 6, 11 and 33 fixtures, which is 0.3 s to 1.5 s: a quarter of the drift at
+# worst, and unobservable at best. That is the claim, re-verified, and it is why
+# the count and not the clock is the control.
+#
+# Headroom is capacity, not time already spent. The gate pays only for fixtures
+# actually added, each in the commit that adds them, and the two guards above
+# still refuse the mechanism that made a gate expensive in the first place.
+L0_COLLECTED_CEILING = 1440
 
 # Set by CI (or by hand) to profile without the gate refusing; the value is
 # printed in the failure text so a run that was let through says so.

@@ -527,7 +527,7 @@ duration threshold measures the machine, not the suite: 40 tests exceed 0.5 s in
 the slow regime and fewer do in the fast one.
 
 **So the enforceable half of this budget is not wall clock at all.** It is
-`L0_COLLECTED_CEILING` in `conftest.py`, currently 1240 against the 1139 the gate
+`L0_COLLECTED_CEILING` in `conftest.py`, currently 1440 against the 1238 the gate
 collects — the aggregate a slow machine cannot move, beside the two guards that
 already bound the mechanisms which take a gate from 43 s to 997 s. The minute
 above stays as the *product* statement, because a person waits seconds and no
@@ -2686,7 +2686,7 @@ in this slice is a *Windows run*, where the last recorded one had two
 environmental failures of its own (a machine-speed tier-guard timeout and a
 mesh-library edge count), and neither is a platform assumption in the tests. The count moves with
 every slice and is reported in each commit rather than here; what is *enforced*
-is `L0_COLLECTED_CEILING` in `conftest.py`, currently 1240, because a ceiling a
+is `L0_COLLECTED_CEILING` in `conftest.py`, currently 1440, because a ceiling a
 slow machine cannot move is the only regression control that means anything.
 
 Which tier a test is collected in is structural. `testpaths` in `pyproject.toml`
