@@ -89,3 +89,13 @@ Each module is one half of a file that still exists under `testpaths`, and says
 which in its docstring. Fixtures the two halves share are **imported** from the
 half that stayed rather than copied: two spellings of one fixture is how two
 tiers stop testing the same thing.
+
+**Import a `tools/` module by the same name its siblings use.** A module under
+`tools/` reaches its neighbours by bare name -- `import corpus` -- because pytest
+prepends a test file's own directory. A half living here does not get that, and the
+obvious repair, `from tools import corpus`, is not equivalent: it produces a
+*second* module object for the same file, so `corpus is tools.corpus` is false.
+Anything that patches one is invisible to the other, and a `mock.patch.object` on
+the wrong object silently does nothing -- the test then fails, or worse passes, for
+a reason unrelated to what it asserts. Put `tools/` on `sys.path` and use the bare
+names. `test_blind_corpus.py` carries the measured case.

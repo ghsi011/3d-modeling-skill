@@ -40,10 +40,24 @@ def _fetched(entry_id: str = ENTRY) -> bool:
     return True
 
 
+def _written(root: Path) -> Path:
+    """Write the request under `root`, and return where it landed.
+
+    Module-level rather than a method because the corpus-dependent half of this
+    class now lives in `benchmarks/heavy/test_blind_corpus.py` and needs it too;
+    the heavy directory's rule is that a shared fixture is imported from the half
+    that stayed rather than copied into the half that moved.
+    """
+    return blind.write_request(ENTRY, root / "job")
+
+
 class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
 
-    def _written(self, root: Path) -> Path:
-        return blind.write_request(ENTRY, root / "job")
+    ASKING = ("request", "_project", "_brief", "write_request", "handle", "main")
+    MAY_CALL = frozenset({"question_ids", "request_view", "CorpusLeak",
+                          "CorpusUnavailable", "CorpusCorrupt",
+                          "COINCIDENCE_FRACTION", "resolve",
+                          "reference_measurements"})
 
     def test_the_written_job_is_a_project_design_tool_can_be_pointed_at(self) -> None:
         """The generator's output, checked as the pipeline's input.
@@ -55,7 +69,7 @@ class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
         from pipeline import project as P
 
         with tempfile.TemporaryDirectory() as raw:
-            where = self._written(Path(raw))
+            where = _written(Path(raw))
             payload = json.loads((where / "project.json").read_text("utf-8"))
             self.assertEqual({"x", "y", "z"}, set(payload["envelope_mm"]))
             self.assertTrue((where / "brief.md").is_file())
@@ -67,68 +81,6 @@ class TheQuestionIsAnswerableAndCarriesNoAnswerTest(unittest.TestCase):
             for row in loaded.requirements:
                 with self.subTest(requirement=row.name):
                     self.assertEqual([], row.problems())
-
-    def test_the_written_job_names_no_path_digest_or_entry_geometry(self) -> None:
-        """`tools/fixtures.py`'s standard, applied here.
-
-        That module's wall searches every staged byte for the reference's path,
-        its *name*, and its parent directory. This searched for `path` and
-        `sha256` only, and missed the leak that mattered: `project.json` carried
-        `job_id: "blind-voron-deck-support"`, which ranks the true reference
-        first or second among the hundred and fifty STLs already sitting in the
-        corpus root. A wall that stops the path and publishes the filename is
-        not a wall.
-        """
-        if not _fetched():
-            self.skipTest("the reference is not on this machine")
-        row = corpus._entries()[ENTRY]
-        where_it_lives = corpus._location(ENTRY)
-        truth = corpus.reference_measurements(ENTRY)
-
-        with tempfile.TemporaryDirectory() as raw:
-            where = self._written(Path(raw))
-            staged = sorted(p for p in where.rglob("*") if p.is_file())
-            self.assertEqual(["brief.md", "project.json"],
-                             [p.name for p in staged],
-                             "every file written is a file this test reads")
-            written = "\n".join(p.read_text("utf-8") for p in staged)
-
-            for token in (row["path"], row["sha256"], ENTRY, row["source"],
-                          where_it_lives.name, where_it_lives.stem,
-                          where_it_lives.parent.name, str(where_it_lives)):
-                with self.subTest(token=token):
-                    self.assertNotIn(str(token), written)
-
-            # Parsed, not flattened. `json.dumps` escapes non-ASCII, so an em
-            # dash in the brief became `\u2014` and a scan read `2014` -- 20.14,
-            # within 2% of this part's 20.0 mm extent. That was serialisation
-            # inventing a number, and the first fix for it narrowed the scan to
-            # three keys, which then missed a real leak a review planted in a
-            # file the narrowed scan no longer read. So: every staged file, each
-            # parsed in its own format, with one named exemption.
-            scanned = []
-            for path in staged:
-                if path.suffix == ".json":
-                    payload = json.loads(path.read_text("utf-8"))
-                    payload.pop("updated_utc", None)   # a fixed epoch, not a measurement
-                    scanned.append(payload)
-                else:
-                    scanned.append(path.read_text("utf-8"))
-            declared = {row["measurement"] for row
-                        in corpus.request_view(ENTRY)["discloses"]}
-            undeclared = [(value, name) for value, name
-                          in corpus.coincidences(corpus.numbers_in(scanned), truth)
-                          if name not in declared]
-            self.assertEqual(
-                [], undeclared,
-                "a number in the generated job measures the reference and is "
-                "not one the entry declares giving away")
-
-    ASKING = ("request", "_project", "_brief", "write_request", "handle", "main")
-    MAY_CALL = frozenset({"question_ids", "request_view", "CorpusLeak",
-                          "CorpusUnavailable", "CorpusCorrupt",
-                          "COINCIDENCE_FRACTION", "resolve",
-                          "reference_measurements"})
 
     def test_the_asking_path_touches_only_the_question_side_of_the_corpus(self) -> None:
         """Every `corpus.<name>` in the module, by AST, not by grepping two

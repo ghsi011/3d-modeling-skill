@@ -28,6 +28,7 @@ envelope.
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -55,7 +56,7 @@ import corpus  # noqa: E402
 # than copied: two spellings of one fixture is how two tiers stop testing the same
 # thing (`benchmarks/heavy/README.md`). Imported by the same bare name for the same
 # module-identity reason as above.
-from test_blind import ENTRY, OTHER, _fetched  # noqa: E402
+from test_blind import ENTRY, OTHER, _fetched, _written  # noqa: E402
 
 
 class TheScoreDiscriminatesTest(unittest.TestCase):
@@ -249,3 +250,74 @@ class TheScoreDiscriminatesTest(unittest.TestCase):
         """A missing file is the benchmark not having run."""
         with self.assertRaises(blind.BlindError):
             blind.score(Path("/nonexistent/candidate.stl"), ENTRY)
+
+
+class TheWrittenJobNamesNoAnswerTest(unittest.TestCase):
+    """The one member of `TheQuestionIsAnswerableAndCarriesNoAnswerTest` that needs
+    the reference bytes, and therefore belongs on this side of the seam.
+
+    Its three siblings answer without a corpus and stayed in `tools/test_blind.py`.
+    Splitting a class across two tiers is worse to read than keeping it whole, and it
+    is still correct: the corpus rule in `benchmarks/heavy/README.md` is an invariant
+    about where a test can *run*, and cohesion is a preference about how it reads. The
+    first attempt at this move kept the class together and left a corpus-dependent test
+    collected-but-skipped in the commit gate, which is the thing the seam exists to
+    prevent.
+    """
+
+    def test_the_written_job_names_no_path_digest_or_entry_geometry(self) -> None:
+        """`tools/fixtures.py`'s standard, applied here.
+
+        That module's wall searches every staged byte for the reference's path,
+        its *name*, and its parent directory. This searched for `path` and
+        `sha256` only, and missed the leak that mattered: `project.json` carried
+        `job_id: "blind-voron-deck-support"`, which ranks the true reference
+        first or second among the hundred and fifty STLs already sitting in the
+        corpus root. A wall that stops the path and publishes the filename is
+        not a wall.
+        """
+        if not _fetched():
+            self.skipTest("the reference is not on this machine")
+        row = corpus._entries()[ENTRY]
+        where_it_lives = corpus._location(ENTRY)
+        truth = corpus.reference_measurements(ENTRY)
+
+        with tempfile.TemporaryDirectory() as raw:
+            where = _written(Path(raw))
+            staged = sorted(p for p in where.rglob("*") if p.is_file())
+            self.assertEqual(["brief.md", "project.json"],
+                             [p.name for p in staged],
+                             "every file written is a file this test reads")
+            written = "\n".join(p.read_text("utf-8") for p in staged)
+
+            for token in (row["path"], row["sha256"], ENTRY, row["source"],
+                          where_it_lives.name, where_it_lives.stem,
+                          where_it_lives.parent.name, str(where_it_lives)):
+                with self.subTest(token=token):
+                    self.assertNotIn(str(token), written)
+
+            # Parsed, not flattened. `json.dumps` escapes non-ASCII, so an em
+            # dash in the brief became `\u2014` and a scan read `2014` -- 20.14,
+            # within 2% of this part's 20.0 mm extent. That was serialisation
+            # inventing a number, and the first fix for it narrowed the scan to
+            # three keys, which then missed a real leak a review planted in a
+            # file the narrowed scan no longer read. So: every staged file, each
+            # parsed in its own format, with one named exemption.
+            scanned = []
+            for path in staged:
+                if path.suffix == ".json":
+                    payload = json.loads(path.read_text("utf-8"))
+                    payload.pop("updated_utc", None)   # a fixed epoch, not a measurement
+                    scanned.append(payload)
+                else:
+                    scanned.append(path.read_text("utf-8"))
+            declared = {row["measurement"] for row
+                        in corpus.request_view(ENTRY)["discloses"]}
+            undeclared = [(value, name) for value, name
+                          in corpus.coincidences(corpus.numbers_in(scanned), truth)
+                          if name not in declared]
+            self.assertEqual(
+                [], undeclared,
+                "a number in the generated job measures the reference and is "
+                "not one the entry declares giving away")
+
