@@ -371,5 +371,108 @@ class TheManifestIsCheckedBeforeItIsTrustedTest(unittest.TestCase):
             self.assertEqual("ids-only", manifest.mutations[0].name)
 
 
+class TheRestoreIsVerifiedByDigestTest(unittest.TestCase):
+    """The half of `RestoreFailed` that a write-failure provocation cannot reach.
+
+    `patched`'s `finally` has two guards and they catch different worlds. The
+    `except OSError` half catches a write that *refuses*; this half catches a write
+    that *lies* -- one that returns without error and leaves bytes on disk that are
+    not the bytes it was handed. A truncating filesystem, a full disk that reports
+    success, a sync that never lands.
+
+    It needed its own test because the existing directory provocation exercises only
+    the refusing half: replacing the comparison with `if False:` left the whole L0
+    file green. The module docstring and a merged pull request both said the restore
+    is "verified by digest", which was true of the code and unproven by the suite --
+    and an unproven guard is indistinguishable from a deleted one.
+
+    Provoked rather than described: the write is made to land two bytes short, which
+    is what a partial write looks like from here.
+    """
+
+    def test_a_write_that_lands_wrong_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "src.py"
+            _write(path)
+            real = Path.write_bytes
+
+            def truncating(self, data):
+                # Succeeds, reports nothing, and leaves the wrong bytes behind.
+                return real(self, data[:-2] if self == path else data)
+
+            with self.assertRaises(MU.RestoreFailed) as caught:
+                Path.write_bytes = truncating
+                try:
+                    with MU.patched(root, _mutation()):
+                        pass
+                finally:
+                    Path.write_bytes = real
+            message = str(caught.exception)
+            self.assertIn("does not match", message)
+            self.assertIn("src.py", message)
+
+    def test_the_probe_itself_would_pass_a_faithful_write(self) -> None:
+        """The control, without which the test above proves only that patching works."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "src.py"
+            _write(path)
+            with MU.patched(root, _mutation()) as target:
+                self.assertIn(REPLACEMENT, target.read_text(encoding="utf-8"))
+            self.assertEqual(SOURCE, path.read_text(encoding="utf-8"))
+
+
+class AStaleBytecodeThatCannotBeRemovedIsRefusedTest(unittest.TestCase):
+    """A verdict decided by a `.pyc` nobody chose is not a verdict about the mutation.
+
+    `_invalidate_bytecode` raises rather than warns, and that refusal had no test:
+    swallowing the `MutateError` left the whole L0 file green. The reason it must be
+    a refusal is recorded in the harness itself -- a stale entry compiled from the
+    mutation outlives the sweep, so a later run in the same checkout can execute code
+    no file on disk contains.
+    """
+
+    def test_a_pyc_that_will_not_unlink_stops_the_sweep(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "src.py"
+            _write(path)
+            cache = root / "__pycache__"
+            cache.mkdir()
+            stale = cache / "src.cpython-312.pyc"
+            stale.write_bytes(b"stale bytecode")
+            real = Path.unlink
+
+            def refusing(self, missing_ok=False):
+                if self == stale:
+                    raise OSError(13, "in use by another process")
+                return real(self, missing_ok=missing_ok)
+
+            with self.assertRaises(MU.MutateError) as caught:
+                Path.unlink = refusing
+                try:
+                    MU._invalidate_bytecode(path)
+                finally:
+                    Path.unlink = real
+            message = str(caught.exception)
+            self.assertIn("stale", message.lower())
+            self.assertIn("src.py", message)
+
+    def test_a_removable_pyc_is_removed_and_does_not_raise(self) -> None:
+        """The control: the refusal above must be about the failure, not the path."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "src.py"
+            _write(path)
+            cache = root / "__pycache__"
+            cache.mkdir()
+            for tag in ("cpython-311", "cpython-312"):
+                (cache / f"src.{tag}.pyc").write_bytes(b"stale")
+            MU._invalidate_bytecode(path)
+            self.assertEqual([], sorted(cache.glob("src.*.pyc")),
+                             "every interpreter's stale entry must go, not just this one's")
+
+
 if __name__ == "__main__":
     unittest.main()
