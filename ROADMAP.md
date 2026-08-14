@@ -2767,6 +2767,17 @@ No live AI call occurs.
 
 Run on demand and before significant releases.
 
+**What L2 does not yet cover, stated because the gap is easy to miss.** The blind
+scorer never runs a job: `--score` takes a mesh that already exists and compares
+it, so **no automated test in this repository asks an agent to turn a brief into
+a design**. The four L1 recordings are self-recorded goldens and `_play_one`
+refuses an `AGENT_COMMISSION` outright (`tools/replay.py:1028`), so
+`design_proposal.json` and `model.py` are shipped *inputs* and the authoring step
+that is the CUSTOM lane never executes. Exactly two tests invoke the CLI as a
+real subprocess, both packaging smokes. `docs/agents/qa-e2e-implementation.md` is
+the five-fixture plan that closes this, and `docs/agents/qa-e2e-plan.md` records
+the audit it came from. Neither is built yet.
+
 **Built, for reconstruction.** `tools/blind.py` asks and scores against the
 external reference corpus (`benchmarks/corpus.json`, Voron 2, GPL-3.0, never
 committed):
@@ -2782,15 +2793,22 @@ envelope. Not the part's own geometry: that is the answer, `corpus.request_view`
 is the only door to question material, and it refuses any number coinciding
 with the reference's extents or volume.
 
-**What a score is, and it is narrow.** Four measurements: the three bounding-box
-extents *sorted*, the volume, the body count, whether the solid is closed.
+**What a score is, and it is narrow.** Four dimensional measurements -- the three
+bounding-box extents *sorted*, the volume, the body count, whether the solid is
+closed -- **plus one shape descriptor**: the three principal moments of inertia
+about the solid's own centre of mass at unit density, sorted and each divided by
+`V^(5/3)`, scored as three separate per-moment rows at a 1% band.
 Sorting buys orientation-independence with no registration — a part modelled
 lying down still scores — and costs the axis identity with it. It is
 **dimensional agreement, not shape equivalence**, and that is measured rather
 than hedged: a plain slab with one rectangular pocket, sized to the deck
-support's bounding box and volume, agrees on every row, and so does the same
-slab with x and y swapped, which would not fit the extrusion the brief
-specifies. In the other direction two percent of that part's volume is about
+support's bounding box and volume, agrees on every *dimensional* row, and so
+does the same slab with x and y swapped, which would not fit the extrusion the
+brief specifies. **Normalised inertia is what rejects that slab** -- by 33% to
+63%, where the per-body Euler tuple matched it exactly and normalised area sat
+within 1.7%, which is why inertia shipped and the other two proposed descriptors
+did not. It still does not certify a shape: three numbers can be shared by
+distinct solids, so agreement there is evidence rather than proof. In the other direction two percent of that part's volume is about
 one small through-hole, so whether a *correct* reconstruction passes the volume
 row can turn on a feature the brief never dimensioned. Shape comparison is
 Release 6 and needs the registration this avoids.
