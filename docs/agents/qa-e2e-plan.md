@@ -7,6 +7,19 @@ This plan is a design, not a claim of coverage. Nothing in it has been built yet
 number below marked *(measured)* was read out of a generator or a source file at the time
 of writing; every number not so marked is an assumption and is labelled.
 
+> **What governs, and what this file is.** `docs/agents/qa-e2e-implementation.md` is the
+> authorised five-fixture target and the authorised implementation sequence. This file is
+> the **audit that motivated it** plus a set of **hypotheses**: §1 is a finding with
+> evidence, §2-§3 are measured facts, and §4-§6 are superseded — the fixture set, the
+> predicate gaps `G1`-`G11` and the ordering here are provisional and are **not** an
+> authorised order of work. Where the two disagree, the implementation brief wins.
+>
+> **The immediate next step is one real split-bearing-clamp commission with the current
+> skill, followed by a post-mortem recording the predicates actually missing.** Only then
+> is the smallest reusable predicate slice ruled. Both this repository's reviewer and the
+> implementation brief's §13 say so, and this file previously scheduled harness work ahead
+> of it, which was machinery-first and wrong.
+
 ## 1. What is covered end to end today: nothing
 
 The pipeline is well tested. The skill is not tested at all — **no automated test has ever
@@ -100,7 +113,13 @@ redistributable and relicensable downstream. Its drawings are therefore kept out
 distributable fixture assets. F3 uses only the published pitch/clearance/footprint numbers
 and measurements of the MIT-generated artifact.
 
-## 4. The fixture set
+## 4. The fixture set — SUPERSEDED, retained as the reasoning that led here
+
+**Not the authorised set.** `docs/agents/qa-e2e-implementation.md` §6 defines the five
+fixtures actually adopted, with pinned commits and verified licences. What follows is the
+earlier draft; it is kept because the adversarial reasoning under it is still useful, and
+because one of its errors is instructive (below).
+
 
 | # | fixture | use case | family | primary predicates | tier |
 |---|---|---|---|---|---|
@@ -110,6 +129,19 @@ and measurements of the MIT-generated artifact.
 | **F3** | `modify-gridfinity-drain` — 2 geometry arms + cap arm + D21 arm | modify supplied geometry | exact-reference | preservation outside the region box (≤ 0.05); hole Ø 20.0 ±0.2 and centre **±0.05**; footprint 83.50 / 41.50 ±0.20; volume delta against an independently computed boolean; `diagnose` as precondition | heavy + live |
 | **F4** | `diagnose-supplied-files` | diagnose supplied artifact | exact-reference (facts) | CLI-level classification per artifact; exit 1 on `RECONSTRUCTION_REQUIRED`; **the artifact's SHA is unchanged after the run**; D1 asserted *as the documented wrong count*, so the day D1 is fixed this goes red | heavy |
 | **F5** | `branch-alternatives` | competing concepts | exact-reference | sibling-refusal: answering branch A's review into branch B must be refused | heavy |
+
+### A leak this draft contained, found by an independent audit
+
+An independent auditor reading this section found that the **11 x 20 mm hive opening** in an
+associated brief was disclosed under a heading declaring such facts to be "properties of the
+world the part must join, not of any particular solution". Hive bodies do not come with an
+11 x 20 mm hole; the keeper cuts one because that product's instructions say to. The
+provenance was sound and the **categorisation** was wrong, so every candidate would have been
+forced through the pass-through the reference invented.
+
+The rule that came out of it is now in `docs/agents/review-workflow.md`: provenance answers
+*where a fact came from* and never *whether stating it hands over the solution*. The test is
+**would this constraint exist if the reference had never been designed?**
 
 ### Why these predicates and not similarity
 
@@ -127,7 +159,13 @@ Two proposed bands were also wrong and are corrected above: a shoulder bore of
 band of ±0.20 would have admitted the exact `bbox/N` mis-derivation (0.125 mm) it was meant
 to catch.
 
-## 5. Predicate gaps, smallest first
+## 5. Predicate gaps — HYPOTHESES, not a work list
+
+**None of `G1`-`G11` is authorised.** They are guesses at what a fit-critical run will need,
+written before any such run existed. The bearing-clamp commission is what turns any of them
+into a real requirement; a gap that the commission does not actually hit should be dropped
+rather than built.
+
 
 | gap | builds on | needed before |
 |---|---|---|
@@ -149,7 +187,17 @@ to catch.
 of source surface the ceiling raises `SampleBudgetExceeded`. That is a decision, not a
 detail.
 
-## 6. Order of work
+## 6. Order of work — REPLACED
+
+Superseded by `docs/agents/qa-e2e-implementation.md` §13, which sequences Slice A (common
+live-E2E shell + the grid-bin fixture), then MODIFY, then images, then hardware, then the
+enclosure — and which preserves the same continuity rule stated at the top of this file:
+the split-bearing-clamp discovery commission runs first and teaches the harness what it
+needs.
+
+The list below is the earlier, machinery-first ordering. It is retained only so the
+correction is legible.
+
 
 `_SPAWN_ALLOWED = {"git"}` bans child processes in L0, so **everything below lands in
 `benchmarks/heavy/`**. No slice in this plan raises the collection ceiling.
