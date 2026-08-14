@@ -2773,8 +2773,12 @@ it, so **no automated test in this repository asks an agent to turn a brief into
 a design**. The four L1 recordings are self-recorded goldens and `_play_one`
 refuses an `AGENT_COMMISSION` outright (`tools/replay.py:1028`), so
 `design_proposal.json` and `model.py` are shipped *inputs* and the authoring step
-that is the CUSTOM lane never executes. Exactly two tests invoke the CLI as a
-real subprocess, both packaging smokes. `docs/agents/qa-e2e-implementation.md` is
+that is the CUSTOM lane never executes. Real-subprocess coverage is not thin --
+21 files in `benchmarks/heavy/` spawn one across 47 call sites, and
+`test_build_skill_heavy.py` alone drives intake, plan, build and commission
+through the extracted bundle. What none of it does is ask a live agent to author
+geometry: every one exercises packaging or a deterministic CLI path against
+inputs the test already holds. `docs/agents/qa-e2e-implementation.md` is
 the five-fixture plan that closes this, and `docs/agents/qa-e2e-plan.md` records
 the audit it came from. Neither is built yet.
 
