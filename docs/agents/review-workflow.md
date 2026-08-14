@@ -33,11 +33,23 @@ that produced it. Five errors in a single document, all one shape — **a plausi
 written down in the grammar of a measurement** — produced these rules. Each is mechanical,
 because "be careful" has already failed.
 
-**Two methods, or it is an anecdote.** No measured number is reported until a second method
-that shares no assumption with the first agrees. Where they disagree, only what survives
-both is reported, and the disagreement is stated. *Evidence:* a bore was measured three
-ways and gave thread depths of 0.48, 2.08 and 4.51 mm per flank; the first was published as
-fact before the others existed. Only the median diameter survived all three.
+**Two methods for a load-bearing measurement, or it is an anecdote.** A measurement is
+load-bearing when something rests on it: a claim, an acceptance threshold, a disclosure from
+a withheld reference, a fit or safety decision — or when the method is itself suspect or
+disputed. Those are not reported until a second method sharing no assumption with the first
+agrees. Where the two disagree, **report the disagreement** rather than silently selecting a
+survivor; only what survives both may be stated as fact.
+
+Ordinary diagnostic and corroborative numbers ship from **one validated method**, with their
+provenance and their uncertainty. Requiring a second instrument for every figure would cost
+more than it protects, which §7's proportional rule already forbids: the question is always
+whether the check shortens time to a *trustworthy* result, and for a number nothing rests on
+it does not.
+
+*Evidence:* a bore was measured three ways and gave thread depths of 0.48, 2.08 and 4.51 mm
+per flank; the first was published as fact before the others existed. That figure was
+load-bearing — a fixture's expected value rested on it. Only the median diameter survived
+all three, and it is the only one that shipped.
 
 **A filter is a suspect, not a convenience.** Before filtering data ahead of a measurement,
 state what the filter can reject and prove it cannot reject the phenomenon being measured.
