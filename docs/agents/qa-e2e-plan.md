@@ -92,10 +92,13 @@ convention is centred**, which is what F3's derived hole centre depends on — a
 centres are at `x = ±21.0`. Note `zlen = 24.8` for a 3-unit bin rather than 21: the height
 is not simply `7 × n`, so no fixture may assume it.
 
-**Hard line:** `Stu142/Gridfinity-Documentation` is **CC BY-NC-SA 4.0**. Its drawings must
-never be copied into this repository, cited as a spec source, or consulted. F3 uses only
-the published pitch/clearance/footprint numbers and measurements of the MIT-generated
-artifact.
+**Excluded, and for the accurate reason:** `Stu142/Gridfinity-Documentation` is
+**CC BY-NC-SA 4.0**. That licence does *not* forbid copying categorically — it permits
+noncommercial sharing under its conditions — so the honest statement is that NonCommercial
+plus ShareAlike is a poor fit for a reusable repository QA asset, which must stay freely
+redistributable and relicensable downstream. Its drawings are therefore kept out of our
+distributable fixture assets. F3 uses only the published pitch/clearance/footprint numbers
+and measurements of the MIT-generated artifact.
 
 ## 4. The fixture set
 
