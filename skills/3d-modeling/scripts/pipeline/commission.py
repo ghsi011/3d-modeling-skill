@@ -27,7 +27,7 @@ from .contract import Contract, Feature
 KNOWN_CHECKS = frozenset({
     "section_area", "bed_contact", "through_hole", "bore_by_displacement",
     "void_region", "envelope", "watertight", "bodies", "unit_scale", "seated",
-    "fit_acceptance", "overhang", "preservation",
+    "fit_acceptance", "overhang", "preservation", "counterpart_fit",
 })
 
 
@@ -419,10 +419,112 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                       "bodies": report.get("bodies")},
                      tol, _verdict(feature, preserved, True))
 
+    if kind == "counterpart_fit":
+        return _counterpart_fit_check(ctx, feature, source_dir)
+
     return _unavailable_check(
         feature, f"Feature kind {kind!r}",
         f"no check implements kind {kind!r}",
         "UNKNOWN_CHECK_KIND", None, None)
+
+
+def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
+                           source_dir: Path | None) -> Check:
+    """Does the candidate hold the thing it is for, without seizing it?
+
+    **The blind spot this closes.** A real discovery commission passed 19 of 19
+    checks on a split clamp for a 608 bearing. Every one of those checks was a
+    property of the candidate alone -- bodies, watertight, seated, envelope, four
+    section areas, six hole diameters, two void regions, support area, unit
+    scale. The counterpart was never loaded, there was no assembly pose, and so
+    nothing anywhere asked whether the bearing fits. A clamp that grips the
+    *inner* race -- which stops the bearing turning, the one thing its brief
+    forbids -- passes all nineteen.
+
+    So this check asks the two questions the others structurally cannot, and it
+    asks them of the assembled pose rather than of the printed one:
+
+    * **retained**: candidate material inside the annular band around the outer
+      race. Zero means the clamp does not grip the bearing at all.
+    * **intruded**: candidate material inside the cylinder the inner race and
+      shaft turn in. Anything above the declared allowance means the clamp
+      seizes the bearing.
+
+    Both zones are frozen into the contract from the counterpart and the pose
+    before any candidate exists, and `counterpart_fit` is in no `PROPOSABLE`
+    whitelist, so neither a designer nor a candidate can move the question.
+
+    **What this deliberately does not do.** It does not fit a circle to the seat
+    and compare the diameter. That measurement was tried on the real commission
+    and carried 0.26-0.37 mm of spread against an 0.03 mm interference -- an
+    instrument that cannot resolve the thing it is measuring. A volume in a
+    region has no such problem: the zones are known exactly because they are
+    constructed, not measured.
+    """
+    exp = feature.expectation
+    title = "Bearing fit at the assembled interface"
+    ceiling = float(exp.get("max_intrusion_mm3", 0.0))
+    tol = _tol(feature.tolerance, ceiling)
+
+    root = Path(source_dir) if source_dir is not None else ctx.path.parent
+    counterpart = root / str(exp.get("counterpart", ""))
+    if not counterpart.is_file():
+        return _unavailable_check(
+            feature, title,
+            f"the declared mating object {exp.get('counterpart')!r} is not in "
+            f"{root}, so the part it has to fit was never loaded",
+            "COUNTERPART_MISSING", exp, tol)
+    digest = S.sha256_file(counterpart)
+    if digest != str(exp.get("counterpart_sha256")):
+        return _unavailable_check(
+            feature, title,
+            f"the mating object on disk hashes {digest}, and the contract was "
+            f"frozen against {exp.get('counterpart_sha256')}. A fit measured "
+            "against different bytes than the ones the zones came from is a fit "
+            "against a different object.",
+            "COUNTERPART_CHANGED", exp, tol)
+
+    pose = exp.get("pose") or {}
+    centre = tuple(float(v) for v in pose.get("centre_mm", (0.0, 0.0, 0.0)))
+    axis = tuple(float(v) for v in pose.get("axis", (0.0, 0.0, 1.0)))
+    try:
+        retained = ctx.annulus_volume(
+            centre=centre, axis=axis,
+            r_mm=(float(exp["retain_r_mm"][0]), float(exp["retain_r_mm"][1])),
+            z_mm=(float(exp["retain_z_mm"][0]), float(exp["retain_z_mm"][1])))
+        intruded = ctx.annulus_volume(
+            centre=centre, axis=axis,
+            r_mm=(0.0, float(exp["clear_r_mm"])),
+            z_mm=(float(exp["clear_z_mm"][0]), float(exp["clear_z_mm"][1])))
+    except MeasurementFailed as exc:
+        return _unavailable_check(
+            feature, title, f"{type(exc).__name__}: {exc}",
+            getattr(exc, "code", "BOOLEAN_ENGINE_REFUSED"), exp, tol)
+
+    floor = float(exp["min_retain_mm3"])
+    grips = retained >= floor
+    clear = intruded - ceiling <= tol
+    reasons = []
+    if not grips:
+        reasons.append(
+            f"the candidate puts {retained:.1f} mm3 inside the outer-race band and "
+            f"{floor:.1f} mm3 is the least that counts as gripping it")
+    if not clear:
+        reasons.append(
+            f"the candidate puts {intruded:.1f} mm3 inside the cylinder the inner "
+            f"race and shaft turn in, above the {ceiling:.1f} mm3 allowed, so the "
+            "bearing is held rather than carried")
+    return Check(
+        check_id=f"feature-{feature.feature_id}", feature_id=feature.feature_id,
+        title=title, ran=True,
+        reason="; ".join(reasons) if reasons else
+               "the candidate grips the outer race and stays clear of the inner one",
+        expected={"min_retain_mm3": floor, "max_intrusion_mm3": ceiling,
+                  "counterpart": exp.get("counterpart"), "pose": pose},
+        measured={"retained_mm3": round(retained, 3),
+                  "intruded_mm3": round(intruded, 3)},
+        tolerance=feature.tolerance,
+        result=_verdict(feature, grips and clear, True))
 
 
 def _fit_acceptance_check(feature: Feature, checks: list[Check]) -> Check:

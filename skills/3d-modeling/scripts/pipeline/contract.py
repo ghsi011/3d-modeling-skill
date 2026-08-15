@@ -205,6 +205,111 @@ def declared_bed_z(contract: Contract) -> float | None:
     return float(bed_z) if math.isfinite(float(bed_z)) else None
 
 
+def _number(expectation: dict[str, Any], field: str) -> float | None:
+    value = expectation.get(field)
+    if (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value)):
+        return float(value)
+    return None
+
+
+def _span(expectation: dict[str, Any], field: str) -> tuple[float, float] | None:
+    value = expectation.get(field)
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    out = []
+    for item in value:
+        if (not isinstance(item, (int, float)) or isinstance(item, bool)
+                or not math.isfinite(item)):
+            return None
+        out.append(float(item))
+    return (out[0], out[1])
+
+
+def _counterpart_fit_problems(expectation: dict[str, Any], where: str) -> list[str]:
+    """Every reason an assembled-interface row could not decide anything.
+
+    All of it runs before a mesh is loaded, and all of it is about the *zones*
+    rather than about the candidate -- which is the point of the row. The two
+    zones are frozen from the counterpart and the assembly pose, so a candidate
+    cannot move the question it is asked, and neither can a designer: this kind
+    is in no `PROPOSABLE` whitelist.
+    """
+    problems: list[str] = []
+    for field in ("counterpart", "counterpart_sha256"):
+        value = expectation.get(field)
+        if not isinstance(value, str) or not value.strip():
+            problems.append(
+                f"{where}: counterpart fit must name {field}. A zone placed against "
+                "a mating object nobody identified is a zone about nothing.")
+
+    pose = expectation.get("pose")
+    if not isinstance(pose, dict):
+        problems.append(f"{where}: counterpart fit must declare a pose")
+        pose = {}
+    centre = pose.get("centre_mm")
+    if (not isinstance(centre, (list, tuple)) or len(centre) != 3
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       and math.isfinite(v) for v in centre)):
+        problems.append(
+            f"{where}: pose.centre_mm must be three finite numbers -- where the "
+            "counterpart sits in the candidate's frame. The halves export in their "
+            "printed pose, so an assembled question needs the assembled placement "
+            "stated rather than assumed.")
+    axis = pose.get("axis")
+    if (not isinstance(axis, (list, tuple)) or len(axis) != 3
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                       and math.isfinite(v) for v in axis)):
+        problems.append(f"{where}: pose.axis must be three finite numbers")
+    elif not any(float(v) != 0.0 for v in axis):
+        problems.append(
+            f"{where}: pose.axis is all zeros, so the zones have no orientation")
+
+    retain_r = _span(expectation, "retain_r_mm")
+    if retain_r is None:
+        problems.append(
+            f"{where}: retain_r_mm must be [inner, outer] finite radii -- the band "
+            "the candidate is required to grip")
+    elif not 0.0 <= retain_r[0] < retain_r[1]:
+        problems.append(
+            f"{where}: retain_r_mm {list(retain_r)} is not an annulus with "
+            "0 <= inner < outer")
+
+    clear_r = _number(expectation, "clear_r_mm")
+    if clear_r is None or clear_r <= 0.0:
+        problems.append(
+            f"{where}: clear_r_mm must be a positive radius -- the cylinder the "
+            "candidate must stay out of")
+    elif retain_r is not None and clear_r > retain_r[0]:
+        problems.append(
+            f"{where}: clear_r_mm {clear_r:g} reaches past the retained band's "
+            f"inner radius {retain_r[0]:g}, so the two zones overlap and one piece "
+            "of material would answer both questions at once -- required here and "
+            "forbidden there.")
+
+    for field in ("retain_z_mm", "clear_z_mm"):
+        span = _span(expectation, field)
+        if span is None:
+            problems.append(f"{where}: {field} must be [low, high] finite numbers")
+        elif span[1] <= span[0]:
+            problems.append(
+                f"{where}: {field} {list(span)} has no height, so the zone it names "
+                "encloses nothing")
+
+    floor = _number(expectation, "min_retain_mm3")
+    if floor is None or floor <= 0.0:
+        problems.append(
+            f"{where}: min_retain_mm3 must be positive. A retention floor of zero "
+            "is satisfied by a part that touches the counterpart nowhere, and a "
+            "gate that cannot fail is not one.")
+    ceiling = _number(expectation, "max_intrusion_mm3")
+    if ceiling is None or ceiling < 0.0:
+        problems.append(
+            f"{where}: max_intrusion_mm3 must be zero or positive -- how much "
+            "material is tolerated inside the forbidden cylinder")
+    return problems
+
+
 def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
     """Every reason this contract cannot be built against, or an empty list.
 
@@ -285,6 +390,9 @@ def preflight(contract: Contract, *, known_checks: frozenset[str]) -> list[str]:
                 problems.append(
                     f"{where}: fit acceptance parameter must name the mapped built "
                     "parameter")
+
+        if feature.kind == "counterpart_fit":
+            problems.extend(_counterpart_fit_problems(feature.expectation, where))
 
     if not contract.expected_bbox_mm:
         problems.append("no expected_bbox_mm: nothing would check the part's own size, "
