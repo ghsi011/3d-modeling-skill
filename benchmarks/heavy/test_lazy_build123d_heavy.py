@@ -7,15 +7,14 @@ imported, whether a name is the same object, and whether an unproven release get
 ordinary build123d.
 
 **Structure, not milliseconds.** `docs/agents/review-workflow.md` section 7:
-*profile with time; regress with structure*. The wall clock found this -- 5.784 s
-to 4.045 s median on the real bearing candidate through the confined boundary,
-ten interleaved runs an arm, ranges not overlapping -- and the wall clock is a
-terrible regression control, because a loaded runner moves it further than the
-whole effect. So what is asserted here is the causal property: a minimal
-candidate's imports leave `sklearn`, `ezdxf`, `svgpathtools`, `svgelements`,
-`svgwrite` and `ocpsvg` out of `sys.modules` entirely. That fails on the pull
-request that broadens the search set, and it fails for the same reason the
-seconds would come back.
+*profile with time; regress with structure*. The wall clock found this -- median
+6.004 s to 4.332 s on the real bearing candidate through the confined boundary,
+ten interleaved runs an arm, ranges not overlapping (`docs/baseline.md`) -- and
+the wall clock is a terrible regression control, because a loaded runner moves it
+further than the whole effect. So what is asserted here is the causal property: a
+minimal candidate's imports leave `ezdxf` out of `sys.modules` entirely. That
+fails on the pull request that puts `exporters` or `import_dxf` back into the
+search set, and it fails for the same reason the seconds would come back.
 
 **Both directions, every time.** A test that only asserts absence passes just as
 well when build123d stopped working. Every structural case here has its arm
@@ -43,18 +42,31 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "skills" / "3d-modeling" / "scripts"
 
-# The transitive stack the three deferred submodules carry, and nothing else:
-# `sklearn` through `brep_from_stl` (937 ms of its 941 ms), `ezdxf` through both
-# `exporters` and `import_dxf` (651 ms), the three SVG libraries and `ocpsvg`
-# through `exporters` (89 ms). `scipy` is deliberately absent from this set --
-# `topology/one_d.py` imports it and every arm pays for it.
-EXPENSIVE = ("sklearn", "ezdxf", "svgpathtools", "svgelements", "svgwrite", "ocpsvg")
+# What the *omitted* submodules carry and nothing a served submodule also
+# reaches, which is the only set an omission can be held to. `ezdxf` comes
+# through both `exporters` and `import_dxf`, and `pyparsing` comes with it.
+#
+# Two libraries are deliberately absent from this tuple and it is the correction
+# that keeps the test honest. `svgpathtools`, `svgelements`, `svgwrite` and
+# `ocpsvg` are reached by `importers`, which the facade *serves*, so both arms
+# load them and asserting their absence would fail on a correct facade; `scipy`
+# is the same through `topology/one_d.py`. The measured whole is 3155 modules in
+# the eager arm against 2296 in this one.
+OMITTED_STACK = ("ezdxf", "pyparsing")
+
+# `brep_from_stl`'s stack. Omitting it is worth +0.011 s against a 0.39 s spread,
+# which is nothing, so its absence from an ordinary build is a consequence of
+# build123d importing it *last* rather than of the omission -- and the two claims
+# are asserted under separate names rather than in one tuple, so that an ordering
+# accident cannot be read as a guarantee the design makes. What the omission of
+# `brep_from_stl` actually buys is in the identity sweep, not here.
+LAST_IMPORT_STACK = ("sklearn", "joblib", "threadpoolctl")
 
 # What the real bearing commission imports, verbatim from
 # `C:\projects\3d\bearing-clamp-discovery\job\model.py`. Seven names, and the
 # only reason they are the ones written here is that this is the candidate the
 # measurement was taken on -- the contract is that *any* authored candidate gets
-# the structural guarantee, which is why the guarantee is a property of the
+# the guarantee about `ezdxf`, which is why that guarantee is a property of the
 # omission set rather than of this list.
 MINIMAL = "Align, Axis, Box, Compound, Cylinder, Location, chamfer"
 
@@ -124,7 +136,7 @@ elif mode == "semantics":
             kept[name] = getattr(build123d, name)
         out["served_lazily"] = len(kept)
         out["lazy_throughout"] = lazy_throughout
-        # One name that only the omitted three can answer. It must force the
+        # One name that only an omitted submodule can answer. It must force the
         # real `__init__` and it must bring `ezdxf` with it.
         out["fallback_forced_by"] = "ExportSVG"
         kept["ExportSVG"] = build123d.ExportSVG
@@ -221,28 +233,46 @@ class TheDeferredStackStaysOutOfTheChildTest(unittest.TestCase):
     while measuring nothing either way.
     """
 
-    def test_a_minimal_candidates_imports_load_none_of_the_deferred_stack(self) -> None:
+    def test_a_minimal_candidates_imports_load_no_ezdxf(self) -> None:
         after = _probe("structure", "lazy")["after_minimal_imports"]
-        for library in EXPENSIVE:
+        for library in OMITTED_STACK:
             with self.subTest(library=library):
                 self.assertNotIn(
                     library, after["top_level"],
                     f"{library} is loaded after seven ordinary build123d names. "
-                    "The three-submodule omission is what keeps it out; putting "
-                    "any of exporters / import_dxf / brep_from_stl back into "
-                    "SEARCH lets any candidate's name lookup drag it in, which "
-                    "is the 1.739 s this slice measured.")
-        for submodule in ("exporters", "import_dxf", "brep_from_stl"):
+                    "The omission is what keeps it out: build123d imports "
+                    "`exporters` sixth and `import_dxf` ninth, ahead of the "
+                    "submodules carrying Box, Compound and chamfer, so putting "
+                    "either back into SEARCH lets any candidate's name lookup "
+                    "drag ezdxf in -- measured at about 0.7 s each.")
+        for submodule in ("exporters", "import_dxf"):
             with self.subTest(submodule=submodule):
                 self.assertNotIn(f"build123d.{submodule}",
                                  after["build123d_submodules"])
+
+    def test_the_sklearn_stack_is_out_too_but_the_omission_is_not_why(self) -> None:
+        """Recorded under its own name because the two are different claims.
+
+        `brep_from_stl` is `__init__.py`'s last import, so even served it would
+        stay unimported here: a search stops at the first hit, and a name that
+        would walk past it falls through to the real `__init__`, which imports it
+        anyway. Measured at +0.011 s against a 0.39 s spread. So this absence is
+        an ordering consequence and not something the omission earned -- what the
+        omission earned is in `test_the_search_order_cannot_change_what_a_name_
+        means`, where serving it makes `build123d.copy` the wrong object.
+        """
+        after = _probe("structure", "lazy")["after_minimal_imports"]
+        for library in LAST_IMPORT_STACK:
+            with self.subTest(library=library):
+                self.assertNotIn(library, after["top_level"])
+        self.assertNotIn("build123d.brep_from_stl", after["build123d_submodules"])
 
     def test_the_same_imports_without_the_facade_load_all_of_it(self) -> None:
         """The positive control. Absence is evidence only where presence was
         reachable, and this is also the reproduction: it is what every authored
         build paid for before this slice."""
         after = _probe("structure", "plain")["after_minimal_imports"]
-        for library in EXPENSIVE:
+        for library in OMITTED_STACK + LAST_IMPORT_STACK:
             with self.subTest(library=library):
                 self.assertIn(library, after["top_level"])
         self.assertLess(
@@ -279,8 +309,8 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
 
         83 of the 200 public names are re-exported by more than one submodule, so
         "which submodule answers first" would be a live question if any two ever
-        disagreed. None do -- and the seven public names no served submodule
-        carries are exactly the ones that live only in the omitted three.
+        disagreed. None do -- and the public names no served submodule carries
+        are exactly the ones that live only in the omitted submodules.
         """
         premise = _probe("premise", "plain")
         self.assertEqual([], premise["wrong"],
@@ -389,7 +419,7 @@ class TheOptimizationFailsOpenOnAnUnprovenReleaseTest(unittest.TestCase):
         """Not merely equivalent: the same work. The fallback executes the real
         `__init__.py`, so every library the eager package loads is loaded."""
         fake = _probe("structure", "fake")["after_minimal_imports"]
-        for library in EXPENSIVE:
+        for library in OMITTED_STACK + LAST_IMPORT_STACK:
             with self.subTest(library=library):
                 self.assertIn(
                     library, fake["top_level"],
@@ -402,7 +432,8 @@ class TheOptimizationFailsOpenOnAnUnprovenReleaseTest(unittest.TestCase):
         the facade never worked, an unproven release would look identical to a
         proven one and both would be green."""
         lazy = _probe("structure", "lazy")["after_minimal_imports"]
-        self.assertEqual([], [lib for lib in EXPENSIVE if lib in lazy["top_level"]])
+        self.assertEqual([], [lib for lib in OMITTED_STACK + LAST_IMPORT_STACK
+                              if lib in lazy["top_level"]])
 
 
 if __name__ == "__main__":

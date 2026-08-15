@@ -6,13 +6,13 @@ child, after the syscall filter, and the parent never imports either module.
 
 **The measurement.** `build123d/__init__.py` is eager. It imports 24 submodules,
 and importing *any* one of them executes the package body first, so a candidate
-that asks for seven names pays for `sklearn`, `ezdxf`, `svgpathtools`,
-`svgelements`, `svgwrite` and `ocpsvg` as well. On the real bearing candidate
-through the real confined boundary, ten interleaved fresh-child runs per arm:
-median wall **5.784 s -> 4.045 s, a 1.739 s (30.1%) cut**, with the ranges not
-overlapping (worst lazy 4.253 s < best base 5.666 s) and one STL sha256 across
-all twenty runs. `PYTHONPROFILEIMPORTTIME=1` in the same child: 2836 modules and
-5.223 s of import self-time become 1980 and 3.107 s.
+that asks for seven names pays for `sklearn` and `ezdxf` and everything those
+two drag with them. Measured on the real bearing candidate through the real
+confined boundary, fresh child per run, arms interleaved: the numbers, the spread
+and the per-submodule attribution are in `docs/baseline.md` under "the lazy
+build123d facade", which is also where the `build_seconds` change point is
+recorded. Measured in the same child: the eager import loads 3155 modules and
+this one loads 2296.
 
 **The seam is `sys.modules`, and it is repo-owned.** `install()` binds the name
 `build123d` to a module object built from `find_spec` -- the real `__path__`, the
@@ -29,22 +29,32 @@ object from a different submodule**. Every provider of a name provides the
 identical object. That property is a fact about one release, which is what
 `PROVEN_VERSIONS` is for.
 
-**Why three submodules are omitted rather than merely ordered last.** Ordering
-the expensive ones last would already have served the checked-in candidates,
-because a search stops at the first hit and never reaches them. That is a
-property of *our* candidates' import lists, and an authored candidate is
-arbitrary by contract. Omitting them makes it a property of the mechanism: with
-`exporters`, `import_dxf` and `brep_from_stl` outside `SEARCH`, no name lookup by
-any candidate can pull `sklearn` or `ezdxf` in, and `benchmarks/heavy/
-test_lazy_build123d_heavy.py` asserts exactly that on `sys.modules` rather than
-on a clock. Measured import cost in the confined child: `brep_from_stl` 941 ms
-(`sklearn.cluster` 937 ms), `exporters` 748 ms (`ezdxf` 651 ms + `svgpathtools`
-89 ms), `import_dxf` 651 ms (`ezdxf`). Seven of the 200 public names live only in
-these three (`DotLength`, `Export2D`, `ExportDXF`, `ExportSVG`, `LineType`,
-`detect_primitives`, `import_dxf`); a candidate asking for one of them executes
-the real `__init__` and pays what it costs -- measured, no gain and no
-regression. This is the smallest omission set that keeps the measured win, and
-that is the whole of its justification.
+**The search walks the package's own import order, minus the submodules in
+`DEFERRED`, and that omission is the entire design.** `SEARCH` is `SUBMODULES`
+less `DEFERRED` -- a set difference against what `build123d/__init__.py` itself
+imports, in the order it imports it, rather than a hand-picked list of what
+somebody thought was cheap. The justification is "the smallest omission that
+keeps the measured win", not "it serves the candidates checked in here", because
+an authored candidate is arbitrary by contract; so what the omission buys is a
+property of the mechanism rather than of one import list. `exporters` is
+`__init__`'s sixth import and `import_dxf` its ninth, both ahead of the
+submodules that carry `Box`, `Compound` and `chamfer`, and both reach `ezdxf`.
+Taking them out of the search means no name lookup by any candidate can load it,
+and `benchmarks/heavy/test_lazy_build123d_heavy.py` asserts that on `sys.modules`
+rather than on a clock.
+
+A cheap-first *reordering* was measured against this and is not shipped. It is
+within the run-to-run spread on the candidate it was measured on (arm
+`cheapfirst`, `docs/baseline.md`), and it would make the omission inert, because
+a search that stops at the first hit never reaches whatever was sorted to the
+back. It is rejected for what it does to the *next* candidate: the order would
+then be an unchecked claim about relative cost, and a name served by a late
+submodule would walk into everything sorted behind it.
+
+Seven of the 200 public names live only in the omitted submodules (`DotLength`,
+`Export2D`, `ExportDXF`, `ExportSVG`, `LineType`, `detect_primitives`,
+`import_dxf`). A candidate asking for one of them executes the real `__init__`
+and pays what it costs -- measured, no gain and no regression.
 
 **Why nothing is armed until the package is first touched.** The experiment this
 came from ran the version read and `modify_copyreg()` eagerly at install time.
@@ -88,29 +98,41 @@ PACKAGE = "build123d"
 # not widening a range until the gate goes green.
 PROVEN_VERSIONS = frozenset({"0.11.1"})
 
-# Every submodule `build123d/__init__.py` imports, cheapest first. The order is a
-# cost property only: the 0-conflict sweep above is what makes it unable to
-# change which object a name binds to. `mesher`, `drafting` and `importers` are
-# cheap but rarely wanted, so they sit after the common names and are reached
-# only by a candidate that actually asks for one of theirs.
-#
-# `test_lazy_build123d.py` parses the installed `__init__.py` and fails if this
-# inventory and that file ever disagree, because a submodule this list has never
-# heard of is a name the facade would answer with the wrong module or not at all.
+# Every submodule `build123d/__init__.py` imports, **in the order it imports
+# them**. It is the package's own list and not a chosen one: reordering it is
+# how a facade stops being a description of build123d and becomes a set of
+# guesses about which submodules are cheap, and the guesses are what go stale on
+# the next release. `test_lazy_build123d.py` parses the installed `__init__.py`
+# and fails if this tuple and that file disagree in membership *or* in order.
 SUBMODULES = (
-    "build_enums", "geometry", "build_common", "topology",
-    "build_line", "build_part", "build_sketch",
-    "objects_part", "objects_sketch", "operations_generic",
-    "operations_part", "operations_sketch", "objects_curve",
-    "pack", "joints", "exporters3d", "text", "persistence",
-    "mesher", "drafting", "importers",
-    # Omitted from the search; listed here because this tuple is the inventory
-    # of what the package imports, and the omission is a set difference against
-    # it rather than a hand-picked include list.
-    "exporters", "import_dxf", "brep_from_stl",
+    "build_common", "build_enums", "build_line", "build_part", "build_sketch",
+    "exporters", "geometry", "importers", "import_dxf", "joints", "mesher",
+    "objects_curve", "objects_part", "objects_sketch", "operations_generic",
+    "operations_part", "operations_sketch", "pack", "topology", "drafting",
+    "persistence", "exporters3d", "text", "brep_from_stl",
 )
 
-# The three that carry `sklearn`, `ezdxf`, `svgpathtools` and `svgwrite`.
+# The three the search does not walk, and the whole of the design. Everything
+# else in this module is bookkeeping around a search that mirrors the package.
+#
+# Two of them are here for seconds and one is here for correctness, and the
+# difference is worth the four lines it costs, because a reader who assumes all
+# three earn their place the same way will remove the wrong one.
+#
+# `exporters` (`__init__`'s sixth import) and `import_dxf` (its ninth) are ahead
+# of the submodules that carry `Box`, `Compound` and `chamfer`, and both reach
+# `ezdxf`. Measured on the bearing candidate, serving either costs about 0.7 s.
+#
+# `brep_from_stl` costs **+0.011 s** against a 0.39 s run-to-run spread -- it is
+# `__init__`'s *last* import, so a search that stops at the first hit only reaches
+# it for a name nothing else carries, and such a name falls through to the real
+# `__init__` anyway. On the seconds alone it had earned nothing and was removed.
+# The identity sweep put it back: `build123d.brep_from_stl` binds `copy` to the
+# **module** where `__init__` leaves `copy.copy`, the *function*, from
+# `exporters`, and `T` and `TOLERANCE` differ too -- so serving it breaks the
+# 0-conflict property the whole search rests on, for a candidate that never
+# mentioned it. It is omitted because it cannot be served correctly, not because
+# it is slow, and that is why removing it on the timing would have been wrong.
 DEFERRED = ("exporters", "import_dxf", "brep_from_stl")
 
 SEARCH = tuple(name for name in SUBMODULES if name not in DEFERRED)

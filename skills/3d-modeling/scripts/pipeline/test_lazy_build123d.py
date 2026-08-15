@@ -51,21 +51,23 @@ def _installed_init() -> Path | None:
     return Path(spec.origin)
 
 
-def _submodules_the_package_imports(init: Path) -> set[str]:
-    """`from build123d.X import ...` in the package body, by AST.
+def _submodules_the_package_imports(init: Path) -> list[str]:
+    """`from build123d.X import ...` in the package body, in source order, by AST.
+
+    Order is part of the answer, so this walks `tree.body` rather than
+    `ast.walk`, which promises nothing about ordering.
 
     Absolute imports only. `from .version import version as __version__` is
     relative and is deliberately not in the inventory: the facade never has to
     serve `version` from a search, because `__version__` starts with an
     underscore pair and goes straight to the real `__init__`.
     """
-    tree = ast.parse(init.read_text(encoding="utf-8"))
-    found: set[str] = set()
-    for node in ast.walk(tree):
+    found: list[str] = []
+    for node in ast.parse(init.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.ImportFrom) and not node.level and node.module:
             parts = node.module.split(".")
-            if parts[0] == L.PACKAGE and len(parts) == 2:
-                found.add(parts[1])
+            if parts[0] == L.PACKAGE and len(parts) == 2 and parts[1] not in found:
+                found.append(parts[1])
     return found
 
 
@@ -82,13 +84,16 @@ class TheOmissionSetIsTheDesignTest(unittest.TestCase):
                 "the facade declines on this install and there is no inventory to "
                 "hold to account. Sweeping a new release is what adds it.")
         self.assertEqual(
-            set(L.SUBMODULES), _submodules_the_package_imports(init),
+            list(L.SUBMODULES), _submodules_the_package_imports(init),
             "the facade's submodule inventory and build123d's own __init__.py "
-            "disagree. A submodule the inventory has never heard of is a name "
-            "the search cannot serve; a name the release moved into an "
-            "earlier-searched module is a silent mis-bind. Re-run the identity "
-            "sweep in benchmarks/heavy/test_lazy_build123d_heavy.py against the "
-            "new release before touching either list.")
+            "disagree in membership or in order. A submodule the inventory has "
+            "never heard of is a name the search cannot serve; a name the "
+            "release moved into an earlier-searched module is a silent "
+            "mis-bind; and a *reordered* inventory is no longer a description "
+            "of the package but a claim about which submodules are cheap, which "
+            "is the design this slice rejected. Re-run the identity sweep in "
+            "benchmarks/heavy/test_lazy_build123d_heavy.py against the new "
+            "release before touching either list.")
 
     def test_the_search_is_the_inventory_minus_exactly_the_three(self) -> None:
         """Stated as a set difference, because that is the whole justification.
@@ -96,7 +101,13 @@ class TheOmissionSetIsTheDesignTest(unittest.TestCase):
         The omission is "the smallest set that keeps the measured win", not "the
         set that happens to serve the candidates in this repository". An authored
         candidate is arbitrary by contract, so what the omission has to buy is a
-        property of the mechanism: no name lookup can reach `sklearn` or `ezdxf`.
+        property of the mechanism: no name lookup can reach `ezdxf`.
+
+        Two of the three are here for seconds -- about 0.7 s each on the bearing
+        candidate, `docs/baseline.md`. `brep_from_stl` measured **+0.011 s**
+        against a 0.39 s spread and was removed on that, and the identity sweep
+        put it straight back: it binds `copy` to the module where `__init__`
+        leaves the function. It is omitted because it cannot be served correctly.
         """
         self.assertEqual(("exporters", "import_dxf", "brep_from_stl"), L.DEFERRED)
         self.assertEqual(set(), set(L.SEARCH) & set(L.DEFERRED))
@@ -105,14 +116,17 @@ class TheOmissionSetIsTheDesignTest(unittest.TestCase):
                          "a repeated name in the inventory would shrink the "
                          "search without saying so")
 
-    def test_the_inventory_is_ordered_and_the_three_are_last(self) -> None:
-        """Order is a cost property and the tuple is also the inventory.
+    def test_the_search_keeps_the_packages_order(self) -> None:
+        """A subsequence of the inventory, never a re-sort of it.
 
-        Keeping the deferred three in `SUBMODULES` is what lets the previous test
-        be a set difference against the package's own imports rather than a
-        hand-maintained include list -- which is the form that goes stale.
+        Sorting the expensive submodules to the back would buy the same seconds
+        on the candidate this was measured on and would make the omission inert
+        -- measured, `docs/baseline.md`. It is rejected because the order would
+        then be an unchecked claim about relative cost, and the omission is what
+        this slice is asking a reviewer to accept.
         """
-        self.assertEqual(list(L.DEFERRED), list(L.SUBMODULES[-len(L.DEFERRED):]))
+        kept = [name for name in L.SUBMODULES if name in set(L.SEARCH)]
+        self.assertEqual(kept, list(L.SEARCH))
 
 
 class TheFacadeStepsAsideTest(unittest.TestCase):

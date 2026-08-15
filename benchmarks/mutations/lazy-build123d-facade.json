@@ -1,0 +1,179 @@
+{
+  "target": "the lazy build123d facade: the version guard that makes it safe, the omission that makes it fast, and the equivalence that makes it invisible",
+  "note": "Every entry was run against the real code and observed to fail the named tests. The set is shaped by one fact: this optimization is *behind* a byte-identical mesh, so geometry proves nothing about it -- an earlier draft returned 11 names from `dir(build123d)` where the package returns 485 and every timing and geometry check passed. So the guards being mutated here are semantic and structural, never timed. One entry -- `the-omission-loses-brep-from-stl` -- is an edit that was actually made and reverted: the benchmark said that submodule earned nothing and the equivalence sweep said it could not be served correctly, and the sweep won. Two more entries are the instrument's own: a sweep that resolves no names and a premise walk over no names both report a clean facade while measuring nothing, which is the shape `docs/agents/review-workflow.md` section 3 calls corroboration mistaken for proof. Run with: uv run python tools/mutate.py benchmarks/mutations/lazy-build123d-facade.json",
+  "mutations": [
+    {
+      "name": "the-version-guard-is-disabled",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        if installed_version() in PROVEN_VERSIONS:",
+      "replacement": "        if True:",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheOptimizationFailsOpenOnAnUnprovenReleaseTest"
+      ],
+      "why": "the architectural compromise this slice asks a reviewer to accept. The search order is a fact about build123d 0.11.1 verified name by name; on a release nobody swept, a name moved into an earlier-searched module mis-binds silently and nothing at runtime can see it happen. With the guard disabled the facade serves an explicitly unsupported release lazily, and the fail-open contract -- an unknown release gets ordinary build123d -- is gone"
+    },
+    {
+      "name": "the-proven-set-is-widened-until-the-gate-goes-green",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "PROVEN_VERSIONS = frozenset({\"0.11.1\"})",
+      "replacement": "PROVEN_VERSIONS = frozenset({\"0.11.1\", \"99.0.0-not-a-release\"})",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheOptimizationFailsOpenOnAnUnprovenReleaseTest"
+      ],
+      "why": "the same protection weakened the way it would actually be weakened -- not by deleting a guard but by adding a version to the set it checks against, which is what a dependency bump with a red gate invites. `AGENTS.md` forbids widening a gate to pass; this is the entry that makes the prohibition testable rather than aspirational"
+    },
+    {
+      "name": "the-omission-loses-exporters",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "DEFERRED = (\"exporters\", \"import_dxf\", \"brep_from_stl\")",
+      "replacement": "DEFERRED = (\"import_dxf\", \"brep_from_stl\")",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheDeferredStackStaysOutOfTheChildTest::test_a_minimal_candidates_imports_load_no_ezdxf",
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheOmissionSetIsTheDesignTest::test_the_search_is_the_inventory_minus_exactly_the_three"
+      ],
+      "why": "the whole slice, undone by one word. `build123d/__init__.py` imports `exporters` sixth, so serving it puts `ezdxf` back in front of every name the search resolves after that -- which on the bearing candidate is all seven. This is the entry that proves the structural test measures the omission rather than reciting it: the seconds come back and the `sys.modules` assertion is what notices"
+    },
+    {
+      "name": "the-omission-loses-import-dxf",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "DEFERRED = (\"exporters\", \"import_dxf\", \"brep_from_stl\")",
+      "replacement": "DEFERRED = (\"exporters\", \"brep_from_stl\")",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheDeferredStackStaysOutOfTheChildTest::test_a_minimal_candidates_imports_load_no_ezdxf",
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheOmissionSetIsTheDesignTest::test_the_search_is_the_inventory_minus_exactly_the_three"
+      ],
+      "why": "the other half of the same edge, and the one that would silently restore the cost if only `exporters` were kept out: `import_dxf` is imported ninth and reaches the same `ezdxf`, so either submodule alone is enough to put it back in front of `Box`, `chamfer` and `Compound`"
+    },
+    {
+      "name": "the-omission-loses-brep-from-stl",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "DEFERRED = (\"exporters\", \"import_dxf\", \"brep_from_stl\")",
+      "replacement": "DEFERRED = (\"exporters\", \"import_dxf\")",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_search_order_cannot_change_what_a_name_means",
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheOmissionSetIsTheDesignTest::test_the_search_is_the_inventory_minus_exactly_the_three"
+      ],
+      "why": "the edit the wall clock argued for and the semantics refused. Serving `brep_from_stl` costs +0.011 s against a 0.39 s spread, so on the timing it had earned nothing and it *was* removed -- and the identity sweep failed within the hour, because that submodule binds `copy` to the module where `__init__.py` leaves `copy.copy`, the function it re-exports from `exporters` (`T` and `TOLERANCE` differ too). This entry is here so the next reader who reruns the benchmark and reaches the same conclusion is stopped by a test rather than by luck"
+    },
+    {
+      "name": "the-fallback-never-runs",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        if state[\"full\"]:\n            return\n        state[\"full\"] = True",
+      "replacement": "        if True:\n            return\n        state[\"full\"] = True",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest"
+      ],
+      "why": "the claim that nothing is lost, only deferred. Without the fallback the facade is not a slower path for the seven names it cannot serve, it is a package missing them -- and `__all__`, `__version__` and `dir()` come back wrong as well, because every dunder is answered by executing the real `__init__`"
+    },
+    {
+      "name": "dir-loses-its-forced-import",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        _arm()\n        _full()\n        return sorted(module.__dict__)",
+      "replacement": "        _arm()\n        return sorted(module.__dict__)",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_public_surface_is_identical"
+      ],
+      "why": "the defect exactly as it was found, and the reason this manifest exists at all: the draft with no `__dir__` returned 11 names where the package returns 485, behind a byte-identical STL and identical STEP geometry across sixty timed builds. A candidate deriving `PARAMS` from `dir()` would have declared something different and every geometry check would still have passed"
+    },
+    {
+      "name": "the-search-leaves-its-submodules-bound-on-the-package",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        if module.__dict__.get(sub) is imported:\n            del module.__dict__[sub]",
+      "replacement": "        if False:\n            del module.__dict__[sub]",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_every_name_the_facade_serves_is_the_object_the_package_binds"
+      ],
+      "why": "the second defect the identity sweep found. The import system binds every submodule it imports onto its parent, and `__init__.py` then rebinds `pack` and `import_dxf` to *functions* of the same name -- so leaving the modules there answers those two with the wrong object, for candidates that never mentioned either, as a side effect of a search for something else"
+    },
+    {
+      "name": "the-submodules-are-not-put-back-before-the-real-init-runs",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        for sub in SUBMODULES:\n            cached = sys.modules.get(f\"{PACKAGE}.{sub}\")",
+      "replacement": "        for sub in ():\n            cached = sys.modules.get(f\"{PACKAGE}.{sub}\")",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_public_surface_is_identical"
+      ],
+      "why": "the repair for the entry above, mutated in its turn. Only a submodule's *first* import binds it onto its parent; a cached one comes straight back out of `sys.modules` and touches nothing. So `__init__.py` cannot restore what the search removed, and the module the fallback produces comes up short by however many submodules the search happened to walk -- which is a different `dir()` for every candidate"
+    },
+    {
+      "name": "copyreg-is-never-armed",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "            _submodule(\"persistence\").modify_copyreg()",
+      "replacement": "            pass",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_a_solid_still_pickles_when_only_a_submodule_was_imported"
+      ],
+      "why": "`__init__.py`'s one side effect beyond its imports. Deferring the imports and dropping the side effect would be a package that builds the same solid and cannot pickle or deep-copy it -- a failure that waits for the first candidate to try"
+    },
+    {
+      "name": "the-path-hook-is-removed",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "    module.__dict__.pop(\"__path__\", None)",
+      "replacement": "    module.__dict__.setdefault(\"__path__\", real_path)",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_a_solid_still_pickles_when_only_a_submodule_was_imported"
+      ],
+      "why": "`import build123d.topology` is the one route into the package that never touches an attribute: the import system reads `__path__` off the parent and goes straight to the submodule. Leaving `__path__` in place means `__getattr__` is never called on that route, so neither the version check nor `modify_copyreg()` is armed for a candidate that imports only submodules"
+    },
+    {
+      "name": "the-docstring-is-left-as-none",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "    module.__doc__ = consts[0] if consts and isinstance(consts[0], str) else None",
+      "replacement": "    module.__doc__ = None",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_docstring_is_right_before_anything_forces_the_import"
+      ],
+      "why": "the third defect the equivalence sweep found, and the one that could not be deferred like the rest: popping `__doc__` sends the lookup to `types.ModuleType.__doc__` -- the type's docstring -- rather than to `__getattr__`, so the facade has to answer it at install time or answer it wrongly"
+    },
+    {
+      "name": "the-facade-installs-over-a-candidates-own-build123d",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "    if spec is None or not spec.submodule_search_locations or spec.loader is None:",
+      "replacement": "    if spec is None or spec.loader is None:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheFacadeStepsAsideTest::test_it_declines_when_the_candidate_ships_its_own_build123d"
+      ],
+      "why": "the sealed input directory is `sys.path[0]` by the time the facade installs, so a designer who ships `build123d.py` beside the model shadows the library today and must keep shadowing it. Without the package check the boundary decides what the candidate's own file meant, which is the property `build_child.py`'s comment on that `sys.path.insert` states in as many words"
+    },
+    {
+      "name": "the-child-stops-installing-the-facade",
+      "file": "skills/3d-modeling/scripts/pipeline/build_child.py",
+      "anchor": "    L.install()",
+      "replacement": "    pass",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheBoundaryInstallsItInOnePlaceTest::test_the_child_installs_the_facade_after_the_seal_and_inside_the_clock"
+      ],
+      "why": "a module with no caller is a slice that shipped nothing, and every test of the facade would still pass -- they install it themselves. D8's finding is this shape: a protection whose absence is invisible to any assertion about a return value needs the call site read as syntax"
+    },
+    {
+      "name": "the-install-moves-out-of-the-stopwatch",
+      "file": "skills/3d-modeling/scripts/pipeline/build_child.py",
+      "anchor": "    started = time.perf_counter()",
+      "replacement": "    L.install()\n    started = time.perf_counter()",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheBoundaryInstallsItInOnePlaceTest::test_the_child_installs_the_facade_after_the_seal_and_inside_the_clock"
+      ],
+      "why": "the one edit that makes `build_seconds` smaller without making the child faster, which is what `docs/baseline.md` records this change point in order to prevent. The experiment that preceded this slice listed moving the stopwatch as an alternative and rejected it in the same words; nothing but this test stops it arriving later as a tidy-up"
+    },
+    {
+      "name": "the-identity-sweep-resolves-nothing",
+      "file": "benchmarks/heavy/test_lazy_build123d_heavy.py",
+      "anchor": "        for name in servable:\n            lazy_throughout &= \"__getattr__\" in build123d.__dict__",
+      "replacement": "        for name in []:\n            lazy_throughout &= \"__getattr__\" in build123d.__dict__",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_every_name_the_facade_serves_is_the_object_the_package_binds"
+      ],
+      "why": "the instrument. A sweep that resolves no names reports zero mismatches and a facade that never fell back, which reads exactly like a clean result -- and the count assertion beside it is the only thing that can tell the two apart"
+    },
+    {
+      "name": "the-premise-walk-covers-no-names",
+      "file": "benchmarks/heavy/test_lazy_build123d_heavy.py",
+      "anchor": "    for name in sorted(build123d.__dict__):\n        if name.startswith(\"__\"):",
+      "replacement": "    for name in []:\n        if name.startswith(\"__\"):",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_search_order_cannot_change_what_a_name_means"
+      ],
+      "why": "the other instrument, and the one whose failure would be quietest: an empty walk finds no conflicting name and no unserved public name, so the claim the whole design rests on -- that search order cannot change what a name binds to -- would be asserted over nothing"
+    }
+  ]
+}

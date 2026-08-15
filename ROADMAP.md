@@ -1061,7 +1061,17 @@ And the seconds are somewhere else. Assessment is 62–64% of a certified run �
 0.12 s of 0.19 s. The confined build boundary is 1.37–2.73 s per authored
 invocation, and repeated builds are 2 of 3 on the `MODIFY` round trip and 3 of 6
 on the branched job. Neither is an assessment, and a registry would not touch
-either.
+either. That boundary figure is a *trimesh*-lane one and stands as measured; the
+authored **build123d** lane has since moved, and the argument is unaffected
+because it moved the right way. The lazy `build123d` facade cut a real bearing
+candidate's confined build from a median 5.931 s to 4.299 s of wall
+(`build_seconds` 4.910 s → 3.404 s), ranges not overlapping — so the term this
+clause calls "somewhere else" is about 3.4 s rather than about 4.9 s and is still
+an order above the assessment it is being compared with. The change point and the
+arm-by-arm attribution are in [`docs/baseline.md`](docs/baseline.md) under
+"Re-measured after the lazy `build123d` facade". `build_seconds` was **not**
+redefined, so a figure recorded before that heading and one recorded after it are
+both honest and are not comparable.
 
 Building one now would **create** the duplicate planning authority Release 10 is
 scoped to remove, over a set of assessments that mostly do not exist, to save a

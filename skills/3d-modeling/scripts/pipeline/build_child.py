@@ -138,10 +138,10 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
     # Inside the stopwatch deliberately, and after the seal: the facade is build
     # work, not boundary setup, and `build_seconds` must keep measuring the same
     # phase it always measured (`docs/baseline.md`, "the lazy build123d facade").
-    # It defers the six libraries `build123d/__init__.py` imports that no
-    # candidate here calls -- measured 5.784 s -> 4.045 s on the bearing
-    # candidate -- and it declines outright on any build123d release whose public
-    # surface has not been swept, so an unknown one builds exactly as before.
+    # It defers the three `build123d` submodules that carry `sklearn` and `ezdxf`
+    # -- measured on the bearing candidate, `docs/baseline.md` -- and it serves
+    # nothing lazily on a build123d release whose public surface has not been
+    # swept, so an unknown one builds exactly as it did before.
     L.install()
     model, builder = A.load(model_path)
     part = builder() if callable(builder) else builder

@@ -6,6 +6,52 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — the confined child stops importing `ezdxf` for candidates that never mention it
+
+`build123d/__init__.py` is eager: 24 submodules, and importing any one of them executes
+the package body first, so a candidate asking for seven names also pays for `ezdxf`,
+`sklearn` and everything those two drag. `pipeline/lazy_build123d.py` binds `build123d`
+in the child to a module built from `find_spec` — real path, real loader, *not executed*
+— carrying a PEP 562 `__getattr__` that resolves a name by importing the package's own
+submodules in the package's own order, minus `{exporters, import_dxf, brep_from_stl}`.
+Anything the search cannot serve executes the real `__init__.py`, so no name and no side
+effect is lost; they are deferred, and only while nothing asks.
+
+**Measured, one fresh confined child per run, arms interleaved, on the real bearing
+candidate:** median wall **5.931 s → 4.299 s (1.632 s, 27.5%)** and `build_seconds`
+**4.910 s → 3.404 s (1.505 s, 30.7%)**, ranges not overlapping, one STL sha256 and one
+declared-`PARAMS` digest across every run of both arms. `docs/baseline.md` carries the
+arm-by-arm attribution and is where the change point is recorded: `build_seconds` still
+measures the phase it always measured and the implementation underneath it got faster,
+so figures from before that heading are preserved and are not comparable with figures
+after it.
+
+**The omission is the design, and one of the three is in it for a reason that is not
+speed.** `exporters` and `import_dxf` are `__init__`'s sixth and ninth imports, ahead of
+the submodules carrying `Box` and `chamfer`, and each is worth about 0.7 s. Omitting
+`brep_from_stl` measured **+0.011 s** against a 0.39 s spread — nothing — and it was
+removed on that; the identity sweep put it back, because it binds `copy` to the *module*
+where `__init__` leaves the *function*. It is omitted because it cannot be served
+correctly.
+
+**Only for releases actually swept.** The optimization arms itself on first contact with
+the package, and only for a `build123d` version whose whole namespace has been compared
+object by object (0.11.1: 474 names, 0 conflicts). Any other release executes the real
+`__init__.py` — asserted against an arm that never installed a facade. `pyproject.toml`
+keeps `build123d>=0.9`: narrowing a dependency range to protect a speedup would pay for
+it with the ability to install.
+
+Three defects the sweeps found before this shipped, none of which a build could have
+seen behind a byte-identical mesh: `dir(build123d)` returning 11 names where the package
+returns 485; `build123d.pack` answering with the submodule where `__init__` binds a
+function of the same name; and `build123d.__doc__` reading `None`.
+
+Deliberately not done, so the scope is legible later: no generic lazy-import machinery,
+nothing under `site-packages` touched, no library stubbed, no warm child kept alive, no
+cache semantics changed, and the trimesh lane untouched — a candidate that never names
+build123d pays one `find_spec`.
+
+
 ### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
 
 The rule that requires a unit tests `if not str(self.unit).strip()`. The loader read
