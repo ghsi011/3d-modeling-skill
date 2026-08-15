@@ -152,6 +152,26 @@
         "tools/test_mutate.py::TheVerdictIsWhatTheCheckSaidTest"
       ],
       "why": "a survivor stops failing the command, so a sweep nobody reads reports every rule as held"
+    },
+    {
+      "name": "restore-digest-check-removed",
+      "file": "tools/mutate.py",
+      "anchor": "        if _digest(back) != _digest(original):",
+      "replacement": "        if False:",
+      "tests": [
+        "tools/test_mutate.py::TheRestoreIsVerifiedByDigestTest"
+      ],
+      "why": "the half of the restore guard a write-failure provocation cannot reach: a write that LIES rather than refuses, leaving bytes on disk that are not the bytes it was handed. This survived the whole L0 file before its test existed, while the module docstring and a merged pull request both claimed the restore is verified by digest -- true of the code, unproven by the suite"
+    },
+    {
+      "name": "stale-bytecode-refusal-swallowed",
+      "file": "tools/mutate.py",
+      "anchor": "        except OSError as exc:\n            raise MutateError(\n                f\"{stale} could not be removed ({exc}), so a child may execute it \"",
+      "replacement": "        except OSError:\n            pass\n        if False:\n            raise MutateError(\n                f\"{stale} could not be removed, so a child may execute it \"",
+      "tests": [
+        "tools/test_mutate.py::AStaleBytecodeThatCannotBeRemovedIsRefusedTest"
+      ],
+      "why": "the refusal turned into a warning. A stale entry compiled from the mutation outlives the sweep, so a later run in the same checkout executes code no file contains -- which is the failure that once made six sweeps of a byte-identical tree return clean, survivor, clean, survivor, clean, clean"
     }
   ]
 }
