@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""L0 for the lazy `build123d` facade -- the half that answers in this process.
+
+What the facade *does* needs a fresh interpreter, because the honest instrument
+for "was this module imported" is `sys.modules` in a process that has just
+started, and `conftest.py` permits an L0 test to spawn `git` and nothing else.
+That half is `benchmarks/heavy/test_lazy_build123d_heavy.py`, and it is where the
+structural regression control lives: a minimal candidate must not load `sklearn`
+or `ezdxf`, asserted on `sys.modules` rather than on a clock.
+
+What is left here is not a residue. It is the two claims that no run can make:
+
+* the pinned submodule inventory is the installed package's own. The facade
+  answers a name by importing submodules in a fixed order, and that order is a
+  fact about one release of somebody else's package. A submodule this list has
+  never heard of is a name the facade cannot serve or -- worse, if the release
+  ever moved one -- serves from the wrong module. `PROVEN_VERSIONS` is the guard
+  and this is the guard's own check, run on every commit against whatever
+  `uv.lock` currently resolves;
+* the facade is installed at the one point in `build_child.py` where it is safe
+  to install it: after the syscall filter, inside the stopwatch, before the first
+  candidate byte is imported. That is a call site, and D8's finding is that a
+  protection whose weakening is invisible to any assertion about a return value
+  needs the call site read as syntax.
+"""
+from __future__ import annotations
+
+import ast
+import importlib.util
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+
+from . import lazy_build123d as L
+from .test_import_cost import _module_level_imports
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
+
+
+def _installed_init() -> Path | None:
+    """The installed `build123d/__init__.py`, found without executing it.
+
+    `find_spec` is ~1.5 ms and imports nothing -- which is the only reason this
+    check can live in the commit gate at all.
+    """
+    spec = importlib.util.find_spec(L.PACKAGE)
+    if spec is None or spec.origin is None:
+        return None
+    return Path(spec.origin)
+
+
+def _submodules_the_package_imports(init: Path) -> set[str]:
+    """`from build123d.X import ...` in the package body, by AST.
+
+    Absolute imports only. `from .version import version as __version__` is
+    relative and is deliberately not in the inventory: the facade never has to
+    serve `version` from a search, because `__version__` starts with an
+    underscore pair and goes straight to the real `__init__`.
+    """
+    tree = ast.parse(init.read_text(encoding="utf-8"))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            parts = node.module.split(".")
+            if parts[0] == L.PACKAGE and len(parts) == 2:
+                found.add(parts[1])
+    return found
+
+
+class TheOmissionSetIsTheDesignTest(unittest.TestCase):
+    """Three names, chosen by subtraction, and the reason written down once."""
+
+    def test_the_pinned_inventory_is_the_installed_packages_own(self) -> None:
+        init = _installed_init()
+        self.assertIsNotNone(init, "build123d is a core dependency and its "
+                                   "__init__.py must be findable")
+        if L.installed_version() not in L.PROVEN_VERSIONS:
+            self.skipTest(
+                f"build123d {L.installed_version()} is not in PROVEN_VERSIONS, so "
+                "the facade declines on this install and there is no inventory to "
+                "hold to account. Sweeping a new release is what adds it.")
+        self.assertEqual(
+            set(L.SUBMODULES), _submodules_the_package_imports(init),
+            "the facade's submodule inventory and build123d's own __init__.py "
+            "disagree. A submodule the inventory has never heard of is a name "
+            "the search cannot serve; a name the release moved into an "
+            "earlier-searched module is a silent mis-bind. Re-run the identity "
+            "sweep in benchmarks/heavy/test_lazy_build123d_heavy.py against the "
+            "new release before touching either list.")
+
+    def test_the_search_is_the_inventory_minus_exactly_the_three(self) -> None:
+        """Stated as a set difference, because that is the whole justification.
+
+        The omission is "the smallest set that keeps the measured win", not "the
+        set that happens to serve the candidates in this repository". An authored
+        candidate is arbitrary by contract, so what the omission has to buy is a
+        property of the mechanism: no name lookup can reach `sklearn` or `ezdxf`.
+        """
+        self.assertEqual(("exporters", "import_dxf", "brep_from_stl"), L.DEFERRED)
+        self.assertEqual(set(), set(L.SEARCH) & set(L.DEFERRED))
+        self.assertEqual(set(L.SUBMODULES) - set(L.DEFERRED), set(L.SEARCH))
+        self.assertEqual(len(L.SUBMODULES) - len(L.DEFERRED), len(L.SEARCH),
+                         "a repeated name in the inventory would shrink the "
+                         "search without saying so")
+
+    def test_the_inventory_is_ordered_and_the_three_are_last(self) -> None:
+        """Order is a cost property and the tuple is also the inventory.
+
+        Keeping the deferred three in `SUBMODULES` is what lets the previous test
+        be a set difference against the package's own imports rather than a
+        hand-maintained include list -- which is the form that goes stale.
+        """
+        self.assertEqual(list(L.DEFERRED), list(L.SUBMODULES[-len(L.DEFERRED):]))
+
+
+class TheFacadeStepsAsideTest(unittest.TestCase):
+    """Every path that must end in ordinary `import build123d`.
+
+    `install()` costs one `find_spec` and one module object and decides nothing
+    about which release this is; that decision is armed on first contact, where
+    a candidate that never names build123d never pays for it. So what is
+    checkable here is the declining, and each of these is a case where the
+    boundary must not have an opinion.
+    """
+
+    def setUp(self) -> None:
+        self._saved = sys.modules.pop(L.PACKAGE, None)
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        sys.modules.pop(L.PACKAGE, None)
+        if self._saved is not None:
+            sys.modules[L.PACKAGE] = self._saved
+
+    def test_it_declines_when_the_candidate_already_imported_build123d(self) -> None:
+        """Whatever is already bound stays bound. Replacing it mid-flight would
+        be the boundary rewriting an import the candidate has already made."""
+        sentinel = types.ModuleType(L.PACKAGE)
+        sys.modules[L.PACKAGE] = sentinel
+        self.assertFalse(L.install())
+        self.assertIs(sentinel, sys.modules[L.PACKAGE])
+
+    def test_it_declines_when_the_candidate_ships_its_own_build123d(self) -> None:
+        """The sealed input directory is `sys.path[0]` by the time this runs.
+
+        A designer who ships `build123d.py` beside the model shadows the library
+        today, and must keep shadowing it: a shadowing *module* has no
+        `submodule_search_locations`, so the facade steps aside rather than
+        deciding what the candidate's file was supposed to mean.
+        """
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        (Path(raw.name) / f"{L.PACKAGE}.py").write_text("SHADOW = 1\n",
+                                                        encoding="utf-8")
+        sys.path.insert(0, raw.name)
+        self.addCleanup(sys.path.remove, raw.name)
+        importlib.invalidate_caches()
+        self.addCleanup(importlib.invalidate_caches)
+
+        self.assertFalse(L.install())
+        self.assertNotIn(L.PACKAGE, sys.modules,
+                         "declining means leaving the name alone, so the "
+                         "candidate's own file resolves the way it always did")
+
+    def test_it_declines_when_build123d_cannot_be_found_at_all(self) -> None:
+        """A checkout without the dependency gets a normal ImportError from the
+        candidate's own import, raised by the import system and not by this."""
+        original = importlib.util.find_spec
+
+        def missing(name: str, package: str | None = None):
+            return None if name == L.PACKAGE else original(name, package)
+
+        importlib.util.find_spec = missing
+        self.addCleanup(setattr, importlib.util, "find_spec", original)
+        self.assertFalse(L.install())
+        self.assertNotIn(L.PACKAGE, sys.modules)
+
+
+class TheBoundaryInstallsItInOnePlaceTest(unittest.TestCase):
+    """Read as syntax, because the ordering is the protection.
+
+    Installed before the seal, the facade would be doing importlib work with more
+    authority than the candidate gets. Installed after `A.load`, it would be
+    replacing an import the candidate has already made. Outside the stopwatch, it
+    would move work out of `build_seconds` without making anything faster, which
+    `docs/baseline.md` names as the one thing this change must not do. None of
+    those three is visible in any return value.
+    """
+
+    def _build_body(self) -> list[ast.stmt]:
+        tree = ast.parse((PACKAGE_ROOT / "build_child.py").read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "_build":
+                return node.body
+        raise AssertionError("build_child._build is gone")
+
+    def _index_of(self, body: list[ast.stmt], predicate) -> int:
+        for index, node in enumerate(body):
+            if predicate(node):
+                return index
+        return -1
+
+    def test_the_child_installs_the_facade_after_the_seal_and_inside_the_clock(
+            self) -> None:
+        body = self._build_body()
+
+        def calls(name: str):
+            def check(node: ast.stmt) -> bool:
+                return (isinstance(node, ast.Expr)
+                        and isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Attribute)
+                        and node.value.func.attr == name)
+            return check
+
+        def starts_the_clock(node: ast.stmt) -> bool:
+            return (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "started"
+                            for t in node.targets))
+
+        def loads_the_model(node: ast.stmt) -> bool:
+            return (isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and node.value.func.attr == "load")
+
+        seal = self._index_of(body, calls("seal_syscalls"))
+        clock = self._index_of(body, starts_the_clock)
+        install = self._index_of(body, calls("install"))
+        load = self._index_of(body, loads_the_model)
+
+        self.assertNotEqual(-1, install,
+                            "build_child._build does not install the facade, so "
+                            "every authored build pays for sklearn, ezdxf, "
+                            "svgpathtools and svgwrite again -- measured 1.739 s "
+                            "on the bearing candidate")
+        self.assertLess(seal, install, "the facade must run under the same "
+                                       "syscall filter the candidate does")
+        self.assertLess(clock, install, "moving the facade out of `build_seconds` "
+                                        "shrinks the number without making the "
+                                        "child faster")
+        self.assertLess(install, load, "the candidate's first import must find "
+                                       "the facade already in sys.modules")
+
+    def test_the_boundary_never_imports_build123d_at_module_level(self) -> None:
+        """The facade is only worth anything if nothing above it has already
+        executed the package. `_export` keeps its `from build123d import ...`
+        inside the function for exactly this reason."""
+        for module in ("build_child.py", "lazy_build123d.py"):
+            with self.subTest(module=module):
+                self.assertNotIn(L.PACKAGE,
+                                 _module_level_imports(PACKAGE_ROOT / module))
+
+
+if __name__ == "__main__":
+    unittest.main()
