@@ -110,6 +110,16 @@ elif mode == "star":
     exec("from build123d import *", namespace)
     out["star"] = sorted(k for k in namespace if not k.startswith("__"))
 
+elif mode == "dironly":
+    # `dir()` and nothing else, before any name has forced the fallback. Every
+    # other question in this file leaves the facade fully imported long before it
+    # reaches `dir`, so asking it there proves nothing about `__dir__` -- measured:
+    # the mutation that takes the forced import out of `__dir__` SURVIVED the
+    # whole-surface comparison, and this is the case that kills it.
+    import build123d
+    out["dir"] = sorted(dir(build123d))
+    out["dir_len"] = len(out["dir"])
+
 elif mode == "pickle":
     # The route that never touches an attribute of the package: the import
     # system reads `__path__` off the parent and goes straight to the submodule,
@@ -347,6 +357,21 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
         self.assertEqual(200, len(plain["all"]))
         self.assertEqual(485, len(plain["dir"]),
                          "the count the `dir()` defect was found against")
+
+    def test_dir_on_its_own_is_still_the_whole_namespace(self) -> None:
+        """The case the whole-surface comparison could not make, and the proof is
+        a mutation that survived it.
+
+        `dir()` is the one question a facade cannot answer lazily, and removing
+        the forced import from `__dir__` is invisible to every other test here --
+        each of them has already read `__version__` or resolved a fallback name,
+        so the package is fully imported by the time `dir` is asked. Measured:
+        `dir-loses-its-forced-import` SURVIVED `test_the_public_surface_is_
+        identical` and is killed by this. The original defect returned 11 names.
+        """
+        lazy, plain = _probe("dironly", "lazy"), _probe("dironly", "plain")
+        self.assertEqual(plain["dir"], lazy["dir"])
+        self.assertEqual(485, plain["dir_len"])
 
     def test_a_star_import_binds_the_same_names(self) -> None:
         """`from build123d import *` reads `__all__`, which starts with an

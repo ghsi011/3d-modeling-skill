@@ -71,9 +71,9 @@
       "anchor": "        _arm()\n        _full()\n        return sorted(module.__dict__)",
       "replacement": "        _arm()\n        return sorted(module.__dict__)",
       "tests": [
-        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_public_surface_is_identical"
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_dir_on_its_own_is_still_the_whole_namespace"
       ],
-      "why": "the defect exactly as it was found, and the reason this manifest exists at all: the draft with no `__dir__` returned 11 names where the package returns 485, behind a byte-identical STL and identical STEP geometry across sixty timed builds. A candidate deriving `PARAMS` from `dir()` would have declared something different and every geometry check would still have passed"
+      "why": "the defect exactly as it was found, and the reason this manifest exists at all: the draft with no `__dir__` returned 11 names where the package returns 485, behind a byte-identical STL and identical STEP geometry across sixty timed builds. A candidate deriving `PARAMS` from `dir()` would have declared something different and every geometry check would still have passed. It is named against a `dir()`-and-nothing-else probe because it **SURVIVED** the whole-surface comparison first: that test reads `__version__` and resolves a fallback name before it asks for `dir`, so the package is already fully imported and `__dir__` is not doing anything by then. The fixture was strengthened rather than the mutation dropped"
     },
     {
       "name": "the-search-leaves-its-submodules-bound-on-the-package",
