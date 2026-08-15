@@ -467,14 +467,27 @@ def _assemble(ctx: MeshAnalysisContext, bodies) -> MeshAnalysisContext:
 
     components = ctx.components
     posed = []
+    claimed: dict[int, int] = {}
     for index, row in enumerate(bodies):
         locator = [float(v) for v in row["locator_mm"]]
-        holding = [c for c in components if _holds(c, locator)]
+        # `contains` is a ray test and answers nothing on an open surface, so a
+        # component the locator's box reaches into but which is not a closed
+        # solid stops the row rather than being guessed at.
+        for candidate in (c for c in components if _in_box(c, locator)):
+            if not candidate.is_watertight:
+                raise _CannotAssemble(
+                    f"bodies[{index}] reaches an exported solid that is not "
+                    "closed, so whether the locator is inside it cannot be "
+                    "decided by a ray test.",
+                    code="BODY_NOT_A_SOLID")
+        holding = [i for i, c in enumerate(components) if _holds(c, locator)]
         if not holding:
             raise _CannotAssemble(
                 f"bodies[{index}] is named by the point {locator}, and no exported "
-                "solid contains it. Either the part is not the one the contract "
-                "was frozen against, or a half is missing.",
+                "solid has material there. Either the part is not the one the "
+                "contract was frozen against, a half is missing, or the point was "
+                "put in a void -- the bore's own axis is inside the box of the "
+                "half around it and inside none of its material.",
                 code="BODY_LOCATOR_UNMATCHED")
         if len(holding) > 1:
             raise _CannotAssemble(
@@ -482,13 +495,25 @@ def _assemble(ctx: MeshAnalysisContext, bodies) -> MeshAnalysisContext:
                 f"inside {len(holding)} exported solids. A locator that names more "
                 "than one body names none of them.",
                 code="BODY_LOCATOR_AMBIGUOUS")
+        # One row, one solid, and no solid twice. Without this a candidate that
+        # lost a half can have both locators land in the survivor, which is then
+        # copied under two transforms into an assembly that looks complete while
+        # a real exported solid is never read. The rows would each be
+        # unambiguous; it is the *pairing* that is not.
+        if holding[0] in claimed:
+            raise _CannotAssemble(
+                f"bodies[{index}] selects the same exported solid as "
+                f"bodies[{claimed[holding[0]]}]. Each row must name a different "
+                "one, or a part could be assembled twice out of one half.",
+                code="BODY_LOCATOR_NOT_DISTINCT")
+        claimed[holding[0]] = index
         matrix = CT.as_transform(row.get("transform"))
         if matrix is None:
             raise _CannotAssemble(
                 f"bodies[{index}] declares a transform that is not a finite rigid "
                 "one, so the solid may not be moved by it.",
                 code="BODY_TRANSFORM_UNUSABLE")
-        moved = holding[0].copy()
+        moved = components[holding[0]].copy()
         moved.apply_transform(matrix)
         posed.append(moved)
 
@@ -502,16 +527,35 @@ def _assemble(ctx: MeshAnalysisContext, bodies) -> MeshAnalysisContext:
                                load_count=0, repair_actions=())
 
 
-def _holds(mesh, point) -> bool:
-    """Is the point inside this solid's own bounding box?
-
-    Bounds rather than `contains`: a ray test on a solid with an open bore is
-    the expensive way to answer a question the contract can simply avoid asking
-    badly, and a locator that lands in two boxes is refused above rather than
-    resolved by a more elaborate instrument.
-    """
+def _in_box(mesh, point) -> bool:
+    """Cheap rejection only. Never an answer on its own -- see `_holds`."""
     low, high = mesh.bounds
     return all(float(low[i]) <= point[i] <= float(high[i]) for i in range(3))
+
+
+def _holds(mesh, point) -> bool:
+    """Is the point inside this solid's **material**?
+
+    The bounding box is a prefilter and nothing more. The first version of this
+    stopped at the box and called it identity, with a comment arguing that a ray
+    test was the expensive way to answer a question a careful contract could
+    avoid asking badly. Review found the hole in that: a box is not a solid, and
+    the gap between them is exactly where a wrong assembly hides. The axis of
+    this clamp's own bore lies inside the body's box and in no material at all,
+    so a locator put on the bearing axis -- the most natural point anyone would
+    reach for -- named a solid it is not inside.
+
+    Worse, the box of one half can cover a point meant for another. A candidate
+    missing a half then has both locators land in the surviving one, and it is
+    copied under two transforms into a complete-looking assembly while a real
+    exported solid is ignored. Nothing in the old check could see that.
+
+    `contains` is a ray test and it is only meaningful on a closed solid, so an
+    open component is refused by the caller rather than guessed at.
+    """
+    if not _in_box(mesh, point):
+        return False
+    return bool(mesh.contains([point])[0])
 
 
 def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,

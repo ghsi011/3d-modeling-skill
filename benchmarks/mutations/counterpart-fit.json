@@ -105,12 +105,42 @@
     {
       "name": "the-locator-is-replaced-by-split-order",
       "file": "skills/3d-modeling/scripts/pipeline/commission.py",
-      "anchor": "        holding = [c for c in components if _holds(c, locator)]",
-      "replacement": "        holding = [components[index]] if index < len(components) else []",
+      "anchor": "        holding = [i for i, c in enumerate(components) if _holds(c, locator)]",
+      "replacement": "        holding = [index] if index < len(components) else []",
       "tests": [
         "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_rows_may_be_declared_in_either_order"
       ],
       "why": "the reviewer's requirement was that bodies be bound to independently identifiable solids rather than to component order. Split order is an artefact of the mesh library: the same geometry re-exported can renumber, and then the cap's transform is applied to the body and the body's to the cap, producing a confident assembly of the wrong part. It SURVIVED the first sweep: every other fixture listed the bodies in split order, so a positional implementation passed them all. The test that kills it declares the same two rows the other way round"
+    },
+    {
+      "name": "the-locator-only-has-to-be-in-the-bounding-box",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    if not _in_box(mesh, point):\n        return False\n    return bool(mesh.contains([point])[0])",
+      "replacement": "    return _in_box(mesh, point)",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_locator_in_the_box_but_in_no_material_is_refused"
+      ],
+      "why": "this is the shipped defect review caught, restored exactly. A box is not a solid: the bearing axis -- the most natural point anyone would put a locator on -- lies inside the body's bounding box and in none of its material, because the seat's arch is cut away there. The row bound a solid the point is not inside, and the receipt showed a clean assembly"
+    },
+    {
+      "name": "two-rows-may-bind-the-same-solid",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        if holding[0] in claimed:",
+      "replacement": "        if False:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_two_rows_may_not_bind_the_same_solid"
+      ],
+      "why": "the forged assembly. Each row stays individually unambiguous, so nothing else in the file notices; it is the pairing that is wrong. One half is copied under its own transform and again under the other half's, producing a complete-looking ring at a full retained volume while a genuinely exported solid is never read -- so a candidate that lost a half scores a full grip"
+    },
+    {
+      "name": "an-open-surface-is-ray-tested-anyway",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "            if not candidate.is_watertight:",
+      "replacement": "            if False:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_locators_that_do_name_material_still_work"
+      ],
+      "why": "`contains` is a ray test, and inside/outside is not defined for an open surface -- it answers, and the answer is whichever way the parity happened to land. Refusing is the only honest outcome, because an unreliable containment silently decides which solid receives which transform"
     }
   ]
 }

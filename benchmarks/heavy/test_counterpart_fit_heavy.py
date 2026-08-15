@@ -432,23 +432,67 @@ class TheHalvesAreAssembledBeforeTheyAreJudgedTest(unittest.TestCase):
             msg="the same two solids in the same two places must measure the "
                 "same, whichever order the contract lists them in")
 
+    def test_two_rows_may_not_bind_the_same_solid(self) -> None:
+        """The assembly forged out of one half, which review found and I had not.
+
+        Each row here is individually unambiguous -- both points really are
+        inside the body, and neither is inside two solids. It is the *pairing*
+        that is wrong: the body would be copied under the identity and again
+        under the cap's flip, producing a complete-looking ring while the real
+        cap is never read. A candidate that lost a half could be presented this
+        way and score a full grip.
+
+        So the binding has to be one row to one solid, and no solid twice.
+        """
+        row = self._run(bodies=(BODY_ROW,
+                                {"locator_mm": [10.0, 0.0, 1.0],
+                                 "transform": CAP_TRANSFORM}))
+        self.assertFalse(row["ran"])
+        self.assertEqual("BODY_LOCATOR_NOT_DISTINCT", row["error_code"])
+        self.assertEqual("FAIL", row["result"])
+
+    def test_a_locator_in_the_box_but_in_no_material_is_refused(self) -> None:
+        """A bounding box is not a solid, and the gap is where this failed.
+
+        The point chosen is the bearing axis itself -- the most natural thing
+        anyone would reach for, and the exact centre of the arch the seat cuts
+        away. It lies inside the body's bounding box and inside none of its
+        material. The first version of this check stopped at the box and bound
+        the body to it.
+        """
+        row = self._run(bodies=({"locator_mm": [0.0, 0.0, SPLIT_Z],
+                                 "transform": "identity"}, CAP_ROW))
+        self.assertFalse(row["ran"])
+        self.assertEqual("BODY_LOCATOR_UNMATCHED", row["error_code"])
+        self.assertEqual("FAIL", row["result"])
+
+    def test_the_locators_that_do_name_material_still_work(self) -> None:
+        """The control. Without it the two tests above pass against a check
+        that refuses everything, which would be a gate nobody could satisfy."""
+        row = self._run()
+        self.assertTrue(row["ran"])
+        self.assertEqual("PASS", row["result"], row["reason"])
+
     def test_a_locator_inside_two_solids_is_refused(self) -> None:
         """A nested solid, which is what makes a locator genuinely ambiguous.
 
-        Two rows sharing one locator is a different fault -- the contract naming
-        one body twice -- and preflight catches that. This is the other one: a
-        loose pin sitting inside the block's bore, so its bounding box lies
-        wholly inside the block's, and a point in the pin is a point in both.
-        The contract cannot say which solid it meant, so the row refuses rather
-        than taking the first.
+        Once the locator has to be in *material*, the loose-pin-in-a-bore case
+        this originally used stops being ambiguous at all: the bore is a void,
+        so a point there is inside the pin and inside nothing else, and the
+        stricter check resolves what the bounding-box version could not. That
+        is the fix working, and it left this test asserting a refusal that no
+        longer happens.
+
+        What survives true containment is genuine overlap: a smaller solid
+        wholly *inside* a larger one, both closed, exported as two components.
+        A point at the centre is in both materials, and no instrument can say
+        which body the contract meant -- so the row refuses rather than taking
+        the first.
         """
         import trimesh
 
-        block = trimesh.boolean.difference(
-            [trimesh.creation.box(extents=(40.0, 20.0, 20.0)),
-             trimesh.creation.cylinder(radius=8.0, height=60.0, sections=96)],
-            engine="manifold")
-        pin = trimesh.creation.cylinder(radius=2.0, height=6.0, sections=96)
+        block = trimesh.creation.box(extents=(40.0, 20.0, 20.0))
+        pin = trimesh.creation.box(extents=(4.0, 4.0, 4.0))
         both = trimesh.util.concatenate([block, pin])
         ctx = MeshAnalysisContext(path=None, raw=both, normalized=both,
                                   load_count=1, repair_actions=())
