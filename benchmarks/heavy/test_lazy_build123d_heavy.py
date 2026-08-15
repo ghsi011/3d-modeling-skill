@@ -317,10 +317,11 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
     def test_the_search_order_cannot_change_what_a_name_means(self) -> None:
         """The premise, over the whole namespace rather than over `__all__`.
 
-        83 of the 200 public names are re-exported by more than one submodule, so
-        "which submodule answers first" would be a live question if any two ever
-        disagreed. None do -- and the public names no served submodule carries
-        are exactly the ones that live only in the omitted submodules.
+        179 of the 474 names the package binds have more than one provider — 83
+        of the 200 public ones among them — so "which submodule answers first"
+        would be a live question if any two ever disagreed. None do, and the
+        public names no served submodule carries are exactly the ones that live
+        only in the omitted submodules.
         """
         premise = _probe("premise", "plain")
         self.assertEqual([], premise["wrong"],

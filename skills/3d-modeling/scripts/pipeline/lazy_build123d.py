@@ -22,12 +22,15 @@ serve executes the real `__init__.py` at full price, so no name and no side
 effect is lost: they are deferred, and only for as long as nothing asks.
 
 **Why the search order cannot change what a name means.** Verified against
-`build123d 0.11.1` by importing the real package and comparing object identity
-for all 200 names in `__all__` against every submodule that carries them: 83
-names are re-exported by more than one submodule and **0 resolve to a different
-object from a different submodule**. Every provider of a name provides the
-identical object. That property is a fact about one release, which is what
-`PROVEN_VERSIONS` is for.
+`build123d 0.11.1` over the package's **whole namespace** and not just `__all__`,
+because a candidate can read a name the package never advertised: for each of the
+474 names `build123d` binds, walk `SEARCH` and compare the first hit against what
+`__init__.py` bound. **179 of them have more than one provider and 0 resolve to a
+different object** -- 83 of the 200 public names are among the multiply-provided
+ones. Every provider of a name provides the identical object, so search order
+cannot decide what an import means. That is a fact about one release, which is
+what `PROVEN_VERSIONS` is for, and
+`benchmarks/heavy/test_lazy_build123d_heavy.py` is where it is re-run.
 
 **The search walks the package's own import order, minus the submodules in
 `DEFERRED`, and that omission is the entire design.** `SEARCH` is `SUBMODULES`
