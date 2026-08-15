@@ -1,0 +1,36 @@
+{
+  "target": "the disc probe `commission` uses on a bolt-hole boss, which the commit gate never executed",
+  "note": "Before this slice `disc_area`'s body ran ZERO times across the whole L0 gate: `commission.py:247` calls it in production and the only test naming it, `test_pipeline.py:3126`, replaces it with a stub. Every entry here is killed by the closed-form fixture, which needs no corpus and no child process. Each was run against the real code and observed to fail the named test. Run with: uv run python tools/mutate.py benchmarks/mutations/disc-area-coverage.json",
+  "mutations": [
+    {
+      "name": "radius-passed-where-diameter-belongs",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "            window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,",
+      "replacement": "            window = trimesh.creation.cylinder(radius=float(diameter),",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_analysis_windows.py"
+      ],
+      "why": "the classic radius-for-diameter slip, wrong by a factor of four in area. It reports a boss as having four times the material it has, which is the direction that turns a thin boss into a passing one"
+    },
+    {
+      "name": "the-slab-thickness-does-not-cancel",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "            solid = self._intersect(window, where=f\"the disc at z={z:.3f}\")\n            self._windows[key] = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM",
+      "replacement": "            solid = self._intersect(window, where=f\"the disc at z={z:.3f}\")\n            self._windows[key] = 0.0 if solid.is_empty else float(solid.volume)",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_analysis_windows.py"
+      ],
+      "why": "the probe measures a thin slab's volume and divides by its thickness to get an area. Without the division the answer is a volume wearing an area's name, and every downstream comparison is off by the slab constant. The anchor carries the preceding line because the division is byte-identical in `window_area`, and the harness refused the ambiguous form rather than probing whichever it found first"
+    },
+    {
+      "name": "the-probe-is-not-cached",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "        if key not in self._windows:\n            import trimesh\n\n            window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,",
+      "replacement": "        if True:\n            import trimesh\n\n            window = trimesh.creation.cylinder(radius=float(diameter) / 2.0,",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_analysis_windows.py"
+      ],
+      "why": "the cache defeated outright: every probe recomputes and writes over the same key. My first attempt at this mutation added id(self) to the key, which SURVIVED -- within one context that value is constant, so the cache still worked and the mutation probed nothing. The first version of the test was equally weak: it counted keys, and a recompute-then-overwrite leaves the dictionary one entry long. The test now counts calls to `_intersect`, which is the work the cache exists to avoid"
+    }
+  ]
+}
