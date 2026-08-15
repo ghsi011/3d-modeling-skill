@@ -1,0 +1,26 @@
+{
+  "target": "numpy stays out of a command that never touches geometry",
+  "note": "The trimesh slice's rule applied to the module pair it deliberately left out. Both entries are killed by the L0 import-graph walk that slice built, which needs no corpus and no child process. Each was run against the real code and observed to fail the named test. Run with: uv run python tools/mutate.py benchmarks/mutations/lazy-numpy-import.json",
+  "mutations": [
+    {
+      "name": "contract-imports-numpy-at-module-level",
+      "file": "skills/3d-modeling/scripts/pipeline/contract.py",
+      "anchor": "from . import schemas as S",
+      "replacement": "import numpy as np\n\nfrom . import schemas as S",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_import_cost.py::ANonGeometryCommandDoesNotPayForTheMeshStackTest"
+      ],
+      "why": "the defect as it was: `cli` reaches `contract` through `acceptance`, so `doctor`, `status`, `init` and `route` would pay ~125 ms for a library only `as_transform` and `_frame_disagreements` ever call"
+    },
+    {
+      "name": "screening-imports-numpy-at-module-level",
+      "file": "skills/3d-modeling/scripts/pipeline/screening.py",
+      "anchor": "CALIBRATED = False",
+      "replacement": "import numpy as np\n\nCALIBRATED = False",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_import_cost.py::ANonGeometryCommandDoesNotPayForTheMeshStackTest"
+      ],
+      "why": "the other half of the same edge, and the one that would silently restore the cost if only `contract` were fixed -- `cli` imports `screening` directly, so either module alone is enough to put numpy back on every command"
+    }
+  ]
+}

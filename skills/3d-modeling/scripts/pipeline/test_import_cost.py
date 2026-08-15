@@ -37,7 +37,12 @@ PACKAGE = Path(__file__).resolve().parent
 # The stack a non-geometry command must not drag in. `trimesh` is the measured
 # 85%; `build123d` is the ~10.7 s one the backends already keep function-local and
 # is here so this test fails if that discipline ever moves into a module body.
-MESH_STACK = frozenset({"trimesh", "build123d", "manifold3d", "cascadio"})
+# `numpy` is here for the same reason and by the same measurement, not because it is a
+# mesh library: it cost 123-129 ms of a 308-337 ms CLI import through `contract` and
+# `screening`, which every command reaches and only four functions in either one use.
+# The set is "what a command that does no geometry must not pay for", which is why the
+# name is about the cost rather than about meshes.
+DEFERRED_IMPORTS = frozenset({"trimesh", "build123d", "manifold3d", "cascadio", "numpy"})
 
 # Where a command actually enters the package.
 ENTRY = "cli"
@@ -118,11 +123,11 @@ class ANonGeometryCommandDoesNotPayForTheMeshStackTest(unittest.TestCase):
                       "it is asserting about a graph that stops short")
         for module, imports in sorted(graph.items()):
             with self.subTest(module=module):
-                offenders = sorted(imports & MESH_STACK)
+                offenders = sorted(imports & DEFERRED_IMPORTS)
                 self.assertEqual(
                     [], offenders,
                     f"pipeline/{module}.py imports {offenders} at module level, so "
-                    "every command that reaches it pays for the mesh stack. Move the "
+                    "every command that reaches it pays for it. Move the "
                     "import into the function that uses it, as diagnose.py does.")
 
     def test_the_walk_would_notice_an_import_that_came_back(self) -> None:

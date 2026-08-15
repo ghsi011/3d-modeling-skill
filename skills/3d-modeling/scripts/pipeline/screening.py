@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
+
 
 from .analysis import MeasurementFailed, MeshAnalysisContext
 from .contract import Contract
@@ -266,6 +266,8 @@ def _printer_frame_low_z(bounds, transform) -> float | None:
     used to call `is_finite_rigid` itself, which made two readings of one
     declaration -- the shape of the defect being fixed.
     """
+    import numpy as np
+
     low, high = np.asarray(bounds, dtype=np.float64)
     if not np.all(np.isfinite([low, high])):
         return None
@@ -312,6 +314,8 @@ def _bed_screen(ctx: MeshAnalysisContext, contract: Contract) -> dict[str, Any]:
     # read of one field, in the function this slice centralised, is the shape
     # being fixed. It also removes the `matrix == "identity"` comparison that
     # raised on a numpy array.
+    import numpy as np
+
     identity = bool(np.allclose(transform, np.eye(4)))
     frame = ("model frame (the declared orientation is the identity)" if identity
              else "printer frame (the declared orientation is applied)")

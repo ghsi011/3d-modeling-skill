@@ -20,8 +20,8 @@ from __future__ import annotations
 import dataclasses
 import math
 
-import numpy as np
 from typing import Any
+
 
 from . import schemas as S
 
@@ -167,6 +167,7 @@ def as_transform(matrix: Any):
     `edit_scopes[].alignment_transform` already use for that.
     """
     from team_preflight import is_finite_rigid
+    import numpy as np
 
     if isinstance(matrix, str):
         return np.eye(4) if matrix == "identity" else None
@@ -372,6 +373,8 @@ def _frame_disagreements(contract: Contract) -> list[str]:
     4x4 identity are one declaration in two spellings, and refusing that pair
     would fail every job that spells them differently for no geometric reason.
     """
+    import numpy as np
+
     declared = printer_transform(contract)
     bed = declared_bed_z(contract)
     problems: list[str] = []
