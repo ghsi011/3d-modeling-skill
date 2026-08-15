@@ -1,5 +1,5 @@
 {
-  "target": "The assembled-interface row: both functional surfaces, the pose that places them, and the two preflight guards that stop a row which cannot decide anything",
+  "target": "The assembled-interface row: the per-body poses that build the assembly, both functional surfaces, and the preflight guards that stop a row which cannot decide anything",
   "note": "The ruling for this slice required a mutation that removes or bypasses the new condition, surviving before the fix and dying after it. The 'survives before' half is asserted in code rather than left to this file: benchmarks/heavy/test_counterpart_fit_heavy.py::TheGateCannotSeeASeizedBearingTest runs the seized clamp against the same contract with the row removed and requires it to PASS -- which is the mutation 'delete the whole check', permanently in the tree. The entries below remove each half separately, because a check with two conditions can lose one and still look like it works. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/counterpart-fit.json",
   "mutations": [
     {
@@ -71,6 +71,46 @@
         "skills/3d-modeling/scripts/pipeline/test_counterpart_fit.py::TheInstrumentRefusesAnEmptyRegionTest::test_a_zone_with_no_volume_is_a_failure_not_a_zero"
       ],
       "why": "an inside-out or zero-height zone encloses nothing, and nothing intersected with a candidate is 0.0 mm3 -- which reads on the receipt exactly like a part that stays clear of the bearing. The refusal is what keeps an empty region from being reported as a measured absence"
+    },
+    {
+      "name": "only-the-first-declared-body-is-posed",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    for index, row in enumerate(bodies):\n        locator = [float(v) for v in row[\"locator_mm\"]]",
+      "replacement": "    for index, row in enumerate(list(bodies)[:1]):\n        locator = [float(v) for v in row[\"locator_mm\"]]",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_assembled_pair_reaches_the_whole_ring"
+      ],
+      "why": "the exact defect this slice was sent back to repair, in its most plausible form: the row still assembles, still reports a retained volume, and silently scores half a clamp against a whole-ring floor. Measured on the real commission, one half retains 24.38 mm3 of the 48.16 mm3 ring -- so a correct part is failed and the receipt gives no hint that a body was left on the bed"
+    },
+    {
+      "name": "a-declared-body-that-is-not-there-is-skipped",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        if not holding:\n            raise _CannotAssemble(",
+      "replacement": "        if False:\n            raise _CannotAssemble(",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_missing_half_is_named_rather_than_measured_around"
+      ],
+      "why": "a missing half would be measured around rather than named. The row would grip half a ring and report it as the assembly's grip, which is the false-pass direction: an export that lost its cap looks like a clamp with a weak seat rather than like a clamp with no cap"
+    },
+    {
+      "name": "a-mirrored-half-is-allowed-to-assemble-the-part",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        matrix = CT.as_transform(row.get(\"transform\"))\n        if matrix is None:",
+      "replacement": "        import numpy as _np\n        matrix = CT.as_transform(row.get(\"transform\"))\n        if matrix is None and row.get(\"transform\") != \"identity\":\n            matrix = _np.array(row.get(\"transform\"), dtype=float)\n        if matrix is None:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_reflection_may_not_assemble_the_part"
+      ],
+      "why": "with the rigid predicate bypassed, a determinant of -1 assembles the mirror image of the half that was printed. The two mirrored arches still close around a cylinder, so the retained volume looks right, and the part that fits is one no printer made"
+    },
+    {
+      "name": "the-locator-is-replaced-by-split-order",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        holding = [c for c in components if _holds(c, locator)]",
+      "replacement": "        holding = [components[index]] if index < len(components) else []",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_missing_half_is_named_rather_than_measured_around"
+      ],
+      "why": "the reviewer's requirement was that bodies be bound to independently identifiable solids rather than to component order. Split order is an artefact of the mesh library: the same geometry re-exported can renumber, and then the cap's transform is applied to the body and the body's to the cap, producing a confident assembly of the wrong part"
     }
   ]
 }

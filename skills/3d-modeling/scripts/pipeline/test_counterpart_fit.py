@@ -37,6 +37,7 @@ from . import contract as CT
 GOOD = {
     "counterpart": "bearing.stl",
     "counterpart_sha256": "0" * 64,
+    "bodies": [{"locator_mm": [0.0, 0.0, 1.0], "transform": "identity"}],
     "pose": {"centre_mm": [0.0, 0.0, 12.0], "axis": [0.0, 1.0, 0.0]},
     "retain_r_mm": [9.5, 11.0],
     "retain_z_mm": [-3.5, 3.5],
@@ -111,6 +112,58 @@ class TheZonesMustBeAbleToDecideSomethingTest(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertNotEqual([], _problems(**{field: _ABSENT}))
                 self.assertNotEqual([], _problems(**{field: "  "}))
+
+    def test_the_bodies_must_be_named_and_placed(self) -> None:
+        """No bodies at all means the row would be asked of the file as exported.
+
+        Measured on the real commission, which is why this is a refusal and not
+        a default: each half of the clamp retains 24.38 mm3 of the 48.16 mm3
+        ring, and one zone over the export saw 24.38 -- the cap sits 13 mm away
+        in Y, outside a zone 7 mm wide.
+        """
+        for bodies in (_ABSENT, [], "one", [{"transform": "identity"}],
+                       [{"locator_mm": [0.0, 0.0], "transform": "identity"}],
+                       [{"locator_mm": [0.0, 0.0, float("nan")],
+                         "transform": "identity"}]):
+            with self.subTest(bodies=bodies):
+                self.assertNotEqual([], _problems(bodies=bodies))
+
+    def test_one_locator_may_not_name_two_rows(self) -> None:
+        problems = _problems(bodies=[
+            {"locator_mm": [0.0, 0.0, 1.0], "transform": "identity"},
+            {"locator_mm": [0.0, 0.0, 1.0], "transform": "identity"}])
+        self.assertTrue(any("same solid" in p for p in problems), problems)
+
+    def test_only_a_rigid_transform_may_move_a_printed_half(self) -> None:
+        """Reflection, scale, shear and projection all refused.
+
+        Read through `contract.as_transform`, the same predicate
+        `model_to_printer_matrix` goes through, rather than a second opinion
+        about whether a mesh may be moved by a matrix.
+        """
+        identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+        def _with(row, col, value):
+            matrix = [r[:] for r in identity]
+            matrix[row][col] = value
+            return matrix
+
+        cases = {
+            "reflection": _with(0, 0, -1.0),      # determinant -1
+            "uniform scale": [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0],
+                              [0.0, 0.0, 2.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+            "shear": _with(0, 1, 0.5),
+            "projective": _with(3, 2, 1.0),
+            "not a matrix": "sideways",
+            "wrong shape": [[1.0, 0.0], [0.0, 1.0]],
+        }
+        for name, matrix in cases.items():
+            with self.subTest(case=name):
+                problems = _problems(bodies=[{"locator_mm": [0.0, 0.0, 1.0],
+                                              "transform": matrix}])
+                self.assertTrue(any("rigid" in p for p in problems),
+                                f"{name} was accepted: {problems}")
 
     def test_a_non_numeric_bound_is_refused(self) -> None:
         """`float("nan")` compares false against everything, so a NaN ceiling

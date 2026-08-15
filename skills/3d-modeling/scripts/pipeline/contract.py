@@ -265,6 +265,43 @@ def _counterpart_fit_problems(expectation: dict[str, Any], where: str) -> list[s
         problems.append(
             f"{where}: pose.axis is all zeros, so the zones have no orientation")
 
+    bodies = expectation.get("bodies")
+    if not isinstance(bodies, list) or not bodies:
+        problems.append(
+            f"{where}: counterpart fit must declare at least one body and where it "
+            "goes. The halves of a split part export in their printed pose -- side "
+            "by side, not assembled -- so an assembled question asked of the file "
+            "as exported is asked at the wrong place.")
+        bodies = []
+    seen_locators: set[tuple[float, ...]] = set()
+    for index, row in enumerate(bodies):
+        at = f"{where}: bodies[{index}]"
+        if not isinstance(row, dict):
+            problems.append(f"{at} must be a mapping")
+            continue
+        locator = row.get("locator_mm")
+        if (not isinstance(locator, (list, tuple)) or len(locator) != 3
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                           and math.isfinite(v) for v in locator)):
+            problems.append(
+                f"{at}.locator_mm must be three finite numbers. A body is named by "
+                "a point the contract puts inside it, because split order is not "
+                "an identity and anything the candidate writes about itself is not "
+                "independent of the candidate.")
+        else:
+            key = tuple(round(float(v), 6) for v in locator)
+            if key in seen_locators:
+                problems.append(
+                    f"{at}.locator_mm {list(key)} is already used by another body, "
+                    "so the two rows name the same solid")
+            seen_locators.add(key)
+        if as_transform(row.get("transform")) is None:
+            problems.append(
+                f"{at}.transform is not a finite rigid transform. Translation and a "
+                "proper rotation only: a reflection would assemble a mirror image "
+                "of the part that was printed, and a scale would fit a bearing to a "
+                "part no printer made.")
+
     retain_r = _span(expectation, "retain_r_mm")
     if retain_r is None:
         problems.append(

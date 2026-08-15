@@ -428,6 +428,92 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
         "UNKNOWN_CHECK_KIND", None, None)
 
 
+class _CannotAssemble(RuntimeError):
+    """The declared bodies could not be put where the contract says they go."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _assemble(ctx: MeshAnalysisContext, bodies) -> MeshAnalysisContext:
+    """Put the exported solids into the pose the contract froze for them.
+
+    **Why this exists.** The halves of a split part export in their *printed*
+    pose -- side by side and, for a clamp, one of them flipped -- because that is
+    how they go on a bed. Measured on the real commission: each half of the
+    bearing clamp retains 24.38 mm3 of the 48.16 mm3 interference ring, and a
+    single zone over the file as exported sees 24.38, because the cap sits 13 mm
+    away in Y and outside a zone 7 mm wide. So a threshold set for a whole ring
+    fails a correct part and one set for a half passes a part with no cap at all.
+    Neither is a trustworthy verdict, and the repair is to assemble first.
+
+    **How a body is named.** By a point the contract puts inside it, and exactly
+    one solid may contain that point. Not by split order, which is an artefact of
+    the mesh library and changes with the geometry; and not by anything the
+    candidate says about itself, which would let the part choose which transform
+    it receives. Ambiguity is refused rather than resolved: two solids around one
+    locator means the contract cannot say which it meant.
+
+    The transform is read through `contract.as_transform`, which is the same
+    predicate `orientation.model_to_printer_matrix` and `alignment_transform` go
+    through -- translation and a proper rotation, no reflection and no scale.
+    Reused rather than reimplemented: a second reading of "may a mesh be moved by
+    this" is a second authority over it.
+    """
+    from . import contract as CT
+
+    import trimesh
+
+    components = ctx.components
+    posed = []
+    for index, row in enumerate(bodies):
+        locator = [float(v) for v in row["locator_mm"]]
+        holding = [c for c in components if _holds(c, locator)]
+        if not holding:
+            raise _CannotAssemble(
+                f"bodies[{index}] is named by the point {locator}, and no exported "
+                "solid contains it. Either the part is not the one the contract "
+                "was frozen against, or a half is missing.",
+                code="BODY_LOCATOR_UNMATCHED")
+        if len(holding) > 1:
+            raise _CannotAssemble(
+                f"bodies[{index}] is named by the point {locator}, which lies "
+                f"inside {len(holding)} exported solids. A locator that names more "
+                "than one body names none of them.",
+                code="BODY_LOCATOR_AMBIGUOUS")
+        matrix = CT.as_transform(row.get("transform"))
+        if matrix is None:
+            raise _CannotAssemble(
+                f"bodies[{index}] declares a transform that is not a finite rigid "
+                "one, so the solid may not be moved by it.",
+                code="BODY_TRANSFORM_UNUSABLE")
+        moved = holding[0].copy()
+        moved.apply_transform(matrix)
+        posed.append(moved)
+
+    assembled = posed[0]
+    for other in posed[1:]:
+        # Union rather than concatenation: two halves that interpenetrate would
+        # have their shared material counted twice by a concatenated mesh, and
+        # that is the direction that reports a grip nobody has.
+        assembled = trimesh.boolean.union([assembled, other], engine="manifold")
+    return MeshAnalysisContext(path=ctx.path, raw=assembled, normalized=assembled,
+                               load_count=0, repair_actions=())
+
+
+def _holds(mesh, point) -> bool:
+    """Is the point inside this solid's own bounding box?
+
+    Bounds rather than `contains`: a ray test on a solid with an open bore is
+    the expensive way to answer a question the contract can simply avoid asking
+    badly, and a locator that lands in two boxes is refused above rather than
+    resolved by a more elaborate instrument.
+    """
+    low, high = mesh.bounds
+    return all(float(low[i]) <= point[i] <= float(high[i]) for i in range(3))
+
+
 def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
                            source_dir: Path | None) -> Check:
     """Does the candidate hold the thing it is for, without seizing it?
@@ -442,7 +528,9 @@ def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
     forbids -- passes all nineteen.
 
     So this check asks the two questions the others structurally cannot, and it
-    asks them of the assembled pose rather than of the printed one:
+    asks them of the part **assembled** -- each declared body moved into place by
+    a transform the contract froze, because the halves export flat on a bed and
+    that is not where the bearing goes (`_assemble` has the measured numbers):
 
     * **retained**: candidate material inside the annular band around the outer
       race. Zero means the clamp does not grip the bearing at all.
@@ -484,15 +572,20 @@ def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
             "against a different object.",
             "COUNTERPART_CHANGED", exp, tol)
 
+    try:
+        assembled = _assemble(ctx, exp.get("bodies") or ())
+    except _CannotAssemble as exc:
+        return _unavailable_check(feature, title, str(exc), exc.code, exp, tol)
+
     pose = exp.get("pose") or {}
     centre = tuple(float(v) for v in pose.get("centre_mm", (0.0, 0.0, 0.0)))
     axis = tuple(float(v) for v in pose.get("axis", (0.0, 0.0, 1.0)))
     try:
-        retained = ctx.annulus_volume(
+        retained = assembled.annulus_volume(
             centre=centre, axis=axis,
             r_mm=(float(exp["retain_r_mm"][0]), float(exp["retain_r_mm"][1])),
             z_mm=(float(exp["retain_z_mm"][0]), float(exp["retain_z_mm"][1])))
-        intruded = ctx.annulus_volume(
+        intruded = assembled.annulus_volume(
             centre=centre, axis=axis,
             r_mm=(0.0, float(exp["clear_r_mm"])),
             z_mm=(float(exp["clear_z_mm"][0]), float(exp["clear_z_mm"][1])))
@@ -520,9 +613,14 @@ def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
         reason="; ".join(reasons) if reasons else
                "the candidate grips the outer race and stays clear of the inner one",
         expected={"min_retain_mm3": floor, "max_intrusion_mm3": ceiling,
-                  "counterpart": exp.get("counterpart"), "pose": pose},
+                  "counterpart": exp.get("counterpart"), "pose": pose,
+                  "bodies": len(exp.get("bodies") or ())},
         measured={"retained_mm3": round(retained, 3),
-                  "intruded_mm3": round(intruded, 3)},
+                  "intruded_mm3": round(intruded, 3),
+                  # What was actually assembled, not what was asked for: a row
+                  # reporting a grip over fewer halves than the contract named
+                  # is the exact failure this slice was sent back to repair.
+                  "bodies_posed": len(exp.get("bodies") or ())},
         tolerance=feature.tolerance,
         result=_verdict(feature, grips and clear, True))
 

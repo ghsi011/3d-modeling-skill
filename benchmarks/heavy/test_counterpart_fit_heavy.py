@@ -129,6 +129,11 @@ def _features(counterpart_name: str, digest: str, *, with_fit: bool):
             feature_id="bearing-fit", kind="counterpart_fit", provenance="MEASURED",
             expectation={
                 "counterpart": counterpart_name, "counterpart_sha256": digest,
+                # One solid, already where it belongs: this fixture is a single
+                # block, so its transform is the identity. The two-half case is
+                # the class at the bottom of this file.
+                "bodies": [{"locator_mm": [0.0, 0.0, 1.0],
+                            "transform": "identity"}],
                 "pose": {"centre_mm": [0.0, 0.0, AXIS_Z], "axis": [0.0, 1.0, 0.0]},
                 "retain_r_mm": [FREE_R + 1.0, BEARING_R],
                 "retain_z_mm": [-BEARING_W / 2.0, BEARING_W / 2.0],
@@ -271,6 +276,173 @@ class TheAssembledInterfaceDecidesTest(unittest.TestCase):
                                 "axis": [0.0, 1.0, 0.0]}))
         self.assertEqual("FAIL", row["result"])
         self.assertEqual(0.0, row["measured"]["retained_mm3"])
+
+
+SPLIT_Z = 14.0          # the split plane, and the bearing axis, in the printed pose
+HALF = (40.0, 7.0, SPLIT_Z)
+CAP_Y = 13.0            # where the cap prints, beside the body
+
+
+def _half(y_centre: float):
+    """One printed half: a block with the seat's lower arch taken out of its top.
+
+    Both halves print this way -- split face up, arch below it, no support -- so
+    both are *lower* halves as exported. Assembly flips one of them, which is
+    exactly the transform the contract has to carry.
+    """
+    import trimesh
+
+    block = trimesh.creation.box(extents=HALF)
+    block.apply_translation([0.0, y_centre, HALF[2] / 2.0])
+    arch = trimesh.creation.cylinder(radius=SEAT_R, height=HALF[1] * 3.0,
+                                     sections=192)
+    arch.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], [0, 1, 0]))
+    arch.apply_translation([0.0, y_centre, SPLIT_Z])
+    return trimesh.boolean.difference([block, arch], engine="manifold")
+
+
+# Rotate 180 degrees about X and set the cap down on the body: (x, y, z) maps to
+# (x, CAP_Y - y, 2*SPLIT_Z - z). The rotation block is diag(1, -1, -1), whose
+# determinant is +1 -- a proper rotation, not a reflection, which is what
+# `contract.as_transform` requires and what a printed part can actually do.
+CAP_TRANSFORM = [[1.0, 0.0, 0.0, 0.0],
+                 [0.0, -1.0, 0.0, CAP_Y],
+                 [0.0, 0.0, -1.0, 2 * SPLIT_Z],
+                 [0.0, 0.0, 0.0, 1.0]]
+
+
+def _split_clamp(with_cap: bool = True):
+    import trimesh
+
+    halves = [_half(0.0)] + ([_half(CAP_Y)] if with_cap else [])
+    return trimesh.util.concatenate(halves)
+
+
+def _split_fit_row(counterpart_name: str, digest: str, *, bodies, min_retain):
+    return CT.Feature(
+        feature_id="bearing-fit", kind="counterpart_fit", provenance="MEASURED",
+        expectation={
+            "counterpart": counterpart_name, "counterpart_sha256": digest,
+            "bodies": bodies,
+            "pose": {"centre_mm": [0.0, 0.0, SPLIT_Z], "axis": [0.0, 1.0, 0.0]},
+            "retain_r_mm": [FREE_R + 1.0, BEARING_R],
+            "retain_z_mm": [-BEARING_W / 2.0, BEARING_W / 2.0],
+            "clear_r_mm": FREE_R, "clear_z_mm": [-40.0, 40.0],
+            "min_retain_mm3": min_retain, "max_intrusion_mm3": 0.0,
+        },
+        tolerance={"abs": 1.0}, verified_by="counterpart_fit",
+        on_unrunnable="FAIL")
+
+
+BODY_ROW = {"locator_mm": [0.0, 0.0, 1.0], "transform": "identity"}
+CAP_ROW = {"locator_mm": [0.0, CAP_Y, 1.0], "transform": CAP_TRANSFORM}
+# The whole ring, so a single half cannot reach it. pi*(11^2-10.9^2)*7 = 48.16.
+FULL_RING = math.pi * (BEARING_R ** 2 - SEAT_R ** 2) * BEARING_W
+
+
+class TheHalvesAreAssembledBeforeTheyAreJudgedTest(unittest.TestCase):
+    """The repair the reviewer sent this slice back for.
+
+    Measured on the real commission before the repair: each half of the clamp
+    retains 24.38 mm3 of the 48.16 mm3 ring, and one zone over the file as
+    exported saw 24.38 -- because the cap sits 13 mm away in Y, outside a zone
+    7 mm wide. A threshold set for the whole ring failed a correct part; one set
+    for a half passed a part with no cap at all. Both candidates below are
+    scored against a **full-ring** floor, which is only reachable once the cap
+    has been put where it goes.
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = Path(self._dir.name)
+        self.digest = _counterpart(self.root / "bearing.stl")
+        self.addCleanup(self._dir.cleanup)
+
+    def _run(self, *, with_cap=True, bodies=(BODY_ROW, CAP_ROW),
+             min_retain=FULL_RING * 0.85):
+        mesh = _split_clamp(with_cap=with_cap)
+        ctx = _ctx(mesh, self.root / f"clamp-{with_cap}-{len(bodies)}.stl")
+        contract = CT.Contract(
+            job_id="split-clamp", template="authored", template_version="1",
+            domain_id=None, backend="authored", parameters={},
+            expected_bbox_mm={"x": HALF[0], "y": CAP_Y + HALF[1],
+                              "z": HALF[2]},
+            bbox_tolerance_mm=0.5, expected_bodies=2 if with_cap else 1,
+            orientation={"bed_z_mm": 0.0, "model_to_printer_matrix": "identity"},
+            material={"material": "PLA", "process": "FDM"},
+            nozzle={"diameter_mm": 0.4}, printer="Bambu Lab A1", modifiers=(),
+            minimum_coverage=1.0, step_required=False,
+            consequence="INCONSEQUENTIAL", updated_utc="2026-08-15T00:00:00Z",
+            source={"kind": "authored"},
+            features=(_split_fit_row("bearing.stl", self.digest,
+                                     bodies=list(bodies), min_retain=min_retain),))
+        report = CM.run(ctx, contract, source_dir=self.root)
+        return next(c for c in report["checks"] if c["feature_id"] == "bearing-fit")
+
+    def test_the_assembled_pair_reaches_the_whole_ring(self) -> None:
+        row = self._run()
+        self.assertEqual("PASS", row["result"], row["reason"])
+        self.assertAlmostEqual(FULL_RING, row["measured"]["retained_mm3"],
+                               delta=FULL_RING * 0.03)
+        self.assertEqual(0.0, row["measured"]["intruded_mm3"])
+
+    def test_one_half_alone_falls_short_of_the_whole_ring(self) -> None:
+        """The false-pass the reviewer named, shown not to happen.
+
+        The body alone is a legitimate solid that grips half a ring. Scored
+        against a whole-ring floor it fails, which is the point: the floor can
+        now be set to what the assembly must achieve rather than to what one
+        half can reach.
+        """
+        row = self._run(with_cap=False, bodies=(BODY_ROW,))
+        self.assertEqual("FAIL", row["result"])
+        self.assertAlmostEqual(FULL_RING / 2.0, row["measured"]["retained_mm3"],
+                               delta=FULL_RING * 0.03)
+
+    def test_a_missing_half_is_named_rather_than_measured_around(self) -> None:
+        """Cap declared, cap absent: the row refuses instead of scoring the rest."""
+        row = self._run(with_cap=False)
+        self.assertFalse(row["ran"])
+        self.assertEqual("BODY_LOCATOR_UNMATCHED", row["error_code"])
+        self.assertEqual("FAIL", row["result"])
+
+    def test_a_locator_inside_two_solids_is_refused(self) -> None:
+        """A nested solid, which is what makes a locator genuinely ambiguous.
+
+        Two rows sharing one locator is a different fault -- the contract naming
+        one body twice -- and preflight catches that. This is the other one: a
+        loose pin sitting inside the block's bore, so its bounding box lies
+        wholly inside the block's, and a point in the pin is a point in both.
+        The contract cannot say which solid it meant, so the row refuses rather
+        than taking the first.
+        """
+        import trimesh
+
+        block = trimesh.boolean.difference(
+            [trimesh.creation.box(extents=(40.0, 20.0, 20.0)),
+             trimesh.creation.cylinder(radius=8.0, height=60.0, sections=96)],
+            engine="manifold")
+        pin = trimesh.creation.cylinder(radius=2.0, height=6.0, sections=96)
+        both = trimesh.util.concatenate([block, pin])
+        ctx = MeshAnalysisContext(path=None, raw=both, normalized=both,
+                                  load_count=1, repair_actions=())
+        with self.assertRaises(CM._CannotAssemble) as caught:
+            CM._assemble(ctx, [{"locator_mm": [0.0, 0.0, 0.0],
+                                "transform": "identity"}])
+        self.assertEqual("BODY_LOCATOR_AMBIGUOUS", caught.exception.code)
+
+    def test_a_reflection_may_not_assemble_the_part(self) -> None:
+        """A mirrored cap would fit a part no printer made.
+
+        Determinant -1: `contract.as_transform` refuses it, and it is refused
+        here rather than silently producing a plausible retained volume.
+        """
+        mirror = [row[:] for row in CAP_TRANSFORM]
+        mirror[0][0] = -1.0
+        row = self._run(bodies=(BODY_ROW, {"locator_mm": [0.0, CAP_Y, 1.0],
+                                           "transform": mirror}))
+        self.assertFalse(row["ran"])
+        self.assertEqual("BODY_TRANSFORM_UNUSABLE", row["error_code"])
 
 
 if __name__ == "__main__":
