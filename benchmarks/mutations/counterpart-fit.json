@@ -1,0 +1,146 @@
+{
+  "target": "The assembled-interface row: the per-body poses that build the assembly, both functional surfaces, and the preflight guards that stop a row which cannot decide anything",
+  "note": "The ruling for this slice required a mutation that removes or bypasses the new condition, surviving before the fix and dying after it. The 'survives before' half is asserted in code rather than left to this file: benchmarks/heavy/test_counterpart_fit_heavy.py::TheGateCannotSeeASeizedBearingTest runs the seized clamp against the same contract with the row removed and requires it to PASS -- which is the mutation 'delete the whole check', permanently in the tree. The entries below remove each half separately, because a check with two conditions can lose one and still look like it works. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/counterpart-fit.json",
+  "mutations": [
+    {
+      "name": "the-forbidden-cylinder-is-not-consulted",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    clear = intruded - ceiling <= tol",
+      "replacement": "    clear = True",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheAssembledInterfaceDecidesTest::test_a_clamp_that_seizes_the_bearing_fails"
+      ],
+      "why": "the exact defect the slice exists to close: the row still loads the counterpart, still measures both volumes, still reports them on the receipt -- and a clamp whose lip reaches r=5.0 into the r=6.5 cylinder the bearing turns in is commissioned PASS. A reader of the report sees an intruded_mm3 of 54.2 beside a verdict of PASS and has no way to tell the number was never read"
+    },
+    {
+      "name": "the-retained-band-is-not-consulted",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    grips = retained >= floor",
+      "replacement": "    grips = True",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheAssembledInterfaceDecidesTest::test_a_clamp_that_grips_nothing_fails_the_other_way"
+      ],
+      "why": "the other functional surface. Without it a clamp whose seat is bored to clearance -- holding the bearing nowhere, so it falls out -- passes, and it passes for the same reason the inner-race clamp did: nothing compared the measurement to anything"
+    },
+    {
+      "name": "the-assembly-pose-is-ignored",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    centre = tuple(float(v) for v in pose.get(\"centre_mm\", (0.0, 0.0, 0.0)))",
+      "replacement": "    centre = (0.0, 0.0, 0.0)",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheAssembledInterfaceDecidesTest::test_the_pose_is_used_rather_than_assumed"
+      ],
+      "why": "the halves of a split clamp export in their printed pose, side by side and not assembled, so the origin is precisely where the bearing is not. A row that defaults the placement measures two zones in empty space and reports a confident 0.0 mm3 of intrusion -- an answer about nowhere, indistinguishable on the receipt from an answer about a part that stays clear"
+    },
+    {
+      "name": "the-counterpart-digest-is-not-checked",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    if digest != str(exp.get(\"counterpart_sha256\")):",
+      "replacement": "    if False:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheAssembledInterfaceDecidesTest::test_a_counterpart_whose_bytes_moved_is_refused"
+      ],
+      "why": "the zones are frozen from one mating object; without the digest they can be measured against a different one that happens to sit at the same path, and the receipt would name the file that was read while the numbers describe a fit to something else"
+    },
+    {
+      "name": "a-retention-floor-of-zero-is-accepted",
+      "file": "skills/3d-modeling/scripts/pipeline/contract.py",
+      "anchor": "    floor = _number(expectation, \"min_retain_mm3\")\n    if floor is None or floor <= 0.0:",
+      "replacement": "    floor = _number(expectation, \"min_retain_mm3\")\n    if False:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_counterpart_fit.py::TheZonesMustBeAbleToDecideSomethingTest::test_a_retention_floor_of_zero_is_refused"
+      ],
+      "why": "a floor of zero is met by `retained >= 0.0` for every part ever built, including one that touches the counterpart nowhere. The row runs, reports a number, and is counted as covered -- which is worse than not having it, because coverage then says a fit was checked"
+    },
+    {
+      "name": "overlapping-zones-are-accepted",
+      "file": "skills/3d-modeling/scripts/pipeline/contract.py",
+      "anchor": "    elif retain_r is not None and clear_r > retain_r[0]:",
+      "replacement": "    elif False:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_counterpart_fit.py::TheZonesMustBeAbleToDecideSomethingTest::test_zones_that_overlap_are_refused"
+      ],
+      "why": "with the forbidden cylinder reaching into the retained band, one ring of material is counted as gripping the outer race and as fouling the inner one at once. The verdict then depends on which radius somebody typed larger rather than on the part, and both halves of the check can be satisfied or failed by the same millimetre"
+    },
+    {
+      "name": "a-degenerate-zone-measures-a-confident-zero",
+      "file": "skills/3d-modeling/scripts/pipeline/analysis.py",
+      "anchor": "        if outer <= inner or height <= 0:",
+      "replacement": "        if False:",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_counterpart_fit.py::TheInstrumentRefusesAnEmptyRegionTest::test_a_zone_with_no_volume_is_a_failure_not_a_zero"
+      ],
+      "why": "an inside-out or zero-height zone encloses nothing, and nothing intersected with a candidate is 0.0 mm3 -- which reads on the receipt exactly like a part that stays clear of the bearing. The refusal is what keeps an empty region from being reported as a measured absence"
+    },
+    {
+      "name": "only-the-first-declared-body-is-posed",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    for index, row in enumerate(bodies):\n        locator = [float(v) for v in row[\"locator_mm\"]]",
+      "replacement": "    for index, row in enumerate(list(bodies)[:1]):\n        locator = [float(v) for v in row[\"locator_mm\"]]",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_assembled_pair_reaches_the_whole_ring"
+      ],
+      "why": "the exact defect this slice was sent back to repair, in its most plausible form: the row still assembles, still reports a retained volume, and silently scores half a clamp against a whole-ring floor. Measured on the real commission, one half retains 24.38 mm3 of the 48.16 mm3 ring -- so a correct part is failed and the receipt gives no hint that a body was left on the bed"
+    },
+    {
+      "name": "a-declared-body-that-is-not-there-is-skipped",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        if not holding:\n            raise _CannotAssemble(",
+      "replacement": "        if False:\n            raise _CannotAssemble(",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_missing_half_is_named_rather_than_measured_around"
+      ],
+      "why": "a missing half would be measured around rather than named. The row would grip half a ring and report it as the assembly's grip, which is the false-pass direction: an export that lost its cap looks like a clamp with a weak seat rather than like a clamp with no cap"
+    },
+    {
+      "name": "a-mirrored-half-is-allowed-to-assemble-the-part",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        matrix = CT.as_transform(row.get(\"transform\"))\n        if matrix is None:",
+      "replacement": "        import numpy as _np\n        matrix = CT.as_transform(row.get(\"transform\"))\n        if matrix is None and row.get(\"transform\") != \"identity\":\n            matrix = _np.array(row.get(\"transform\"), dtype=float)\n        if matrix is None:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_reflection_may_not_assemble_the_part"
+      ],
+      "why": "with the rigid predicate bypassed, a determinant of -1 assembles the mirror image of the half that was printed. The two mirrored arches still close around a cylinder, so the retained volume looks right, and the part that fits is one no printer made"
+    },
+    {
+      "name": "the-locator-is-replaced-by-split-order",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        holding = [i for i, c in enumerate(components) if _holds(c, locator)]",
+      "replacement": "        holding = [index] if index < len(components) else []",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_rows_may_be_declared_in_either_order"
+      ],
+      "why": "the reviewer's requirement was that bodies be bound to independently identifiable solids rather than to component order. Split order is an artefact of the mesh library: the same geometry re-exported can renumber, and then the cap's transform is applied to the body and the body's to the cap, producing a confident assembly of the wrong part. It SURVIVED the first sweep: every other fixture listed the bodies in split order, so a positional implementation passed them all. The test that kills it declares the same two rows the other way round"
+    },
+    {
+      "name": "the-locator-only-has-to-be-in-the-bounding-box",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "    if not _in_box(mesh, point):\n        return False\n    return bool(mesh.contains([point])[0])",
+      "replacement": "    return _in_box(mesh, point)",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_a_locator_in_the_box_but_in_no_material_is_refused"
+      ],
+      "why": "this is the shipped defect review caught, restored exactly. A box is not a solid: the bearing axis -- the most natural point anyone would put a locator on -- lies inside the body's bounding box and in none of its material, because the seat's arch is cut away there. The row bound a solid the point is not inside, and the receipt showed a clean assembly"
+    },
+    {
+      "name": "two-rows-may-bind-the-same-solid",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "        if holding[0] in claimed:",
+      "replacement": "        if False:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_two_rows_may_not_bind_the_same_solid"
+      ],
+      "why": "the forged assembly. Each row stays individually unambiguous, so nothing else in the file notices; it is the pairing that is wrong. One half is copied under its own transform and again under the other half's, producing a complete-looking ring at a full retained volume while a genuinely exported solid is never read -- so a candidate that lost a half scores a full grip"
+    },
+    {
+      "name": "an-open-surface-is-ray-tested-anyway",
+      "file": "skills/3d-modeling/scripts/pipeline/commission.py",
+      "anchor": "            if not candidate.is_watertight:",
+      "replacement": "            if False:",
+      "tests": [
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_an_open_surface_is_refused_rather_than_ray_tested"
+      ],
+      "why": "`contains` is a ray test, and inside/outside is not defined for an open surface -- it answers, and the answer is whichever way the parity happened to land. Refusing is the only honest outcome, because an unreliable containment silently decides which solid receives which transform. It SURVIVED the first sweep after the blocker fix: every fixture in the file is a closed solid, so nothing could see the guard go"
+    }
+  ]
+}

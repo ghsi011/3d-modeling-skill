@@ -209,6 +209,81 @@ class MeshAnalysisContext:
             self._windows[key] = 0.0 if solid.is_empty else float(solid.volume) / SLAB_MM
         return self._windows[key]
 
+    def annulus_volume(self, *, centre: tuple[float, float, float],
+                       axis: tuple[float, float, float],
+                       r_mm: tuple[float, float],
+                       z_mm: tuple[float, float]) -> float:
+        """Candidate material inside one annular zone, in mm3.
+
+        The instrument the bearing blind spot needed. Every other measurement in
+        this class asks a question about the candidate alone -- an area, an
+        extent, a diameter -- and a clamp that grips the *inner* race of its
+        bearing answers all of them correctly while being the one part the brief
+        forbids. That failure is not a dimension being wrong. It is material in a
+        place no dimension names, so the measurement has to be a volume in a
+        region rather than a number on a plane.
+
+        `r_mm` is `(inner, outer)`; an inner radius of zero gives a plain
+        cylinder. `centre` and `axis` place the zone in the candidate's frame,
+        and `z_mm` is the span along `axis` measured from `centre`. The zone is
+        built from the assembled pose rather than from anything measured on the
+        candidate, which is what keeps the question candidate-independent: the
+        same zone is put to a good part and a bad one.
+
+        Volume, not area, and deliberately: an area on a plane can miss a lip
+        that sits between two sampled heights, which is exactly how the failure
+        this measures escapes the section rows.
+        """
+        inner, outer = float(r_mm[0]), float(r_mm[1])
+        low, high = float(z_mm[0]), float(z_mm[1])
+        height = high - low
+        # Refused before the mesh stack is touched, and before the cache is
+        # consulted, because this is a statement about the declaration rather
+        # than about the part: a zone that encloses nothing intersects every
+        # candidate in 0.0 mm3, which on a receipt is indistinguishable from a
+        # part that genuinely stays clear.
+        if outer <= inner or height <= 0:
+            raise MeasurementFailed(
+                f"the zone at {tuple(centre)} has no volume to measure: radii "
+                f"{inner:g}..{outer:g} mm over {height:g} mm of height. A zone "
+                "that encloses nothing cannot report material inside it.",
+                code="ZONE_DEGENERATE")
+        if not any(float(v) != 0.0 for v in axis):
+            raise MeasurementFailed(
+                "the zone declares a zero-length axis, so its orientation is "
+                "undefined and the region it names is not a region.",
+                code="ZONE_AXIS_DEGENERATE")
+
+        key = ("annulus", tuple(round(float(v), 6) for v in centre),
+               tuple(round(float(v), 6) for v in axis),
+               (round(inner, 6), round(outer, 6)),
+               (round(low, 6), round(high, 6)))
+        if key not in self._windows:
+            import numpy as np
+            import trimesh
+
+            zone = trimesh.creation.cylinder(radius=outer, height=height,
+                                             sections=192)
+            if inner > 0:
+                # Taller than the zone so the bore is a through hole rather than
+                # a blind pocket with two lids the boolean would keep.
+                bore = trimesh.creation.cylinder(radius=inner,
+                                                 height=height * 2.0 + 1.0,
+                                                 sections=192)
+                zone = trimesh.boolean.difference([zone, bore], engine="manifold")
+            # `trimesh.creation.cylinder` is centred on the origin and runs along
+            # +Z, so the zone's own mid-height is the offset that lands `low` at
+            # `low`.
+            zone.apply_translation([0.0, 0.0, low + height / 2.0])
+            direction = np.asarray(axis, dtype=float)
+            norm = float(np.linalg.norm(direction))
+            zone.apply_transform(trimesh.geometry.align_vectors(
+                [0.0, 0.0, 1.0], direction / norm))
+            zone.apply_translation([float(v) for v in centre])
+            solid = self._intersect(zone, where=f"the zone at {centre}")
+            self._windows[key] = 0.0 if solid.is_empty else float(solid.volume)
+        return self._windows[key]
+
     def axis_profile(self, axis: int, samples: int, *, jitter: float = 0.0) -> list[dict[str, Any]]:
         """Material area along one axis, for the screening detectors.
 

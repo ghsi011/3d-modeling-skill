@@ -27,7 +27,7 @@ from .contract import Contract, Feature
 KNOWN_CHECKS = frozenset({
     "section_area", "bed_contact", "through_hole", "bore_by_displacement",
     "void_region", "envelope", "watertight", "bodies", "unit_scale", "seated",
-    "fit_acceptance", "overhang", "preservation",
+    "fit_acceptance", "overhang", "preservation", "counterpart_fit",
 })
 
 
@@ -419,10 +419,254 @@ def _feature_check(ctx: MeshAnalysisContext, feature: Feature,
                       "bodies": report.get("bodies")},
                      tol, _verdict(feature, preserved, True))
 
+    if kind == "counterpart_fit":
+        return _counterpart_fit_check(ctx, feature, source_dir)
+
     return _unavailable_check(
         feature, f"Feature kind {kind!r}",
         f"no check implements kind {kind!r}",
         "UNKNOWN_CHECK_KIND", None, None)
+
+
+class _CannotAssemble(RuntimeError):
+    """The declared bodies could not be put where the contract says they go."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _assemble(ctx: MeshAnalysisContext, bodies) -> MeshAnalysisContext:
+    """Put the exported solids into the pose the contract froze for them.
+
+    **Why this exists.** The halves of a split part export in their *printed*
+    pose -- side by side and, for a clamp, one of them flipped -- because that is
+    how they go on a bed. Measured on the real commission: each half of the
+    bearing clamp retains 24.38 mm3 of the 48.16 mm3 interference ring, and a
+    single zone over the file as exported sees 24.38, because the cap sits 13 mm
+    away in Y and outside a zone 7 mm wide. So a threshold set for a whole ring
+    fails a correct part and one set for a half passes a part with no cap at all.
+    Neither is a trustworthy verdict, and the repair is to assemble first.
+
+    **How a body is named.** By a point the contract puts inside it, and exactly
+    one solid may contain that point. Not by split order, which is an artefact of
+    the mesh library and changes with the geometry; and not by anything the
+    candidate says about itself, which would let the part choose which transform
+    it receives. Ambiguity is refused rather than resolved: two solids around one
+    locator means the contract cannot say which it meant.
+
+    The transform is read through `contract.as_transform`, which is the same
+    predicate `orientation.model_to_printer_matrix` and `alignment_transform` go
+    through -- translation and a proper rotation, no reflection and no scale.
+    Reused rather than reimplemented: a second reading of "may a mesh be moved by
+    this" is a second authority over it.
+    """
+    from . import contract as CT
+
+    import trimesh
+
+    components = ctx.components
+    posed = []
+    claimed: dict[int, int] = {}
+    for index, row in enumerate(bodies):
+        locator = [float(v) for v in row["locator_mm"]]
+        # `contains` is a ray test and answers nothing on an open surface, so a
+        # component the locator's box reaches into but which is not a closed
+        # solid stops the row rather than being guessed at.
+        for candidate in (c for c in components if _in_box(c, locator)):
+            if not candidate.is_watertight:
+                raise _CannotAssemble(
+                    f"bodies[{index}] reaches an exported solid that is not "
+                    "closed, so whether the locator is inside it cannot be "
+                    "decided by a ray test.",
+                    code="BODY_NOT_A_SOLID")
+        holding = [i for i, c in enumerate(components) if _holds(c, locator)]
+        if not holding:
+            raise _CannotAssemble(
+                f"bodies[{index}] is named by the point {locator}, and no exported "
+                "solid has material there. Either the part is not the one the "
+                "contract was frozen against, a half is missing, or the point was "
+                "put in a void -- the bore's own axis is inside the box of the "
+                "half around it and inside none of its material.",
+                code="BODY_LOCATOR_UNMATCHED")
+        if len(holding) > 1:
+            raise _CannotAssemble(
+                f"bodies[{index}] is named by the point {locator}, which lies "
+                f"inside {len(holding)} exported solids. A locator that names more "
+                "than one body names none of them.",
+                code="BODY_LOCATOR_AMBIGUOUS")
+        # One row, one solid, and no solid twice. Without this a candidate that
+        # lost a half can have both locators land in the survivor, which is then
+        # copied under two transforms into an assembly that looks complete while
+        # a real exported solid is never read. The rows would each be
+        # unambiguous; it is the *pairing* that is not.
+        if holding[0] in claimed:
+            raise _CannotAssemble(
+                f"bodies[{index}] selects the same exported solid as "
+                f"bodies[{claimed[holding[0]]}]. Each row must name a different "
+                "one, or a part could be assembled twice out of one half.",
+                code="BODY_LOCATOR_NOT_DISTINCT")
+        claimed[holding[0]] = index
+        matrix = CT.as_transform(row.get("transform"))
+        if matrix is None:
+            raise _CannotAssemble(
+                f"bodies[{index}] declares a transform that is not a finite rigid "
+                "one, so the solid may not be moved by it.",
+                code="BODY_TRANSFORM_UNUSABLE")
+        moved = components[holding[0]].copy()
+        moved.apply_transform(matrix)
+        posed.append(moved)
+
+    assembled = posed[0]
+    for other in posed[1:]:
+        # Union rather than concatenation: two halves that interpenetrate would
+        # have their shared material counted twice by a concatenated mesh, and
+        # that is the direction that reports a grip nobody has.
+        assembled = trimesh.boolean.union([assembled, other], engine="manifold")
+    return MeshAnalysisContext(path=ctx.path, raw=assembled, normalized=assembled,
+                               load_count=0, repair_actions=())
+
+
+def _in_box(mesh, point) -> bool:
+    """Cheap rejection only. Never an answer on its own -- see `_holds`."""
+    low, high = mesh.bounds
+    return all(float(low[i]) <= point[i] <= float(high[i]) for i in range(3))
+
+
+def _holds(mesh, point) -> bool:
+    """Is the point inside this solid's **material**?
+
+    The bounding box is a prefilter and nothing more. The first version of this
+    stopped at the box and called it identity, with a comment arguing that a ray
+    test was the expensive way to answer a question a careful contract could
+    avoid asking badly. Review found the hole in that: a box is not a solid, and
+    the gap between them is exactly where a wrong assembly hides. The axis of
+    this clamp's own bore lies inside the body's box and in no material at all,
+    so a locator put on the bearing axis -- the most natural point anyone would
+    reach for -- named a solid it is not inside.
+
+    Worse, the box of one half can cover a point meant for another. A candidate
+    missing a half then has both locators land in the surviving one, and it is
+    copied under two transforms into a complete-looking assembly while a real
+    exported solid is ignored. Nothing in the old check could see that.
+
+    `contains` is a ray test and it is only meaningful on a closed solid, so an
+    open component is refused by the caller rather than guessed at.
+    """
+    if not _in_box(mesh, point):
+        return False
+    return bool(mesh.contains([point])[0])
+
+
+def _counterpart_fit_check(ctx: MeshAnalysisContext, feature: Feature,
+                           source_dir: Path | None) -> Check:
+    """Does the candidate hold the thing it is for, without seizing it?
+
+    **The blind spot this closes.** A real discovery commission passed 19 of 19
+    checks on a split clamp for a 608 bearing. Every one of those checks was a
+    property of the candidate alone -- bodies, watertight, seated, envelope, four
+    section areas, six hole diameters, two void regions, support area, unit
+    scale. The counterpart was never loaded, there was no assembly pose, and so
+    nothing anywhere asked whether the bearing fits. A clamp that grips the
+    *inner* race -- which stops the bearing turning, the one thing its brief
+    forbids -- passes all nineteen.
+
+    So this check asks the two questions the others structurally cannot, and it
+    asks them of the part **assembled** -- each declared body moved into place by
+    a transform the contract froze, because the halves export flat on a bed and
+    that is not where the bearing goes (`_assemble` has the measured numbers):
+
+    * **retained**: candidate material inside the annular band around the outer
+      race. Zero means the clamp does not grip the bearing at all.
+    * **intruded**: candidate material inside the cylinder the inner race and
+      shaft turn in. Anything above the declared allowance means the clamp
+      seizes the bearing.
+
+    Both zones are frozen into the contract from the counterpart and the pose
+    before any candidate exists, and `counterpart_fit` is in no `PROPOSABLE`
+    whitelist, so neither a designer nor a candidate can move the question.
+
+    **What this deliberately does not do.** It does not fit a circle to the seat
+    and compare the diameter. That measurement was tried on the real commission
+    and carried 0.26-0.37 mm of spread against an 0.03 mm interference -- an
+    instrument that cannot resolve the thing it is measuring. A volume in a
+    region has no such problem: the zones are known exactly because they are
+    constructed, not measured.
+    """
+    exp = feature.expectation
+    title = "Bearing fit at the assembled interface"
+    ceiling = float(exp.get("max_intrusion_mm3", 0.0))
+    tol = _tol(feature.tolerance, ceiling)
+
+    root = Path(source_dir) if source_dir is not None else ctx.path.parent
+    counterpart = root / str(exp.get("counterpart", ""))
+    if not counterpart.is_file():
+        return _unavailable_check(
+            feature, title,
+            f"the declared mating object {exp.get('counterpart')!r} is not in "
+            f"{root}, so the part it has to fit was never loaded",
+            "COUNTERPART_MISSING", exp, tol)
+    digest = S.sha256_file(counterpart)
+    if digest != str(exp.get("counterpart_sha256")):
+        return _unavailable_check(
+            feature, title,
+            f"the mating object on disk hashes {digest}, and the contract was "
+            f"frozen against {exp.get('counterpart_sha256')}. A fit measured "
+            "against different bytes than the ones the zones came from is a fit "
+            "against a different object.",
+            "COUNTERPART_CHANGED", exp, tol)
+
+    try:
+        assembled = _assemble(ctx, exp.get("bodies") or ())
+    except _CannotAssemble as exc:
+        return _unavailable_check(feature, title, str(exc), exc.code, exp, tol)
+
+    pose = exp.get("pose") or {}
+    centre = tuple(float(v) for v in pose.get("centre_mm", (0.0, 0.0, 0.0)))
+    axis = tuple(float(v) for v in pose.get("axis", (0.0, 0.0, 1.0)))
+    try:
+        retained = assembled.annulus_volume(
+            centre=centre, axis=axis,
+            r_mm=(float(exp["retain_r_mm"][0]), float(exp["retain_r_mm"][1])),
+            z_mm=(float(exp["retain_z_mm"][0]), float(exp["retain_z_mm"][1])))
+        intruded = assembled.annulus_volume(
+            centre=centre, axis=axis,
+            r_mm=(0.0, float(exp["clear_r_mm"])),
+            z_mm=(float(exp["clear_z_mm"][0]), float(exp["clear_z_mm"][1])))
+    except MeasurementFailed as exc:
+        return _unavailable_check(
+            feature, title, f"{type(exc).__name__}: {exc}",
+            getattr(exc, "code", "BOOLEAN_ENGINE_REFUSED"), exp, tol)
+
+    floor = float(exp["min_retain_mm3"])
+    grips = retained >= floor
+    clear = intruded - ceiling <= tol
+    reasons = []
+    if not grips:
+        reasons.append(
+            f"the candidate puts {retained:.1f} mm3 inside the outer-race band and "
+            f"{floor:.1f} mm3 is the least that counts as gripping it")
+    if not clear:
+        reasons.append(
+            f"the candidate puts {intruded:.1f} mm3 inside the cylinder the inner "
+            f"race and shaft turn in, above the {ceiling:.1f} mm3 allowed, so the "
+            "bearing is held rather than carried")
+    return Check(
+        check_id=f"feature-{feature.feature_id}", feature_id=feature.feature_id,
+        title=title, ran=True,
+        reason="; ".join(reasons) if reasons else
+               "the candidate grips the outer race and stays clear of the inner one",
+        expected={"min_retain_mm3": floor, "max_intrusion_mm3": ceiling,
+                  "counterpart": exp.get("counterpart"), "pose": pose,
+                  "bodies": len(exp.get("bodies") or ())},
+        measured={"retained_mm3": round(retained, 3),
+                  "intruded_mm3": round(intruded, 3),
+                  # What was actually assembled, not what was asked for: a row
+                  # reporting a grip over fewer halves than the contract named
+                  # is the exact failure this slice was sent back to repair.
+                  "bodies_posed": len(exp.get("bodies") or ())},
+        tolerance=feature.tolerance,
+        result=_verdict(feature, grips and clear, True))
 
 
 def _fit_acceptance_check(feature: Feature, checks: list[Check]) -> Check:
