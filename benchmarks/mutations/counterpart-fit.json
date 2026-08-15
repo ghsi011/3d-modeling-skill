@@ -138,9 +138,9 @@
       "anchor": "            if not candidate.is_watertight:",
       "replacement": "            if False:",
       "tests": [
-        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_the_locators_that_do_name_material_still_work"
+        "benchmarks/heavy/test_counterpart_fit_heavy.py::TheHalvesAreAssembledBeforeTheyAreJudgedTest::test_an_open_surface_is_refused_rather_than_ray_tested"
       ],
-      "why": "`contains` is a ray test, and inside/outside is not defined for an open surface -- it answers, and the answer is whichever way the parity happened to land. Refusing is the only honest outcome, because an unreliable containment silently decides which solid receives which transform"
+      "why": "`contains` is a ray test, and inside/outside is not defined for an open surface -- it answers, and the answer is whichever way the parity happened to land. Refusing is the only honest outcome, because an unreliable containment silently decides which solid receives which transform. It SURVIVED the first sweep after the blocker fix: every fixture in the file is a closed solid, so nothing could see the guard go"
     }
   ]
 }

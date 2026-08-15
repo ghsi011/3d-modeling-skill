@@ -473,6 +473,43 @@ class TheHalvesAreAssembledBeforeTheyAreJudgedTest(unittest.TestCase):
         self.assertTrue(row["ran"])
         self.assertEqual("PASS", row["result"], row["reason"])
 
+    def test_an_open_surface_is_refused_rather_than_ray_tested(self) -> None:
+        """`contains` answers on an open shell, and the answer means nothing.
+
+        Inside and outside are not defined for a surface with a hole in it: the
+        ray test returns whichever way the crossing parity happened to land, so
+        it decides which solid receives which transform by accident. This case
+        was found by a surviving mutation -- every other fixture in this file is
+        a closed solid, so removing the guard changed nothing any of them could
+        see.
+
+        **Half a box, and the size matters.** `split` quietly fills a small
+        hole: a box with one face missing goes in with 10 triangles and comes
+        back out with 12, closed, so a fixture built that way tests nothing and
+        the first version of this test did exactly that. Three faces missing is
+        past what the repair will bridge, and that survives as a genuinely open
+        component -- which is also what a failed export looks like.
+
+        The assertion below is on `ctx.components`, not on the mesh handed in,
+        because the components are what `_assemble` actually reads.
+        """
+        import trimesh
+
+        box = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
+        open_shell = trimesh.Trimesh(vertices=box.vertices.copy(),
+                                     faces=box.faces[6:].copy(), process=False)
+        ctx = MeshAnalysisContext(path=None, raw=open_shell,
+                                  normalized=open_shell, load_count=1,
+                                  repair_actions=())
+        self.assertTrue(
+            any(not c.is_watertight for c in ctx.components),
+            "the fixture has to reach `_assemble` still open, or this test "
+            "proves nothing about the guard -- `split` repairs small holes")
+        with self.assertRaises(CM._CannotAssemble) as caught:
+            CM._assemble(ctx, [{"locator_mm": [0.0, 0.0, 0.0],
+                                "transform": "identity"}])
+        self.assertEqual("BODY_NOT_A_SOLID", caught.exception.code)
+
     def test_a_locator_inside_two_solids_is_refused(self) -> None:
         """A nested solid, which is what makes a locator genuinely ambiguous.
 
