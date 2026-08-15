@@ -406,6 +406,32 @@ class TheHalvesAreAssembledBeforeTheyAreJudgedTest(unittest.TestCase):
         self.assertEqual("BODY_LOCATOR_UNMATCHED", row["error_code"])
         self.assertEqual("FAIL", row["result"])
 
+    def test_the_rows_may_be_declared_in_either_order(self) -> None:
+        """Bodies are bound by locator, not by the order `split` happens to return.
+
+        The distinguishing case, and it took a surviving mutation to find it:
+        every other test here passes just as well against an implementation that
+        indexes `components` positionally, because the contract happens to list
+        the bodies in split order. Declared the other way round, a positional
+        implementation applies the cap's flip to the body and the identity to the
+        cap -- a confident assembly of the wrong part, with a retained volume
+        that no longer reaches the ring.
+
+        This matters beyond the mutation: split order is an artefact of the mesh
+        library and of the geometry, so the same design re-exported can renumber
+        without anybody changing the contract.
+        """
+        forward = self._run(bodies=(BODY_ROW, CAP_ROW))
+        reversed_ = self._run(bodies=(CAP_ROW, BODY_ROW))
+        for name, row in (("forward", forward), ("reversed", reversed_)):
+            with self.subTest(order=name):
+                self.assertEqual("PASS", row["result"], row["reason"])
+        self.assertAlmostEqual(
+            forward["measured"]["retained_mm3"],
+            reversed_["measured"]["retained_mm3"], places=6,
+            msg="the same two solids in the same two places must measure the "
+                "same, whichever order the contract lists them in")
+
     def test_a_locator_inside_two_solids_is_refused(self) -> None:
         """A nested solid, which is what makes a locator genuinely ambiguous.
 
