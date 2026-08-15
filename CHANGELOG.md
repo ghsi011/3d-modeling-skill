@@ -46,6 +46,13 @@ seen behind a byte-identical mesh: `dir(build123d)` returning 11 names where the
 returns 485; `build123d.pack` answering with the submodule where `__init__` binds a
 function of the same name; and `build123d.__doc__` reading `None`.
 
+17 mutations attempted, 17 killed, 0 survived
+(`benchmarks/mutations/lazy-build123d-facade.json`) — after a first sweep of 17/16/1.
+The survivor was the `dir()` guard, which was correct while the fixture named against it
+could not fail for what it was named after: that test reads `__version__` and resolves a
+fallback name before it asks for `dir`, so the package is fully imported by then. The
+fixture was strengthened with a `dir()`-and-nothing-else probe, not the mutation dropped.
+
 Deliberately not done, so the scope is legible later: no generic lazy-import machinery,
 nothing under `site-packages` touched, no library stubbed, no warm child kept alive, no
 cache semantics changed, and the trimesh lane untouched — a candidate that never names
