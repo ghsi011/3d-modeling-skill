@@ -67,7 +67,7 @@ library instead, and walks build items through their components so a body hidden
 second component is counted. And `make_3mf.py`'s `%.6g` vertices (**D2**) are now
 quantified: p99 3.27e-05 mm, volume delta 0.0013 mm³.
 
-L0 grew by 35 tests to 1296 collected, against a ceiling of 1440.
+L0 grew by 36 tests to 1297 collected, against a ceiling of 1440.
 
 ### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
 

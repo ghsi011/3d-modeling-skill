@@ -456,6 +456,35 @@ class TheThreeMfGateCountsPlacedBodiesTest(unittest.TestCase):
         self.assertFalse(rows[0]["passes"])
         self.assertEqual("three_mf_present", rows[0]["predicate"])
 
+    def test_the_reason_this_reader_exists_is_still_true(self) -> None:
+        """`docs/defects.md` D3, asserted against `pyproject.toml`.
+
+        `trimesh`'s 3MF loader needs `lxml`, which this project declares only in
+        the `bambu` extra -- so a runtime-only install cannot read back the 3MF
+        `make_3mf.py` just wrote, and the writer's own round-trip check prints
+        *round-trip verification skipped* and exits 0.
+
+        Asserted against the **declared dependency set** and not by trying to
+        import `lxml`. The first version of this did import it, and it was a
+        trap: CI installs core plus every extra, so `lxml` is present there
+        without being core, and the test would have failed for a reason it does
+        not name. Provenance is not sufficiency -- an importable module answers
+        *is it here on this machine*, and the claim is *is it here on a default
+        install*.
+
+        When `lxml` becomes a core dependency this fails, and the signal is to
+        delete the reader's justification -- not the reader, whose stricter walk
+        through build items and components is worth keeping either way.
+        """
+        import tomllib
+
+        payload = tomllib.loads(
+            (Path(e2e.ROOT) / "pyproject.toml").read_text(encoding="utf-8"))
+        core = " ".join(payload["project"]["dependencies"])
+        extras = payload["project"]["optional-dependencies"]
+        self.assertNotIn("lxml", core)
+        self.assertIn("lxml", " ".join(extras["bambu"]))
+
 
 class TheFixtureHalvesAgreeTest(unittest.TestCase):
     """The brief and the predicates state the same request in two languages.

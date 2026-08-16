@@ -141,11 +141,9 @@ class TheRepositorysOwnThreeMfWriterIsReadableTest(unittest.TestCase):
     the format the repository actually emits, or both halves agree with each
     other and neither agrees with the deliverable.
 
-    It also pins the reason the reader exists. `trimesh.load` cannot open a 3MF
-    without `lxml`, which is in the `bambu` extra and not in the default
-    install, so the writer's own round-trip verification prints *round-trip
-    verification skipped* on a normal checkout -- `docs/defects.md` D3,
-    reproduced rather than recited.
+    The reason the reader exists at all -- `docs/defects.md` D3 -- is pinned in
+    `tools/test_e2e.py` instead, against `pyproject.toml` rather than against
+    whatever extras this machine happens to have selected.
     """
 
     def test_the_written_archive_places_exactly_the_one_body(self) -> None:
@@ -163,16 +161,6 @@ class TheRepositorysOwnThreeMfWriterIsReadableTest(unittest.TestCase):
         self.assertEqual(1, read["printable_bodies"])
         self.assertEqual("millimeter", read["unit"])
         self.assertTrue(all(row["passes"] for row in rows.values()), rows)
-
-    def test_trimeshs_own_reader_is_the_one_that_cannot_open_it(self) -> None:
-        """The defect, asserted rather than described.
-
-        If `lxml` ever becomes a core dependency this test fails, which is the
-        signal to delete the reader's justification -- not the reader, whose
-        stricter component walk is worth keeping.
-        """
-        with self.assertRaises(ModuleNotFoundError):
-            import lxml                                     # noqa: F401
 
 
 @unittest.skipUnless(HAVE, WHY)
