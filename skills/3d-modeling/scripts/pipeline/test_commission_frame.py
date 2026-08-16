@@ -311,57 +311,75 @@ class TheCommissionPacketCarriesTheRowSchemaTest(unittest.TestCase):
     """A designer may read only `authorized_inputs` and must satisfy
     `proposal_api` exactly. Both are possible only if the API says what a row owes.
 
-    **This proves the packet carries the schema, because it fails whenever a
-    field exists in `PROPOSABLE` and not in `PROPOSAL_API`.** That is not a
-    hypothetical `Y` -- it is the state this test was written against. Six of the
-    eight field names (`d_mm`, `enclosing_d_mm`, `size_mm`, `value_mm2`,
-    `z_from`, `z_to`) appeared nowhere in the packet, while the *kinds* were
-    already interpolated from the same whitelist. So the packet named five
-    proposable kinds and never said that a `section_area` row owes `at` and
-    `value_mm2`.
+    **This proves the packet states which fields each kind requires, because it
+    fails whenever the rendered association differs from `PROPOSABLE` in any
+    direction** -- a kind dropped, a kind invented, or a field attached to the
+    wrong kind. That is not a hypothetical `Y`. Six of the eight field names
+    (`d_mm`, `enclosing_d_mm`, `size_mm`, `value_mm2`, `z_from`, `z_to`)
+    appeared nowhere in the packet, while the *kinds* were already interpolated
+    from the same whitelist. So the packet named five proposable kinds and never
+    said that a `section_area` row owes `at` and `value_mm2`.
 
     None of those names is in an authorized file either. Measured on a real
     commission: the designer read `acceptance.py` to find the row schema, which
     is the only way to obey one instruction and a breach of the other.
 
+    **The association is the claim, so the association is what is asserted.** An
+    earlier form of this test joined every value of `PROPOSAL_API` into one
+    string and asked whether each field name appeared *somewhere* in it. That
+    instrument passes while asking a different question: `section_area` could
+    lose `value_mm2` and stay green for as long as `bed_contact` still listed
+    it, and the packet would once again fail to tell a designer what a
+    *particular* row owes. Presence in the packet was never the property; the
+    binding of a field to its kind is. The discriminating mutation is exactly
+    that: move a field off its owning kind while leaving it present elsewhere in
+    the rendered text. The old form passes that mutation and this one fails it,
+    which is the whole difference between the two.
+
+    Only `PROPOSAL_API["features"]` is read, because that is the entry that
+    carries the schema; scanning the whole packet is what let an unrelated
+    sentence satisfy the assertion.
+
     Compared against `PROPOSABLE` itself rather than a list written here, because
     a list written here is the same defect one release later: `PROPOSABLE` is the
     authority on what a row may carry, and a second spelling of it in a test is a
-    second authority over the same question.
+    second authority over the same question. Asserting the whole mapping at once
+    also subsumes the separate "every kind is named" check this class used to
+    carry: two dicts are equal only if their key sets are.
     """
 
-    def _packet_text(self) -> str:
+    @staticmethod
+    def _rendered_associations(features: str) -> dict[str, list[str]]:
+        """The `kind -> field, field` clauses the packet actually renders.
+
+        Deliberately strict. If the rendering changes shape this returns
+        something that does not match `PROPOSABLE` and the test fails, which is
+        the right outcome: a designer parses this text by eye, and a shape the
+        test cannot read is a shape a reader cannot either.
+        """
+        body = features.partition("requires: ")[2]
+        body = body.partition(". A row may not carry")[0]
+        out: dict[str, list[str]] = {}
+        for clause in body.split(";"):
+            kind, arrow, fields = clause.partition(" -> ")
+            if not arrow:
+                continue
+            out[kind.strip()] = [f.strip() for f in fields.split(",") if f.strip()]
+        return out
+
+    def test_the_packet_states_which_fields_each_kind_requires(self) -> None:
+        from . import acceptance as ACC
         from .cli import PROPOSAL_API
 
-        return " ".join(str(value) for value in PROPOSAL_API.values())
-
-    def test_every_proposable_field_is_named_in_the_packet(self) -> None:
-        from . import acceptance as ACC
-
-        text = self._packet_text()
-        missing = sorted({field
-                          for fields in ACC.PROPOSABLE.values()
-                          for field in fields
-                          if field not in text})
+        rendered = self._rendered_associations(PROPOSAL_API["features"])
         self.assertEqual(
-            [], missing,
-            f"the commission packet never names {missing}, so a designer told to "
-            "read only its authorized inputs cannot learn what a row owes. It "
-            "either guesses or reads acceptance.py, and acceptance.py is not "
+            {kind: sorted(fields) for kind, fields in ACC.PROPOSABLE.items()},
+            {kind: sorted(fields) for kind, fields in rendered.items()},
+            "the commission packet does not say which fields each proposable "
+            "kind requires, so a designer told to read only its authorized "
+            "inputs cannot learn what a *particular* row owes. It either "
+            "guesses or reads acceptance.py, and acceptance.py is not "
             "authorized")
-
-    def test_every_proposable_kind_is_named_in_the_packet(self) -> None:
-        """The half that already passed, kept so the pairing is visible.
-
-        Without it, deriving the fields while dropping the kinds would leave this
-        file green about a packet that had stopped saying what may be proposed.
-        """
-        from . import acceptance as ACC
-
-        text = self._packet_text()
-        missing = [kind for kind in ACC.PROPOSABLE if kind not in text]
-        self.assertEqual([], missing,
-                         f"the packet no longer names the kinds {missing}")
 
 
 if __name__ == "__main__":
