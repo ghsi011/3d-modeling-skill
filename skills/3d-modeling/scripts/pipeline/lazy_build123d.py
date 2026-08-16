@@ -130,6 +130,7 @@ attribute access executes the real `__init__.py` through the real loader.
 """
 from __future__ import annotations
 
+import _thread
 import importlib
 import importlib.machinery
 import importlib.util
@@ -338,7 +339,6 @@ def install() -> bool:
     consts = loader.get_code(PACKAGE).co_consts
     module.__doc__ = consts[0] if consts and isinstance(consts[0], str) else None
 
-    served: set[str] = set()
     # Everything written onto the package from outside this module. The facade
     # caches what it serves straight into `ns`, so a write that arrives through
     # `__setattr__` is by definition somebody else's, and `_full()` puts them
@@ -347,7 +347,40 @@ def install() -> bool:
     # deferred submodule carries -- measured against the real package, which
     # keeps the write, because nothing in it re-executes.
     patched: dict[str, Any] = {}
-    state = {"armed": False, "lazy": False, "full": False}
+    state = {"armed": False, "lazy": False, "retired": False,
+             "executing": False, "done": False}
+
+    # First contact is the one moment two threads can be inside this module at
+    # once, and two things there must happen exactly once: the arming, whose
+    # `modify_copyreg()` is a side effect, and the execution of `__init__.py`.
+    # `if not flag: flag = True` has a window between its test and its set;
+    # `dict.setdefault` is a single C-level operation and has none, so the claim
+    # is a `setdefault` and the loser waits on a latch the winner opens.
+    #
+    # `_thread` rather than `threading`: a lock and a thread id are all this
+    # needs, `_thread` is a builtin at a measured 0.0007 ms, and `threading`
+    # costs 2.2 ms of import in the child -- more than `install()` itself, paid
+    # by every candidate including the trimesh ones that never name build123d.
+    claims: dict[str, int] = {}
+    armed_latch = _thread.allocate_lock()
+    ready_latch = _thread.allocate_lock()
+    armed_latch.acquire()                          # both start closed
+    ready_latch.acquire()
+
+    def _claim(what: str) -> bool:
+        """True for exactly one thread. The others get False and must wait."""
+        return claims.setdefault(what, _thread.get_ident()) == _thread.get_ident()
+
+    def _open(latch: Any) -> None:
+        try:
+            latch.release()
+        except RuntimeError:                       # already open
+            pass
+
+    def _wait(latch: Any) -> None:
+        """Block until the winner opens the latch, then leave it open."""
+        latch.acquire()
+        latch.release()
 
     def _submodule(sub: str) -> Any:
         """Import one submodule. What it binds onto the facade is `__setattr__`'s.
@@ -360,31 +393,45 @@ def install() -> bool:
         """
         return importlib.import_module(f"{PACKAGE}.{sub}")
 
-    def _arm() -> bool:
+    def _arm(wait: bool = True) -> bool:
         """First contact: decide whether this release may be served lazily.
 
         Returns True when it may. On any other release this executes the real
         `__init__.py` and the facade is finished -- one branch, so the expensive
         path and the fallback path cannot drift apart.
+
+        Exactly one thread runs the body; the others wait for it, because
+        `modify_copyreg()` is a side effect and running it twice is running it
+        twice. `wait=False` is the `__path__` caller and the deadlock rule is in
+        `_getattr`.
         """
         if state["armed"]:
             return state["lazy"]
-        state["armed"] = True
-        # Before anything else can ask for it: `_full()` executes `__init__.py`,
-        # whose first statement imports a submodule, which reads `__path__` off
-        # this module and would re-enter `__getattr__`. Written into `ns` rather
-        # than through `setattr`, because a write that reaches `__setattr__` is
-        # recorded as somebody else's and put back after the fallback, and this
-        # one is the facade's own.
-        ns["__path__"] = real_path
-        if installed_version() in PROVEN_VERSIONS:
-            state["lazy"] = True
-            # `__init__.py`'s only side effect beyond its imports. It has to
-            # happen before a candidate pickles or deep-copies a shape, and a
-            # candidate cannot have a shape without having reached here first.
-            _submodule("persistence").modify_copyreg()
-        else:
-            _full()
+        if not _claim("arm"):
+            if wait:
+                _wait(armed_latch)
+            return state["lazy"]
+        try:
+            # Before anything else can ask for it, and that ordering does two
+            # jobs: `_full()` executes `__init__.py`, whose first statement
+            # imports a submodule, which reads `__path__` off this module -- and
+            # finding it *here* is also what stops this thread re-entering
+            # `__getattr__` and this function while it owns the claim. Written
+            # into `ns` rather than through `setattr`, because a write that
+            # reaches `__setattr__` is recorded as somebody else's and put back
+            # after the fallback, and this one is the facade's own.
+            ns["__path__"] = real_path
+            if installed_version() in PROVEN_VERSIONS:
+                state["lazy"] = True
+                # `__init__.py`'s only side effect beyond its imports. It has to
+                # happen before a candidate pickles or deep-copies a shape, and a
+                # candidate cannot have a shape without having reached here first.
+                _submodule("persistence").modify_copyreg()
+            else:
+                _full()
+        finally:
+            state["armed"] = True
+            _open(armed_latch)
         return state["lazy"]
 
     def _retire() -> None:
@@ -394,13 +441,13 @@ def install() -> bool:
         one caller that must have it *without* the execution: the import system,
         when it is about to execute `__init__.py` into this module itself.
         """
-        if state["full"]:
+        if state["retired"]:
             return
-        state["full"] = True
+        state["retired"] = True
         state["armed"] = True
-        for name in ("__getattr__", "__dir__", *served):
-            ns.pop(name, None)
-        served.clear()
+        _open(armed_latch)
+        ns.pop("__getattr__", None)
+        ns.pop("__dir__", None)
         # The third hook, and it comes out here for the same reason as the other
         # two rather than being left as a harmless subclass: `type(build123d)` is
         # observable, and a module the boundary handed back with a repo-owned
@@ -425,24 +472,66 @@ def install() -> bool:
         left afterwards is what an ordinary import leaves: the same object, the
         same loader, the same namespace, the same type.
         """
-        if state["full"]:
+        if state["done"]:
             return
-        _retire()
-        loader.exec_module(module)
-        # And what somebody else put on the package goes back on top of it,
-        # because executing `__init__.py` is this module's business and not
-        # theirs. A candidate that set `build123d.Box = ...` and then read one of
-        # the seven names only a deferred submodule carries had the write
-        # reverted by the fallback -- measured, against a real package that keeps
-        # it, because an ordinary attribute read re-executes nothing. `_retire()`
-        # deliberately does not do this: the one caller it has is a *reload*,
-        # which is supposed to wipe a monkeypatch, and does so on both sides.
-        ns.update(patched)
+        # The loser does not execute and does not race ahead of the winner
+        # either: it waits, because the next thing it does is read a name out of
+        # a namespace `__init__.py` is still being executed into. Measured
+        # deterministically -- two threads on first contact, one held inside
+        # `exec_module` -- the loser without this wait raised `AttributeError:
+        # module 'build123d' has no attribute 'ExportDXF'` for a name the
+        # package has.
+        if not _claim("full"):
+            _wait(ready_latch)
+            return
+        if state["executing"]:
+            # This thread, re-entering its own execution of `__init__.py`.
+            return
+        try:
+            if state["retired"]:
+                # A reload retired the facade; the import system is executing
+                # `__init__.py` itself and this must not do it a second time.
+                return
+            # The hooks stay on until the namespace is complete, and that is the
+            # other half of the two-thread repair. Retiring *first* leaves a
+            # window in which the module is an ordinary one with no
+            # `__getattr__` and a namespace `__init__.py` has not finished
+            # filling, so a second thread's `build123d.<name>` raises
+            # `AttributeError` for a name the package has. While this flag is up
+            # the namespace property answers this thread directly -- it is the
+            # exec doing the reading -- and every other thread goes through
+            # `__getattr__` and waits below.
+            state["executing"] = True
+            loader.exec_module(module)
+            # And what somebody else put on the package goes back on top of it,
+            # because executing `__init__.py` is this module's business and not
+            # theirs. A candidate that set `build123d.Box = ...` and then read
+            # one of the seven names only a deferred submodule carries had the
+            # write reverted by the fallback -- measured, against a real package
+            # that keeps it, because an ordinary attribute read re-executes
+            # nothing. `_retire()` deliberately does not do this: the one caller
+            # it has is a *reload*, which is supposed to wipe a monkeypatch, and
+            # does so on both sides.
+            ns.update(patched)
+            _retire()
+        finally:
+            state["executing"] = False
+            state["done"] = True
+            _open(ready_latch)
 
     def _getattr(name: str) -> Any:
-        lazy = _arm()
         if name == "__path__":
-            return module.__path__
+            # Answered without waiting for anyone, and that is a deadlock rule
+            # rather than a shortcut. The import system asks a package for
+            # `__path__` while it holds the module lock for the submodule it is
+            # importing, and `_full()` imports submodules -- so a thread that
+            # blocked here while holding that lock, waiting for the thread that
+            # wants it, is the cycle. The value is a constant this module has
+            # had since `install()`, so answering early is answering correctly;
+            # whichever thread owns the arming will finish it.
+            _arm(wait=False)
+            return real_path
+        lazy = _arm()
         # No shortcut for `getattr(build123d, "<a submodule name>")`, and the
         # reason is `import_dxf`: it is both a submodule and a public function,
         # and `__init__.py`'s `from build123d.import_dxf import import_dxf`
@@ -459,7 +548,6 @@ def install() -> bool:
                     # somebody else's for `_full()` to know which ones to put
                     # back afterwards.
                     ns[name] = found
-                    served.add(name)
                     return found
         _full()
         try:
@@ -509,6 +597,13 @@ def install() -> bool:
 
         @property
         def __dict__(self) -> dict[str, Any]:      # type: ignore[override]
+            if state["executing"] and claims.get("full") == _thread.get_ident():
+                # `SourceLoader.exec_module` reads `module.__dict__` to execute
+                # `__init__.py` *into*. That read is this thread's own execution
+                # asking for the namespace it is filling, so it is answered and
+                # not forced -- forcing it is what made `reload` run the package
+                # body twice.
+                return ns
             _arm()
             _full()
             return ns
@@ -541,7 +636,7 @@ def install() -> bool:
             if name in REBOUND and value is sys.modules.get(f"{PACKAGE}.{name}"):
                 return
             super().__setattr__(name, value)
-            if not state["full"]:
+            if not state["retired"]:
                 patched[name] = value
             # `importlib.reload` rebinds `__spec__` to a *fresh* spec object and
             # then executes `__init__.py` into this module itself -- and
