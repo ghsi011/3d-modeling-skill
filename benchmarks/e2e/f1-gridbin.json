@@ -1,6 +1,6 @@
 {
   "id": "e2e-grid-bin-2x1x3",
-  "revision": 2,
+  "revision": 3,
   "class": "FROM_SPEC",
   "required_hosted": false,
   "note": "F1 of docs/agents/qa-e2e-implementation.md, and Slice A of its section 13. Reference-determined geometry (section 3.1): the standard fixes the answer, so hard acceptance may include exact topology and a registered surface comparison. The other four fixtures have different truth models and this file deliberately says nothing about them.\n\nWHAT REVISION 2 IS. Revision 1 withheld the base and lip profile and then judged them with a hard reference-distance predicate. The first real run failed exactly there and nowhere else, and the reviewer ruled: the truth model was stronger than the request, so it was not yet a fair reusable benchmark. The ruling also refused the other repair -- do NOT perturb the 42 mm pitch off the published standard, because F1 was chosen as a real standard-driven fixture and not an anti-memory synthetic. So revision 2 states the load-bearing interface on the request side from a public source, with provenance, and re-scopes the hard predicates so that every surface a distance predicate decides on is determined by a request-side fact. What is not determined -- the internal fillets, and the lip's final chamfer, which cannot be built in full at a 1.0 mm wall -- is masked out of the hard row and reported as a diagnostic.\n\nEVERY NUMBER BELOW IS ON ONE OF TWO SIDES OF A WALL, AND THE SIDES ARE NOT INTERCHANGEABLE. `request` is what a designer is handed. `geometry` is what the grader applies: it may be informed by the reference, because a predicate is candidate-independent and is frozen before any candidate runs. `tools/e2e.py:audit_request` enforces the first half mechanically, by running `corpus.numbers_in` and `corpus.coincidences` over the materialised request package -- so a measurement that reached the brief is a hard failure and not a review finding.\n\nTWO COINCIDENCES NOW CROSS, AND BOTH ARE DECLARED. The published widest section is 41.5 mm per grid unit in a 42 mm cell, so a two-by-one bin is 83.5 x 41.5 mm at its widest and a request that states the interface states both footprint axes. That is the point of revision 2 rather than a leak in it: the footprint is a published property of the family, it would exist if this particular reference had never been generated, and the reviewer's ruling requires it on the request side. The third extent -- the overall height -- is NOT disclosed and is not derivable, because the publication does not fix the lip truncation; it stays a design decision inside a band this file records.",
@@ -106,7 +106,7 @@
       "lip_final_chamfer": "published 1.9 mm; the reference runs 1.3 mm (z 23.500 -> 24.800, opening 79.70 -> 82.30), which keeps 0.6 mm of rim wall. Physical necessity rather than an error: the published 1.9 would reach the outer surface exactly. Reported rather than reconciled, per review-workflow section 3a -- and it is the whole reason the region above the lip's land is masked out of the hard distance.",
       "overall_height": "a consequence of the line above: the reference is 3.8 mm of lip above its 21.0 mm body where the full published lip would be 4.4. Not disclosed to the request and not derivable from it; the height predicate is a band spanning both readings.",
       "internal_fillets": "the reference uses r = 1.1 at the floor (z 7.000 -> 8.100) and at the divider junctions; the same public file's r_f2 is 2.8. Undetermined, and masked.",
-      "feet_to_body_blend": "the publication ties the feet together somewhere in the 2.25 mm between the top of the profile (4.75) and the base height (7.0) and does not say how. The reference blends over 0.25 mm, from two squares at 4.750 to one outline at 5.000. Measured cost of the disagreement against a sharp step: p95 of 0.140 mm and a worst point of 0.250 mm in the 4-5 mm bucket, which is inside the band -- so it is recorded and left in the hard row rather than masked."
+      "feet_to_body_tie": "THE DEFECT RUN 02 FOUND, and the reason there is a revision 3. The publication ties the feet together somewhere in the 2.25 mm between the top of the profile (4.75) and the base height (7.0) and does not say how or where. Measured on two independent implementations of the same published figures: the reference goes from two rounded squares at z = 4.750 to one outline at z = 5.000, a 0.25 mm blend; run 02's candidate ramps each foot over the full 2.25 mm and closes the last of the gap at z = 6.85. Revision 2 judged that span twice -- it read the corner radius at 6.0 and it left the span in the hard distance -- and failed a candidate whose corner radius is exactly 3.7528 at every height from 6.9 upward, the same figure the reference gives. Revision 3 moves the probe above the base and masks the span."
     }
   },
   "request": {
@@ -413,7 +413,6 @@
     ],
     "published_tolerance_mm": 0.2,
     "outer_corner_radius_mm": 3.75,
-    "corner_radius_probe_z_mm": 6.0,
     "base_height_mm": 7.0,
     "base_profile": {
       "lower_chamfer_mm": 0.8,
@@ -467,7 +466,8 @@
     "three_mf": {
       "samples": 8000,
       "band_mm": 0.001
-    }
+    },
+    "corner_radius_probe_above_base_mm": 5.0
   },
   "why_the_bands_are_what_they_are": {
     "published_tolerance_mm": "0.2 mm, applied to every figure the request states and to nothing else. Brief section 5: 'For dimensions explicitly stated in a brief, use the stated tolerance instead of inventing a similarity band.' The brief states it in the same words the predicates apply it in. It is a CAD tolerance and not a print tolerance -- the model is the deliverable being judged.\n\nLoose enough on the measurement side: the two corner-radius methods disagree by 0.003 mm on the reference (3.7528 by area deficit, 3.7500 by corner distance), the reference's base-profile spans read 0.000 mm off the published figures, and an arc drawn at this benchmark's own 24 segments per corner reads 0.005 mm high (3.7549 against 3.75) because an inscribed polygon is smaller than its arc. Tight enough on the defect side: both deviations the first real run produced were 0.25 mm -- a 2.4 mm upper chamfer against a published 2.15, which is 0.5 mm on the span the profile row reads, and a 4.0 mm corner radius against a published 3.75.",
@@ -475,7 +475,9 @@
     "height_max_mm": "25.4 = 3 height units plus the whole published lip. A bin cannot be taller than the publication without inventing geometry above it.",
     "corner_radius_probe_z_mm": "6.0 -- above the published base profile's 4.75 and below the published floor at 7.0, so the section is the plain outer wall on any candidate that read the request.",
     "internal_fillet_allowance_mm": "2.8, the largest internal fillet radius the cited public file contemplates (r_f2). It is the height of the masked floor transition, so no implementation choosing any radius the source mentions is penalised by the distance row.",
-    "compartment_band": "9.8 to 18.0 mm above the base, and absolute at revision 2 where revision 1 hung the top of it off the candidate's own rim. Both ends are arithmetic on stated numbers: 9.8 is the published floor at 7.0 plus the 2.8 mm fillet allowance, so the band starts above any internal transition the source contemplates; 18.0 is the lip's inner tip at 3 x 7 less its published 1.2 mm support and its 1.6 mm protrusion past a 1.0 mm wall, less a 0.2 mm margin. Relative-to-the-rim was safe while the height band was 21..28 with one plausible answer in it; with a legitimate 1.9 mm of freedom in the overall height, a top hung off the rim slides into the lip's underside ramp on a taller bin and the prismatic row would report a forbidden feature that is not there."
+    "compartment_band": "9.8 to 18.0 mm above the base, and absolute at revision 2 where revision 1 hung the top of it off the candidate's own rim. Both ends are arithmetic on stated numbers: 9.8 is the published floor at 7.0 plus the 2.8 mm fillet allowance, so the band starts above any internal transition the source contemplates; 18.0 is the lip's inner tip at 3 x 7 less its published 1.2 mm support and its 1.6 mm protrusion past a 1.0 mm wall, less a 0.2 mm margin. Relative-to-the-rim was safe while the height band was 21..28 with one plausible answer in it; with a legitimate 1.9 mm of freedom in the overall height, a top hung off the rim slides into the lip's underside ramp on a taller bin and the prismatic row would report a forbidden feature that is not there.",
+    "corner_radius_probe_above_base_mm": "5.0 mm above the published base height, so the section is read at 12.0 mm. It has to be above the base, because that is the first height at which the publication fixes what the outline is; and it has to be below the lip's underside ramp, which the publication puts at 3 x 7 less the 1.2 mm support less the 1.6 mm the lip protrudes past a 1.0 mm wall -- 18.2 mm. 12.0 is the middle of what is left. Revision 2 probed at 6.0 and that was the defect run 02 found: 6.0 is inside the base, where the feet are still tying into the body.",
+    "the_masked_tie": "4.75 to 7.0 -- the published base profile's rise to the published base height. The publication says the base owns one height unit 'including the structure tying the bases together' and gives the profile 4.75 of it, so the tie happens somewhere in the 2.25 mm between, and nothing says where. Measured on two independent implementations: the reference closes it in 0.25 mm, run 02's candidate ramps it over the whole 2.25 mm. The second is not a whim -- the 83.5 x 41.5 body overhangs the two 41.5 mm feet by about 30 mm2 of flat ceiling, and the brief asks for no supports, so a designer that reads the print constraint has to build something there."
   },
   "calibration": {
     "measured_utc": "2026-08-16",
@@ -519,7 +521,7 @@
       "a defect confined to under one percent of the retained surface, because the gate is p99. On this part one percent is roughly 100 mm2 of surface -- larger than a single magnet pocket's wall, which is why no_bores_in_base is a separate predicate and not left to this one.",
       "anything at all when the candidate is scored in a pose outside the 24 proper rotations. The pose set is the cuboid rotation group, so a candidate rotated by an arbitrary angle registers badly and fails; that is a refusal to guess rather than a detection.",
       "handedness on THIS part, because there is nothing handed to catch. Measured, not assumed: the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation. So probe 6 of the brief's required seven ('mirrored/incorrect-handed transformation IF the fixture gains any handed feature') has no handed feature to act on here, and the mutation that stands in its place probes the property that would matter if it did -- that the registration cannot fit a reflection.",
-      "REVISION 2, the masked regions: the internal floor transition from 7.0 to 9.8 mm above the base, and everything above 23.5 mm. Both are reported as a diagnostic (diagnostics.surface_distance_unmasked) and both are covered by named predicates instead -- compartment_floor_height_mm for the one, stack_lip_depth_mm and stack_lip_seat_height_mm and height_mm for the other.",
+      "REVISION 3, the masked regions: the tie between the feet and the body from 4.75 to 7.0 mm above the base, the internal floor transition from 7.0 to 9.8, and everything above 23.5. All three are reported as a diagnostic (diagnostics.surface_distance_unmasked) and all three are covered by named predicates instead -- base_feet and base_plug_profile_mm below the first, compartment_floor_height_mm for the second, and stack_lip_depth_mm, stack_lip_seat_height_mm and height_mm for the third.",
       "REVISION 2, the one undetermined feature the mask does NOT remove: the vertical fillet where the divider meets the compartment walls, and the 0.25 mm blend where the feet meet the body. The reference fillets the first at r = 1.1 and blends the second over 0.25 mm; the publication fixes neither. Measured against a sharp-junction implementation of the same published figures, the two together put 0.086% of retained samples beyond the band, with a worst point of 0.454 mm. They are left in because that is far under the p99 cut and because removing them would need a mask defined by something other than height -- and left recorded, because the alternative is a later reader finding them."
     ],
     "mask_validation": {
@@ -550,6 +552,16 @@
         "the scorer now honours the fixture's probe_samples, which revision 1 declared and did not read"
       ],
       "what_did_not_change": "the reference bytes and their digests, the 0.3 mm band and its calibration record, the 3MF gate, and run 01 -- which is preserved below as evidence about revision 1 and is not evidence about this one."
+    },
+    {
+      "revision": 3,
+      "what_changed": [
+        "the corner radius is read 5.0 mm above the published base height instead of at a fixed 6.0 mm, because 6.0 is inside the base and the publication does not fix the outline there",
+        "the hard reference distance masks the tie between the feet and the body, 4.75 to 7.0 mm above the base, on the same rule as the other two masked ranges",
+        "two mutations added, one per change"
+      ],
+      "why_it_changed": "run 02, the first candidate scored against revision 2, failed outer_corner_radius_mm at 6.7724 against 3.75 +/- 0.2 -- and the failure was the fixture's, not the candidate's. Measured: that candidate's outer corner radius is 3.7528 at every height from 6.9 upward, which is the reference's own figure to four decimals. At 6.0 its section was still two feet growing into a body. The same mechanism showed in the distance: bucketed by height, every band was at or near zero except 4.75-7.0, which reached p99 = 1.2280 and put 12-16% of its samples beyond the band. Revision 2 was deciding a hard row on a surface the request does not determine, which is the exact class of defect the reviewer's ruling was about -- found one layer deeper than revision 2 looked.",
+      "what_did_not_change": "the reference bytes and their digests, the 0.3 mm band and its calibration record, the published figures, the brief, the request package, the 3MF gate, and the sixteen predicate names."
     }
   ],
   "run_findings": {
@@ -578,6 +590,30 @@
         "design_tool_run_seconds": 64.5
       },
       "blind_score_coupling": "NOT reproduced here, and the coupling is real. tools/blind.py:score reads corpus.request_view, which is the QUESTION validator, so a fault in the question half denies a score outright -- reproduced on a synthetic entry with the candidate, the reference and the scorer untouched. tools/e2e.py calls only corpus.numbers_in and corpus.coincidences, and only on the request side, so a malformed request package fails the audit and cannot make a measured candidate unscoreable."
+    },
+    "run_02": {
+      "which_revision": "REVISION 2. Preserved as discovery evidence exactly as scored. It was NOT re-scored against revision 3, it is not evidence that revision 3 is fair, and revision 3 was not tuned to it: the two changes are a probe height and a mask bound, both computed from published numbers -- the base height and the base profile's rise -- and both would be the right bounds if this candidate had never run.",
+      "verdict": "CAD_FAIL / 3MF_PASS",
+      "candidate_sha256": "8ebcd7fec9698b4273b2154d5983468b833bdb92aa6a69cc48d1d061475ee439",
+      "failed": [
+        "outer_corner_radius_mm at 6.7724 mm against 3.75 +/- 0.2 mm"
+      ],
+      "the_failure_is_the_fixtures": "measured, not inferred. The candidate's outer section is 83.500 x 41.500 at every height from 4.75 upward, and its corner radius by area deficit reads 7.2345 at 4.80, 6.7724 at 6.00, and 3.7528 from 6.90 to the lip -- the reference's own 3.7528 to four decimals. The rising figures are not a radius at all: below 6.9 the section is two feet ramping into one body, and the area-deficit formula assumes a rounded rectangle. Revision 2 placed the probe at 6.0 reasoning only that it was above the base profile and below the floor, which put it inside the one span the publication leaves open.",
+      "why_the_candidate_ramps_at_all": "not a whim, and this is the finding worth keeping: the published 83.5 x 41.5 body overhangs the two published 41.5 mm feet -- across the 0.5 mm gap between them and in four notches where each foot's 3.75 mm inner corners curve away from the long sides -- for about 30 mm2 of flat ceiling. The brief asks for no supports and the compiled print plan allows 0.0 mm2 of unsupported downward area. So the published geometry REQUIRES a designer to invent a transition the publication does not specify, and the reference's own 0.25 mm blend is one answer to it rather than the answer.",
+      "where_the_disagreement_is": "measured over 20000 samples a side, bucketed by height in the datum frame. z 0-4.75: median 0.0000, max 0.0016. z 4.75-5.00: p99 0.2260. z 5-6: p99 0.9479, 16.5% beyond the band. z 6-7: p99 1.2280, 12.5% beyond. Every band above the floor transition: median 0.0000, p95 0.0000, worst point 0.4456 at the divider junctions. The whole disagreement is the tie.",
+      "what_this_run_does_not_establish": [
+        "it is NOT evidence that revision 3 is a fair benchmark. It is one candidate, scored against revision 2, and what it established is a defect in revision 2.",
+        "it says nothing about whether a designer can pass F1, because the row it failed is a row it should not have been judged on.",
+        "the seventeen rows it passed are real evidence about revision 2's other predicates, and they include every row revision 2 added except the one that failed.",
+        "no independent verification ran. final_status is NEEDS_MORE_EVIDENCE with commission_verdict PASS, for the reason run 01 recorded: the compiled plan sets verification_dispatch NEVER, no renderer is installed, and brief section 1.5 forbids manufacturing a receipt to get past it."
+      ],
+      "isolation": "an isolated directory outside both the repository and the project tree, holding only the materialised request, a copy of the skill at the freeze commit, and a venv installed from a wheel built at it and pinned to the scoring environment's versions -- which closes run 01's trimesh 5.0.0 against 4.12.2 gap. Checked for pointers before the run and recorded in C:/projects/3d/qa-f1-gridbin/runs/run-02/isolation.md, with what it does NOT cover stated there. The designer reported reading nothing outside it, and the three undisclosed facts were measured off the delivered STL rather than taken on trust: overall height 24.4 against the reference's 24.8, lip final chamfer 0.95 against 1.3, internal fillet 1.0 against 1.1. None reproduced.",
+      "cost": {
+        "harness_seconds": 32.184,
+        "design_path_seconds": 3040,
+        "design_tool_run_seconds": 6.6,
+        "note": "the harness grew from 18.97 s at revision 1 to 32.18 because revision 2 added about 190 cross-sections -- the lip throat scan alone is 160 at 0.05 mm -- and because the registration now summarises a masked and an unmasked distribution. The two share one sampling pass, so they cost one measurement rather than two. The design path is the authoring turn plus the design-tool invocations, measured by the caller and never summed with the harness."
+      }
     }
   },
   "mutations": "benchmarks/mutations/e2e-f1-gridbin.json"

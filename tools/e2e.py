@@ -557,7 +557,7 @@ def features(mesh, geometry: dict[str, Any]) -> dict[str, Any]:
         "base_feet_counts": base_feet,
         "base_profile": base_profile_deviation(mesh, z0, geometry),
         "outer_corner_radius_mm": _corner_radius(
-            mesh, z0 + geometry["corner_radius_probe_z_mm"]),
+            mesh, z0 + corner_radius_probe(geometry)),
         "floor_top_mm": _floor_top(mesh, z0, top, step),
         "lip_throat": throat,
         "base_band_z": base_zs, "base_ring_counts": base_rings,
@@ -641,6 +641,16 @@ def undetermined(points, mask: dict[str, float] | None):
     predicate may judge a surface only where request-side facts fix it, and two
     regions of this part are not fixed by anything the request states:
 
+    * **the tie between the feet and the body.** The published base profile is
+      per grid unit and the published base height is one height unit, so
+      somewhere in the 2.25 mm between the top of the profile and the top of the
+      base the feet grow into one body -- and the publication does not say
+      where. Measured on two independent implementations: the reference closes
+      it in 0.25 mm, and run 02's candidate ramps it over the whole 2.25 mm
+      because the body overhangs the feet by about 30 mm2 of flat ceiling and
+      the brief forbids supports. Revision 2 judged this span and failed a
+      conformant candidate for it; that is the defect run 02 found and revision
+      3 removes.
     * **the internal floor transition.** The publication gives the floor height
       -- the base occupies the first height unit -- and says nothing about the
       fillet or chamfer that joins the floor to the walls. That it is genuinely
@@ -665,6 +675,7 @@ def undetermined(points, mask: dict[str, float] | None):
     if not mask:
         return ~keep
     z = np.asarray(points, dtype=float)[:, 2]
+    keep &= ~((z >= mask["tie_low_mm"]) & (z <= mask["tie_high_mm"]))
     keep &= ~((z >= mask["floor_low_mm"]) & (z <= mask["floor_high_mm"]))
     keep &= z <= mask["lip_land_top_mm"]
     return ~keep
@@ -1062,11 +1073,29 @@ def distance_mask(geometry: dict[str, Any]) -> dict[str, float]:
     lip = geometry["lip_profile"]
     floor = geometry["base_height_mm"]
     return {
+        "tie_low_mm": geometry["base_profile"]["rise_mm"],
+        "tie_high_mm": floor,
         "floor_low_mm": floor,
         "floor_high_mm": floor + geometry["internal_fillet_allowance_mm"],
         "lip_land_top_mm": (geometry["height_units"] * geometry["height_unit_mm"]
                             + lip["lower_chamfer_mm"] + lip["land_mm"]),
     }
+
+
+def corner_radius_probe(geometry: dict[str, Any]) -> float:
+    """The height at which the outer section is a section of the published wall.
+
+    Above the base, because that is the first height at which the publication
+    fixes what the outline is: the base owns the first height unit and the feet
+    finish tying into the body somewhere inside it, at a height the publication
+    does not give. Revision 2 probed at 6.0 -- reasoning only that it was above
+    the base profile and below the floor -- and 6.0 is inside that span. Run 02
+    priced the mistake: a candidate whose corner radius is exactly the published
+    3.75 mm everywhere from 6.9 mm upward read 6.77 at 6.0, because at 6.0 its
+    section was still a foot growing into a body, and it failed a row it
+    satisfies.
+    """
+    return geometry["base_height_mm"] + geometry["corner_radius_probe_above_base_mm"]
 
 
 def comparison_rows(registration: dict[str, Any], geometry: dict[str, Any]
@@ -1084,12 +1113,14 @@ def comparison_rows(registration: dict[str, Any], geometry: dict[str, Any]
         _row("reference_surface_distance_p99_mm",
              distance["p99_mm"] <= band["band_mm"],
              round(distance["p99_mm"], 4), f"<= {band['band_mm']} mm",
-             "the determined surfaces only: everything except the internal "
-             f"floor transition ({mask['floor_low_mm']:g}.."
-             f"{mask['floor_high_mm']:g} mm above the base) and everything "
-             f"above the lip's published land ({mask['lip_land_top_mm']:g} mm). "
-             "Band calibrated from same-geometry noise; see the fixture's "
-             "calibration block for the method and what it cannot catch"),
+             "the determined surfaces only: everything except the tie between "
+             f"the feet and the body ({mask['tie_low_mm']:g}.."
+             f"{mask['tie_high_mm']:g} mm above the base), the internal floor "
+             f"transition ({mask['floor_low_mm']:g}..{mask['floor_high_mm']:g}) "
+             f"and everything above the lip's published land "
+             f"({mask['lip_land_top_mm']:g}). Band calibrated from "
+             "same-geometry noise; see the fixture's calibration block for the "
+             "method and what it cannot catch"),
     ]
 
 

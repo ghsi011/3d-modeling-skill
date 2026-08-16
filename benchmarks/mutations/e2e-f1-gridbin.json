@@ -1,5 +1,5 @@
 {
-  "target": "F1's hard acceptance at fixture revision 2: the sixteen predicates that decide CAD_PASS, the two that decide 3MF_PASS, and the structural guards -- the request leak audit, the reference digest, the registration datum and the distance mask",
+  "target": "F1's hard acceptance at fixture revision 3: the sixteen predicates that decide CAD_PASS, the two that decide 3MF_PASS, and the structural guards -- the request leak audit, the reference digest, the registration datum and the distance mask",
   "note": "Run with: uv run python tools/mutate.py benchmarks/mutations/e2e-f1-gridbin.json\n\nTWO KINDS OF MUTATION, AND THE DIFFERENCE IS THE POINT. Rows against tools/f1_candidate.py mutate the CANDIDATE: they build a defective bin and prove the predicate notices the defect, which is what the brief's section 6/F1 'required mutation probes' asks for. Rows against tools/e2e.py mutate the INSTRUMENT: they weaken a gate and prove a test notices the gate weakening. A fixture with only the second kind proves its tests read its own code; a fixture with only the first proves nothing about the gates the candidate never trips.\n\nThe brief requires seven probes. Six are here as candidate mutations -- divider removed, divider on the wrong axis, lip removed, magnet holes added, one axis scaled, an extra body in the STL (and again in the 3MF). The seventh, a mirrored or wrong-handed transform, is qualified in the brief itself: 'IF the fixture gains any handed feature'. This one has not, and that is measured rather than assumed -- the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation (benchmarks/e2e/f1-gridbin.json, calibration.measurements.mirror_p99_mm). So the probe that stands in its place is the property that would matter if the fixture ever did gain one: that the registration cannot fit a reflection at all. It is exercised against a deliberately handed solid, because a reflection guard tested on an achiral part passes whether or not it exists.\n\nREVISION 2 ADDED SIX HARD PREDICATES AND TWO STRUCTURAL CHANGES, AND SECTION 12 OF THE BRIEF SAYS WHAT THAT COSTS: 'Every predicate that can cause PASS/FAIL must have a mutation that proves it can fail.' Each of the six has one below, and two of them reproduce the exact deviations the first real run produced -- a 2.4 mm capture ramp against a published 2.15, and a 4.0 mm corner radius against a published 3.75 -- so the fixture's claim to be able to see them is a measurement rather than an argument. The registration datum and the distance mask are gates too, and both are mutated: a mask that stops masking, a mask that masks everything, and a datum that goes back to centring bounding boxes.\n\nEvery entry below was run against the real code and observed to fail its named test.",
   "mutations": [
     {
@@ -211,6 +211,26 @@
         "tools/test_e2e.py::TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest"
       ],
       "why": "the other masked range, and the one that is measured rather than argued: with it in place an independent implementation of the published figures scores p99 = 0.0018 mm, and without it 0.300 -- exactly on the band. The publication fixes the floor height and not the fillet that meets it, and the same public file offers 2.8 mm where the reference uses 1.1"
+    },
+    {
+      "name": "the-distance-mask-stops-masking-the-feet-to-body-tie",
+      "file": "tools/e2e.py",
+      "anchor": "    keep &= ~((z >= mask[\"tie_low_mm\"]) & (z <= mask[\"tie_high_mm\"]))",
+      "replacement": "    keep &= True",
+      "tests": [
+        "tools/test_e2e.py::TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest"
+      ],
+      "why": "revision 3, and the half of run 02's finding that the distance row carried. The publication gives the base one height unit INCLUDING the structure tying the feet together and gives the profile 4.75 of it, so the tie happens somewhere in the 2.25 mm between and nothing says where -- measured, the reference spends 0.25 mm of it and run 02's candidate spends all of it, because the body overhangs the feet and the brief forbids supports. Bucketed by height, that span was the whole of run 02's disagreement: p99 1.2280 against 0.0000 in every band above it"
+    },
+    {
+      "name": "the-corner-radius-is-read-inside-the-base",
+      "file": "tools/e2e.py",
+      "anchor": "    return geometry[\"base_height_mm\"] + geometry[\"corner_radius_probe_above_base_mm\"]",
+      "replacement": "    return geometry[\"base_profile\"][\"rise_mm\"] + geometry[\"corner_radius_probe_above_base_mm\"] - 4.0",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedInterfaceRowsCanFailTest"
+      ],
+      "why": "revision 3, and the other half. The mutation is revision 2's own probe height, 6.0 mm, restored. It reads the outline where the feet are still becoming a body, and the area-deficit formula assumes a rounded rectangle -- so what comes back is not a radius: 6.7724 on a part whose radius is 3.7528 at every height it has one. The test measures it on a solid built to have two feet at that height, because a probe height is only wrong against geometry that uses the freedom the publication leaves"
     },
     {
       "name": "a-mask-that-removes-everything-reports-a-clean-distance",

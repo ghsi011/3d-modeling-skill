@@ -292,6 +292,50 @@ class ThePublishedInterfaceRowsCanFailTest(unittest.TestCase):
         got.update(changes)
         return {row["predicate"]: row for row in e2e.predicates(got, GEOMETRY)}
 
+    def test_the_corner_radius_is_read_above_the_base_the_feet_tie_inside(self) -> None:
+        """Revision 3, and the defect run 02 priced.
+
+        The publication gives the base one height unit *including* the structure
+        tying the feet together, and gives the profile 4.75 of it -- so the feet
+        finish becoming a body somewhere in the 2.25 mm between, at a height
+        nothing states. A bin that spends all of it is as conformant as one that
+        spends a quarter of a millimetre, and the first is what a designer
+        building to "no supports" produces, because the body overhangs the feet.
+
+        Measured on a solid that does exactly that: at the revision-2 probe
+        height its outline is mid-tie and the area-deficit formula -- which
+        assumes a rounded rectangle -- returns something that is not a radius at
+        all; at the revision-3 height it returns the published 3.75.
+        """
+        import trimesh
+
+        import f1_candidate
+
+        radius = GEOMETRY["outer_corner_radius_mm"]
+        unit = GEOMETRY["unit_widest_mm"]
+        base, floor = GEOMETRY["base_profile"]["rise_mm"], GEOMETRY["base_height_mm"]
+        parts = [f1_candidate._loft([(floor, 83.5, 41.5, radius),
+                                     (20.0, 83.5, 41.5, radius)])]
+        for at in (-GEOMETRY["grid_pitch_mm"] / 2.0, GEOMETRY["grid_pitch_mm"] / 2.0):
+            foot = f1_candidate._loft([(base, unit, unit, radius),
+                                       (floor + 0.5, unit, unit, radius)])
+            foot.fix_normals()
+            foot.apply_translation((at, 0.0, 0.0))
+            parts.append(foot)
+        parts[0].fix_normals()
+        spread = trimesh.boolean.union(parts, engine="manifold")
+
+        probe = e2e.corner_radius_probe(GEOMETRY)
+        self.assertGreater(probe, floor)
+        self.assertAlmostEqual(radius, e2e._corner_radius(spread, probe), places=1)
+        # Mid-tie the outline is two feet, not one rounded rectangle, so the
+        # area-deficit formula is being asked a question about a shape it does
+        # not describe -- and what it returns is not a radius. Run 02 got 6.7724
+        # this way against a part whose radius is 3.7528 everywhere it is one.
+        inside = (base + floor) / 2.0
+        self.assertGreater(e2e._corner_radius(spread, inside),
+                           radius + GEOMETRY["published_tolerance_mm"])
+
     def test_the_corner_radius_is_the_published_one(self) -> None:
         self.assertTrue(verdict("outer_corner_radius_mm"))
         self.assertFalse(self._with(outer_corner_radius_mm=4.0)
@@ -338,6 +382,8 @@ class TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest(unittest.TestCase):
     def test_the_masked_ranges_are_arithmetic_on_request_side_numbers(self) -> None:
         mask = e2e.distance_mask(GEOMETRY)
         lip = GEOMETRY["lip_profile"]
+        self.assertEqual(GEOMETRY["base_profile"]["rise_mm"], mask["tie_low_mm"])
+        self.assertEqual(GEOMETRY["base_height_mm"], mask["tie_high_mm"])
         self.assertEqual(GEOMETRY["base_height_mm"], mask["floor_low_mm"])
         self.assertEqual(GEOMETRY["base_height_mm"] +
                          GEOMETRY["internal_fillet_allowance_mm"],
@@ -346,16 +392,17 @@ class TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest(unittest.TestCase):
                          lip["lower_chamfer_mm"] + lip["land_mm"],
                          mask["lip_land_top_mm"])
 
-    def test_only_the_two_declared_ranges_are_dropped(self) -> None:
+    def test_only_the_three_declared_ranges_are_dropped(self) -> None:
         import numpy as np
 
         mask = e2e.distance_mask(GEOMETRY)
-        heights = np.array([0.0, 3.0, 6.9, 7.0, 8.4, 9.8, 9.9, 23.5, 23.6, 30.0])
+        heights = np.array([0.0, 3.0, 4.7, 4.75, 6.0, 7.0, 8.4, 9.8, 9.9,
+                            23.5, 23.6, 30.0])
         points = np.stack([np.zeros_like(heights), np.zeros_like(heights),
                            heights], axis=1)
         dropped = e2e.undetermined(points, mask).tolist()
-        self.assertEqual([False, False, False, True, True, True, False,
-                          False, True, True], dropped)
+        self.assertEqual([False, False, False, True, True, True, True, True,
+                          False, False, True, True], dropped)
 
     def test_no_mask_drops_nothing(self) -> None:
         import numpy as np

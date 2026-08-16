@@ -6,6 +6,35 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — F1's first revision-2 run found a defect in revision 2 (revision 3)
+
+The fresh candidate scored `CAD_FAIL / 3MF_PASS` on one row, `outer_corner_radius_mm`
+at 6.7724 against 3.75 ± 0.2 — **and the failure was the fixture's.** Measured: that
+candidate's outer corner radius is 3.7528 at every height from 6.9 mm upward, which is
+the reference's own figure to four decimals. At the 6.0 mm probe height its section was
+still two feet growing into one body, and the area-deficit formula assumes a rounded
+rectangle.
+
+The publication gives the base one height unit *including the structure tying the feet
+together* and gives the profile 4.75 mm of it, so the feet finish becoming a body
+somewhere in the 2.25 mm between — and nothing says where. The reference spends 0.25 mm
+of it; the candidate spends all of it, and not by whim: the published 83.5 × 41.5 body
+overhangs the two published 41.5 mm feet by about 30 mm² of flat ceiling, and the brief
+asks for no supports. **The published geometry requires a designer to invent a
+transition the publication does not specify.**
+
+Revision 2 judged that span twice. The corner radius is now read 5.0 mm above the
+published base height instead of at a fixed 6.0, and the hard distance masks
+4.75–7.0 mm on the same rule as its other two masked ranges — bucketed by height, that
+span was the *whole* of the run's disagreement (p99 1.2280 there, 0.0000 in every band
+above it). Two mutations added, one per change; 32 in the manifest.
+
+This is the same class of defect the reviewer's ruling named, found one layer deeper
+than revision 2 looked. Run 02 is preserved as revision-2 evidence: not re-scored, not
+presented as proof of revision 3, and revision 3 was not tuned to it — both new bounds
+are arithmetic on published numbers and would be the right bounds if that candidate had
+never run.
+
 ### Changed — F1 becomes a standard-conformance fixture (revision 2)
 
 The reviewer's ruling on run 01: F1's truth model was stronger than its request. The
