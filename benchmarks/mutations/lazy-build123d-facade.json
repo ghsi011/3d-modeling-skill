@@ -58,8 +58,8 @@
     {
       "name": "the-fallback-never-runs",
       "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
-      "anchor": "        if state[\"full\"]:\n            return\n        state[\"full\"] = True",
-      "replacement": "        if True:\n            return\n        state[\"full\"] = True",
+      "anchor": "        if state[\"done\"]:\n            return",
+      "replacement": "        if True:\n            return",
       "tests": [
         "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest"
       ],
@@ -220,6 +220,56 @@
         "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_search_order_cannot_change_what_a_name_means"
       ],
       "why": "the other instrument, and the one whose failure would be quietest: an empty walk finds no conflicting name and no unserved public name, so the claim the whole design rests on -- that search order cannot change what a name binds to -- would be asserted over nothing"
+    },
+    {
+      "name": "the-reload-is-not-noticed",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "            if name == \"__spec__\" and value is not spec:\n                _retire()",
+      "replacement": "            if False:\n                _retire()",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_reload_executes_the_package_body_exactly_once"
+      ],
+      "why": "the regression this slice introduced and an independent probe caught: `SourceLoader.exec_module` reads `module.__dict__` to execute `__init__.py` *into*, and that read is the namespace property, so the property executed the package body and then the reload executed it again -- `modify_copyreg` twice where the real package runs it once. Traced, not inferred: `reload -> _exec -> exec_module -> lazy_build123d.__dict__ -> _full`. The signal is the import system rebinding `__spec__` to a fresh object, measured as the first attribute `_init_module_attrs` sets, well before the exec"
+    },
+    {
+      "name": "the-loser-of-first-contact-does-not-wait",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "        if not _claim(\"full\"):\n            _wait(ready_latch)\n            return",
+      "replacement": "        if False:\n            _wait(ready_latch)\n            return",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_two_threads_on_first_contact_see_a_finished_package"
+      ],
+      "why": "the thread that loses the race for the fallback must not race ahead of the winner, because the next thing it does is read a name out of a namespace `__init__.py` is still being executed into. Without the wait it returns immediately and raises `AttributeError: module 'build123d' has no attribute 'ExportDXF'` for a name the package has -- measured deterministically by holding the winner inside `exec_module` until the loser has arrived, which is a window a sleep-based storm does not reliably hit"
+    },
+    {
+      "name": "the-hooks-come-off-before-the-namespace-is-real",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "            state[\"executing\"] = True\n            loader.exec_module(module)",
+      "replacement": "            state[\"executing\"] = True\n            _retire()\n            loader.exec_module(module)",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_two_threads_on_first_contact_see_a_finished_package"
+      ],
+      "why": "the ordering half of the same repair, and the one that reads like tidying: retiring before the execution rather than after leaves a window in which `build123d` is an ordinary module with no `__getattr__` and a namespace `__init__.py` has not finished filling, so another thread's attribute access misses the hook entirely and fails. It was written this way first and the deterministic two-thread fixture is what found it"
+    },
+    {
+      "name": "the-candidates-write-is-not-put-back",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "            ns.update(patched)\n            _retire()",
+      "replacement": "            _retire()",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_a_candidates_write_survives_the_fallback"
+      ],
+      "why": "executing `__init__.py` rebinds every name it binds, so a candidate's `build123d.Box = ...` was reverted by the next read of one of the seven names only a deferred submodule carries. The real package keeps the write because an ordinary attribute read re-executes nothing. The facade caches what it serves straight into the namespace precisely so that a write arriving through `__setattr__` is known to be somebody else's"
+    },
+    {
+      "name": "the-facade-installs-on-a-loader-it-cannot-read",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "    if not hasattr(spec.loader, \"get_code\"):\n        return False",
+      "replacement": "    if False:\n        return False",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheFacadeStepsAsideTest::test_it_declines_a_loader_that_cannot_hand_over_the_code"
+      ],
+      "why": "PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader`, so a vendored, plugin or metapath loader the import system handles perfectly can lack it. Reading it unguarded raised `AttributeError` out of `install()` -- an unhandled exception in the boundary on an import that would otherwise have succeeded. An independent probe reported this REFUTED on the previous head, but only because its fabricated search location is not a listable directory and the inventory rule declined first; against the real build123d directory it still raised, which is why the fixture uses that directory"
     }
   ]
 }
