@@ -75,6 +75,35 @@ is removed from the facade's namespace at install time and served by
 `__getattr__`, which is where the version check and `modify_copyreg()` are armed.
 Without it, a candidate that imports only submodules would silently get neither.
 
+**`vars()` and `__dict__` do not reach `__getattr__` either, and that is a second
+hole of the same shape.** PEP 562 is consulted only when ordinary lookup
+*fails*, and `module.__dict__` never fails: `types.ModuleType` answers it from a
+slot. Measured on the facade before this was fixed: `build123d.__dict__` carried
+**9** names where the real package carries **485**, and `'Box' in
+vars(build123d)` was `False` where build123d answers `True` -- behind the same
+byte-identical mesh as the `dir()` defect, so nothing built could have seen it.
+Anything that reads a module's namespace rather than asking it for a name
+observed a different package without ever calling `__getattr__`.
+
+The module's *class* is the only hook for that, so `install()` gives the facade a
+`types.ModuleType` subclass whose `__dict__` is a property that executes the real
+`__init__.py` first. It is the same answer `__dir__` gives to the same kind of
+question -- a whole-namespace question cannot be answered lazily -- through the
+one route that exists for it. `importlib.util.LazyLoader` reassigns
+`module.__class__` for its own laziness and restores `types.ModuleType` on first
+use, and `_full()` restores it here for the reason it pops `__getattr__`: what is
+left afterwards has to be what an ordinary import leaves. Attribute lookup never
+touches the property -- CPython reads a module's namespace slot directly, which
+is exactly why `__getattr__` could not cover this -- so the search path is
+unchanged, and the facade's own code holds that namespace in a local rather than
+reaching it back through the hook it just installed.
+
+One difference outlives none of this and is stated rather than hidden:
+`type(build123d)` is the subclass while the facade is still lazy, because the
+subclass *is* the hook. It is gone at the first question that forces the real
+package, and `benchmarks/heavy/test_lazy_build123d_heavy.py` measures both halves
+of that instead of taking this paragraph's word for it.
+
 **Why a pinned version and not a range.** `pyproject.toml` says
 `build123d>=0.9` and is deliberately not narrowed for this: a release that
 *moves* a name is safe, because the search misses and the real `__init__` runs;
@@ -88,8 +117,11 @@ attribute access executes the real `__init__.py` through the real loader.
 from __future__ import annotations
 
 import importlib
+import importlib.machinery
 import importlib.util
+import os
 import sys
+import types
 from typing import Any
 
 PACKAGE = "build123d"
@@ -163,18 +195,67 @@ def installed_version() -> str | None:
         return None
 
 
+def _carries_the_inventory(spec: importlib.machinery.ModuleSpec) -> bool:
+    """True when `spec` is a package that can supply every name in `SUBMODULES`.
+
+    The whole of what the facade offers is *I will answer a name by importing
+    these 24 submodules out of this package*, so a `build123d` that cannot supply
+    them is not one this module has any business standing in front of, however it
+    reached `sys.path`. Both shapes of candidate shadow fail here, and for the
+    same reason rather than for two:
+
+    * a candidate's own `build123d.py` is a *module*. It has no
+      `submodule_search_locations`, so there is nowhere to look and nothing to
+      find;
+    * a candidate's own `build123d/` is a *package*. It has search locations and
+      not one of the submodules in them. Measured before this asked about more
+      than the search locations: the facade installed over it, and the
+      candidate's first attribute access died with `ModuleNotFoundError: No
+      module named 'build123d.persistence'` -- an error about a submodule it
+      never wrote, raised out of a package it deliberately supplied.
+
+    One `os.listdir` per search location and set membership against
+    `importlib.machinery.all_suffixes()`, which is the import machinery's own
+    answer to what a module may be called rather than this module's guess at it:
+    a measured **0.11 ms** median over nine fresh interpreters (0.10-0.18)
+    against the ~1.6 ms `install()` already cost, and a shadow is refused on the
+    first name that misses.
+
+    It is deliberately a question about *shape* and not about identity. Proving
+    this is the swept release means reading distribution metadata, which costs
+    132 ms and is the reason `_arm()` defers it to first contact. What that
+    leaves open is a candidate shipping a package that carries all 24 names,
+    which this cannot tell from the real one -- and which is why the version
+    guard, not this, is what says the search order is safe. A release that
+    renamed a submodule fails here and gets ordinary build123d, the same
+    direction `PROVEN_VERSIONS` fails.
+    """
+    entries: set[str] = set()
+    for location in spec.submodule_search_locations or ():
+        try:
+            entries.update(os.listdir(location))
+        except OSError:            # unreadable, or not a directory at all
+            return False
+    suffixes = importlib.machinery.all_suffixes()
+    return all(sub in entries or any(sub + suffix in entries for suffix in suffixes)
+               for sub in SUBMODULES)
+
+
 def install() -> bool:
     """Bind `build123d` to the facade. True if it was installed.
 
-    Cheap by construction -- one `find_spec` and one module object, ~1.6 ms. It
+    Cheap by construction -- one `find_spec`, one directory listing and one
+    module object, ~1.6 ms with the listing's measured 0.11 ms inside it. It
     decides nothing about *which* build123d this is; `_arm()` does that on first
     contact, so the decision costs nothing to a candidate that never asks.
 
-    It declines whenever `find_spec` does not resolve to an importable package,
-    which is what keeps a candidate's own `build123d.py` working exactly as it
-    does today: the sealed input directory is `sys.path[0]` by the time this
-    runs, a shadowing *module* has no `submodule_search_locations`, and the
-    facade steps aside rather than deciding what the candidate's file meant.
+    It declines whenever `find_spec` does not resolve to a package carrying the
+    inventory the search is written against, which is what keeps a candidate's
+    own `build123d` working exactly as it does today: the sealed input directory
+    is `sys.path[0]` by the time this runs, a shadowing *module* has no
+    `submodule_search_locations` and a shadowing *package* has none of the
+    submodules, and the facade steps aside rather than deciding what the
+    candidate's file meant. `_carries_the_inventory` is the one rule both fail.
     """
     if PACKAGE in sys.modules:
         return False
@@ -182,15 +263,21 @@ def install() -> bool:
         spec = importlib.util.find_spec(PACKAGE)
     except (ImportError, ValueError):              # a broken or shadowed install
         return False
-    if spec is None or not spec.submodule_search_locations or spec.loader is None:
+    if spec is None or spec.loader is None or not _carries_the_inventory(spec):
         return False
 
     module = importlib.util.module_from_spec(spec)
     loader = spec.loader
     real_path = spec.submodule_search_locations
+    # The namespace, held directly. Everything below reads and writes it through
+    # this name and never through `module.__dict__`, because `__dict__` is about
+    # to become the hook two paragraphs of the module docstring are about: going
+    # back through it would execute the real `__init__.py` on the facade's first
+    # own bookkeeping and there would be nothing left to defer.
+    ns = module.__dict__
     # The hook. `module_from_spec` put `__path__` here; taking it out is what
     # routes `import build123d.topology` through `__getattr__` at all.
-    module.__dict__.pop("__path__", None)
+    ns.pop("__path__", None)
     # The one attribute that cannot be deferred like every other name. Popping
     # the key does not send it to `__getattr__`: attribute lookup then finds
     # `types.ModuleType.__doc__`, which is the *type's* docstring and is a
@@ -215,8 +302,8 @@ def install() -> bool:
         asked about. Found by the identity sweep; no build could have seen it.
         """
         imported = importlib.import_module(f"{PACKAGE}.{sub}")
-        if module.__dict__.get(sub) is imported:
-            del module.__dict__[sub]
+        if ns.get(sub) is imported:
+            del ns[sub]
         return imported
 
     def _arm() -> bool:
@@ -256,8 +343,15 @@ def install() -> bool:
             return
         state["full"] = True
         for name in ("__getattr__", "__dir__", *served):
-            module.__dict__.pop(name, None)
+            ns.pop(name, None)
         served.clear()
+        # The third hook, and it comes out here for the same reason as the other
+        # two rather than being left as a harmless subclass: `type(build123d)` is
+        # observable, and a module the boundary handed back with a repo-owned
+        # class is not what an ordinary import leaves. It is also the ordering
+        # `exec_module` needs -- it executes `__init__.py` into `module.__dict__`,
+        # which would otherwise be the property calling back into here.
+        module.__class__ = types.ModuleType
         # And put back what `_submodule()` took out. An ordinary import binds a
         # submodule onto its package as it imports it, and only the *first*
         # import does: a cached one comes straight back out of `sys.modules` and
@@ -267,7 +361,7 @@ def install() -> bool:
         for sub in SUBMODULES:
             cached = sys.modules.get(f"{PACKAGE}.{sub}")
             if cached is not None:
-                module.__dict__[sub] = cached
+                ns[sub] = cached
         loader.exec_module(module)
 
     def _getattr(name: str) -> Any:
@@ -290,7 +384,7 @@ def install() -> bool:
                     return found
         _full()
         try:
-            return module.__dict__[name]
+            return ns[name]
         except KeyError:
             raise AttributeError(
                 f"module {PACKAGE!r} has no attribute {name!r}") from None
@@ -305,9 +399,31 @@ def install() -> bool:
         # said so.
         _arm()
         _full()
-        return sorted(module.__dict__)
+        return sorted(ns)
+
+    class _Facade(types.ModuleType):
+        """The facade's class, and the only hook `vars()` has.
+
+        `__getattr__` is asked a question only when ordinary lookup *fails*, and
+        `module.__dict__` never fails -- `types.ModuleType` answers it from a
+        slot -- so a facade with no class of its own reported 9 names where the
+        package reports 485. A property on the class is what CPython consults
+        first, and this is what it is for.
+
+        Exactly one instance, so the property closes over that module rather than
+        reading `self`: reading it back off `self` would be `__dict__` again.
+        Attribute lookup does not come through here at all, which is why the
+        search costs nothing for it.
+        """
+
+        @property
+        def __dict__(self) -> dict[str, Any]:      # type: ignore[override]
+            _arm()
+            _full()
+            return ns
 
     module.__getattr__ = _getattr
     module.__dir__ = _dir
+    module.__class__ = _Facade
     sys.modules[PACKAGE] = module
     return True

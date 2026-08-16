@@ -30,6 +30,15 @@ tracks whether the facade was still lazy at each resolution and fails if it was
 not. The defect that earned this: an earlier draft with no `__dir__` returned 11
 names from `dir(build123d)` where the package returns 485, behind a
 byte-identical mesh. Every timing and geometry check passed.
+
+**A question that forces the package can only be asked first, so it gets its own
+interpreter.** `dironly` and `namespaceonly` each ask exactly one thing of a
+facade nothing else has touched. Both were earned rather than chosen: the `dir()`
+mutation SURVIVED the whole-surface comparison, because that comparison reads
+`__version__` and resolves a fallback name before it reaches `dir`; and
+`vars(build123d)` -- which reaches a module's namespace without `__getattr__`
+ever being consulted, since PEP 562 answers only a lookup that *failed* --
+returned 9 names against 485 at a head where every one of these tests was green.
 """
 from __future__ import annotations
 
@@ -71,8 +80,16 @@ LAST_IMPORT_STACK = ("sklearn", "joblib", "threadpoolctl")
 MINIMAL = "Align, Axis, Box, Compound, Cylinder, Location, chamfer"
 
 _PROBE = '''
-import json, pickle, sys
+import json, pickle, sys, types
 sys.path.insert(0, __SCRIPTS__)
+
+# The namespace as `types.ModuleType` itself answers it, which is the one route
+# into a module's `__dict__` that a facade cannot intercept -- and that is why
+# this is here rather than `build123d.__dict__`. The facade's own `__dict__` hook
+# executes the real `__init__.py` on purpose, so asking through it would end the
+# laziness these probes exist to observe: the instrument would destroy what it
+# measures and every `lazy_throughout` would read False.
+RAW = types.ModuleType.__dict__["__dict__"]
 
 mode, arm = sys.argv[1], sys.argv[2]
 if arm in ("lazy", "fake"):
@@ -120,6 +137,22 @@ elif mode == "dironly":
     out["dir"] = sorted(dir(build123d))
     out["dir_len"] = len(out["dir"])
 
+elif mode == "namespaceonly":
+    # `vars()` and `__dict__` and nothing else, before any name has forced the
+    # fallback. They are the introspection routes that never reach `__getattr__`:
+    # PEP 562 answers a lookup that *failed*, and a module's `__dict__` cannot
+    # fail, so the facade was walked straight past. Measured before the hook
+    # existed: 9 names here against the package's 485, and `"Box" in
+    # vars(build123d)` False. Asked in its own interpreter for the reason
+    # `dironly` is -- every other mode has already forced the real `__init__`
+    # long before it gets here.
+    import build123d
+    out["type_before"] = type(build123d).__name__
+    out["vars"] = sorted(vars(build123d))
+    out["has_box"] = "Box" in vars(build123d)
+    out["dict_keys"] = sorted(build123d.__dict__)
+    out["type_after"] = type(build123d).__name__
+
 elif mode == "pickle":
     # The route that never touches an attribute of the package: the import
     # system reads `__path__` off the parent and goes straight to the submodule,
@@ -142,7 +175,7 @@ elif mode == "semantics":
         servable = json.loads(sys.argv[3])
         kept, lazy_throughout = {}, True
         for name in servable:
-            lazy_throughout &= "__getattr__" in build123d.__dict__
+            lazy_throughout &= "__getattr__" in RAW.__get__(build123d)
             kept[name] = getattr(build123d, name)
         out["served_lazily"] = len(kept)
         out["lazy_throughout"] = lazy_throughout
@@ -150,7 +183,7 @@ elif mode == "semantics":
         # real `__init__` and it must bring `ezdxf` with it.
         out["fallback_forced_by"] = "ExportSVG"
         kept["ExportSVG"] = build123d.ExportSVG
-        out["fallback_happened"] = "__getattr__" not in build123d.__dict__
+        out["fallback_happened"] = "__getattr__" not in RAW.__get__(build123d)
         out["identity_mismatches"] = sorted(
             name for name, value in kept.items()
             if build123d.__dict__.get(name, object()) is not value)
@@ -163,6 +196,10 @@ elif mode == "semantics":
     out["dir"] = sorted(dir(build123d))
     out["namespace"] = sorted(build123d.__dict__)
     out["doc"] = build123d.__doc__
+    # Read last, with the package fully imported in both arms. Intercepting
+    # `__dict__` needs a class of the facade's own, so this is the field that says
+    # the class did not survive the fallback that made it unnecessary.
+    out["type_name"] = type(build123d).__name__
     out["name"] = build123d.__name__
     out["loader"] = type(build123d.__loader__).__name__
     out["spec_name"] = build123d.__spec__.name
@@ -352,7 +389,7 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
         lazy, plain = self._lazy(), self._plain()
         for field in ("version", "all", "dir", "namespace", "doc", "name",
                       "loader", "spec_name", "file_is_the_packages_own",
-                      "submodule_identity", "missing", "text_bbox"):
+                      "submodule_identity", "missing", "text_bbox", "type_name"):
             with self.subTest(field=field):
                 self.assertEqual(plain[field], lazy[field])
         self.assertEqual(200, len(plain["all"]))
@@ -373,6 +410,57 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
         lazy, plain = _probe("dironly", "lazy"), _probe("dironly", "plain")
         self.assertEqual(plain["dir"], lazy["dir"])
         self.assertEqual(485, plain["dir_len"])
+
+    def test_vars_and_the_namespace_are_still_the_packages_own(self) -> None:
+        """The same defect one route over, and the route `__dir__` cannot cover.
+
+        `__getattr__` is consulted only about a lookup that *failed*, and
+        `module.__dict__` never fails -- `types.ModuleType` answers it from a
+        slot -- so `vars(build123d)` and `build123d.__dict__` walked straight
+        past the facade without arming it: **9** names against the package's
+        **485**, and `"Box" in vars(build123d)` **False** where build123d says
+        True. Reproduced on this branch's own head before the repair. A candidate
+        that reads a module namespace instead of asking it for a name, and every
+        introspection tool that does the same, observed a different package
+        without `__getattr__` being called once.
+
+        Its own interpreter, and `vars()` first, for the reason `dironly` has
+        one: every other question in this file forces the real `__init__` before
+        it would get here, and a namespace read after that compares the package
+        with itself.
+        """
+        lazy, plain = _probe("namespaceonly", "lazy"), _probe("namespaceonly",
+                                                              "plain")
+        self.assertEqual(485, len(plain["vars"]),
+                         "the count both namespace defects were found against")
+        self.assertEqual(plain["vars"], lazy["vars"])
+        self.assertTrue(lazy["has_box"],
+                        "`Box in vars(build123d)` is True for the package and "
+                        "must be True through the facade, or a candidate can "
+                        "see two different build123ds depending on how it asks")
+        self.assertEqual(plain["dict_keys"], lazy["dict_keys"])
+        self.assertEqual(lazy["vars"], lazy["dict_keys"])
+
+    def test_the_namespace_hook_does_not_outlive_the_fallback(self) -> None:
+        """What that hook costs, measured rather than promised.
+
+        `__dict__` can only be intercepted on the module's *class*, so while the
+        facade is still lazy `type(build123d)` is a `types.ModuleType` subclass
+        and not `types.ModuleType` itself. That is the one observable this repair
+        adds, it is why `_full()` puts the class back, and this test is what
+        holds both halves: the difference exists while the facade is lazy, and
+        nothing of it survives the question that makes the package real.
+        """
+        lazy, plain = _probe("namespaceonly", "lazy"), _probe("namespaceonly",
+                                                              "plain")
+        self.assertEqual("module", plain["type_before"])
+        self.assertNotEqual(
+            "module", lazy["type_before"],
+            "the facade is serving a plain module class, so nothing is "
+            "intercepting `vars()` and the test above is passing for a reason "
+            "that is not the repair")
+        self.assertEqual("module", lazy["type_after"])
+        self.assertEqual(plain["type_after"], lazy["type_after"])
 
     def test_a_star_import_binds_the_same_names(self) -> None:
         """`from build123d import *` reads `__all__`, which starts with an
@@ -437,7 +525,7 @@ class TheOptimizationFailsOpenOnAnUnprovenReleaseTest(unittest.TestCase):
         for field in ("version", "all", "dir", "namespace", "doc",
                       "doc_on_first_read", "name", "loader", "spec_name",
                       "file_is_the_packages_own", "submodule_identity",
-                      "missing", "text_bbox"):
+                      "missing", "text_bbox", "type_name"):
             with self.subTest(field=field):
                 self.assertEqual(plain[field], fake[field])
 

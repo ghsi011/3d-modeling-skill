@@ -31,6 +31,7 @@ import sys
 import tempfile
 import types
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 from . import lazy_build123d as L
@@ -156,27 +157,63 @@ class TheFacadeStepsAsideTest(unittest.TestCase):
         self.assertFalse(L.install())
         self.assertIs(sentinel, sys.modules[L.PACKAGE])
 
-    def test_it_declines_when_the_candidate_ships_its_own_build123d(self) -> None:
-        """The sealed input directory is `sys.path[0]` by the time this runs.
-
-        A designer who ships `build123d.py` beside the model shadows the library
-        today, and must keep shadowing it: a shadowing *module* has no
-        `submodule_search_locations`, so the facade steps aside rather than
-        deciding what the candidate's file was supposed to mean.
-        """
+    def _shadowed_by(self, write: Callable[[Path], None]) -> None:
+        """Put a candidate-supplied `build123d` at the front of `sys.path`."""
         raw = tempfile.TemporaryDirectory()
         self.addCleanup(raw.cleanup)
-        (Path(raw.name) / f"{L.PACKAGE}.py").write_text("SHADOW = 1\n",
-                                                        encoding="utf-8")
+        write(Path(raw.name))
         sys.path.insert(0, raw.name)
         self.addCleanup(sys.path.remove, raw.name)
         importlib.invalidate_caches()
         self.addCleanup(importlib.invalidate_caches)
 
+    def test_it_declines_when_the_candidate_ships_its_own_build123d(self) -> None:
+        """The sealed input directory is `sys.path[0]` by the time this runs.
+
+        A designer who ships `build123d.py` beside the model shadows the library
+        today, and must keep shadowing it: a shadowing *module* has no
+        `submodule_search_locations`, so there is nowhere for
+        `_carries_the_inventory` to look and the facade steps aside rather than
+        deciding what the candidate's file was supposed to mean.
+        """
+        self._shadowed_by(lambda root: (root / f"{L.PACKAGE}.py").write_text(
+            "SHADOW = 1\n", encoding="utf-8"))
+
         self.assertFalse(L.install())
         self.assertNotIn(L.PACKAGE, sys.modules,
                          "declining means leaving the name alone, so the "
                          "candidate's own file resolves the way it always did")
+
+    def test_it_declines_when_the_candidate_ships_its_own_build123d_package(
+            self) -> None:
+        """The other shape of the same file, and the one that was not declined.
+
+        A designer may ship `build123d/` rather than `build123d.py`, and a
+        package has `submodule_search_locations` -- so a check that asked only
+        whether the spec was a package accepted it and the boundary installed
+        itself over a package the candidate deliberately supplied. Reproduced
+        before the repair, in a child with this directory on `sys.path[0]`: the
+        candidate's first attribute access raised `ModuleNotFoundError: No module
+        named 'build123d.persistence'`, naming a submodule the candidate never
+        wrote, from a package it did.
+
+        `_carries_the_inventory` is what declines both: this package has search
+        locations and not one of the 24 submodules the search would import out of
+        them.
+        """
+        def write(root: Path) -> None:
+            package = root / L.PACKAGE
+            package.mkdir()
+            (package / "__init__.py").write_text("SHADOW = 1\n", encoding="utf-8")
+
+        self._shadowed_by(write)
+
+        self.assertFalse(L.install())
+        self.assertNotIn(
+            L.PACKAGE, sys.modules,
+            "declining means leaving the name alone, so the candidate's own "
+            "package resolves the way it always did -- and being a package "
+            "rather than a module is not what decides it")
 
     def test_it_declines_when_build123d_cannot_be_found_at_all(self) -> None:
         """A checkout without the dependency gets a normal ImportError from the
