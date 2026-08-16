@@ -397,6 +397,18 @@ def install() -> bool:
         # timing and geometry check passed. A candidate deriving `PARAMS` from
         # `dir()` would have declared something different and nothing would have
         # said so.
+        #
+        # Still forced here although `__dict__` now gets there first, and that is
+        # a measurement rather than a preference: once the namespace hook landed,
+        # `dir-loses-its-forced-import` SURVIVED the `dir()`-and-nothing-else
+        # probe, because CPython's `module_dir` fetches `__dict__` through
+        # ordinary attribute access *before* it looks for a `__dir__` inside it.
+        # Two routes still rest on this line -- a candidate calling
+        # `build123d.__dir__()`, which never touches `__dict__`, and any
+        # interpreter whose `dir()` reads the namespace slot directly the way
+        # attribute lookup does. Dropping it would leave `dir()` correct by an
+        # implementation detail of one interpreter, which is how the original
+        # defect got in.
         _arm()
         _full()
         return sorted(ns)

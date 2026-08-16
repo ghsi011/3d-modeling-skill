@@ -32,13 +32,17 @@ names from `dir(build123d)` where the package returns 485, behind a
 byte-identical mesh. Every timing and geometry check passed.
 
 **A question that forces the package can only be asked first, so it gets its own
-interpreter.** `dironly` and `namespaceonly` each ask exactly one thing of a
-facade nothing else has touched. Both were earned rather than chosen: the `dir()`
-mutation SURVIVED the whole-surface comparison, because that comparison reads
-`__version__` and resolves a fallback name before it reaches `dir`; and
-`vars(build123d)` -- which reaches a module's namespace without `__getattr__`
-ever being consulted, since PEP 562 answers only a lookup that *failed* --
-returned 9 names against 485 at a head where every one of these tests was green.
+interpreter.** `dironly`, `dunderdironly` and `namespaceonly` each ask exactly
+one thing of a facade nothing else has touched, and all three were earned rather
+than chosen. The `dir()` mutation SURVIVED the whole-surface comparison, because
+that comparison reads `__version__` and resolves a fallback name before it
+reaches `dir`. `vars(build123d)` -- which reaches a module's namespace without
+`__getattr__` ever being consulted, since PEP 562 answers only a lookup that
+*failed* -- returned 9 names against 485 at a head where every one of these tests
+was green. And the same `dir()` mutation SURVIVED again once the namespace hook
+answered for it: `module_dir` fetches `__dict__` through ordinary attribute
+access before it looks for a `__dir__` in it, so only a direct `__dir__()` call
+still asks `__dir__` anything.
 """
 from __future__ import annotations
 
@@ -136,6 +140,17 @@ elif mode == "dironly":
     import build123d
     out["dir"] = sorted(dir(build123d))
     out["dir_len"] = len(out["dir"])
+
+elif mode == "dunderdironly":
+    # `build123d.__dir__()` and nothing else -- the route `dir()` stopped taking.
+    # `dir()` on a module fetches `__dict__` through ordinary attribute access
+    # before it looks for a `__dir__` in it, and `__dict__` is now the hook, so
+    # `dir()` arrives at a package the namespace hook has already made real.
+    # Calling `__dir__` itself does not touch `__dict__`, so this is where the
+    # forced import inside `__dir__` is still the only thing answering.
+    import build123d
+    out["dunder_dir"] = sorted(build123d.__dir__())
+    out["dunder_dir_len"] = len(out["dunder_dir"])
 
 elif mode == "namespaceonly":
     # `vars()` and `__dict__` and nothing else, before any name has forced the
@@ -410,6 +425,30 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
         lazy, plain = _probe("dironly", "lazy"), _probe("dironly", "plain")
         self.assertEqual(plain["dir"], lazy["dir"])
         self.assertEqual(485, plain["dir_len"])
+
+    def test_the_modules_own_dir_hook_still_forces_the_import(self) -> None:
+        """`__dir__` asked directly, which is the route `dir()` stopped taking.
+
+        Measured when the `vars()` repair landed: `dir-loses-its-forced-import`
+        SURVIVED the probe above, for the second time in this slice's history and
+        for a new reason. CPython's `module_dir` fetches `__dict__` through
+        ordinary attribute access *before* it looks for a `__dir__` inside it, so
+        `dir()` now arrives at a package the namespace hook has already made
+        real, and `__dir__`'s own forcing is answering a question already
+        answered.
+
+        Two routes still rest on it, which is why the implementation stayed and
+        the fixture moved: a candidate calling `build123d.__dir__()`, which never
+        touches `__dict__` -- this test -- and any interpreter whose `dir()`
+        reads the namespace slot directly the way attribute lookup does. Without
+        both hooks, `dir()` would be correct by one interpreter's internals,
+        which is the shape of the defect that started this.
+        """
+        lazy, plain = _probe("dunderdironly", "lazy"), _probe("dunderdironly",
+                                                              "plain")
+        self.assertEqual(plain["dunder_dir"], lazy["dunder_dir"])
+        self.assertEqual(485, plain["dunder_dir_len"],
+                         "the count both `dir()` defects were found against")
 
     def test_vars_and_the_namespace_are_still_the_packages_own(self) -> None:
         """The same defect one route over, and the route `__dir__` cannot cover.
