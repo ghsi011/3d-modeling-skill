@@ -6,6 +6,114 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — the confined child stops importing `ezdxf` for candidates that never mention it
+
+`build123d/__init__.py` is eager: 24 submodules, and importing any one of them executes
+the package body first, so a candidate asking for seven names also pays for `ezdxf`,
+`sklearn` and everything those two drag. `pipeline/lazy_build123d.py` binds `build123d`
+in the child to a module built from `find_spec` — real path, real loader, *not executed*
+— carrying a PEP 562 `__getattr__` that resolves a name by importing the package's own
+submodules in the package's own order, minus `{exporters, import_dxf, brep_from_stl}`.
+Anything the search cannot serve executes the real `__init__.py`, so no name and no side
+effect is lost; they are deferred, and only while nothing asks.
+
+**Measured, one fresh confined child per run, arms interleaved, on the real bearing
+candidate:** median wall **5.931 s → 4.299 s (1.632 s, 27.5%)** and `build_seconds`
+**4.910 s → 3.404 s (1.505 s, 30.7%)**, ranges not overlapping, one STL sha256 and one
+declared-`PARAMS` digest across every run of both arms. `docs/baseline.md` carries the
+arm-by-arm attribution and is where the change point is recorded: `build_seconds` still
+measures the phase it always measured and the implementation underneath it got faster,
+so figures from before that heading are preserved and are not comparable with figures
+after it.
+
+**The omission is the design, and one of the three is in it for a reason that is not
+speed.** `exporters` and `import_dxf` are `__init__`'s sixth and ninth imports, ahead of
+the submodules carrying `Box` and `chamfer`, and each is worth about 0.7 s. Omitting
+`brep_from_stl` measured **+0.011 s** against a 0.39 s spread — nothing — and it was
+removed on that; the identity sweep put it back, because it binds `copy` to the *module*
+where `__init__` leaves the *function*. It is omitted because it cannot be served
+correctly.
+
+**Only for releases actually swept.** The optimization arms itself on first contact with
+the package, and only for a `build123d` version whose whole namespace has been compared
+object by object (0.11.1: 474 names, 0 conflicts). Any other release executes the real
+`__init__.py` — asserted against an arm that never installed a facade. `pyproject.toml`
+keeps `build123d>=0.9`: narrowing a dependency range to protect a speedup would pay for
+it with the ability to install.
+
+**Ten defects found before this shipped, none of which a build could have seen behind a
+byte-identical mesh, and every one of them a route into the package the facade's hooks
+did not answer the way build123d does.** Three the equivalence sweep caught while the
+slice was being written: `dir(build123d)` returning 11 names where the package returns
+485; `build123d.pack` answering with the submodule where `__init__` binds a function of
+the same name; and `build123d.__doc__` reading `None`. Three more were found by
+independent reads at a head where every suite was green and seventeen mutations were
+killed — all three routes that do not reach `__getattr__`, which PEP 562 consults only
+about a lookup that *failed*:
+
+* `vars(build123d)` and `build123d.__dict__` carried **9** names against **485**, and
+  `'Box' in vars(build123d)` was `False`. A module's `__dict__` cannot fail, so nothing
+  was ever asked. The module's *class* is the only hook for it, and the facade now has
+  one whose `__dict__` executes the real `__init__.py` — putting `types.ModuleType` back
+  when it does, so nothing of it outlives the fallback;
+* the import system *writes* that namespace. `import build123d.pack` binds the submodule
+  onto its parent by `setattr`, and `__init__.py` leaves a *function* there, so
+  `build123d.pack(shapes)` raised `TypeError: 'module' object is not callable` through
+  the boundary and worked without it. Measured against the executed package, all 24
+  submodule names: exactly `pack` and `import_dxf` are rebound, and those two writes are
+  declined. The other 22 are what an ordinary import leaves and they stand;
+* `install()` stepped aside for a candidate's own `build123d.py` and installed itself
+  over a candidate's own `build123d/`. Before the repair the candidate's first attribute
+  access died with `ModuleNotFoundError: No module named 'build123d.persistence'`, from a
+  package it had supplied itself. **A third reading found that repair incomplete**, and
+  it is the clearest case in this entry of a rule answering the wrong question: requiring
+  the spec to carry the search's 24-name inventory proves *shape*, and a candidate that
+  ships a complete `build123d/` has exactly that shape — while `installed_version()` goes
+  on reading the installed distribution's metadata, which is a fact about site-packages
+  and not about the package on `sys.path`. Measured: the shape rule returned True and
+  `install()` returned True over a 24-name candidate package. A `build123d` is now
+  declined on **origin** as well — the boundary passes the sealed input directory it put
+  on `sys.path`, and a spec resolved out of it is the candidate's whatever it looks like.
+
+And four more from independent probes against the heads that repaired those, which is the
+plainest statement available that a repair is a change and has to be measured like one:
+
+* **`importlib.reload` executed the package body twice, and the `vars()` repair is what
+  introduced it.** `SourceLoader.exec_module` reads `module.__dict__` to execute *into*,
+  and that read was the new namespace property — so it executed `__init__.py` and the
+  reload then executed it again: `modify_copyreg` twice where the real package runs it
+  once. The facade now retires without executing when the import system rebinds
+  `__spec__` to a fresh spec, which it does before the exec;
+* **a candidate's monkeypatch did not survive the fallback.** `build123d.Box = ...`
+  followed by a read of one of the seven deferred-only names re-executed `__init__.py`,
+  which rebound the name; the real package keeps the write because an ordinary attribute
+  read re-executes nothing. Writes that arrive from outside are now put back after the
+  execution — and deliberately *not* after a reload, which is supposed to wipe them;
+* **first contact was not exactly-once and left a window.** `if not flag: flag = True`
+  has a gap between its test and its set, so two threads could both arm — running
+  `modify_copyreg()` twice — and the hooks came off *before* the package body ran, so a
+  second thread could meet an ordinary module with no `__getattr__` and a half-filled
+  namespace and get `AttributeError` for a name the package has. The claim is now
+  `dict.setdefault`, the loser waits on a latch, and the hooks come off after the
+  execution rather than before.
+
+`install()` also stopped raising `AttributeError` on a loader without `get_code`, which
+PEP 451 does not require of a loader the import system handles perfectly.
+
+28 mutations attempted, 28 killed, 0 survived
+(`benchmarks/mutations/lazy-build123d-facade.json`). The `dir()` guard survived twice and
+moved its fixture twice rather than being dropped: first because the whole-surface
+comparison reads `__version__` before it asks for `dir`, then because the `vars()` repair
+answers `dir()` before `__dir__` is reached — CPython fetches `__dict__` through ordinary
+attribute access first — so it is now named against a direct `build123d.__dir__()` call.
+Three entries were removed rather than kept as survivors, because each repair removed the
+code its predecessor protected.
+
+Deliberately not done, so the scope is legible later: no generic lazy-import machinery,
+nothing under `site-packages` touched, no library stubbed, no warm child kept alive, no
+cache semantics changed, and the trimesh lane untouched — a candidate that never names
+build123d pays one `find_spec`.
+
 ### Added — revision 4's run: the first `CAD_PASS / 3MF_PASS`
 
 A fresh isolated designer, dispatched after revision 4 was frozen and pushed, cleared

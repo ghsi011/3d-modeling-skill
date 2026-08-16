@@ -55,6 +55,7 @@ from typing import Any
 
 from . import authored as A
 from . import confine as C
+from . import lazy_build123d as L
 from . import schemas as S
 
 # 3: the manifest reports a `kernel` *token* and no engine prose. It used to
@@ -134,6 +135,20 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
     C.seal_syscalls()
 
     started = time.perf_counter()
+    # Inside the stopwatch deliberately, and after the seal: the facade is build
+    # work, not boundary setup, and `build_seconds` must keep measuring the same
+    # phase it always measured (`docs/baseline.md`, "the lazy build123d facade").
+    # It defers the three `build123d` submodules that carry `sklearn` and `ezdxf`
+    # -- measured on the bearing candidate, `docs/baseline.md` -- and it serves
+    # nothing lazily on a build123d release whose public surface has not been
+    # swept, so an unknown one builds exactly as it did before.
+    #
+    # `input_dir` is passed because this is the side that knows it: the directory
+    # inserted above is the candidate's own, and a `build123d` resolved out of it
+    # is one the designer supplied deliberately. The facade declines those on
+    # origin, which is the only question that separates a complete, well-formed
+    # candidate package from the installed one.
+    L.install(input_dir)
     model, builder = A.load(model_path)
     part = builder() if callable(builder) else builder
     kernel = _export(part, stl_path, step_path)

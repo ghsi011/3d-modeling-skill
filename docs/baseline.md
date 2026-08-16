@@ -327,7 +327,12 @@ question no declared check asks.
 
 The seconds that are not in this table are the ones worth chasing: the confined
 build boundary at 1.37-2.73 s per authored invocation, and the repeated builds a
-review round trip pays for. Neither is an assessment.
+review round trip pays for. Neither is an assessment. That band was measured
+before the lazy `build123d` facade recorded further down this file and is left as
+it was taken: it is a trimesh-lane figure, and the facade does not touch the
+trimesh lane. An authored **build123d** candidate now costs materially less than
+it did, and "Re-measured after the lazy `build123d` facade" is where that is
+decomposed.
 
 ### The commit gate after the slice, and why its wall clock cannot be read
 
@@ -373,6 +378,133 @@ honest that it under-reports the drift rather than cancelling it.
 calls totalling 81.8 s, **40 tests over 0.5 s hold 35.8 s** — 44% of the gate in
 8% of the tests, the same shape as the 997 s finding one order down. Nothing
 exceeds 2.1 s and nothing comes near the 5 s ceiling.
+
+## Re-measured after the lazy `build123d` facade
+
+Same workstation, Windows 11, Python 3.12.6, `build123d 0.11.1`. The change is
+`pipeline/lazy_build123d.py`: inside the confined child, `import build123d`
+resolves a name by importing the package's own submodules in the package's own
+order, minus `{exporters, import_dxf, brep_from_stl}`, and falls through to the
+real `__init__.py` for anything that search cannot serve. Nothing outside the
+child changed, and the trimesh lane — which never names build123d — is untouched
+by construction: the facade arms nothing until the package is first asked for
+something.
+
+**`build_seconds` is not redefined, and this heading is the change point.** It
+measures what it always measured — importing the candidate and building it,
+which in a fresh process are one cost — and the implementation underneath it
+became faster. Every figure recorded *above* this section is the old
+implementation and stays as it was taken; every figure below is the new one. A
+number from before this line and a number from after it are both honest and are
+not comparable, which is why the line is here instead of a quiet re-measurement
+of the tables above.
+
+Method, and it is the method the finding needs rather than a convention: one
+fresh confined child per run through `pipeline.isolation.build(..., step=True)`;
+seven copies of `skills/3d-modeling/scripts` differing only in this module; all
+seven visited round-robin with the order reversed on alternate rounds; one
+discarded warm-up per arm; ten kept runs per arm. Interleaving is not caution.
+The bounded experiment that preceded this slice watched the **unchanged** base
+arm's median move 5.368 s → 5.784 s between two sets on identical work, so a
+before/after pair taken across such a gap could have reported anything between
+1.2 s and 2.2 s.
+
+Candidate: the real bearing commission,
+`C:\projects\3d\bearing-clamp-discovery\job\model.py`, which imports seven names.
+
+| arm | wall min | **wall median** | wall max | spread | `build_seconds` median |
+|---|---|---|---|---|---|
+| `origin/main`, no facade | 5.879 | **6.004** | 6.517 | 0.638 | 5.009 |
+| **shipped** — the three omitted | 4.211 | **4.322** | 4.702 | 0.491 | **3.452** |
+| omitting nothing, same order | 4.777 | 4.969 | 5.082 | 0.305 | 4.020 |
+| …also serving `exporters` | 4.916 | 5.107 | 5.355 | 0.439 | 4.198 |
+| …also serving `import_dxf` | 4.862 | 5.013 | 5.518 | 0.656 | 4.067 |
+| …also serving `brep_from_stl` | 4.241 | 4.332 | 4.628 | 0.387 | 3.444 |
+| a cheap-first re-sort, same omission | 4.129 | 4.237 | 4.516 | 0.387 | 3.352 |
+
+**Wall 6.004 s → 4.322 s: 1.682 s, 28.0%, ranges not overlapping** (worst shipped
+4.702 s < best base 5.879 s). `build_seconds` 5.009 s → 3.452 s: 1.557 s, 31.1%.
+**One STL sha256 across all seventy runs**
+(`8801818141c65dd55094bd85c992b7eecaa6e3e21adc7238132686950bb26eb8`), one STL
+size, one declared-`PARAMS` digest, one STEP size, and every run returned a
+`BuiltCandidate` rather than a refusal — a crash that finishes fast is not a
+speedup, so nothing here trusts the clock alone.
+
+### Where the 1.682 s is, and what the omission itself is worth
+
+Two mechanisms, separable because the arms separate them:
+
+| | |
+|---|---|
+| deferring at all — the package's order, nothing omitted | 6.004 → 4.969 = **1.035 s** |
+| the omission, on top of that | 4.969 → 4.322 = **0.647 s** |
+
+Per omitted submodule, as the marginal cost of *serving* it at the position
+`build123d/__init__.py` imports it:
+
+| submodule | `__init__` position | serving it costs |
+|---|---|---|
+| `exporters` | 6th | **+0.785 s** |
+| `import_dxf` | 9th | **+0.691 s** |
+| `brep_from_stl` | 24th, last | **+0.011 s** |
+
+The first two do not sum to the pair, and that is a finding rather than noise:
+both reach `ezdxf`, so serving either costs about one `ezdxf` and serving both
+costs about the same again. Both sit ahead of the submodules carrying `Box`,
+`Compound` and `chamfer`, so this candidate pays them — as does any candidate
+whose names are not all in the first five submodules.
+
+**`brep_from_stl` earned nothing on the clock and is omitted anyway.** +0.011 s
+against a 0.39 s run-to-run spread is nothing: it is the package's last import,
+so a search that stops at the first hit reaches it only for a name nothing else
+carries, and such a name falls through to the real `__init__`, which imports it
+anyway. It was removed on that measurement. The semantic-equivalence sweep put it
+back within the hour — `build123d.brep_from_stl` binds `copy` to the **module**
+where `__init__` leaves `copy.copy`, the *function*, re-exported from
+`exporters`, and `T` and `TOLERANCE` differ the same way. Serving it would answer
+`build123d.copy` with the wrong object for a candidate that never mentioned it.
+So it is omitted because it cannot be served *correctly*, and the timing is
+recorded here so that nobody removes it on the timing a second time.
+
+**The cheap-first re-sort is inside the spread and is not shipped.** −0.085 s
+against spreads of 0.39–0.49 s is no difference. It is the design the preceding
+experiment measured, and what it buys is bought instead by an ordering claim that
+nothing checks: sort the expensive submodules to the back and the omission goes
+inert, because a search that stops at the first hit never reaches the back. That
+is a property of *this* candidate's seven names and not of the mechanism, and an
+authored candidate is arbitrary by contract.
+
+### What the facade does not reach
+
+The child still spends about 3.4 s and none of it is repo-owned: `IPython.lib.
+pretty`, which `topology/shape_core.py` imports for `__repr__`; `build123d.text`,
+most of which is a system-font scan at module scope; `scipy.optimize` from
+`topology/one_d.py`; `sympy` reached from `operations_generic.py`; and
+`OCP.Standard`. Reaching any of those means changing the library. Measured in the
+same child, the eager import loads **3155** modules and this one loads **2296**.
+
+Four libraries are *not* deferred and it would be easy to assume otherwise:
+`svgpathtools`, `svgelements`, `svgwrite` and `ocpsvg` are reached by
+`importers`, which the facade serves, so both arms load them.
+
+### Confirmed on the shipped tree
+
+The table above was taken on seven trees built to answer the design question, one
+of which is the shipped configuration. Re-run afterwards on the two that matter
+alone — `origin/main`'s child against the exact file that shipped — same method,
+eight kept runs an arm:
+
+| arm | wall min | **wall median** | wall max | spread | `build_seconds` median |
+|---|---|---|---|---|---|
+| `origin/main` | 5.725 | **5.931** | 6.268 | 0.543 | 4.910 |
+| shipped | 4.216 | **4.299** | 4.465 | 0.249 | 3.404 |
+
+**1.632 s, 27.5%; `build_seconds` 1.505 s, 30.7%; ranges not overlapping** (worst
+shipped 4.465 s < best base 5.725 s), one STL sha256, one `PARAMS` digest and one
+STEP size across all sixteen runs. The base arm's own median moved 6.004 s →
+5.931 s between the two sessions on identical work, which is the drift the method
+exists to cancel and is the reason both figures are reported rather than the
+better one.
 
 ## The DIRECT status finding
 
