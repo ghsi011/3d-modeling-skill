@@ -1,0 +1,284 @@
+{
+  "id": "e2e-grid-bin-2x1x3",
+  "revision": 1,
+  "class": "FROM_SPEC",
+  "required_hosted": false,
+  "note": "F1 of docs/agents/qa-e2e-implementation.md, and Slice A of its section 13. Reference-determined geometry (section 3.1): the standard fixes the answer, so hard acceptance may include exact topology and a registered surface comparison. The other four fixtures have different truth models and this file deliberately says nothing about them.\n\nEVERY NUMBER BELOW IS ON ONE OF TWO SIDES OF A WALL, AND THE SIDES ARE NOT INTERCHANGEABLE. `request` is what a designer is handed: it carries the published grid interface and the features the requester asked for, and nothing measured off the hidden reference. `geometry` is what the grader applies: it may be informed by the reference, because a predicate is candidate-independent and is frozen before any candidate runs. `tools/e2e.py:audit_request` enforces the first half mechanically, by running `corpus.numbers_in` and `corpus.coincidences` over the materialised request package -- so a measurement that reached the brief is a hard failure and not a review finding.\n\nThe one number that crosses is declared. The published pitch is 42 mm and a one-unit-wide bin is one pitch less the grid clearance, so a requester who states the pitch states the short footprint to within 1.2%. Refusing that coincidence would refuse the only information that makes the request answerable, which is docs/defects.md D30 exactly. It is declared with its public source, and the report marks that axis given rather than reconstructed.\n\nWHY THE BRIEF STOPS WHERE IT DOES. It carries the pitch, the footprint in grid units, the height in height units, one divider on the long axis, a stacking lip, the forbidden features, the wall thickness and the print context -- and not the base or lip profile. That is a deliberate, recorded gap rather than an oversight: the profile could only come from naming the standard by name (which makes a finished model one search away) or from measuring the hidden reference (which is the prohibition). The consequence is that `reference_surface_distance_p99_mm` is testing a surface the brief never dimensioned, and the first real run is expected to say so.",
+  "reference": {
+    "root": {
+      "env": "QA_E2E_REFERENCE_ROOT",
+      "default": "C:/projects/3d"
+    },
+    "path": "qa-f1-gridbin/reference/gridbin-normalised.stl",
+    "sha256": "d5d86d25d624350b4d89dd94e1a34a27aecfed3bfa140bc5100d326dd12bdd3f",
+    "redistribution": "EXTERNAL_ONLY",
+    "licence": "MIT",
+    "generator": {
+      "repository": "michaelgale/cq-gridfinity",
+      "commit": "a5cff2c45e2cf33162c55b43becb27d97d66cebb",
+      "tag": "v.0.5.7",
+      "package": "cqgridfinity",
+      "install": "uv run --with 'cqgridfinity @ git+https://github.com/michaelgale/cq-gridfinity@a5cff2c45e2cf33162c55b43becb27d97d66cebb'",
+      "call": "GridfinityBox(2, 1, 3, length_div=1, width_div=0, holes=False, no_lip=False, scoops=False, labels=False, wall_th=1.0)"
+    },
+    "as_generated": {
+      "path": "qa-f1-gridbin/reference/gridbin.stl",
+      "sha256": "74f3bb05563e3dce6bd67b5475a105e8a6e828b5628974612b2f0a4bc154eca5"
+    },
+    "step": {
+      "path": "qa-f1-gridbin/reference/gridbin.step",
+      "sha256": "e8f09161b7a0b8c2c445d48a1b5b30a8fbcb14d9a15a7928d325186963c66137"
+    },
+    "why_normalised": "the generator's STL export carries four zero-volume single-triangle slivers, which make the file non-watertight. Scored as generated, the watertight row fails against any correct candidate and blind._normalised_inertia returns None -- losing the only row in that scorer that can see shape. The scorer is right to return None for an open surface; the fault was the reference. Repaired at ingest with the pipeline's own mesh_io.normalize_mesh: 21124 -> 21120 faces, watertight false -> true, volume delta 1.46e-11 mm3. The scored artifact is the normalised file and its digest is above."
+  },
+  "expected_outputs": {
+    "stls": 1,
+    "three_mf": 1
+  },
+  "request": {
+    "brief": [
+      "# A storage bin for a modular 42 mm grid",
+      "",
+      "## What it is for",
+      "",
+      "I organise a drawer with a modular storage system. The drawer floor carries",
+      "baseplates on a square grid, and every bin in the drawer drops into that grid",
+      "and can be lifted straight out. I need one more bin, and it has to be",
+      "interchangeable with the ones already in there: it must sit in any position on",
+      "the grid, and another bin of the same family must be able to stack on top of it",
+      "without sliding off.",
+      "",
+      "## What it has to be",
+      "",
+      "* **Grid pitch**: 42 mm in both X and Y. The grid is square and this is the only",
+      "  interface dimension I have; the bin must drop into a cell of that pitch and",
+      "  come out again without binding.",
+      "* **Footprint**: two grid units long by one grid unit wide.",
+      "* **Height**: three height units, where one height unit is 7 mm.",
+      "* **Divider**: one internal divider, splitting the *long* direction into two",
+      "  compartments. One divider, not two, and not on the short direction.",
+      "* **Stacking lip**: the bin needs the family's standard stack and mating lip at",
+      "  the top, so the base of the next bin up locates on it.",
+      "* **No magnets and no screw holes.** The base stays closed.",
+      "* **No finger scoops.** Both compartments have straight walls from floor to rim.",
+      "* **No label flange.**",
+      "* **Wall thickness**: 1.0 mm nominal.",
+      "",
+      "## How it will be made",
+      "",
+      "* PLA, FDM, 0.4 mm nozzle.",
+      "* Printed base down, no supports.",
+      "",
+      "## What to deliver",
+      "",
+      "* the editable model source;",
+      "* one final STL of the bin;",
+      "* one 3MF containing that one printable object.",
+      "",
+      "## What nobody has told you",
+      "",
+      "The bin's own overall dimensions, its base profile and its lip profile. Those",
+      "follow from the grid interface above and from what the bin has to do, and",
+      "deriving them is the job."
+    ],
+    "project": {
+      "brief": "brief.md",
+      "components": [],
+      "consequence": "INCONSEQUENTIAL",
+      "consequence_rationale": "a storage bin in a drawer. A failure costs the material and tells us the design was wrong, which is what this run is for",
+      "edit_scopes": [],
+      "envelope_mm": {
+        "x": 256.0,
+        "y": 256.0,
+        "z": 256.0
+      },
+      "evidence": [],
+      "expected_artifacts": [],
+      "interface_map": {},
+      "interfaces": [],
+      "job_id": "f1-grid-bin",
+      "material": {
+        "material": "PLA",
+        "process": "FDM"
+      },
+      "model": "model.py",
+      "modifiers": [],
+      "motion": [],
+      "nozzle": {
+        "diameter_mm": 0.4
+      },
+      "open_questions": [],
+      "orientation": {
+        "bed_z_mm": 0.0,
+        "model_to_printer_matrix": "identity"
+      },
+      "parameters": {},
+      "printer": "Benchmark FDM",
+      "required_reviews": [],
+      "requirements": [
+        {
+          "artifact_id": null,
+          "name": "grid_pitch_mm",
+          "note": "the square pitch of the baseplate cells this bin drops into",
+          "provenance": "STATED",
+          "source": "the storage system's published grid interface",
+          "unit": "mm",
+          "value": 42.0
+        },
+        {
+          "artifact_id": null,
+          "name": "grid_units_long",
+          "note": "footprint along the long direction",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "grid units",
+          "value": 2
+        },
+        {
+          "artifact_id": null,
+          "name": "grid_units_short",
+          "note": "footprint across the short direction",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "grid units",
+          "value": 1
+        },
+        {
+          "artifact_id": null,
+          "name": "height_units",
+          "note": "how tall, in the family's height units",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "height units",
+          "value": 3
+        },
+        {
+          "artifact_id": null,
+          "name": "height_unit_mm",
+          "note": "one height unit of the storage family",
+          "provenance": "STATED",
+          "source": "the storage system's published grid interface",
+          "unit": "mm",
+          "value": 7.0
+        },
+        {
+          "artifact_id": null,
+          "name": "divider_count",
+          "note": "one divider, splitting the long direction into two compartments",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "count",
+          "value": 1
+        },
+        {
+          "artifact_id": null,
+          "name": "wall_thickness_mm",
+          "note": "nominal wall",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "mm",
+          "value": 1.0
+        }
+      ],
+      "reviewer": {
+        "model_snapshot": "e2e-f1-benchmark"
+      },
+      "schema_version": 1,
+      "source_artifacts": [],
+      "source_mode": "NEW",
+      "step": false,
+      "template": null,
+      "updated_utc": "2026-08-16T00:00:00Z",
+      "verification_requested": false
+    },
+    "discloses": [
+      {
+        "requirement": "grid_pitch_mm",
+        "measurement": "extent_y",
+        "why": "the pitch is the published interface the bin drops into, and a one-unit-wide bin is one pitch less the grid clearance -- so stating the pitch states the short footprint to within 1.2%. Withholding it would leave the request unanswerable, which is docs/defects.md D30's shape. The public source is the storage system's own grid specification, which states the pitch and the clearance; nothing here was measured off the reference. The report marks that axis given rather than reconstructed."
+      }
+    ]
+  },
+  "geometry": {
+    "grid_pitch_mm": 42.0,
+    "footprint_units": [2, 1],
+    "footprint_min_undersize_mm": 0.1,
+    "footprint_max_undersize_mm": 1.0,
+    "height_unit_mm": 7.0,
+    "height_units": 3,
+    "height_min_mm": 21.0,
+    "height_max_mm": 28.0,
+    "section_step_mm": 0.5,
+    "base_band": {
+      "low_mm": 0.5,
+      "high_mm": 4.0
+    },
+    "compartment_band": {
+      "above_floor_mm": 8.0,
+      "below_top_mm": 7.0
+    },
+    "lip_band": {
+      "below_top_low_mm": 4.5,
+      "below_top_high_mm": 0.5
+    },
+    "expected_compartments": 2,
+    "split_axis": "x",
+    "prismatic_tolerance_fraction": 0.02,
+    "min_lip_inset_mm": 0.3,
+    "reference_comparison": {
+      "samples": 20000,
+      "probe_samples": 400,
+      "seed": 20260816,
+      "band_mm": 0.3
+    },
+    "three_mf": {
+      "samples": 8000,
+      "band_mm": 0.001
+    }
+  },
+  "calibration": {
+    "measured_utc": "2026-08-16",
+    "machine": "Windows-11-10.0.26200, python 3.13.5, trimesh 4.12.2, build123d/OCCT",
+    "why": "brief section 5: do not choose a surface-distance tolerance by looking at agent results. Every figure below is same-geometry noise -- the same solid transported two ways -- measured before any candidate existed.",
+    "method": {
+      "retessellation": "the pinned STEP re-imported and re-triangulated by a SECOND exporter (build123d/OCCT here; the scored STL came out of cadquery at ingest) at three deflections. OCCT reuses an existing triangulation unless it is cleaned first, and without BRepTools.Clean_s all three deflections returned the identical 21124-face mesh -- which reads as 'retessellation noise is zero' when nothing was retessellated. That is the filter-that-rejects-the-phenomenon failure the review workflow's section 3a names, caught here rather than published.",
+      "three_mf": "the scored STL through this repository's own make_3mf.py and back through tools/e2e.py:read_three_mf.",
+      "registration": "the scored STL rotated 90 degrees about Z and translated by (137, -49, 11) mm, then registered back.",
+      "handedness": "the scored STL mirrored through x = 0 with normals fixed, then registered back."
+    },
+    "measurements": {
+      "faces": {
+        "scored": 21120,
+        "fine": 21116,
+        "medium": 1724,
+        "coarse": 860
+      },
+      "scored_vs_fine_p99_mm": 4.08e-06,
+      "scored_vs_medium_p99_mm": 0.0284,
+      "scored_vs_coarse_p99_mm": 0.1135,
+      "scored_vs_coarse_max_mm": 0.1599,
+      "three_mf_roundtrip_p99_mm": 3.27e-05,
+      "three_mf_roundtrip_max_mm": 6.58e-05,
+      "three_mf_roundtrip_volume_delta_mm3": 0.001256,
+      "rigid_recovery_p99_mm": 1.52e-11,
+      "rigid_recovery_determinant": 1.0,
+      "mirror_p99_mm": 4.38e-11,
+      "mirror_max_mm": 0.00073,
+      "defect_two_percent_x_scale_p99_mm": 0.835,
+      "defect_one_millimetre_offset_p99_mm": 1.0
+    },
+    "selected": {
+      "reference_band_mm": 0.3,
+      "why": "2.6x the coarsest measured same-geometry p99 (0.1135 mm at 860 faces, which is a legitimately coarse export a candidate could produce) and 2.8x below the smallest real defect measured (0.835 mm for a two percent single-axis scale). Both margins are stated because a band with headroom on only one side is either unfair or blind.",
+      "three_mf_band_mm": 0.001,
+      "three_mf_why": "30x the measured round-trip p99 and 15x its max. make_3mf.py writes vertices at %.6g (docs/defects.md D2), so the transport is a coordinate quantisation of about 1e-4 mm on this part's coordinates -- which this band absorbs and a stale or substituted body does not."
+    },
+    "what_this_band_cannot_catch": [
+      "any deviation under 0.3 mm anywhere. The brief states a 1.0 mm nominal wall, so a wall 30% thin is inside the band on the surface metric alone.",
+      "a defect confined to under one percent of the sampled surface, because the gate is p99. On this part one percent is roughly 100 mm2 of surface -- larger than a single magnet pocket's wall, which is why no_bores_in_base is a separate predicate and not left to this one.",
+      "anything at all when the candidate is scored in a pose outside the 24 proper rotations. The pose set is the cuboid rotation group, so a candidate rotated by an arbitrary angle registers badly and fails; that is a refusal to guess rather than a detection.",
+      "handedness on THIS part, because there is nothing handed to catch. Measured, not assumed: the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation. So probe 6 of the brief's required seven ('mirrored/incorrect-handed transformation IF the fixture gains any handed feature') has no handed feature to act on here, and the mutation that stands in its place probes the property that would matter if it did -- that the registration cannot fit a reflection."
+    ]
+  },
+  "mutations": "benchmarks/mutations/e2e-f1-gridbin.json"
+}

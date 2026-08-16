@@ -1,0 +1,206 @@
+{
+  "target": "F1's hard acceptance: the ten predicates that decide CAD_PASS, the two that decide 3MF_PASS, and the two structural guards -- the request leak audit and the reference digest",
+  "note": "Run with: uv run python tools/mutate.py benchmarks/mutations/e2e-f1-gridbin.json\n\nTWO KINDS OF MUTATION, AND THE DIFFERENCE IS THE POINT. Rows against tools/f1_candidate.py mutate the CANDIDATE: they build a defective bin and prove the predicate notices the defect, which is what the brief's section 6/F1 'required mutation probes' asks for. Rows against tools/e2e.py mutate the INSTRUMENT: they weaken a gate and prove a test notices the gate weakening. A fixture with only the second kind proves its tests read its own code; a fixture with only the first proves nothing about the gates the candidate never trips.\n\nThe brief requires seven probes. Six are here as candidate mutations -- divider removed, divider on the wrong axis, lip removed, magnet holes added, one axis scaled, an extra body in the STL (and again in the 3MF). The seventh, a mirrored or wrong-handed transform, is qualified in the brief itself: 'IF the fixture gains any handed feature'. This one has not, and that is measured rather than assumed -- the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation (benchmarks/e2e/f1-gridbin.json, calibration.measurements.mirror_p99_mm). So the probe that stands in its place is the property that would matter if the fixture ever did gain one: that the registration cannot fit a reflection at all. It is exercised against a deliberately handed solid, because a reflection guard tested on an achiral part passes whether or not it exists.\n\nEvery entry below was run against the real code and observed to fail its named test.",
+  "mutations": [
+    {
+      "name": "divider-removed",
+      "file": "tools/f1_candidate.py",
+      "anchor": "DIVIDER_COUNT = 1\n",
+      "replacement": "DIVIDER_COUNT = 0\n",
+      "tests": [
+        "tools/test_e2e.py::TheDividerIsCountedAndPlacedTest"
+      ],
+      "why": "probe 1. One divider is two compartments, and the cavity cross-section is where that is visible: two interior rings become one. A bin with no divider has the right footprint, the right height, the right wall and the right lip, so every other predicate accepts it"
+    },
+    {
+      "name": "divider-on-the-short-axis",
+      "file": "tools/f1_candidate.py",
+      "anchor": "SPLIT_AXIS = 0 ",
+      "replacement": "SPLIT_AXIS = 1 ",
+      "tests": [
+        "tools/test_e2e.py::TheDividerIsCountedAndPlacedTest"
+      ],
+      "why": "probe 2. One divider in the wrong place. Every counting predicate still reads two compartments -- this is the defect that a count alone cannot see, which is why the split axis is measured by the disjointness of the two cavity footprints and not by their number"
+    },
+    {
+      "name": "stack-lip-removed",
+      "file": "tools/f1_candidate.py",
+      "anchor": "LIP_INSET_MM = 0.9 ",
+      "replacement": "LIP_INSET_MM = 0.0 ",
+      "tests": [
+        "tools/test_e2e.py::TheStackLipIsRequiredTest"
+      ],
+      "why": "probe 3. Without the inward ledge the next bin up has nothing to land on. The bin's envelope, volume and compartment topology barely move, so a dimensional score would call this correct"
+    },
+    {
+      "name": "magnet-pockets-in-the-base",
+      "file": "tools/f1_candidate.py",
+      "anchor": "MAGNET_BORES = 0 ",
+      "replacement": "MAGNET_BORES = 8 ",
+      "tests": [
+        "tools/test_e2e.py::TheForbiddenFeaturesAreRefusedTest"
+      ],
+      "why": "probe 4. The brief forbids magnets and screw holes; both are bores through a base section that is otherwise solid, so an interior ring anywhere in the base band is one or the other"
+    },
+    {
+      "name": "finger-scoops-in-both-compartments",
+      "file": "tools/f1_candidate.py",
+      "anchor": "SCOOP_MM = 0.0 ",
+      "replacement": "SCOOP_MM = 6.0 ",
+      "tests": [
+        "tools/test_e2e.py::TheForbiddenFeaturesAreRefusedTest"
+      ],
+      "why": "a forbidden feature the brief names alongside the magnets. A scoop is a ramp at the compartment floor, so the open area stops being the same at every height -- which is the same measurement that catches a label flange, and the reason the predicate is stated as 'prismatic' rather than as two feature detectors"
+    },
+    {
+      "name": "label-flange-under-the-rim",
+      "file": "tools/f1_candidate.py",
+      "anchor": "LABEL_MM = 0.0 ",
+      "replacement": "LABEL_MM = 6.0 ",
+      "tests": [
+        "tools/test_e2e.py::TheForbiddenFeaturesAreRefusedTest"
+      ],
+      "why": "the fourth forbidden feature. The tab is drawn deep enough to reach inside the compartment band on purpose: a flange confined to the top seven millimetres is outside what this predicate can see, and that limit is recorded in the fixture rather than hidden by a mutation drawn to avoid it"
+    },
+    {
+      "name": "the-long-axis-scaled-five-percent",
+      "file": "tools/f1_candidate.py",
+      "anchor": "LONG_AXIS_SCALE = 1.0 ",
+      "replacement": "LONG_AXIS_SCALE = 1.05 ",
+      "tests": [
+        "tools/test_e2e.py::TheFootprintMustDropIntoTheGridTest"
+      ],
+      "why": "probe 5. A bin wider than its cells does not drop into the grid. The predicate is a band on the UNDERSIZE rather than a target dimension, so it is derived from the published pitch and the requirement to lift the bin out again -- and states no measurement of the hidden reference"
+    },
+    {
+      "name": "the-short-axis-exactly-one-pitch",
+      "file": "tools/f1_candidate.py",
+      "anchor": "WIDTH_MM = UNITS_SHORT * PITCH_MM - CLEARANCE_MM",
+      "replacement": "WIDTH_MM = UNITS_SHORT * PITCH_MM",
+      "tests": [
+        "tools/test_e2e.py::TheFootprintMustDropIntoTheGridTest"
+      ],
+      "why": "the other footprint axis, and the boundary rather than a gross error: a bin exactly as wide as its cell binds. A one-sided minimum would accept it, which is why the predicate is a band"
+    },
+    {
+      "name": "the-bin-is-far-too-tall",
+      "file": "tools/f1_candidate.py",
+      "anchor": "BASE_MM = 4.75",
+      "replacement": "BASE_MM = 40.0",
+      "tests": [
+        "tools/test_e2e.py::TheHeightMustBeThreeUnitsTest"
+      ],
+      "why": "the height predicate is a deliberately wide band -- three height units plus a standard base allowance -- because narrowing it would encode the hidden reference's own total height. A band that wide still has to be able to fail, or it is a row that reads as a check"
+    },
+    {
+      "name": "an-extra-body-in-the-stl",
+      "file": "tools/f1_candidate.py",
+      "anchor": "EXTRA_BODY = False ",
+      "replacement": "EXTRA_BODY = True ",
+      "tests": [
+        "tools/test_e2e.py::TheStlCarriesOnePrintableBodyTest"
+      ],
+      "why": "probe 7, STL half. A stray solid floating above the bin is a second thing on the plate and an STL cannot object -- the format has no notion of a body, so the count comes from connected components"
+    },
+    {
+      "name": "an-extra-body-in-the-3mf-is-not-counted",
+      "file": "tools/e2e.py",
+      "anchor": "        for child, child_transform in components.get(oid, ()):",
+      "replacement": "        for child, child_transform in list(components.get(oid, ()))[:1]:",
+      "tests": [
+        "tools/test_e2e.py::TheThreeMfGateCountsPlacedBodiesTest"
+      ],
+      "why": "probe 7, 3MF half. The extra body is hidden as a second COMPONENT of the placed assembly rather than as a second build item, which is where this repository's own writer puts every part. A reader that walks only the first component reports one printable body and the archive ships with two"
+    },
+    {
+      "name": "a-reflection-is-admitted-to-the-pose-set",
+      "file": "tools/e2e.py",
+      "anchor": "            if round(float(np.linalg.det(matrix))) == 1:",
+      "replacement": "            if abs(round(float(np.linalg.det(matrix)))) == 1:",
+      "tests": [
+        "tools/test_e2e.py::TheRegistrationCannotFitAReflectionTest"
+      ],
+      "why": "probe 6, in the only form this fixture can honestly carry it. Brief section 4: a mirrored part must not become a PASS because a fitter found a reflection. The bin is achiral so it cannot detect this; the test uses a right-handed tripod whose three arms have distinct lengths, so a proper rotation cannot map it onto its mirror image and an improper one can"
+    },
+    {
+      "name": "the-surface-distance-is-one-way",
+      "file": "tools/e2e.py",
+      "anchor": "    both = np.concatenate([np.asarray(da, dtype=float),\n                           np.asarray(db, dtype=float)])",
+      "replacement": "    both = np.asarray(da, dtype=float)",
+      "tests": [
+        "tools/test_e2e.py::TheSurfaceDistanceIsBidirectionalTest"
+      ],
+      "why": "brief section 4.6. Every point of a plain box has a near neighbour on the same box with a spike on it, so the one-way distance stays at zero however much geometry the candidate added. This is the direction a missing feature hides in"
+    },
+    {
+      "name": "the-distance-row-cannot-fail",
+      "file": "tools/e2e.py",
+      "anchor": "             distance[\"p99_mm\"] <= band[\"band_mm\"],",
+      "replacement": "             True,",
+      "tests": [
+        "tools/test_e2e.py::TheReferenceComparisonCanFailTest"
+      ],
+      "why": "the calibrated band is the fixture's only whole-shape gate, and a gate that cannot fail reads exactly like one that holds. Both states are asserted -- matching geometry passes it, mismatching geometry fails it -- because a row pinned only on the failing side can be satisfied by a scorer that always fails"
+    },
+    {
+      "name": "an-open-surface-passes-the-watertight-row",
+      "file": "tools/e2e.py",
+      "anchor": "        _row(\"watertight\", got[\"watertight\"], got[\"watertight\"], \"True\",",
+      "replacement": "        _row(\"watertight\", True, got[\"watertight\"], \"True\",",
+      "tests": [
+        "tools/test_e2e.py::TheStlCarriesOnePrintableBodyTest"
+      ],
+      "why": "an unclosed candidate has no volume and no defensible moments, and every downstream number computed from it is a divergence sum over a boundary that does not close. The row is one field wide, which is exactly the kind nobody checks"
+    },
+    {
+      "name": "a-missing-3mf-reports-present",
+      "file": "tools/e2e.py",
+      "anchor": "        return [_row(\"three_mf_present\", False, str(path), \"a 3MF file\",",
+      "replacement": "        return [_row(\"three_mf_present\", True, str(path), \"a 3MF file\",",
+      "tests": [
+        "tools/test_e2e.py::TheThreeMfGateCountsPlacedBodiesTest"
+      ],
+      "why": "the brief requires a 3MF, and a run that produced none must say so rather than reporting an absent gate as clear. Brief section 1.4: never describe a skipped fixture as coverage"
+    },
+    {
+      "name": "the-3mf-unit-is-not-checked",
+      "file": "tools/e2e.py",
+      "anchor": "    rows.append(_row(\"three_mf_unit_is_millimetre\", read[\"unit\"] == \"millimeter\",",
+      "replacement": "    rows.append(_row(\"three_mf_unit_is_millimetre\", True,",
+      "tests": [
+        "tools/test_e2e.py::TheThreeMfGateCountsPlacedBodiesTest"
+      ],
+      "why": "3MF's default unit is the micron. An unstated or wrong unit is a thousandfold scale error, and the geometry rows would report it as a shape disagreement rather than as the unit problem it is"
+    },
+    {
+      "name": "an-unreadable-archive-raises-instead-of-reporting",
+      "file": "tools/e2e.py",
+      "anchor": "    except (OSError, zipfile.BadZipFile, E2EError, ValueError) as exc:",
+      "replacement": "    except (E2EError,) as exc:",
+      "tests": [
+        "tools/test_e2e.py::TheThreeMfGateCountsPlacedBodiesTest"
+      ],
+      "why": "a corrupt deliverable is a finding the report has to carry. An exception out of the gate is a run that produces no report at all, which is worse than a failing row because there is nothing to read"
+    },
+    {
+      "name": "the-request-audit-excuses-every-coincidence",
+      "file": "tools/e2e.py",
+      "anchor": "    undeclared = [pair for pair in found if pair[1] not in declared]",
+      "replacement": "    undeclared = []",
+      "tests": [
+        "tools/test_e2e.py::TheRequestPackageCarriesNoAnswerTest"
+      ],
+      "why": "the requester-side prohibition, and the one guard whose absence produces a number indistinguishable from a real one. The boundary covers derived measurements and not only the reference mesh: on the bee fixture the designer voluntarily avoided the measurement scripts, and a harness that depends on that restraint is measuring the designer's manners"
+    },
+    {
+      "name": "the-reference-digest-is-not-verified",
+      "file": "tools/e2e.py",
+      "anchor": "    if found != block[\"sha256\"]:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_e2e.py::TheReferenceIsProvenOnEveryCallTest"
+      ],
+      "why": "a drifted reference is worse than a missing one, because a benchmark scored against it produces a number that looks exactly like a real one. The digest is checked on every call and not once at ingest, for the reason tools/corpus.py gives: a hash taken when the file arrived says nothing about the file this run is about to read"
+    }
+  ]
+}
