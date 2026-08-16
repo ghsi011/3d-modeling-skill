@@ -302,11 +302,15 @@ def install() -> bool:
     module = importlib.util.module_from_spec(spec)
     loader = spec.loader
     real_path = spec.submodule_search_locations
-    # The namespace, held directly. Everything below reads and writes it through
-    # this name and never through `module.__dict__`, because `__dict__` is about
-    # to become the hook two paragraphs of the module docstring are about: going
-    # back through it would execute the real `__init__.py` on the facade's first
-    # own bookkeeping and there would be nothing left to defer.
+    # The namespace, held directly, because `module.__dict__` is about to become
+    # the hook two paragraphs of the module docstring are about and the facade's
+    # own bookkeeping has no business going back through it.
+    #
+    # Hygiene and not a guard, which is worth one line to say: every remaining
+    # use of it runs after `_full()` has restored the plain class, so spelling
+    # them `module.__dict__` would work. Measured -- the mutation that does
+    # exactly that SURVIVED -- and recorded here rather than left as a mutation
+    # nothing can kill.
     ns = module.__dict__
     # The hook. `module_from_spec` put `__path__` here; taking it out is what
     # routes `import build123d.topology` through `__getattr__` at all.
@@ -362,11 +366,10 @@ def install() -> bool:
     def _full() -> None:
         """Execute the real `__init__.py` into this module object.
 
-        Everything the facade added comes out first, so what is left afterwards
-        is what an ordinary import leaves: the same object, the same loader, the
-        same namespace. A cached name that the real `__init__` does not rebind
-        would otherwise show up in `dir()`, which is the family the `dir()`
-        defect below belongs to.
+        Everything the facade added comes out first -- the two hooks in the
+        namespace, the names the search cached there, and the class -- so what is
+        left afterwards is what an ordinary import leaves: the same object, the
+        same loader, the same namespace, the same type.
         """
         if state["full"]:
             return
@@ -381,16 +384,15 @@ def install() -> bool:
         # `exec_module` needs -- it executes `__init__.py` into `module.__dict__`,
         # which would otherwise be the property calling back into here.
         module.__class__ = types.ModuleType
-        # And put back what `_submodule()` took out. An ordinary import binds a
-        # submodule onto its package as it imports it, and only the *first*
-        # import does: a cached one comes straight back out of `sys.modules` and
-        # touches no parent. So `__init__.py` cannot restore these itself, and
-        # `dir(build123d)` would come up short by however many submodules the
-        # search happened to walk before it gave up.
-        for sub in SUBMODULES:
-            cached = sys.modules.get(f"{PACKAGE}.{sub}")
-            if cached is not None:
-                ns[sub] = cached
+        # Nothing has to be put back. Only a submodule's *first* import binds it
+        # onto its parent, so a search that removed those bindings afterwards
+        # owed the namespace 21 names that `__init__.py` could no longer restore
+        # -- and this used to be the loop that did. `__setattr__` declines the
+        # two writes that are wrong instead of the search undoing all 24, so the
+        # bindings the search makes are the ones an ordinary import makes and
+        # they are already here. Measured: with the loop deleted,
+        # `the-submodules-are-not-put-back-before-the-real-init-runs` SURVIVED,
+        # which is what a repair that removed the need for a repair looks like.
         loader.exec_module(module)
 
     def _getattr(name: str) -> Any:

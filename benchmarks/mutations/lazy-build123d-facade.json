@@ -1,6 +1,6 @@
 {
   "target": "the lazy build123d facade: the version guard that makes it safe, the omission that makes it fast, and the equivalence that makes it invisible",
-  "note": "Every entry was run against the real code and observed to fail the named tests. The set is shaped by one fact: this optimization is *behind* a byte-identical mesh, so geometry proves nothing about it -- an earlier draft returned 11 names from `dir(build123d)` where the package returns 485 and every timing and geometry check passed. So the guards being mutated here are semantic and structural, never timed. One entry -- `the-omission-loses-brep-from-stl` -- is an edit that was actually made and reverted: the benchmark said that submodule earned nothing and the equivalence sweep said it could not be served correctly, and the sweep won. Two more entries are the instrument's own: a sweep that resolves no names and a premise walk over no names both report a clean facade while measuring nothing, which is the shape `docs/agents/review-workflow.md` section 3 calls corroboration mistaken for proof. The last five were added after an independent review found two defects at a head where all seventeen earlier entries were killed and every suite was green -- `vars(build123d)` returning 9 names of 485 without `__getattr__` ever being called, and a candidate's own `build123d/` *package* being installed over where its `build123d.py` was not. A green sweep is evidence about the mutations in it. Run with: uv run python tools/mutate.py benchmarks/mutations/lazy-build123d-facade.json",
+  "note": "Every entry was run against the real code and observed to fail the named tests. The set is shaped by one fact: this optimization is *behind* a byte-identical mesh, so geometry proves nothing about it -- an earlier draft returned 11 names from `dir(build123d)` where the package returns 485 and every timing and geometry check passed. So the guards being mutated here are semantic and structural, never timed. One entry -- `the-omission-loses-brep-from-stl` -- is an edit that was actually made and reverted: the benchmark said that submodule earned nothing and the equivalence sweep said it could not be served correctly, and the sweep won. Two more entries are the instrument's own: a sweep that resolves no names and a premise walk over no names both report a clean facade while measuring nothing, which is the shape `docs/agents/review-workflow.md` section 3 calls corroboration mistaken for proof. Six were added after independent reads found three defects at a head where all seventeen earlier entries were killed and every suite was green, which is the plainest statement available that a sweep is evidence about the mutations in it and about nothing else. All three bypass `__getattr__`, which is consulted only about a lookup that *failed*: `vars(build123d)` read 9 names of 485 straight out of the namespace; the import system *wrote* that namespace, binding `build123d.pack` to the submodule where the package leaves the function, so calling it raised `TypeError`; and `install()` stepped aside for a candidate's `build123d.py` while installing over its `build123d/`. Two entries were removed in the same repair rather than kept as survivors -- `the-submodules-are-not-put-back-before-the-real-init-runs` and a probe of the namespace local -- because declining the two wrong writes at the write removed the code they protected. Run with: uv run python tools/mutate.py benchmarks/mutations/lazy-build123d-facade.json",
   "mutations": [
     {
       "name": "the-version-guard-is-disabled",
@@ -119,16 +119,6 @@
       "why": "the third defect of the `vars()` family, found by an independent read after the first two were fixed, and the write side of the same boundary. The import system binds every submodule it imports onto its parent with `setattr` -- a namespace write, which reaches `__getattr__` no more than a namespace read does -- and `__init__.py` leaves a *function* under `pack` and under `import_dxf`. Measured in one interpreter: `import build123d.pack` gave a module through the facade and a function against the package, so `build123d.pack(shapes)` was `TypeError: 'module' object is not callable` for a candidate that did nothing unusual. This rule replaced a cleanup inside the search that only ever covered the facade's own imports and never the candidate's; both tests are named because the identity sweep catches the search's half and only the submodule-import probe catches the candidate's"
     },
     {
-      "name": "the-namespace-hook-reads-the-namespace-through-itself",
-      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
-      "anchor": "            _full()\n            return ns",
-      "replacement": "            _full()\n            return module.__dict__",
-      "tests": [
-        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_vars_and_the_namespace_are_still_the_packages_own"
-      ],
-      "why": "the trap the `ns` local exists for, and the edit that reads as a consistency fix: every other line in the module says `module.__dict__`, and this one cannot, because `module.__dict__` *is* this property. The facade holds the namespace directly for that reason and the mutation is what says so rather than the comment beside it"
-    },
-    {
       "name": "the-rebound-set-is-empty",
       "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
       "anchor": "REBOUND = (\"import_dxf\", \"pack\")",
@@ -138,16 +128,6 @@
         "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheOmissionSetIsTheDesignTest::test_the_rebound_names_are_inventory_names_in_the_packages_order"
       ],
       "why": "the same protection weakened where it is a list rather than a branch, which is the way a per-release fact actually goes wrong -- a dependency bump, a name that moved, and a tuple nobody re-derived. It is pinned like `SUBMODULES` because the facade has to decide what to decline *before* `__init__.py` has run, and the heavy tier holds the pin to account by identity against the executed package"
-    },
-    {
-      "name": "the-submodules-are-not-put-back-before-the-real-init-runs",
-      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
-      "anchor": "        for sub in SUBMODULES:\n            cached = sys.modules.get(f\"{PACKAGE}.{sub}\")",
-      "replacement": "        for sub in ():\n            cached = sys.modules.get(f\"{PACKAGE}.{sub}\")",
-      "tests": [
-        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_the_public_surface_is_identical"
-      ],
-      "why": "the repair for the entry above, mutated in its turn. Only a submodule's *first* import binds it onto its parent; a cached one comes straight back out of `sys.modules` and touches nothing. So `__init__.py` cannot restore what the search removed, and the module the fallback produces comes up short by however many submodules the search happened to walk -- which is a different `dir()` for every candidate"
     },
     {
       "name": "copyreg-is-never-armed",
