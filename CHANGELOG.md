@@ -6,6 +6,250 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — revision 4's run: the first `CAD_PASS / 3MF_PASS`
+
+A fresh isolated designer, dispatched after revision 4 was frozen and pushed, cleared
+**all eighteen CAD rows and all five 3MF rows** — the first time a candidate working only
+from the request has satisfied F1's hard acceptance end to end. The surface distance read
+0.0011 mm against the 0.300 mm band.
+
+**It does not exercise revision 4's change, and that is stated in the fixture rather than
+left to be assumed.** Measured: this candidate's interior ring count drops from two to one
+at z = 20.95, and so does the reference's — they agree on divider height, so the divider
+region had nothing to exclude and the row would have read the same at revision 3. What
+establishes the exclusion is the adversarial pair on constructed geometry, not this run.
+
+The height masks did carry real work here, so the pass is not an artefact of masking
+everything: retained p99 0.0011 against an unmasked p99 of 0.251 and a worst point of
+0.8824. And the row can still fail — proven three ways at this head, not inferred from a
+run that passed: the lip-support control fails at 0.8097, the mutation that makes the row
+always pass is killed, and the mutation that broadens the divider exclusion into the whole
+height band is killed by that same control.
+
+Still `NEEDS_MORE_EVIDENCE` from the pipeline itself, for the reason every run has hit:
+the compiled plan sets `verification_dispatch: NEVER` and no renderer is installed, so the
+`CAD_PASS` is the benchmark's verdict and not the pipeline's.
+
+### Changed — the distance row's scope now matches the request at the divider (revision 4)
+
+The reviewer's ruling on run 03: do not state a divider height from the hidden reference,
+and do not demote the whole registered-distance row. Keep the row, and make its scope
+match the request — above the compartment band, exclude the **divider region
+geometrically, not the whole z band**, because the lip and its support at those same
+heights remain determined and must stay hard-judged.
+
+The exclusion is a slab about the divider's own plane: ±3.6 mm across (half the stated
+1.2 mm thickness, plus the stated 0.2 mm tolerance, plus the 2.8 mm internal fillet the
+cited file contemplates), ±17.95 mm along it (the published short footprint less the
+published lip depth less the tolerance, so the lip ring is never inside it), above
+z = 18.0 (the compartment band's own top). Every bound is arithmetic on a request-side
+fact; none comes from run 03, the reference, or any measured residual. It is applied
+identically to both solids — an asymmetric rule would be a handicap, not a scope.
+
+**The control was built first, and it had to be re-sized.** A 10 mm notch in the lip
+support removes 65.68 mm³ — about half a percent of the sampled surface — and p99 could
+not see it at all (0.0000), which is the limit the fixture already records. The control
+that ships removes the lip support along a whole long side (463.31 mm³) and failed the
+row at p99 = 0.7931 against revision 3, *before* the exclusion existed. With the
+exclusion in place it still fails, at 0.8097 — so the repair did not collapse into a
+height band.
+
+Two bins differing only in divider top height now both clear the row (p99 = 0.0000 in
+both directions), in L0 and again against the hidden reference in L0-heavy. What the
+exclusion deliberately does not reach is recorded: the divider's last stretch where it
+meets the lip ring leaves 0.427 % of samples beyond the band, worst point 1.97 mm, under
+the p99 cut. Extending the bound further would start excluding the lip ring itself.
+
+Two mutations added — removing the exclusion, and broadening it into the whole height
+band — both killed. 34 in the manifest.
+
+### Added — revision 3's first run: sixteen named rows pass, one whole-shape row does not
+
+A fresh isolated designer, dispatched after revision 3 was frozen and pushed, scored
+`CAD_FAIL / 3MF_PASS`. **All sixteen named predicates passed** on geometry nobody here
+authored — the base profile to 0.0 mm, the two feet, the floor height, both lip rows,
+and `outer_corner_radius_mm` at 3.7549, which is the row run 02 failed. The revision-3
+fix is confirmed by a candidate dispatched after it.
+
+`reference_surface_distance_p99_mm` failed at 0.3849 against 0.300, and the residual is
+one feature. Every height band from the plate to 18.2 mm reads median 0.0000 and p99 at
+or under 0.0227; all 282 samples beyond the band (1.07 %) sit between z = 18.2 and 21.0
+with |x| ≤ 0.95 mm, and the worst is exactly 2.800 = 21.0 − 18.2. Measured on both
+solids: the interior ring count drops from two to one at 18.25 on the candidate and at
+21.00 on the reference, while the opening at every height between them is identical to
+three decimals. **It is the divider's top height, and the request does not determine
+it** — the brief gives the divider's existence, axis and 1.2 mm thickness, and no cited
+figure touches its height.
+
+The candidate's own argument for stopping at 18.2 was checked and partly corrected: a
+second copy of the reference seated on the reference interferes by 0.001 mm³ at a
+20.65 mm lift and 19.438 mm³ at 20.60, so 20.65 is the seat — but the reference's own
+divider reaches 20.95 and still does not foul, because the upper bin's feet are 0.5 mm
+apart there and the divider passes between them. Any divider from 18.2 to the lip tip
+is functionally sound.
+
+**Left open on purpose.** This is run 02's defect class in a fourth place, but the three
+repairs available — exclude the divider geometrically, demote the distance row to a
+diagnostic (which the ruling permits), or have the requester state a divider height
+(which has no published source) — are not equivalent and change what F1 measures. The
+reviewer ruled once on this axis; the choice goes back rather than being taken while
+looking at a failing candidate. Nothing in revision 3 was changed by this run.
+
+### Changed — F1's first revision-2 run found a defect in revision 2 (revision 3)
+
+The fresh candidate scored `CAD_FAIL / 3MF_PASS` on one row, `outer_corner_radius_mm`
+at 6.7724 against 3.75 ± 0.2 — **and the failure was the fixture's.** Measured: that
+candidate's outer corner radius is 3.7528 at every height from 6.9 mm upward, which is
+the reference's own figure to four decimals. At the 6.0 mm probe height its section was
+still two feet growing into one body, and the area-deficit formula assumes a rounded
+rectangle.
+
+The publication gives the base one height unit *including the structure tying the feet
+together* and gives the profile 4.75 mm of it, so the feet finish becoming a body
+somewhere in the 2.25 mm between — and nothing says where. The reference spends 0.25 mm
+of it; the candidate spends all of it, and not by whim: the published 83.5 × 41.5 body
+overhangs the two published 41.5 mm feet by about 30 mm² of flat ceiling, and the brief
+asks for no supports. **The published geometry requires a designer to invent a
+transition the publication does not specify.**
+
+Revision 2 judged that span twice. The corner radius is now read 5.0 mm above the
+published base height instead of at a fixed 6.0, and the hard distance masks
+4.75–7.0 mm on the same rule as its other two masked ranges — bucketed by height, that
+span was the *whole* of the run's disagreement (p99 1.2280 there, 0.0000 in every band
+above it). Two mutations added, one per change; 32 in the manifest.
+
+This is the same class of defect the reviewer's ruling named, found one layer deeper
+than revision 2 looked. Run 02 is preserved as revision-2 evidence: not re-scored, not
+presented as proof of revision 3, and revision 3 was not tuned to it — both new bounds
+are arithmetic on published numbers and would be the right bounds if that candidate had
+never run.
+
+### Changed — F1 becomes a standard-conformance fixture (revision 2)
+
+The reviewer's ruling on run 01: F1's truth model was stronger than its request. The
+manifest said the standard fixes the answer and therefore hard acceptance may use
+registered surface similarity, while the request deliberately withheld the base and lip
+profile — and the live run then failed the hard surface-distance row *entirely* on those
+withheld surfaces. Useful discovery evidence; not a fair reusable benchmark. The ruling
+also refused the other repair: **do not perturb the 42 mm pitch**, because F1 was chosen
+as a real standard-driven fixture and not an anti-memory synthetic task.
+
+So the request now states the load-bearing interface, from a public source, with
+provenance: `src/core/standard.scad` of
+[`kennetek/gridfinity-rebuilt-openscad`](https://github.com/kennetek/gridfinity-rebuilt-openscad)
+at `bed60a4`, which names <https://gridfinity.xyz/specification/> as its own source for
+the base and stacking-lip constants, corroborated by
+[`gridfinity-unofficial/specification`](https://github.com/gridfinity-unofficial/specification).
+The primary page itself was opened and does **not** carry the profile figures in text —
+recorded in the fixture, because a citation nobody opened is this repository's most
+common defect. The figures taken: pitch 42, widest section 41.5 per unit leaving a
+0.5 mm gap, corner radius 7.5/2, base profile 0.8 / 1.8 / 2.15 at 45° for a 4.75 mm rise
+and 2.95 mm run, base height 7 including the structure tying the feet together, stacking
+lip 0.7 / 1.8 / 1.9 from its inner tip with a depth of 2.6 and a height of 4.4 over a
+1.2 mm support, and the height unit excluding the lip.
+
+**Six new hard predicates**, each measuring a stated figure against a stated 0.2 mm
+tolerance rather than a similarity band: `base_plug_profile_mm`, `base_feet`,
+`outer_corner_radius_mm`, `compartment_floor_height_mm`, `stack_lip_depth_mm` and
+`stack_lip_seat_height_mm`. `base_feet` exists because the published profile is stated
+*per grid unit* — a two-cell bin stands on two feet with the published gap between them,
+and one plinth of the same outline has the same bounding box at every height, so no span
+can tell them apart. Both footprint rows changed from a range on the undersize to the
+published figure, and the height band narrowed from 21–28 mm to 23.5–25.4 mm, both ends
+computed from published numbers.
+
+**The hard distance now judges only what the request determines.** Registration seats
+both solids on their own base plane and footprint centre instead of centring bounding
+boxes, because the publication cannot fix the overall height and a centroid fit would
+spread half that legitimate difference over every surface. Two ranges are masked out of
+the p99 row and reported as a diagnostic instead: the internal floor transition, where
+the same public file offers a 2.8 mm fillet radius and the reference uses 1.1; and
+everything above the lip's published land, where the final 1.9 mm chamfer would leave the
+rim a knife edge at a 1.0 mm wall and every implementation truncates it by an amount the
+publication does not state. Measured: an independent implementation of the same published
+figures scores p99 = 0.0018 mm masked and 0.300 mm — exactly on the band — unmasked.
+
+Reference conformance was measured before any of this was frozen, and it is not uniform:
+the reference agrees with the publication on the footprint, all three base segments, the
+corner radius (3.7528 by area deficit, 3.7500 by corner distance, against a published
+3.75), the floor height, the lip depth, the lip seat height and the lip's first two
+segments — and *disagrees* on the final chamfer, 1.3 against 1.9. The disagreement is
+reported rather than reconciled, and it is what the mask removes.
+
+Run 01 is preserved as revision-1 discovery evidence. It was not re-scored, it is not
+evidence about revision 2, and revision 2 was not tuned to it: the two figures that
+candidate got wrong — a 2.4 mm capture ramp and a 4.0 mm corner radius — are wrong
+against the public source, and both are now mutation probes.
+
+Thirty mutations, all killed. Also fixed on the way: the scorer ignored the
+`probe_samples` the fixture declared, and the masked row and its unmasked diagnostic now
+come from one sampling pass rather than two — which halves the dominant harness cost and
+makes it impossible for the two to disagree about the same pair of solids.
+
+### Added — F1's live end-to-end arm, and the first real run through it
+
+Slice A of [`docs/agents/qa-e2e-implementation.md`](docs/agents/qa-e2e-implementation.md):
+the minimum needed to materialise the grid-bin request, run the real design path, gate
+what comes back, and say so in one report. F1 only. No interface framework, no scorer
+generalisation, no new dependency.
+
+`tools/e2e.py` decides twelve hard CAD predicates and four 3MF ones. Ten of the CAD
+rows are measured off horizontal cross-sections rather than a CAD feature tree — the
+compartment count is the number of interior rings, the divider axis is the
+disjointness of the two cavity footprints, a stacking lip is an opening that narrows
+near the rim, and "no scoops and no label flange" is one statement, that the
+compartment is prismatic. The other two are the registered comparison: bidirectional
+sampled surface distance, with a pose set of the **24 proper rotations of a cuboid**,
+so no reflection is available to the fitter.
+
+**The bands are calibrated from same-geometry noise, not chosen.** 0.3 mm is 2.6× the
+coarsest measured re-tessellation p99 (0.1135 mm at 860 faces) and 2.8× below the
+smallest real defect measured (0.835 mm for a two percent single-axis scale); the 3MF
+band of 0.001 mm is 30× the measured round trip. The calibration caught its own first
+attempt: OCCT reuses an existing triangulation, so three deflections returned one
+identical mesh until `BRepTools.Clean_s` was added — a measurement of nothing, reading
+as zero noise.
+
+**Two states, not one.** `tools/f1_candidate.py` is a compliant bin this benchmark
+wrote; `benchmarks/heavy/test_e2e_f1_heavy.py` puts the hidden reference — 21 120
+faces from a pinned third-party generator — through the same ten predicates, and it
+passes all of them. Twenty mutations in
+`benchmarks/mutations/e2e-f1-gridbin.json`, all killed: six of the brief's seven
+probes as candidate mutations, and the seventh as a reflection-guard mutation because
+this bin is achiral — measured, the mirrored reference registers back at
+p99 = 4.4e-11 mm.
+
+**The requester-side prohibition is structural.** `audit_request` runs
+`corpus.numbers_in` and `corpus.coincidences` over the materialised request package,
+so a reference measurement that reached the brief is a hard failure rather than a
+review finding. One coincidence is declared with its public source: the published
+42 mm pitch states the short footprint to within 1.2%.
+
+**The first real run: `CAD_FAIL / 3MF_PASS`, and the fixture learned more than the
+designer did.** Eleven of twelve CAD rows passed; the surface distance failed at
+p99 = 2.300 mm. Bucketed by height, the compartment walls and divider sit at a median
+of 0.000 mm and every sample beyond 1 mm is below z = 21 — the parts the brief
+dimensioned agree, and the base profile, floor height and lip profile, which it
+withholds, are the whole of the failure. The finding that matters is worse than a
+failed row: measured at 0.05 mm steps, the blind candidate's base plug matches the
+reference's chamfer height, land height, segment count and 45° angle, differing only
+in the capture ramp. 42 mm identifies the standard, so **F1 as built cannot separate
+recall from derivation**, and withholding more cannot fix it — the repairs are a
+fixture change, recorded in the fixture's own `run_findings`.
+
+Harness overhead is reported apart from the design path and never summed: 18.77 s
+against 1711 s, so 1.1% of the run, four fifths of it in one surface-distance call.
+
+Two known defects reproduced on the way. `trimesh` cannot read a 3MF without `lxml`,
+which is not in the default install, so `make_3mf.py`'s round-trip verification has
+never run here (**D3**) — `e2e.read_three_mf` parses the archive with the standard
+library instead, and walks build items through their components so a body hidden as a
+second component is counted. And `make_3mf.py`'s `%.6g` vertices (**D2**) are now
+quantified: p99 3.27e-05 mm, volume delta 0.0013 mm³.
+
+L0 grew by 38 tests to 1299 collected, against a ceiling of 1440; revision 2 added a
+further 18, to 1317.
+
 ### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
 
 The rule that requires a unit tests `if not str(self.unit).strip()`. The loader read
