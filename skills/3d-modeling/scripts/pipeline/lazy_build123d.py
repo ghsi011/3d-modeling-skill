@@ -104,6 +104,20 @@ subclass *is* the hook. It is gone at the first question that forces the real
 package, and `benchmarks/heavy/test_lazy_build123d_heavy.py` measures both halves
 of that instead of taking this paragraph's word for it.
 
+**That boundary has a write side, and the import system is what uses it.**
+`import build123d.pack` never asks the package for an attribute: the import
+system *sets* one, binding the submodule onto its parent, and a namespace write
+reaches `__getattr__` no more than a namespace read does. For 22 of the 24
+submodules that write is what `build123d/__init__.py` leaves anyway. For the two
+in `REBOUND` it is not, and the facade answered `build123d.pack` with a module
+where build123d answers with a function -- `TypeError: 'module' object is not
+callable` for a candidate that did nothing unusual, measured in one interpreter
+against both arms. `_Facade.__setattr__` declines those two writes and lets the
+search answer, which is the only thing that knows. It is also why the search no
+longer clears its own imports off the package afterwards: one rule at the write
+covers the facade's imports and the candidate's, where clearing up afterwards
+only ever covered the facade's.
+
 **Why a pinned version and not a range.** `pyproject.toml` says
 `build123d>=0.9` and is deliberately not narrowed for this: a release that
 *moves* a name is safe, because the search misses and the real `__init__` runs;
@@ -171,6 +185,25 @@ SUBMODULES = (
 DEFERRED = ("exporters", "import_dxf", "brep_from_stl")
 
 SEARCH = tuple(name for name in SUBMODULES if name not in DEFERRED)
+
+# The submodules whose own name `build123d/__init__.py` leaves bound to something
+# that is **not** the submodule: `from build123d.pack import pack` puts the
+# *function* there, and `from build123d.import_dxf import import_dxf` does the
+# same. Every one of the other 22 is left as the module, which is what the import
+# system already bound -- measured name by name against the installed package,
+# and these two are the whole of the difference.
+#
+# It matters because the import system's parent binding is a *namespace write*.
+# `import build123d.pack` makes it, `__getattr__` is never consulted, and the
+# facade answered with a module where build123d answers with a callable --
+# `TypeError: 'module' object is not callable` for a candidate that did nothing
+# unusual. `_Facade.__setattr__` declines exactly these two writes and lets the
+# search decide, which is the only place that knows.
+#
+# A per-release fact like `SUBMODULES`, and pinned the same way:
+# `test_lazy_build123d.py` reads `from build123d.X import X` out of the installed
+# `__init__.py` and fails if this tuple and that file disagree.
+REBOUND = ("import_dxf", "pack")
 
 _MISSING = object()
 
@@ -292,19 +325,15 @@ def install() -> bool:
     state = {"armed": False, "lazy": False, "full": False}
 
     def _submodule(sub: str) -> Any:
-        """Import one submodule without letting it bind itself onto the facade.
+        """Import one submodule. What it binds onto the facade is `__setattr__`'s.
 
         The import system sets every submodule it imports as an attribute of its
-        parent, and for `pack` and `import_dxf` the real `__init__.py` then
-        rebinds the name to a *function* of the same name. Leaving the module
-        there answers those two with the wrong object -- and it is the search's
-        own side effect, so it happens to whichever names the candidate never
-        asked about. Found by the identity sweep; no build could have seen it.
+        parent, and that write is the same one a candidate's own `import
+        build123d.pack` makes -- so it is answered in one place, at the write,
+        rather than cleaned up here for the search's imports and left standing
+        for the candidate's.
         """
-        imported = importlib.import_module(f"{PACKAGE}.{sub}")
-        if ns.get(sub) is imported:
-            del ns[sub]
-        return imported
+        return importlib.import_module(f"{PACKAGE}.{sub}")
 
     def _arm() -> bool:
         """First contact: decide whether this release may be served lazily.
@@ -433,6 +462,29 @@ def install() -> bool:
             _arm()
             _full()
             return ns
+
+        def __setattr__(self, name: str, value: Any) -> None:
+            """Decline the two parent bindings the real `__init__` overwrites.
+
+            The import system binds every submodule it imports onto its parent,
+            and it does it with `setattr` -- a namespace write, so `__getattr__`
+            never sees it and cannot correct it. For 22 of the 24 that binding is
+            exactly what `build123d/__init__.py` leaves, and it stands. For the
+            two in `REBOUND` it is not: `__init__.py` puts a *function* under
+            each of those names, so `import build123d.pack` followed by
+            `build123d.pack(...)` raised `TypeError: 'module' object is not
+            callable` through the facade and worked against the package.
+            Measured in one interpreter, both arms.
+
+            Declining is all that is needed, because `__getattr__` then answers:
+            the search serves `pack` from the `pack` submodule itself -- the
+            function, identical object -- and `import_dxf` is omitted from the
+            search, so it falls through to the real `__init__` like every other
+            name the search cannot serve, which is where its function is.
+            """
+            if name in REBOUND and value is sys.modules.get(f"{PACKAGE}.{name}"):
+                return
+            super().__setattr__(name, value)
 
     module.__getattr__ = _getattr
     module.__dir__ = _dir

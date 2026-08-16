@@ -108,24 +108,36 @@
       "why": "the other half of `_full()`'s contract -- what is left afterwards must be what an ordinary import leaves -- applied to the one thing this repair adds to the module. Everything still works with the subclass left on: `vars()` is right, `dir()` is right, the mesh is identical, and `type(build123d)` is a repo-owned class inside a package the candidate believes it imported from site-packages. It is the same family as the served names `_full()` already pops, and it is invisible to every question except the one that asks what the module *is*"
     },
     {
-      "name": "the-search-leaves-its-submodules-bound-on-the-package",
+      "name": "the-import-systems-parent-binding-is-allowed-to-stand",
       "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
-      "anchor": "        if ns.get(sub) is imported:\n            del ns[sub]",
-      "replacement": "        if False:\n            del ns[sub]",
+      "anchor": "            if name in REBOUND and value is sys.modules.get(f\"{PACKAGE}.{name}\"):\n                return",
+      "replacement": "            if False:\n                return",
       "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_importing_a_submodule_leaves_the_object_the_package_leaves",
         "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_every_name_the_facade_serves_is_the_object_the_package_binds"
       ],
-      "why": "the second defect the identity sweep found. The import system binds every submodule it imports onto its parent, and `__init__.py` then rebinds `pack` and `import_dxf` to *functions* of the same name -- so leaving the modules there answers those two with the wrong object, for candidates that never mentioned either, as a side effect of a search for something else"
+      "why": "the third defect of the `vars()` family, found by an independent read after the first two were fixed, and the write side of the same boundary. The import system binds every submodule it imports onto its parent with `setattr` -- a namespace write, which reaches `__getattr__` no more than a namespace read does -- and `__init__.py` leaves a *function* under `pack` and under `import_dxf`. Measured in one interpreter: `import build123d.pack` gave a module through the facade and a function against the package, so `build123d.pack(shapes)` was `TypeError: 'module' object is not callable` for a candidate that did nothing unusual. This rule replaced a cleanup inside the search that only ever covered the facade's own imports and never the candidate's; both tests are named because the identity sweep catches the search's half and only the submodule-import probe catches the candidate's"
     },
     {
-      "name": "the-search-reaches-the-namespace-through-its-own-hook",
+      "name": "the-namespace-hook-reads-the-namespace-through-itself",
       "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
-      "anchor": "        if ns.get(sub) is imported:\n            del ns[sub]",
-      "replacement": "        if module.__dict__.get(sub) is imported:\n            del module.__dict__[sub]",
+      "anchor": "            _full()\n            return ns",
+      "replacement": "            _full()\n            return module.__dict__",
       "tests": [
-        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheDeferredStackStaysOutOfTheChildTest::test_a_minimal_candidates_imports_load_no_ezdxf"
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_vars_and_the_namespace_are_still_the_packages_own"
       ],
-      "why": "the cost of the `vars()` repair, and the edit that reads as a tidy-up. `__dict__` is now a property that executes the real `__init__.py`, so the facade's own bookkeeping holds the namespace in a local; spelling it `module.__dict__` again -- which is what it said before the repair and what a reader restoring 'consistency' would write -- makes the *first* submodule import of the search force the full package. Nothing raises, no name is wrong, and the whole optimization is gone: `ezdxf` comes back for a candidate that asked for seven names"
+      "why": "the trap the `ns` local exists for, and the edit that reads as a consistency fix: every other line in the module says `module.__dict__`, and this one cannot, because `module.__dict__` *is* this property. The facade holds the namespace directly for that reason and the mutation is what says so rather than the comment beside it"
+    },
+    {
+      "name": "the-rebound-set-is-empty",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "REBOUND = (\"import_dxf\", \"pack\")",
+      "replacement": "REBOUND = ()",
+      "tests": [
+        "benchmarks/heavy/test_lazy_build123d_heavy.py::TheFacadeIsTheSamePackageTest::test_importing_a_submodule_leaves_the_object_the_package_leaves",
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheOmissionSetIsTheDesignTest::test_the_rebound_names_are_inventory_names_in_the_packages_order"
+      ],
+      "why": "the same protection weakened where it is a list rather than a branch, which is the way a per-release fact actually goes wrong -- a dependency bump, a name that moved, and a tuple nobody re-derived. It is pinned like `SUBMODULES` because the facade has to decide what to decline *before* `__init__.py` has run, and the heavy tier holds the pin to account by identity against the executed package"
     },
     {
       "name": "the-submodules-are-not-put-back-before-the-real-init-runs",

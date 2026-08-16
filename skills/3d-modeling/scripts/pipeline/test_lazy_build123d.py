@@ -117,6 +117,41 @@ class TheOmissionSetIsTheDesignTest(unittest.TestCase):
                          "a repeated name in the inventory would shrink the "
                          "search without saying so")
 
+    def test_the_rebound_names_are_inventory_names_in_the_packages_order(
+            self) -> None:
+        """What a syntax tree can say about `REBOUND`, and it is not the whole.
+
+        `REBOUND` is the submodules whose own name `build123d/__init__.py` leaves
+        bound to something that is *not* the submodule, and it is what
+        `_Facade.__setattr__` declines so the import system's parent binding
+        cannot answer `build123d.pack` with a module where the package answers
+        with a function.
+
+        Whether a *given* release rebinds exactly these two is asked in
+        `benchmarks/heavy/test_lazy_build123d_heavy.py`, against the executed
+        package, and deliberately not here. `__init__.py` reaches `pack` through
+        `from build123d.pack import *`, so answering it from the syntax tree
+        means emulating star-import semantics -- reading a submodule's `__all__`
+        when it has one and its top-level names when it does not -- which is a
+        guess in the grammar of a check. The executed package answers the same
+        question by identity and cannot be wrong about it.
+
+        What is left is exact and cheap: a name outside the inventory is a name
+        no import can bind, so declining its write would protect nothing, and the
+        order is the package's own for the reason `SUBMODULES` keeps it.
+        """
+        self.assertEqual((), tuple(set(L.REBOUND) - set(L.SUBMODULES)),
+                         "a rebound name that is not in the inventory is a name "
+                         "no import binds, so declining its write protects "
+                         "nothing")
+        self.assertEqual([sub for sub in L.SUBMODULES if sub in set(L.REBOUND)],
+                         list(L.REBOUND))
+        self.assertNotEqual((), L.REBOUND,
+                            "an empty REBOUND declines nothing, and `import "
+                            "build123d.pack` then answers with the submodule -- "
+                            "which is `TypeError: 'module' object is not "
+                            "callable` for a candidate that calls it")
+
     def test_the_search_keeps_the_packages_order(self) -> None:
         """A subsequence of the inventory, never a re-sort of it.
 

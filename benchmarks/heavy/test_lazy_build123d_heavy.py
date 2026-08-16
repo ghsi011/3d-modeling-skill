@@ -141,6 +141,26 @@ elif mode == "dironly":
     out["dir"] = sorted(dir(build123d))
     out["dir_len"] = len(out["dir"])
 
+elif mode == "submoduleimport":
+    # The route where the *import system* writes the facade's namespace. `import
+    # build123d.pack` binds the submodule onto its parent by `setattr`, which no
+    # `__getattr__` can see, and `__init__.py` leaves a *function* under that
+    # name. Measured before the repair: `build123d.pack` was a module through the
+    # facade and a function against the package, so `build123d.pack(shapes)` was
+    # `TypeError: 'module' object is not callable`.
+    import build123d.pack
+    out["pack_type"] = type(build123d.pack).__name__
+    out["pack_callable"] = callable(build123d.pack)
+    out["pack_qualname"] = getattr(build123d.pack, "__qualname__", None)
+    out["pack_home"] = getattr(build123d.pack, "__module__", None)
+    # Read before the second import: declining the write must not cost the
+    # deferral it was added to protect. `pack` is `__init__`'s eighteenth import
+    # and reaches no `ezdxf`.
+    out["ezdxf_after_pack"] = "ezdxf" in sys.modules
+    import build123d.import_dxf
+    out["import_dxf_type"] = type(build123d.import_dxf).__name__
+    out["import_dxf_callable"] = callable(build123d.import_dxf)
+
 elif mode == "dunderdironly":
     # `build123d.__dir__()` and nothing else -- the route `dir()` stopped taking.
     # `dir()` on a module fetches `__dict__` through ordinary attribute access
@@ -235,8 +255,17 @@ elif mode == "premise":
     # the whole namespace rather than over `__all__`, because a candidate can
     # read a name the package never advertised.
     import importlib
-    from pipeline.lazy_build123d import SEARCH
+    from pipeline.lazy_build123d import REBOUND, SEARCH, SUBMODULES
     import build123d
+    out["pinned_rebound"] = list(REBOUND)
+    # Which submodules the executed package leaves bound to something that is not
+    # the submodule -- asked by identity, in a process where `__init__.py` has
+    # run, because that is the only instrument that cannot be wrong about it.
+    # `__init__.py` reaches `pack` through `from build123d.pack import *`, so the
+    # syntax tree can only guess.
+    out["rebound"] = [sub for sub in SUBMODULES
+                      if build123d.__dict__.get(sub)
+                      is not importlib.import_module("build123d." + sub)]
     modules = {sub: importlib.import_module("build123d." + sub) for sub in SEARCH}
     MISSING = object()
     wrong, unserved, servable = [], [], []
@@ -387,6 +416,27 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
             premise["unserved_public"])
         self.assertGreater(len(premise["servable"]), 400)
 
+    def test_the_rebound_set_is_what_this_release_actually_rebinds(self) -> None:
+        """`REBOUND` against the executed package, by identity.
+
+        The facade declines the import system's parent binding for exactly these
+        names, and it has to decide that without executing `__init__.py` -- so
+        the list is pinned, like `SUBMODULES`, and this is the check that holds
+        the pin to account. A release that rebound a third submodule would leave
+        the facade answering that name with a module where the package answers
+        with whatever it re-exported, and nothing at runtime could notice.
+
+        Asked here rather than at L0 because `__init__.py` reaches `pack` through
+        `from build123d.pack import *`: a syntax tree would have to emulate
+        star-import semantics to answer, and an executed package does not.
+        """
+        premise = _probe("premise", "plain")
+        self.assertEqual(["import_dxf", "pack"], premise["rebound"],
+                         "build123d 0.11.1 rebinds these two submodule names and "
+                         "no others, measured by identity in a process where "
+                         "__init__.py has run")
+        self.assertEqual(premise["rebound"], premise["pinned_rebound"])
+
     def test_every_name_the_facade_serves_is_the_object_the_package_binds(self) -> None:
         lazy = self._lazy()
         self.assertTrue(lazy["lazy_throughout"],
@@ -449,6 +499,37 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
         self.assertEqual(plain["dunder_dir"], lazy["dunder_dir"])
         self.assertEqual(485, plain["dunder_dir_len"],
                          "the count both `dir()` defects were found against")
+
+    def test_importing_a_submodule_leaves_the_object_the_package_leaves(self) -> None:
+        """The write side of the same boundary, and the third defect of its shape.
+
+        `import build123d.pack` asks the package for nothing. The import system
+        *binds* the submodule onto its parent with `setattr`, and a namespace
+        write reaches `__getattr__` no more than a namespace read does -- so the
+        facade kept the module where `__init__.py` leaves the function it
+        re-exports, and `build123d.pack(shapes)` was `TypeError: 'module' object
+        is not callable` through the boundary and worked without it. Two of the
+        24 submodules are rebound that way and both are checked here.
+
+        The `ezdxf` assertion is not decoration: declining a write is only a
+        repair if the deferral survives it, and it would be easy to buy this by
+        forcing the real `__init__` on any submodule import.
+        """
+        lazy, plain = _probe("submoduleimport", "lazy"), _probe("submoduleimport",
+                                                                "plain")
+        for field in ("pack_type", "pack_callable", "pack_qualname", "pack_home",
+                      "import_dxf_type", "import_dxf_callable"):
+            with self.subTest(field=field):
+                self.assertEqual(plain[field], lazy[field])
+        self.assertTrue(plain["pack_callable"],
+                        "the package's own `pack` is callable, so a facade that "
+                        "answers with the submodule is answering a different "
+                        "question from the one the candidate asked")
+        self.assertEqual("function", plain["pack_type"])
+        self.assertFalse(lazy["ezdxf_after_pack"],
+                         "importing one cheap submodule pulled in ezdxf, so the "
+                         "write is being declined by forcing the real __init__ "
+                         "rather than by letting the search answer")
 
     def test_vars_and_the_namespace_are_still_the_packages_own(self) -> None:
         """The same defect one route over, and the route `__dir__` cannot cover.
