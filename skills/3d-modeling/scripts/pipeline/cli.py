@@ -1380,8 +1380,25 @@ PROPOSAL_API = {
     "bodies": "how many separate solids the export should contain",
     "profile_marks": "{'z': [...]} -- the heights this shape legitimately steps "
                      "at. They explain a step; they cannot clear the part",
+    # Each kind with the fields that kind requires, derived from the whitelist
+    # rather than described beside it. The kinds were already interpolated here
+    # and the *fields* were not, so a designer read "proposable kinds:
+    # section_area, ..." and had nowhere to learn that a `section_area` row owes
+    # `at` and `value_mm2`. Six of the eight field names appeared nowhere in this
+    # packet -- `d_mm`, `enclosing_d_mm`, `size_mm`, `value_mm2`, `z_from`,
+    # `z_to` -- and none of them is in any `authorized_inputs` file either, so
+    # the two instructions this packet gives could not both be obeyed: read only
+    # what is authorized, and satisfy this API exactly. Measured on a real
+    # commission, the designer went and read `acceptance.py` to find the schema,
+    # which is the honest thing to do and outside what it was permitted.
+    #
+    # Derived, because a hand-written list is the same defect one release later:
+    # `PROPOSABLE` is the authority on what a row may carry, and a second
+    # spelling of it here would be a second authority over the same question.
     "features": "rows the gate measures. Geometry only -- position and size. "
-                "Proposable kinds: " + ", ".join(sorted(ACC.PROPOSABLE))
+                "Proposable kinds, with the fields each one requires: "
+                + "; ".join(f"{kind} -> {', '.join(fields)}"
+                            for kind, fields in sorted(ACC.PROPOSABLE.items()))
                 + ". A row may not carry a tolerance: the band is the "
                   "pipeline's and is computed from the row's own magnitude",
 }

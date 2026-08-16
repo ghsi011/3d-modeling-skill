@@ -307,5 +307,62 @@ class TheOverhangIsScreenedInPrintOrientationTest(unittest.TestCase):
         self.assertNotEqual("PASS", row.result)
 
 
+class TheCommissionPacketCarriesTheRowSchemaTest(unittest.TestCase):
+    """A designer may read only `authorized_inputs` and must satisfy
+    `proposal_api` exactly. Both are possible only if the API says what a row owes.
+
+    **This proves the packet carries the schema, because it fails whenever a
+    field exists in `PROPOSABLE` and not in `PROPOSAL_API`.** That is not a
+    hypothetical `Y` -- it is the state this test was written against. Six of the
+    eight field names (`d_mm`, `enclosing_d_mm`, `size_mm`, `value_mm2`,
+    `z_from`, `z_to`) appeared nowhere in the packet, while the *kinds* were
+    already interpolated from the same whitelist. So the packet named five
+    proposable kinds and never said that a `section_area` row owes `at` and
+    `value_mm2`.
+
+    None of those names is in an authorized file either. Measured on a real
+    commission: the designer read `acceptance.py` to find the row schema, which
+    is the only way to obey one instruction and a breach of the other.
+
+    Compared against `PROPOSABLE` itself rather than a list written here, because
+    a list written here is the same defect one release later: `PROPOSABLE` is the
+    authority on what a row may carry, and a second spelling of it in a test is a
+    second authority over the same question.
+    """
+
+    def _packet_text(self) -> str:
+        from .cli import PROPOSAL_API
+
+        return " ".join(str(value) for value in PROPOSAL_API.values())
+
+    def test_every_proposable_field_is_named_in_the_packet(self) -> None:
+        from . import acceptance as ACC
+
+        text = self._packet_text()
+        missing = sorted({field
+                          for fields in ACC.PROPOSABLE.values()
+                          for field in fields
+                          if field not in text})
+        self.assertEqual(
+            [], missing,
+            f"the commission packet never names {missing}, so a designer told to "
+            "read only its authorized inputs cannot learn what a row owes. It "
+            "either guesses or reads acceptance.py, and acceptance.py is not "
+            "authorized")
+
+    def test_every_proposable_kind_is_named_in_the_packet(self) -> None:
+        """The half that already passed, kept so the pairing is visible.
+
+        Without it, deriving the fields while dropping the kinds would leave this
+        file green about a packet that had stopped saying what may be proposed.
+        """
+        from . import acceptance as ACC
+
+        text = self._packet_text()
+        missing = [kind for kind in ACC.PROPOSABLE if kind not in text]
+        self.assertEqual([], missing,
+                         f"the packet no longer names the kinds {missing}")
+
+
 if __name__ == "__main__":
     unittest.main()
