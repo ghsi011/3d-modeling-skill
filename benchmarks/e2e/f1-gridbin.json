@@ -298,6 +298,7 @@
         "harness_seconds": 18.77,
         "harness_share_of_run": 0.011,
         "dominant_harness_cost": "registration and the 40000-sample surface distance, 14.94 s of 18.77",
+        "harness_seconds_note": "18.77 s is the first scoring. The run was scored again at 53b7b07 so the retained payload could carry scorer_commit, and that reading was 18.97 s -- same candidate, same reference, byte-identical verdict, failing row and p99. The spread is machine noise on one function, not a change in what was measured, and both numbers are recorded rather than one being selected.",
         "design_path_seconds": 1711,
         "design_tool_run_seconds": 64.5
       },
