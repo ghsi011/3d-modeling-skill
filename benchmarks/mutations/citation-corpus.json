@@ -1,0 +1,36 @@
+{
+  "target": "The citation guard's source corpus: it reads this repository's tracked files, and refuses the nested checkouts and vendored trees that a directory walk hands it",
+  "note": "The review blocker on PR 28 was that the fix had no regression proving the thing it fixed. The planted-citation probes proved `_CITATION` still recognises a bad section -- which the replaced implementation also did, and which an empty corpus would not disturb. These mutations attack the corpus rule itself. Run with: uv run python tools/mutate.py benchmarks/mutations/citation-corpus.json",
+  "mutations": [
+    {
+      "name": "the-corpus-goes-back-to-walking-everything",
+      "file": "tools/test_documentation.py",
+      "anchor": "    where = ROOT if root is None else root\n    out = subprocess.run([\"git\", \"ls-files\", \"*.py\", \"*.md\"],\n                         cwd=where, capture_output=True, check=True)\n    return [where / name for name in out.stdout.decode(\"utf-8\").splitlines() if name]",
+      "replacement": "    where = ROOT if root is None else root\n    out = []\n    for pat in (\"*.py\", \"*.md\"):\n        for path in sorted(where.rglob(pat)):\n            parts = path.relative_to(where).parts\n            if parts[0] in (\".venv\", \".git\", \"build\", \"dist\"):\n                continue\n            out.append(path)\n    return out",
+      "tests": [
+        "tools/test_documentation.py::test_the_guard_reads_tracked_sources_and_not_a_nested_checkout"
+      ],
+      "why": "the defect as it shipped, restored exactly. A walk filtered only on `parts[0]` lets `.venv312` through and every nested worktree under `.slim/` and `.claude/`, so a citation written in ANOTHER checkout of this repository -- possibly at a commit where the section still existed -- is validated against this tree's ARCHITECTURE.md and blamed on this tree. It also cost 58 945 paths walked to read 265, which is what breached the 5 s L0 ceiling at 19.4 s and had been failing about one run in five before that"
+    },
+    {
+      "name": "the-corpus-is-empty-and-therefore-clean",
+      "file": "tools/test_documentation.py",
+      "anchor": "    return [where / name for name in out.stdout.decode(\"utf-8\").splitlines() if name]",
+      "replacement": "    return []",
+      "tests": [
+        "tools/test_documentation.py::test_the_guard_reads_tracked_sources_and_not_a_nested_checkout"
+      ],
+      "why": "the failure that reads as success. A guard over no files finds no offenders and is indistinguishable on the console from a repository with nothing wrong in it. The planted-citation probes that preceded this regression would have caught this one and nothing else, which is why the regression asserts a bad citation IS found as well as asserting the nested one is not -- one assertion without the other proves the corpus is small, not that it is right"
+    },
+    {
+      "name": "the-nested-checkout-is-read-after-all",
+      "file": "tools/test_documentation.py",
+      "anchor": "    for path in _tracked_sources(root):\n        if path.name == \"test_documentation.py\":\n            continue",
+      "replacement": "    for path in list(_tracked_sources(root)) + sorted(root.rglob(\"stale.md\")):\n        if path.name == \"test_documentation.py\":\n            continue",
+      "why": "the corpus rule bypassed at the point of use rather than at its definition. A correct `_tracked_sources` is worth nothing if the caller reaches past it, and this is the shape that survives a review of the helper alone -- the helper stays right and the guard still reads somebody else's repository",
+      "tests": [
+        "tools/test_documentation.py::test_the_guard_reads_tracked_sources_and_not_a_nested_checkout"
+      ]
+    }
+  ]
+}
