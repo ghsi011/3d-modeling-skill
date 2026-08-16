@@ -41,14 +41,15 @@ object by object (0.11.1: 474 names, 0 conflicts). Any other release executes th
 keeps `build123d>=0.9`: narrowing a dependency range to protect a speedup would pay for
 it with the ability to install.
 
-**Six defects found before this shipped, none of which a build could have seen behind a
-byte-identical mesh, and every one of them a route to the package that does not reach
-`__getattr__`** — which PEP 562 consults only about a lookup that *failed*. Three the
-equivalence sweep caught while the slice was being written: `dir(build123d)` returning 11
-names where the package returns 485; `build123d.pack` answering with the submodule where
-`__init__` binds a function of the same name; and `build123d.__doc__` reading `None`.
-Three more were found by independent reads at a head where every suite was green and
-seventeen mutations were killed:
+**Nine defects found before this shipped, none of which a build could have seen behind a
+byte-identical mesh, and every one of them a route into the package the facade's hooks
+did not answer the way build123d does.** Three the equivalence sweep caught while the
+slice was being written: `dir(build123d)` returning 11 names where the package returns
+485; `build123d.pack` answering with the submodule where `__init__` binds a function of
+the same name; and `build123d.__doc__` reading `None`. Three more were found by
+independent reads at a head where every suite was green and seventeen mutations were
+killed — all three routes that do not reach `__getattr__`, which PEP 562 consults only
+about a lookup that *failed*:
 
 * `vars(build123d)` and `build123d.__dict__` carried **9** names against **485**, and
   `'Box' in vars(build123d)` was `False`. A module's `__dict__` cannot fail, so nothing
@@ -67,15 +68,39 @@ seventeen mutations were killed:
   it, the candidate's first attribute access died with `ModuleNotFoundError: No module
   named 'build123d.persistence'`, from a package it had supplied itself.
 
-21 mutations attempted, 21 killed, 0 survived
+And three more from independent probes against the head that repaired those, which is the
+plainest statement available that a repair is a change and has to be measured like one:
+
+* **`importlib.reload` executed the package body twice, and the `vars()` repair is what
+  introduced it.** `SourceLoader.exec_module` reads `module.__dict__` to execute *into*,
+  and that read was the new namespace property — so it executed `__init__.py` and the
+  reload then executed it again: `modify_copyreg` twice where the real package runs it
+  once. The facade now retires without executing when the import system rebinds
+  `__spec__` to a fresh spec, which it does before the exec;
+* **a candidate's monkeypatch did not survive the fallback.** `build123d.Box = ...`
+  followed by a read of one of the seven deferred-only names re-executed `__init__.py`,
+  which rebound the name; the real package keeps the write because an ordinary attribute
+  read re-executes nothing. Writes that arrive from outside are now put back after the
+  execution — and deliberately *not* after a reload, which is supposed to wipe them;
+* **first contact was not exactly-once and left a window.** `if not flag: flag = True`
+  has a gap between its test and its set, so two threads could both arm — running
+  `modify_copyreg()` twice — and the hooks came off *before* the package body ran, so a
+  second thread could meet an ordinary module with no `__getattr__` and a half-filled
+  namespace and get `AttributeError` for a name the package has. The claim is now
+  `dict.setdefault`, the loser waits on a latch, and the hooks come off after the
+  execution rather than before.
+
+`install()` also stopped raising `AttributeError` on a loader without `get_code`, which
+PEP 451 does not require of a loader the import system handles perfectly.
+
+26 mutations attempted, 26 killed, 0 survived
 (`benchmarks/mutations/lazy-build123d-facade.json`). The `dir()` guard survived twice and
 moved its fixture twice rather than being dropped: first because the whole-surface
 comparison reads `__version__` before it asks for `dir`, then because the `vars()` repair
 answers `dir()` before `__dir__` is reached — CPython fetches `__dict__` through ordinary
 attribute access first — so it is now named against a direct `build123d.__dir__()` call.
-Two entries were removed rather than kept as survivors, because declining the two wrong
-writes at the write left nothing for the search's own cleanup or the fallback's
-restoration loop to do.
+Three entries were removed rather than kept as survivors, because each repair removed the
+code its predecessor protected.
 
 Deliberately not done, so the scope is legible later: no generic lazy-import machinery,
 nothing under `site-packages` touched, no library stubbed, no warm child kept alive, no
