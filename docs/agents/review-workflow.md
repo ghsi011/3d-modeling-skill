@@ -92,6 +92,63 @@ public page it now appears on. The same auditor found the corrected number retai
 new justification — the excuse had changed and the leak had not, so **check that a
 correction removed the fact and not merely its rationale**.
 
+## 3b. Discriminating evidence
+
+§3a governs a *measurement*. This governs the *instrument*, and it exists because a joint
+post-mortem found one failure underneath six separate incidents:
+
+> **An instrument that passes while asking a different question from the claim resting on
+> it.**
+
+It covers a citation guard whose probes proved the pattern still worked while the corpus was
+the fix; a concurrency probe whose "hang" was an event the searcher never triggered; a
+missing-name finding for a name the library never binds; a defect reported fixed because a
+fabricated path was not a listable directory; an unread page paraphrased into a requirement;
+and a DNS row that could not pass on the machine that ran it. **Optimise for preventing
+false evidence, not for accumulating more of it.**
+
+**Write the discriminating observation before the implementation.** For every regression,
+control, probe, benchmark or protection, state:
+
+> *This proves **X** because it changes or fails when **Y** changes.*
+
+`Y` must be a plausible broken implementation: the old implementation, a missing call, a
+bypass at the call site, an empty corpus, a leaked authority. **If the instrument gives the
+same answer with `Y` broken, it is not evidence for `X`.** The full causal mechanism need
+*not* precede the code — instrumenting is often how a mechanism is found — but the question
+the instrument must discriminate does.
+
+**A control owes the same proof as a regression.** A clean control means nothing unless it
+observes the same property, through the same relevant path, as the arm it controls. *"There
+was a control"* is not sufficient. One control here computed a different field from its
+experimental arm and was therefore clean for a reason unrelated to the code, which turned
+an artefact into a reported finding.
+
+**Do not swap the question for a nearby one.** An instrument made deterministic by measuring
+something adjacent has not been repaired; it has been quietly redefined. Where no
+proportional way exists to observe the original property, **narrow the claim honestly** —
+rename the row, synchronise every dependent statement, and leave the original fact
+explicitly unproven rather than replaced by a measurement that resembles it.
+
+*Evidence:* a probe pinned to a hostname that did not resolve on its own machine was
+replaced with one that always resolves locally. That removed the network as a variable and
+also stopped exercising the service route the row existed to observe — so a future boundary
+could close that route with the row still green. The negative arm proved the test rejected
+network-dependent names; it proved nothing about what the surviving arm measured.
+
+## 3c. When the ruling channel fails
+
+A review channel can become unavailable mid-slice — a thread reaching its limit, a rate
+limit, an outage. Silence then looks exactly like agreement, which is the shape every rule
+in this file exists to refuse.
+
+* say once that the channel is unavailable, and **stop at the next ruling boundary**;
+* **silence is never approval**, and a green suite is not a substitute for a ruling;
+* a replacement channel opens with a handoff carrying exact `main`, every open PR and its
+  head SHA, hosted CI state, the last valid ruling, the decision pending, and the queue;
+* **never merge on a ruling that cannot be recovered exactly.** A ruling naming an earlier
+  head has expired.
+
 ## 4. State synchronization rule
 
 After every material change ask:
@@ -194,6 +251,16 @@ Before requesting review, answer:
 > **What changed since the last ruling, what representations could now be stale, what semantic behavior must be preserved, and can the reviewer decide from this packet without reconstructing earlier turns?**
 
 If any answer is unclear, fix the packet before review.
+
+And for every instrument the packet offers as evidence, per §3b:
+
+> **What is `Y` — the broken implementation this would fail against — and has it been run
+> that way?**
+
+An instrument whose `Y` is "the implementation this replaces" and which still passes is not
+a regression. Reviewers may reject a packet on this alone rather than reconstructing the
+proof themselves; **reconstruction teaches that a narrative will be accepted in place of
+one.**
 
 ## 12. Updating this guide
 
