@@ -572,6 +572,8 @@ class TheDividerExclusionIsAVolumeAndNotAHeightBandTest(unittest.TestCase):
                          mask["divider_low_z_mm"])
         self.assertEqual(GEOMETRY["split_axis"] == "x", mask["divider_normal_is_x"])
 
+
+class TheRegistrationSeatsBothSolidsOnTheirBaseTest(unittest.TestCase):
     """The named datum, and why it is not a bounding-box centroid.
 
     Measured rather than argued: two solids that differ only in overall height
