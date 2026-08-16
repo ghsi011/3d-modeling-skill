@@ -6,6 +6,10 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] — 2026-08-17
+
 ### Changed — the confined child stops importing `ezdxf` for candidates that never mention it
 
 `build123d/__init__.py` is eager: 24 submodules, and importing any one of them executes
@@ -2330,4 +2334,5 @@ the bounded-fit-band principle propagated to real Pixel-case geometry at
   contact/motion engine, a fail-closed 3MF writer, a Bambu adapter, camera
   calibration, and a golden-fixture regression suite.
 
+[0.2.0]: https://github.com/ghsi011/3d-modeling-skill/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ghsi011/3d-modeling-skill/releases/tag/v0.1.0
