@@ -6,6 +6,68 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — F1 becomes a standard-conformance fixture (revision 2)
+
+The reviewer's ruling on run 01: F1's truth model was stronger than its request. The
+manifest said the standard fixes the answer and therefore hard acceptance may use
+registered surface similarity, while the request deliberately withheld the base and lip
+profile — and the live run then failed the hard surface-distance row *entirely* on those
+withheld surfaces. Useful discovery evidence; not a fair reusable benchmark. The ruling
+also refused the other repair: **do not perturb the 42 mm pitch**, because F1 was chosen
+as a real standard-driven fixture and not an anti-memory synthetic task.
+
+So the request now states the load-bearing interface, from a public source, with
+provenance: `src/core/standard.scad` of
+[`kennetek/gridfinity-rebuilt-openscad`](https://github.com/kennetek/gridfinity-rebuilt-openscad)
+at `bed60a4`, which names <https://gridfinity.xyz/specification/> as its own source for
+the base and stacking-lip constants, corroborated by
+[`gridfinity-unofficial/specification`](https://github.com/gridfinity-unofficial/specification).
+The primary page itself was opened and does **not** carry the profile figures in text —
+recorded in the fixture, because a citation nobody opened is this repository's most
+common defect. The figures taken: pitch 42, widest section 41.5 per unit leaving a
+0.5 mm gap, corner radius 7.5/2, base profile 0.8 / 1.8 / 2.15 at 45° for a 4.75 mm rise
+and 2.95 mm run, base height 7 including the structure tying the feet together, stacking
+lip 0.7 / 1.8 / 1.9 from its inner tip with a depth of 2.6 and a height of 4.4 over a
+1.2 mm support, and the height unit excluding the lip.
+
+**Six new hard predicates**, each measuring a stated figure against a stated 0.2 mm
+tolerance rather than a similarity band: `base_plug_profile_mm`, `base_feet`,
+`outer_corner_radius_mm`, `compartment_floor_height_mm`, `stack_lip_depth_mm` and
+`stack_lip_seat_height_mm`. `base_feet` exists because the published profile is stated
+*per grid unit* — a two-cell bin stands on two feet with the published gap between them,
+and one plinth of the same outline has the same bounding box at every height, so no span
+can tell them apart. Both footprint rows changed from a range on the undersize to the
+published figure, and the height band narrowed from 21–28 mm to 23.5–25.4 mm, both ends
+computed from published numbers.
+
+**The hard distance now judges only what the request determines.** Registration seats
+both solids on their own base plane and footprint centre instead of centring bounding
+boxes, because the publication cannot fix the overall height and a centroid fit would
+spread half that legitimate difference over every surface. Two ranges are masked out of
+the p99 row and reported as a diagnostic instead: the internal floor transition, where
+the same public file offers a 2.8 mm fillet radius and the reference uses 1.1; and
+everything above the lip's published land, where the final 1.9 mm chamfer would leave the
+rim a knife edge at a 1.0 mm wall and every implementation truncates it by an amount the
+publication does not state. Measured: an independent implementation of the same published
+figures scores p99 = 0.0018 mm masked and 0.300 mm — exactly on the band — unmasked.
+
+Reference conformance was measured before any of this was frozen, and it is not uniform:
+the reference agrees with the publication on the footprint, all three base segments, the
+corner radius (3.7528 by area deficit, 3.7500 by corner distance, against a published
+3.75), the floor height, the lip depth, the lip seat height and the lip's first two
+segments — and *disagrees* on the final chamfer, 1.3 against 1.9. The disagreement is
+reported rather than reconciled, and it is what the mask removes.
+
+Run 01 is preserved as revision-1 discovery evidence. It was not re-scored, it is not
+evidence about revision 2, and revision 2 was not tuned to it: the two figures that
+candidate got wrong — a 2.4 mm capture ramp and a 4.0 mm corner radius — are wrong
+against the public source, and both are now mutation probes.
+
+Thirty-one mutations, all killed. Also fixed on the way: the scorer ignored the
+`probe_samples` the fixture declared, and the masked row and its unmasked diagnostic now
+come from one sampling pass rather than two — which halves the dominant harness cost and
+makes it impossible for the two to disagree about the same pair of solids.
+
 ### Added — F1's live end-to-end arm, and the first real run through it
 
 Slice A of [`docs/agents/qa-e2e-implementation.md`](docs/agents/qa-e2e-implementation.md):
@@ -67,7 +129,8 @@ library instead, and walks build items through their components so a body hidden
 second component is counted. And `make_3mf.py`'s `%.6g` vertices (**D2**) are now
 quantified: p99 3.27e-05 mm, volume delta 0.0013 mm³.
 
-L0 grew by 38 tests to 1299 collected, against a ceiling of 1440.
+L0 grew by 38 tests to 1299 collected, against a ceiling of 1440; revision 2 added a
+further 18, to 1317.
 
 ### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
 

@@ -98,9 +98,11 @@ class TheHardPredicateSetIsFrozenTest(unittest.TestCase):
     detail. A slice that quietly dropped one would still report `CAD_PASS`."""
 
     FROZEN = ("one_printable_body", "watertight", "footprint_long_mm",
-              "footprint_short_mm", "height_mm", "compartment_count",
-              "divider_on_long_axis", "no_bores_in_base",
-              "compartment_is_prismatic", "stack_lip_present")
+              "footprint_short_mm", "height_mm", "base_plug_profile_mm",
+              "outer_corner_radius_mm", "compartment_floor_height_mm",
+              "compartment_count", "divider_on_long_axis", "no_bores_in_base",
+              "base_feet", "compartment_is_prismatic", "stack_lip_present",
+              "stack_lip_depth_mm", "stack_lip_seat_height_mm")
 
     def test_the_predicate_names_are_the_ones_the_fixture_was_frozen_with(self) -> None:
         self.assertEqual(list(self.FROZEN), list(compliant()["rows"]))
@@ -172,30 +174,282 @@ class TheForbiddenFeaturesAreRefusedTest(unittest.TestCase):
 class TheFootprintMustDropIntoTheGridTest(unittest.TestCase):
     """Probe 5: one axis scaled."""
 
-    def test_both_footprints_are_undersize_by_a_working_amount(self) -> None:
+    def test_both_footprints_are_the_published_figure(self) -> None:
         self.assertTrue(verdict("footprint_long_mm"))
         self.assertTrue(verdict("footprint_short_mm"))
 
     def test_a_bin_exactly_the_pitch_wide_is_refused(self) -> None:
-        """The band is on the *undersize*, so equal-to-pitch fails.
+        """The published footprint leaves a gap in the cell, so equal-to-pitch
+        fails.
 
         Written as a direct call rather than through a mutation because the
         boundary is the whole content of the predicate: a bin the size of its
         cell does not drop into the cell.
         """
         exact = dict(compliant()["features"])                  # type: ignore[arg-type]
-        exact["extents_mm"] = [84.0, 41.5, 24.8]
+        exact["extents_mm"] = [84.0, 42.0, 24.8]
         rows = {row["predicate"]: row for row in e2e.predicates(exact, GEOMETRY)}
         self.assertFalse(rows["footprint_long_mm"]["passes"])
+        self.assertFalse(rows["footprint_short_mm"]["passes"])
 
 
 class TheHeightMustBeThreeUnitsTest(unittest.TestCase):
 
-    def test_the_bin_is_three_height_units_plus_a_base_allowance(self) -> None:
+    def test_the_bin_is_three_height_units_plus_a_lip(self) -> None:
         self.assertTrue(verdict("height_mm"))
         self.assertGreaterEqual(compliant()["features"]["height_mm"],
                                 GEOMETRY["height_units"] *
                                 GEOMETRY["height_unit_mm"])
+
+    def test_the_band_is_the_published_lip_at_both_ends(self) -> None:
+        """Both ends are arithmetic on request-side numbers, and neither is a
+        margin around the reference. The publication cannot fix the overall
+        height -- it fixes the body and the whole lip, and the truncation
+        between them is the designer's -- so the band is exactly that freedom
+        and not a tolerance."""
+        body = GEOMETRY["height_units"] * GEOMETRY["height_unit_mm"]
+        lip = GEOMETRY["lip_profile"]
+        self.assertAlmostEqual(body + lip["lower_chamfer_mm"] + lip["land_mm"],
+                               GEOMETRY["height_min_mm"], places=9)
+        self.assertAlmostEqual(body + lip["height_mm"],
+                               GEOMETRY["height_max_mm"], places=9)
+
+
+class ThePublishedBaseProfileIsHeldTest(unittest.TestCase):
+    """Revision 2. The request states the foot; these rows read whether it is
+    there, and they are the rows the ruling exists to create."""
+
+    def test_the_compliant_bin_matches_the_published_profile_exactly(self) -> None:
+        self.assertTrue(verdict("base_plug_profile_mm"))
+        plug = compliant()["features"]["base_profile"]
+        self.assertEqual(0, plug["missing_sections"])
+        self.assertLessEqual(plug["worst_mm"], 0.01)
+
+    def test_every_published_segment_is_sampled_inside_itself(self) -> None:
+        """Nine samples, three per segment, and none of them on a boundary.
+
+        Pinned because a sample taken exactly where two segments meet is a
+        sample of an edge, and which side of it a tessellation lands on is a
+        property of the exporter rather than of the design. If the sampling ever
+        collapses onto the boundaries this passes silently and measures the one
+        thing it must not.
+        """
+        plug = GEOMETRY["base_profile"]
+        edges = {0.0, plug["lower_chamfer_mm"],
+                 plug["lower_chamfer_mm"] + plug["land_mm"], plug["rise_mm"]}
+        heights = [row["z_mm"] for row in
+                   compliant()["features"]["base_profile"]["samples"]]
+        self.assertEqual(9, len(heights))
+        for z in heights:
+            self.assertTrue(all(abs(z - edge) >= plug["sample_margin_mm"] - 1e-9
+                                for edge in edges), z)
+
+    def test_a_quarter_millimetre_on_the_upper_chamfer_is_refused(self) -> None:
+        """The deviation the first real run actually produced, as a number.
+
+        That candidate ran the upper chamfer 2.4 mm where the publication says
+        2.15, which revision 1 could not fault because revision 1 did not state
+        it. Asserted here directly as well as through the mutation, because it
+        is the specific defect this revision exists to be able to see.
+        """
+        got = dict(compliant()["features"])                    # type: ignore[arg-type]
+        got["base_profile"] = {"worst_mm": 0.25, "missing_sections": 0,
+                               "samples": []}
+        rows = {row["predicate"]: row for row in e2e.predicates(got, GEOMETRY)}
+        self.assertFalse(rows["base_plug_profile_mm"]["passes"])
+
+    def test_a_bin_on_one_plinth_is_refused_and_a_bin_on_two_feet_is_not(self) -> None:
+        """The one published fact no span can see.
+
+        Two feet on the pitch and one plinth spanning them have identical
+        bounding boxes at every height, so `base_plug_profile_mm` and both
+        footprint rows accept either. Asserted on both states rather than only
+        the failing one, because a row pinned on one side is satisfied by a
+        scorer that always answers that way.
+        """
+        self.assertTrue(verdict("base_feet"))
+        self.assertEqual([2], sorted(set(
+            compliant()["features"]["base_feet_counts"])))
+        plinth = dict(compliant()["features"])                 # type: ignore[arg-type]
+        plinth["base_feet_counts"] = [1] * len(plinth["base_feet_counts"])
+        rows = {row["predicate"]: row for row in e2e.predicates(plinth, GEOMETRY)}
+        self.assertFalse(rows["base_feet"]["passes"])
+        self.assertTrue(rows["base_plug_profile_mm"]["passes"])
+        self.assertTrue(rows["footprint_long_mm"]["passes"])
+
+
+class ThePublishedInterfaceRowsCanFailTest(unittest.TestCase):
+    """The other three revision-2 rows, each pinned in both states.
+
+    Fed as measurements rather than as built geometry: each of these reads one
+    number off the section stack, and the question here is whether the
+    comparison against the published figure decides anything. The geometry that
+    produces the number is exercised by the mutations.
+    """
+
+    def _with(self, **changes) -> dict[str, dict]:
+        got = dict(compliant()["features"])                    # type: ignore[arg-type]
+        got.update(changes)
+        return {row["predicate"]: row for row in e2e.predicates(got, GEOMETRY)}
+
+    def test_the_corner_radius_is_the_published_one(self) -> None:
+        self.assertTrue(verdict("outer_corner_radius_mm"))
+        self.assertFalse(self._with(outer_corner_radius_mm=4.0)
+                         ["outer_corner_radius_mm"]["passes"])
+        self.assertFalse(self._with(outer_corner_radius_mm=None)
+                         ["outer_corner_radius_mm"]["passes"])
+
+    def test_the_floor_sits_at_the_published_base_height(self) -> None:
+        self.assertTrue(verdict("compartment_floor_height_mm"))
+        self.assertAlmostEqual(GEOMETRY["base_height_mm"],
+                               compliant()["features"]["floor_top_mm"], places=2)
+        self.assertFalse(self._with(floor_top_mm=5.0)
+                         ["compartment_floor_height_mm"]["passes"])
+        self.assertFalse(self._with(floor_top_mm=None)
+                         ["compartment_floor_height_mm"]["passes"])
+
+    def test_the_lip_throat_is_at_the_published_depth_and_height(self) -> None:
+        self.assertTrue(verdict("stack_lip_depth_mm"))
+        self.assertTrue(verdict("stack_lip_seat_height_mm"))
+        shallow = {"opening_mm": 79.5, "inset_from_outer_mm": 2.0,
+                   "seat_top_mm": 21.0}
+        low = {"opening_mm": 78.3, "inset_from_outer_mm": 2.6,
+               "seat_top_mm": 19.5}
+        self.assertFalse(self._with(lip_throat=shallow)
+                         ["stack_lip_depth_mm"]["passes"])
+        self.assertTrue(self._with(lip_throat=shallow)
+                        ["stack_lip_seat_height_mm"]["passes"])
+        self.assertFalse(self._with(lip_throat=low)
+                         ["stack_lip_seat_height_mm"]["passes"])
+        self.assertTrue(self._with(lip_throat=low)["stack_lip_depth_mm"]["passes"])
+        self.assertFalse(self._with(lip_throat=None)
+                         ["stack_lip_depth_mm"]["passes"])
+
+
+class TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest(unittest.TestCase):
+    """Revision 2's mask, and the two ways a mask goes wrong.
+
+    A mask that removes too little judges a surface the request does not fix,
+    which is the defect the ruling names. A mask that removes too much leaves a
+    row that cannot fail, which reads exactly like a row that holds. Both are
+    asserted.
+    """
+
+    def test_the_masked_ranges_are_arithmetic_on_request_side_numbers(self) -> None:
+        mask = e2e.distance_mask(GEOMETRY)
+        lip = GEOMETRY["lip_profile"]
+        self.assertEqual(GEOMETRY["base_height_mm"], mask["floor_low_mm"])
+        self.assertEqual(GEOMETRY["base_height_mm"] +
+                         GEOMETRY["internal_fillet_allowance_mm"],
+                         mask["floor_high_mm"])
+        self.assertEqual(GEOMETRY["height_units"] * GEOMETRY["height_unit_mm"] +
+                         lip["lower_chamfer_mm"] + lip["land_mm"],
+                         mask["lip_land_top_mm"])
+
+    def test_only_the_two_declared_ranges_are_dropped(self) -> None:
+        import numpy as np
+
+        mask = e2e.distance_mask(GEOMETRY)
+        heights = np.array([0.0, 3.0, 6.9, 7.0, 8.4, 9.8, 9.9, 23.5, 23.6, 30.0])
+        points = np.stack([np.zeros_like(heights), np.zeros_like(heights),
+                           heights], axis=1)
+        dropped = e2e.undetermined(points, mask).tolist()
+        self.assertEqual([False, False, False, True, True, True, False,
+                          False, True, True], dropped)
+
+    def test_no_mask_drops_nothing(self) -> None:
+        import numpy as np
+
+        points = np.zeros((5, 3))
+        self.assertFalse(e2e.undetermined(points, None).any())
+
+    def test_a_mask_that_removes_everything_is_a_refusal_not_a_pass(self) -> None:
+        import numpy as np
+
+        points = np.stack([np.zeros(4), np.zeros(4),
+                           np.array([8.0, 8.5, 9.0, 9.5])], axis=1)
+        with self.assertRaises(e2e.E2EError):
+            e2e.summarise(points, np.array([9.0, 9.0, 9.0, 9.0]), band_mm=0.3,
+                          mask=e2e.distance_mask(GEOMETRY))
+
+    def test_the_mask_hides_the_undetermined_range_and_nothing_else(self) -> None:
+        """Two prisms that differ only above the lip's land, and again only
+        below it. The first must pass and the second must fail, or the mask is
+        either not applied or applied everywhere."""
+        import trimesh
+
+        mask = e2e.distance_mask(GEOMETRY)
+        base = trimesh.creation.box(extents=(40.0, 20.0, 24.0))
+        base.apply_translation((0.0, 0.0, 12.0))
+        above = trimesh.creation.box(extents=(40.0, 20.0, 26.0))
+        above.apply_translation((0.0, 0.0, 13.0))
+        below = trimesh.creation.box(extents=(43.0, 20.0, 24.0))
+        below.apply_translation((0.0, 0.0, 12.0))
+        tall = e2e.register(above, base, samples=4000, seed=7, band_mm=0.3,
+                            probe_samples=300, mask=mask)
+        wide = e2e.register(below, base, samples=4000, seed=7, band_mm=0.3,
+                            probe_samples=300, mask=mask)
+        self.assertLess(tall["distance"]["p99_mm"], 0.3)
+        self.assertGreater(tall["distance_unmasked"]["p99_mm"], 0.3)
+        self.assertGreater(wide["distance"]["p99_mm"], 0.3)
+
+    def test_the_unmasked_diagnostic_is_the_same_measurement(self) -> None:
+        """One sampling pass, two summaries. Two passes would let the row and
+        the diagnostic beside it disagree about the same pair of solids."""
+        import trimesh
+
+        solid = trimesh.creation.box(extents=(30.0, 20.0, 24.0))
+        solid.apply_translation((0.0, 0.0, 12.0))
+        found = e2e.register(solid.copy(), solid, samples=2000, seed=7,
+                             band_mm=0.3, probe_samples=200,
+                             mask=e2e.distance_mask(GEOMETRY))
+        self.assertGreater(found["distance"]["masked_out"], 0)
+        self.assertEqual(0, found["distance_unmasked"]["masked_out"])
+        self.assertEqual(found["distance"]["samples"] +
+                         found["distance"]["masked_out"],
+                         found["distance_unmasked"]["samples"])
+
+
+class TheRegistrationSeatsBothSolidsOnTheirBaseTest(unittest.TestCase):
+    """The named datum, and why it is not a bounding-box centroid.
+
+    Measured rather than argued: two solids that differ only in overall height
+    are compared, and a centroid fit smears half the difference over every
+    surface while the datum leaves it where it is.
+    """
+
+    def test_a_seated_solid_stands_on_z_zero_and_is_centred_on_its_footprint(self) -> None:
+        import trimesh
+
+        solid = trimesh.creation.box(extents=(10.0, 6.0, 4.0))
+        solid.apply_translation((17.0, -3.0, 9.0))
+        seated = e2e._seat(solid)
+        self.assertAlmostEqual(0.0, float(seated.bounds[0][2]), places=9)
+        self.assertAlmostEqual(0.0, float(seated.bounds[0][0] +
+                                          seated.bounds[1][0]), places=9)
+        self.assertAlmostEqual(0.0, float(seated.bounds[0][1] +
+                                          seated.bounds[1][1]), places=9)
+
+    def test_a_taller_solid_does_not_shift_the_surfaces_it_shares(self) -> None:
+        import trimesh
+
+        short = trimesh.creation.box(extents=(40.0, 20.0, 24.0))
+        short.apply_translation((0.0, 0.0, 12.0))
+        tall = trimesh.creation.box(extents=(40.0, 20.0, 25.0))
+        tall.apply_translation((0.0, 0.0, 12.5))
+        def centred(mesh):
+            out = mesh.copy()
+            out.apply_translation(-mesh.bounding_box.centroid)
+            return out
+
+        # The plane the two solids share. Under the datum it is the same plane
+        # for both; under a centroid fit the taller one's is half the height
+        # difference away, and every surface below it inherits that offset.
+        self.assertAlmostEqual(float(e2e._seat(tall).bounds[0][2]),
+                               float(e2e._seat(short).bounds[0][2]), places=9)
+        self.assertAlmostEqual(0.5, abs(float(centred(tall).bounds[0][2]) -
+                                        float(centred(short).bounds[0][2])),
+                               places=9)
 
 
 class TheStlCarriesOnePrintableBodyTest(unittest.TestCase):
@@ -308,23 +562,40 @@ class TheRequestPackageCarriesNoAnswerTest(unittest.TestCase):
         return e2e.write_request(SPEC, root)
 
     def test_the_written_request_states_nothing_undeclared(self) -> None:
+        """Two axes cross now and both are declared; the third does not cross.
+
+        Revision 2 states the published footprint, so the request necessarily
+        states two of the reference's three extents -- which is the ruling
+        carried out rather than a hole in the wall. The overall height is the
+        one extent the publication does not fix, and it is the one that has to
+        stay out.
+        """
         with tempfile.TemporaryDirectory() as raw:
             where = self._written(Path(raw))
             audit = e2e.audit_request(SPEC, where, self.MEASURED)
-        self.assertEqual(["extent_y"], audit["declared"])
-        self.assertEqual([["42", "extent_y"]],
+        self.assertEqual(["extent_x", "extent_y"], audit["declared"])
+        self.assertEqual([["42", "extent_y"], ["41.5", "extent_y"],
+                          ["83.5", "extent_x"]],
                          [[f"{value:g}", name]
                           for value, name in audit["coincidences"]])
 
     def test_a_planted_measurement_is_a_hard_failure(self) -> None:
+        """Planted on the axis revision 2 does NOT disclose.
+
+        It used to plant the overall length, which revision 2 legitimately
+        states. Moving the plant to the height keeps this measuring the guard
+        rather than the disclosure: the overall height is a design decision
+        inside a published band, so a request that stated it would be handing
+        over the answer.
+        """
         with tempfile.TemporaryDirectory() as raw:
             where = self._written(Path(raw))
             brief = where / "brief.md"
             brief.write_text(brief.read_text(encoding="utf-8") +
-                             "\n* overall length: 83.5 mm\n", encoding="utf-8")
+                             "\n* overall height: 24.8 mm\n", encoding="utf-8")
             with self.assertRaises(e2e.RequestLeak) as caught:
                 e2e.audit_request(SPEC, where, self.MEASURED)
-        self.assertIn("extent_x", str(caught.exception))
+        self.assertIn("extent_z", str(caught.exception))
 
     def test_the_written_request_is_a_project_design_tool_can_be_run_from(self) -> None:
         from pipeline import project as P
@@ -540,6 +811,54 @@ class TheFixtureHalvesAgreeTest(unittest.TestCase):
                          [rows["grid_units_long"], rows["grid_units_short"]])
         self.assertEqual(GEOMETRY["height_units"], rows["height_units"])
         self.assertEqual(GEOMETRY["grid_pitch_mm"], rows["grid_pitch_mm"])
+
+    def test_every_published_figure_a_predicate_applies_is_in_the_brief(self) -> None:
+        """The revision-2 condition, enforced instead of promised.
+
+        The ruling allows a hard reference-distance predicate only where
+        request-side facts determine the surface, and the same goes for the
+        named rows: `base_plug_profile_mm` against a figure the brief does not
+        state would be revision 1 again under a new name. So every number the
+        predicates read out of `geometry` has to be findable in the prose a
+        designer is handed, and the halves cannot drift apart quietly.
+        """
+        brief = "\n".join(SPEC["request"]["brief"])
+        plug, lip = GEOMETRY["base_profile"], GEOMETRY["lip_profile"]
+        for label, value in (
+                ("grid pitch", GEOMETRY["grid_pitch_mm"]),
+                ("widest section per unit", GEOMETRY["unit_widest_mm"]),
+                ("gap between units", GEOMETRY["grid_gap_mm"]),
+                ("height unit", GEOMETRY["height_unit_mm"]),
+                ("corner radius", GEOMETRY["outer_corner_radius_mm"]),
+                ("base lower chamfer", plug["lower_chamfer_mm"]),
+                ("base land", plug["land_mm"]),
+                ("base upper chamfer", plug["upper_chamfer_mm"]),
+                ("base rise", plug["rise_mm"]),
+                ("base run", plug["run_mm"]),
+                ("base height", GEOMETRY["base_height_mm"]),
+                ("lip lower chamfer", lip["lower_chamfer_mm"]),
+                ("lip land", lip["land_mm"]),
+                ("lip upper chamfer", lip["upper_chamfer_mm"]),
+                ("lip depth", lip["depth_mm"]),
+                ("lip height", lip["height_mm"]),
+                ("lip support", lip["support_height_mm"]),
+                ("stated tolerance", GEOMETRY["published_tolerance_mm"])):
+            self.assertIn(f"{value:g} mm", brief, label)
+
+    def test_the_brief_cites_the_sources_the_fixture_records(self) -> None:
+        """Provenance on the request side, which is what the ruling asked for.
+
+        A figure stated without a source is an assertion a designer has to take
+        on trust and a reviewer cannot check, and this repository's most common
+        defect is a citation nobody opened.
+        """
+        brief = "\n".join(SPEC["request"]["brief"])
+        published = SPEC["published_interface"]
+        for block in ("primary", "corroborating"):
+            url = published[block]["url"]
+            self.assertIn(url.split("/blob/")[0], brief, block)
+        self.assertIn(published["primary_source_checked_and_insufficient"]["url"],
+                      brief)
 
     def test_the_declared_disclosure_names_a_requirement_that_exists(self) -> None:
         names = {row["name"] for row in SPEC["request"]["project"]["requirements"]}

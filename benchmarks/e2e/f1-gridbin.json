@@ -1,9 +1,9 @@
 {
   "id": "e2e-grid-bin-2x1x3",
-  "revision": 1,
+  "revision": 2,
   "class": "FROM_SPEC",
   "required_hosted": false,
-  "note": "F1 of docs/agents/qa-e2e-implementation.md, and Slice A of its section 13. Reference-determined geometry (section 3.1): the standard fixes the answer, so hard acceptance may include exact topology and a registered surface comparison. The other four fixtures have different truth models and this file deliberately says nothing about them.\n\nEVERY NUMBER BELOW IS ON ONE OF TWO SIDES OF A WALL, AND THE SIDES ARE NOT INTERCHANGEABLE. `request` is what a designer is handed: it carries the published grid interface and the features the requester asked for, and nothing measured off the hidden reference. `geometry` is what the grader applies: it may be informed by the reference, because a predicate is candidate-independent and is frozen before any candidate runs. `tools/e2e.py:audit_request` enforces the first half mechanically, by running `corpus.numbers_in` and `corpus.coincidences` over the materialised request package -- so a measurement that reached the brief is a hard failure and not a review finding.\n\nThe one number that crosses is declared. The published pitch is 42 mm and a one-unit-wide bin is one pitch less the grid clearance, so a requester who states the pitch states the short footprint to within 1.2%. Refusing that coincidence would refuse the only information that makes the request answerable, which is docs/defects.md D30 exactly. It is declared with its public source, and the report marks that axis given rather than reconstructed.\n\nWHY THE BRIEF STOPS WHERE IT DOES. It carries the pitch, the footprint in grid units, the height in height units, one divider on the long axis, a stacking lip, the forbidden features, the wall thickness and the print context -- and not the base or lip profile. That is a deliberate, recorded gap rather than an oversight: the profile could only come from naming the standard by name (which makes a finished model one search away) or from measuring the hidden reference (which is the prohibition). The consequence is that `reference_surface_distance_p99_mm` is testing a surface the brief never dimensioned, and the first real run is expected to say so.",
+  "note": "F1 of docs/agents/qa-e2e-implementation.md, and Slice A of its section 13. Reference-determined geometry (section 3.1): the standard fixes the answer, so hard acceptance may include exact topology and a registered surface comparison. The other four fixtures have different truth models and this file deliberately says nothing about them.\n\nWHAT REVISION 2 IS. Revision 1 withheld the base and lip profile and then judged them with a hard reference-distance predicate. The first real run failed exactly there and nowhere else, and the reviewer ruled: the truth model was stronger than the request, so it was not yet a fair reusable benchmark. The ruling also refused the other repair -- do NOT perturb the 42 mm pitch off the published standard, because F1 was chosen as a real standard-driven fixture and not an anti-memory synthetic. So revision 2 states the load-bearing interface on the request side from a public source, with provenance, and re-scopes the hard predicates so that every surface a distance predicate decides on is determined by a request-side fact. What is not determined -- the internal fillets, and the lip's final chamfer, which cannot be built in full at a 1.0 mm wall -- is masked out of the hard row and reported as a diagnostic.\n\nEVERY NUMBER BELOW IS ON ONE OF TWO SIDES OF A WALL, AND THE SIDES ARE NOT INTERCHANGEABLE. `request` is what a designer is handed. `geometry` is what the grader applies: it may be informed by the reference, because a predicate is candidate-independent and is frozen before any candidate runs. `tools/e2e.py:audit_request` enforces the first half mechanically, by running `corpus.numbers_in` and `corpus.coincidences` over the materialised request package -- so a measurement that reached the brief is a hard failure and not a review finding.\n\nTWO COINCIDENCES NOW CROSS, AND BOTH ARE DECLARED. The published widest section is 41.5 mm per grid unit in a 42 mm cell, so a two-by-one bin is 83.5 x 41.5 mm at its widest and a request that states the interface states both footprint axes. That is the point of revision 2 rather than a leak in it: the footprint is a published property of the family, it would exist if this particular reference had never been generated, and the reviewer's ruling requires it on the request side. The third extent -- the overall height -- is NOT disclosed and is not derivable, because the publication does not fix the lip truncation; it stays a design decision inside a band this file records.",
   "reference": {
     "root": {
       "env": "QA_E2E_REFERENCE_ROOT",
@@ -29,11 +29,84 @@
       "path": "qa-f1-gridbin/reference/gridbin.step",
       "sha256": "e8f09161b7a0b8c2c445d48a1b5b30a8fbcb14d9a15a7928d325186963c66137"
     },
-    "why_normalised": "the generator's STL export carries four zero-volume single-triangle slivers, which make the file non-watertight. Scored as generated, the watertight row fails against any correct candidate and blind._normalised_inertia returns None -- losing the only row in that scorer that can see shape. The scorer is right to return None for an open surface; the fault was the reference. Repaired at ingest with the pipeline's own mesh_io.normalize_mesh: 21124 -> 21120 faces, watertight false -> true, volume delta 1.46e-11 mm3. The scored artifact is the normalised file and its digest is above."
+    "why_normalised": "the generator's STL export carries four zero-volume single-triangle slivers, which make the file non-watertight. Scored as generated, the watertight row fails against any correct candidate and blind._normalised_inertia returns None -- losing the only row in that scorer that can see shape. The scorer is right to return None for an open surface; the fault was the reference. Repaired at ingest with the pipeline's own mesh_io.normalize_mesh: 21124 -> 21120 faces, watertight false -> true, volume delta 1.46e-11 mm3. The scored artifact is the normalised file and its digest is above.",
+    "identity_still_withheld": "the generator above is answer-side and stays there. Revision 2 names the STANDARD on the request side, which the ruling requires; it does not name this generator, this repository, this call or these digests, and none of them appear in the materialised request package. The public source the request cites is a different project by a different author in a different language, and it does not produce these bytes -- measured, in `spec_conformance` below, where the two disagree on the lip's final chamfer."
   },
   "expected_outputs": {
     "stls": 1,
     "three_mf": 1
+  },
+  "published_interface": {
+    "what_this_block_is": "the request-side facts of revision 2 and where each one comes from, so a reviewer can check every figure against its source rather than against this file. Provenance tag PUBLISHED throughout, per docs/agents/review-workflow.md section 3a: a public source, named and checkable. Nothing here was measured off the reference; `spec_conformance` below is the separate question of whether the reference happens to agree.",
+    "primary": {
+      "source": "src/core/standard.scad of kennetek/gridfinity-rebuilt-openscad",
+      "url": "https://github.com/kennetek/gridfinity-rebuilt-openscad/blob/main/src/core/standard.scad",
+      "commit": "bed60a4296fe83f1bb7170ee17a069ae4a73bfcf",
+      "read_utc": "2026-08-16",
+      "what_it_is": "the constants file of a widely used public implementation of the grid standard, which cites https://gridfinity.xyz/specification/ in its own comment headers as the source of both the base and the stacking-lip constants. It is an implementation and it is named as one; it is not the reference's generator and shares no author, language or geometry kernel with it.",
+      "figures": {
+        "GRID_DIMENSIONS_MM": "[42, 42]",
+        "BASE_TOP_DIMENSIONS": "[41.5, 41.5] -- 'Each unit's base is 41.5mm x 41.5mm / Leaving 0.5mm gap with an l_grid of 42'",
+        "BASE_TOP_RADIUS": "7.5 / 2",
+        "BASE_PROFILE": "[[0,0],[0.8,0.8],[0.8,(0.8+1.8)],[(0.8+2.15),(0.8+1.8+2.15)]] -- 'Up and out at a 45 degree angle' / 'Straight up' / 'Up and out at a 45 degree angle'",
+        "BASE_HEIGHT": "7 -- 'Height of the base. Includes the structure tying the bases together.'",
+        "STACKING_LIP_LINE": "[[0,0],[0.7,0.7],[0.7,(0.7+1.8)],[(0.7+1.9),(0.7+1.8+1.9)]] -- 'Inner tip' / 'Go out 45 degrees' / 'Vertical increase' / 'Go out 45 degrees'",
+        "STACKING_LIP_SUPPORT_HEIGHT": "1.2, with _stacking_lip_support_angle = 45",
+        "d_div": "1.2 -- 'width of divider between compartments'",
+        "d_wall": "0.95 -- 'minimum wall thickness'",
+        "r_f2": "2.8 -- 'internal fillet radius'",
+        "fromGridfinityUnits": "gridfinityUnit * 7, documented in src/core/gridfinity-rebuilt-utility.scad as 'The final value in mm. **Excluding** base height, and stacking lip height (if present).'",
+        "BASE_GAP_MM": "GRID_DIMENSIONS_MM - BASE_TOP_DIMENSIONS = [0.5, 0.5] -- 'How much overhang is expected by the standard per base. There should be a 0.5mm gap between each base. This must be kept constant, even at half/quarter grid sizes. Otherwise, they won't fit in normal grids.' The base is stated per base, and the file's grid helpers place one per unit."
+      }
+    },
+    "corroborating": {
+      "source": "gridfinity-unofficial/specification, README.md",
+      "url": "https://github.com/gridfinity-unofficial/specification",
+      "read_utc": "2026-08-16",
+      "figures": {
+        "grid": "'The core of the gridfinity design is the 42x42x7mm grid format.'",
+        "block": "'It is 41.5mm square to allow some tolerance to fit within the baseplates.'"
+      },
+      "why_it_is_only_corroborating": "it carries the pitch and the widest section in text and puts the base and lip profiles in two JPEG diagrams rather than in prose, so it cannot be quoted for the segment heights."
+    },
+    "primary_source_checked_and_insufficient": {
+      "url": "https://gridfinity.xyz/specification/",
+      "read_utc": "2026-08-16",
+      "finding": "opened, and it does not carry the profile figures in text. What it states dimensionally is the magnet size (6 mm diameter, 2 mm thick) and M3 corner screws; the rest of the page directs the reader to a community channel. Recorded because a citation nobody opened is this repository's most common defect, and because the two sources above both name this page as theirs -- so a reader who follows the chain should know where it ends."
+    },
+    "what_the_publication_does_not_fix": [
+      "the truncation of the stacking lip's final 1.9 mm chamfer. Run out in full it opens the socket to the outer surface and leaves the rim a knife edge at a 1.0 mm wall, so every implementation stops it early and the publication does not say where. This is why the overall height is a band here and not a figure.",
+      "the internal fillet or chamfer where the floor and the divider meet the walls. The same public file offers r_f2 = 2.8 as an internal fillet radius while the reference uses 1.1 -- two readings of one source disagreeing, which is the proof that it is a design decision rather than an interface.",
+      "the divider's own thickness. d_div = 1.2 sits in that file without a spec attribution, so the request states 1.2 as the requester's own family convention rather than as a published interface figure -- honest about which of the two it is."
+    ]
+  },
+  "spec_conformance": {
+    "what_this_block_is": "whether the hidden reference agrees with the published figures above. Answer-side, and the reason revision 2 can hard-judge anything at all: a predicate written from the publication is only fair if the reference satisfies it, and a surface where the two disagree must be masked instead. Measured on the scored reference with C:/projects/3d/qa-f1-gridbin/spec-conformance/measure_profile.py, outer and cavity cross-sections at 0.05 mm steps.",
+    "agrees": {
+      "footprint_mm": "83.5 x 41.5, against a published 2 x 42 - 0.5 and 1 x 42 - 0.5",
+      "base_lower_chamfer": "z 0.000 -> 0.800, span 77.60 -> 79.20: 0.8 mm rise, 0.8 mm per side out, 45 degrees",
+      "base_land": "z 0.800 -> 2.600, span 79.20 constant: 1.8 mm",
+      "base_upper_chamfer": "z 2.600 -> 4.750, span 79.20 -> 83.50: 2.15 mm rise, 2.15 mm per side out, 45 degrees",
+      "base_run_per_side": "(83.50 - 77.60) / 2 = 2.95, against a published 0.8 + 2.15",
+      "outer_corner_radius": "3.7528 mm by area deficit and 3.7500 mm by the shortest distance from a bounding-box corner, against a published 7.5 / 2. Two methods sharing no assumption, agreeing to 0.003 mm; only the first is cheap enough to run on every candidate and it is the one the predicate uses.",
+      "floor_height": "the first section with an interior ring is z = 7.000, against a published BASE_HEIGHT of 7",
+      "wall": "cavity 81.5 x 39.5 against an outer 83.5 x 41.5: 1.0 mm, which the request states",
+      "cavity_outer_corner_radius": "2.75 = 3.75 - 1.0, recovered from the measured cavity area 3164.309 mm2 to 0.01 mm2 -- a uniform wall, which follows from two request-side numbers",
+      "divider": "1.200 mm thick, centred on x = 0",
+      "lip_depth": "(83.50 - 78.30) / 2 = 2.60 from the outer surface, against a published 2.6",
+      "lip_inner_tip_height": "z = 21.000, against a published 3 height units of 7 mm excluding the lip",
+      "lip_first_segment": "z 21.000 -> 21.700, opening 78.30 -> 79.70: 0.7 mm at 45 degrees",
+      "lip_land": "z 21.700 -> 23.500, opening 79.70 constant: 1.8 mm",
+      "lip_support": "z 19.800 -> 21.000 at a constant 78.30 (1.2 mm, the published support height) and then z 18.200 -> 19.800 ramping out to 81.50 at 45 degrees",
+      "one_foot_per_grid_unit": "measured, and the reason a footprint row cannot stand in for it: at z = 4.750 the section is TWO rounded squares of 41.5 mm with a 0.5 mm gap between them (area 3420.306 mm2 against 3420.36 for two such squares), and at z = 5.000 it is one 83.5 x 41.5 outline (area 3453.161 against 3453.18). The bounding box is 83.5 mm at both heights, so one long plinth would read identically on every span this fixture measures.",
+      "base_bottom_face": "z = 0.000, area 2533.619 mm2 against 2533.62 for two rounded squares of 35.6 mm at r = 0.8 -- the published widest section less twice the published run, at the published radius less the run. Two feet, not one."
+    },
+    "disagrees": {
+      "lip_final_chamfer": "published 1.9 mm; the reference runs 1.3 mm (z 23.500 -> 24.800, opening 79.70 -> 82.30), which keeps 0.6 mm of rim wall. Physical necessity rather than an error: the published 1.9 would reach the outer surface exactly. Reported rather than reconciled, per review-workflow section 3a -- and it is the whole reason the region above the lip's land is masked out of the hard distance.",
+      "overall_height": "a consequence of the line above: the reference is 3.8 mm of lip above its 21.0 mm body where the full published lip would be 4.4. Not disclosed to the request and not derivable from it; the height predicate is a band spanning both readings.",
+      "internal_fillets": "the reference uses r = 1.1 at the floor (z 7.000 -> 8.100) and at the divider junctions; the same public file's r_f2 is 2.8. Undetermined, and masked.",
+      "feet_to_body_blend": "the publication ties the feet together somewhere in the 2.25 mm between the top of the profile (4.75) and the base height (7.0) and does not say how. The reference blends over 0.25 mm, from two squares at 4.750 to one outline at 5.000. Measured cost of the disagreement against a sharp step: p95 of 0.140 mm and a worst point of 0.250 mm in the 4-5 mm bucket, which is inside the band -- so it is recorded and left in the hard row rather than masked."
+    }
   },
   "request": {
     "brief": [
@@ -48,21 +121,71 @@
       "the grid, and another bin of the same family must be able to stack on top of it",
       "without sliding off.",
       "",
-      "## What it has to be",
+      "## What I want",
       "",
-      "* **Grid pitch**: 42 mm in both X and Y. The grid is square and this is the only",
-      "  interface dimension I have; the bin must drop into a cell of that pitch and",
-      "  come out again without binding.",
       "* **Footprint**: two grid units long by one grid unit wide.",
-      "* **Height**: three height units, where one height unit is 7 mm.",
+      "* **Height**: three height units.",
       "* **Divider**: one internal divider, splitting the *long* direction into two",
-      "  compartments. One divider, not two, and not on the short direction.",
-      "* **Stacking lip**: the bin needs the family's standard stack and mating lip at",
-      "  the top, so the base of the next bin up locates on it.",
+      "  compartments. One divider, not two, and not on the short direction. Our",
+      "  dividers are 1.2 mm thick.",
+      "* **Stacking lip**: the family's standard stack and mating lip at the top, so",
+      "  the base of the next bin up locates on it.",
       "* **No magnets and no screw holes.** The base stays closed.",
       "* **No finger scoops.** Both compartments have straight walls from floor to rim.",
       "* **No label flange.**",
       "* **Wall thickness**: 1.0 mm nominal.",
+      "",
+      "## The family's published interface",
+      "",
+      "None of this is mine to choose and I am giving you all of it, because a bin",
+      "that misses any of it does not go in the drawer. Hold every figure below to",
+      "within 0.2 mm.",
+      "",
+      "* **Grid pitch**: 42 mm in both X and Y. One height unit is 7 mm, and the",
+      "  height unit counts the bin's body only -- the stacking lip stands above it.",
+      "* **Widest section**: 41.5 mm per grid unit, which leaves a 0.5 mm gap in a",
+      "  42 mm cell. A bin two units by one is therefore 83.5 mm by 41.5 mm at its",
+      "  widest, and it is that published gap -- not a clearance you pick -- that",
+      "  lets it drop in and lift out.",
+      "* **Corner radius at the widest section**: 3.75 mm, published as 7.5 mm across.",
+      "* **Base profile.** The foot that locates in the baseplate, read from the",
+      "  bottom of the foot upward. It insets its own widest section by 2.95 mm",
+      "  per side:",
+      "  * 0.8 mm at 45 degrees, outward;",
+      "  * 1.8 mm straight up;",
+      "  * 2.15 mm at 45 degrees, outward, arriving at the full widest section.",
+      "  Total rise 4.75 mm.",
+      "* **One foot per grid unit.** The profile above is stated per cell, not per",
+      "  bin: a bin two cells long stands on two feet on the 42 mm pitch, each",
+      "  41.5 mm square where it reaches its widest, with the published gap left",
+      "  between them. The published note is that this gap is kept constant even",
+      "  at fractional grid sizes, or the bin will not fit a normal grid.",
+      "* **Base height**: 7 mm -- one height unit, including the structure that ties",
+      "  the feet together above their profile. The compartment floor is the top of",
+      "  that structure.",
+      "* **Stacking lip.** The socket the next bin's foot drops into, read from its",
+      "  inner tip outward and upward:",
+      "  * 0.7 mm at 45 degrees;",
+      "  * 1.8 mm straight up;",
+      "  * 1.9 mm at 45 degrees.",
+      "  The lip's tip is 2.6 mm in from the outer surface, wall included, and the",
+      "  whole lip is 4.4 mm tall. Below the tip it is carried by 1.2 mm of straight",
+      "  wall and then a 45 degree ramp back out to the compartment wall.",
+      "",
+      "**Where this comes from.** `src/core/standard.scad` of",
+      "https://github.com/kennetek/gridfinity-rebuilt-openscad, read on 2026-08-16,",
+      "which names https://gridfinity.xyz/specification/ as its own source for the",
+      "base and stacking-lip constants. The 42 mm grid and the 41.5 mm widest",
+      "section are stated again at",
+      "https://github.com/gridfinity-unofficial/specification.",
+      "",
+      "## What is still yours to decide",
+      "",
+      "The published lip ends in a 1.9 mm chamfer that would open the socket right",
+      "out to the outer surface and leave the rim a knife edge at a 1.0 mm wall. How",
+      "far to run that last chamfer -- and so the bin's overall height -- is your",
+      "call. So are the fillets or chamfers inside the bin, where the floor and the",
+      "divider meet the walls.",
       "",
       "## How it will be made",
       "",
@@ -73,13 +196,7 @@
       "",
       "* the editable model source;",
       "* one final STL of the bin;",
-      "* one 3MF containing that one printable object.",
-      "",
-      "## What nobody has told you",
-      "",
-      "The bin's own overall dimensions, its base profile and its lip profile. Those",
-      "follow from the grid interface above and from what the bin has to do, and",
-      "deriving them is the job."
+      "* one 3MF containing that one printable object."
     ],
     "project": {
       "brief": "brief.md",
@@ -121,7 +238,7 @@
           "name": "grid_pitch_mm",
           "note": "the square pitch of the baseplate cells this bin drops into",
           "provenance": "STATED",
-          "source": "the storage system's published grid interface",
+          "source": "published grid interface: GRID_DIMENSIONS_MM in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
           "unit": "mm",
           "value": 42.0
         },
@@ -155,11 +272,83 @@
         {
           "artifact_id": null,
           "name": "height_unit_mm",
-          "note": "one height unit of the storage family",
+          "note": "one height unit of the storage family; counts the body and excludes the stacking lip",
           "provenance": "STATED",
-          "source": "the storage system's published grid interface",
+          "source": "published grid interface: fromGridfinityUnits in src/core/gridfinity-rebuilt-utility.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
           "unit": "mm",
           "value": 7.0
+        },
+        {
+          "artifact_id": null,
+          "name": "widest_section_per_unit_mm",
+          "note": "a bin's widest section per grid unit, leaving a published gap in the cell",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_TOP_DIMENSIONS in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 41.5
+        },
+        {
+          "artifact_id": null,
+          "name": "outer_corner_radius_mm",
+          "note": "corner radius at the widest section",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_TOP_RADIUS in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 3.75
+        },
+        {
+          "artifact_id": null,
+          "name": "base_lower_chamfer_mm",
+          "note": "first segment of the published base profile, 45 degrees outward from the bottom of the foot",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_PROFILE in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 0.8
+        },
+        {
+          "artifact_id": null,
+          "name": "base_land_mm",
+          "note": "second segment of the published base profile, straight up",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_PROFILE in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 1.8
+        },
+        {
+          "artifact_id": null,
+          "name": "base_upper_chamfer_mm",
+          "note": "third segment of the published base profile, 45 degrees outward to the widest section",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_PROFILE in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 2.15
+        },
+        {
+          "artifact_id": null,
+          "name": "base_gap_mm",
+          "note": "the published gap left between one grid unit's base and the next, kept constant so the bin fits a normal grid in any position",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_GAP_MM in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 0.5
+        },
+        {
+          "artifact_id": null,
+          "name": "base_height_mm",
+          "note": "the base occupies one height unit including the structure tying the feet together; its top is the compartment floor",
+          "provenance": "STATED",
+          "source": "published grid interface: BASE_HEIGHT in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 7.0
+        },
+        {
+          "artifact_id": null,
+          "name": "lip_depth_mm",
+          "note": "how far the stacking lip's inner tip stands in from the outer surface, wall included",
+          "provenance": "STATED",
+          "source": "published grid interface: STACKING_LIP_LINE in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad",
+          "unit": "mm",
+          "value": 2.6
         },
         {
           "artifact_id": null,
@@ -169,6 +358,15 @@
           "source": "user",
           "unit": "count",
           "value": 1
+        },
+        {
+          "artifact_id": null,
+          "name": "divider_thickness_mm",
+          "note": "the requester's own family convention, not a published interface figure",
+          "provenance": "STATED",
+          "source": "user",
+          "unit": "mm",
+          "value": 1.2
         },
         {
           "artifact_id": null,
@@ -193,29 +391,63 @@
     },
     "discloses": [
       {
-        "requirement": "grid_pitch_mm",
+        "requirement": "widest_section_per_unit_mm",
         "measurement": "extent_y",
-        "why": "the pitch is the published interface the bin drops into, and a one-unit-wide bin is one pitch less the grid clearance -- so stating the pitch states the short footprint to within 1.2%. Withholding it would leave the request unanswerable, which is docs/defects.md D30's shape. The public source is the storage system's own grid specification, which states the pitch and the clearance; nothing here was measured off the reference. The report marks that axis given rather than reconstructed."
+        "why": "the published widest section is 41.5 mm per grid unit in a 42 mm cell, so a one-unit-wide bin is 41.5 mm wide and stating the interface states the short footprint. Public source: BASE_TOP_DIMENSIONS in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad, and 'It is 41.5mm square' at https://github.com/gridfinity-unofficial/specification. It passes the test docs/agents/review-workflow.md section 3a sets -- it would be true of the family if this reference had never been generated -- and the reviewer's ruling requires the interface on the request side. The report marks that axis given rather than reconstructed."
+      },
+      {
+        "requirement": "widest_section_per_unit_mm",
+        "measurement": "extent_x",
+        "why": "the same figure on the long axis: two cells of the published pitch less the published gap is 83.5 mm. Same public source, same test, same reason. Revision 1 disclosed only the short axis because it withheld the gap and expressed the footprint predicate as a range on the undersize; revision 2 states the gap, so both axes are given and both are declared."
       }
     ]
   },
   "geometry": {
     "grid_pitch_mm": 42.0,
-    "footprint_units": [2, 1],
-    "footprint_min_undersize_mm": 0.1,
-    "footprint_max_undersize_mm": 1.0,
+    "grid_gap_mm": 0.5,
+    "unit_widest_mm": 41.5,
+    "footprint_units": [
+      2,
+      1
+    ],
+    "published_tolerance_mm": 0.2,
+    "outer_corner_radius_mm": 3.75,
+    "corner_radius_probe_z_mm": 6.0,
+    "base_height_mm": 7.0,
+    "base_profile": {
+      "lower_chamfer_mm": 0.8,
+      "land_mm": 1.8,
+      "upper_chamfer_mm": 2.15,
+      "rise_mm": 4.75,
+      "run_mm": 2.95,
+      "sample_margin_mm": 0.1
+    },
+    "lip_profile": {
+      "lower_chamfer_mm": 0.7,
+      "land_mm": 1.8,
+      "upper_chamfer_mm": 1.9,
+      "depth_mm": 2.6,
+      "height_mm": 4.4,
+      "support_height_mm": 1.2
+    },
+    "lip_throat": {
+      "scan_mm": 8.0,
+      "step_mm": 0.05,
+      "flat_tolerance_mm": 0.02
+    },
+    "internal_fillet_allowance_mm": 2.8,
     "height_unit_mm": 7.0,
     "height_units": 3,
-    "height_min_mm": 21.0,
-    "height_max_mm": 28.0,
+    "height_min_mm": 23.5,
+    "height_max_mm": 25.4,
     "section_step_mm": 0.5,
     "base_band": {
       "low_mm": 0.5,
       "high_mm": 4.0
     },
     "compartment_band": {
-      "above_floor_mm": 8.0,
-      "below_top_mm": 7.0
+      "low_mm": 9.8,
+      "high_mm": 18.0
     },
     "lip_band": {
       "below_top_low_mm": 4.5,
@@ -236,10 +468,18 @@
       "band_mm": 0.001
     }
   },
+  "why_the_bands_are_what_they_are": {
+    "published_tolerance_mm": "0.2 mm, applied to every figure the request states and to nothing else. Brief section 5: 'For dimensions explicitly stated in a brief, use the stated tolerance instead of inventing a similarity band.' The brief states it in the same words the predicates apply it in. It is a CAD tolerance and not a print tolerance -- the model is the deliverable being judged -- and it is loose enough to absorb a rounded arc discretisation (measured: 0.003 mm on the reference's corner radius, 0.000 mm on its base profile) and tight enough to fail the two deviations the first real run actually produced, both of which were 0.25 mm.",
+    "height_min_mm": "23.5 = 3 height units plus the lip's published lower chamfer and land. A bin that truncates the lip's final chamfer to nothing is still a bin with a seat in it.",
+    "height_max_mm": "25.4 = 3 height units plus the whole published lip. A bin cannot be taller than the publication without inventing geometry above it.",
+    "corner_radius_probe_z_mm": "6.0 -- above the published base profile's 4.75 and below the published floor at 7.0, so the section is the plain outer wall on any candidate that read the request.",
+    "internal_fillet_allowance_mm": "2.8, the largest internal fillet radius the cited public file contemplates (r_f2). It is the height of the masked floor transition, so no implementation choosing any radius the source mentions is penalised by the distance row.",
+    "compartment_band": "9.8 to 18.0 mm above the base, and absolute at revision 2 where revision 1 hung the top of it off the candidate's own rim. Both ends are arithmetic on stated numbers: 9.8 is the published floor at 7.0 plus the 2.8 mm fillet allowance, so the band starts above any internal transition the source contemplates; 18.0 is the lip's inner tip at 3 x 7 less its published 1.2 mm support and its 1.6 mm protrusion past a 1.0 mm wall, less a 0.2 mm margin. Relative-to-the-rim was safe while the height band was 21..28 with one plausible answer in it; with a legitimate 1.9 mm of freedom in the overall height, a top hung off the rim slides into the lip's underside ramp on a taller bin and the prismatic row would report a forbidden feature that is not there."
+  },
   "calibration": {
     "measured_utc": "2026-08-16",
     "machine": "Windows-11-10.0.26200, python 3.13.5, trimesh 4.12.2, build123d/OCCT",
-    "why": "brief section 5: do not choose a surface-distance tolerance by looking at agent results. Every figure below is same-geometry noise -- the same solid transported two ways -- measured before any candidate existed.",
+    "why": "brief section 5: do not choose a surface-distance tolerance by looking at agent results. Every figure below is same-geometry noise -- the same solid transported two ways -- measured before any candidate existed. Revision 2 did not move the band; it moved what the band is applied to.",
     "method": {
       "retessellation": "the pinned STEP re-imported and re-triangulated by a SECOND exporter (build123d/OCCT here; the scored STL came out of cadquery at ingest) at three deflections. OCCT reuses an existing triangulation unless it is cleaned first, and without BRepTools.Clean_s all three deflections returned the identical 21124-face mesh -- which reads as 'retessellation noise is zero' when nothing was retessellated. That is the filter-that-rejects-the-phenomenon failure the review workflow's section 3a names, caught here rather than published.",
       "three_mf": "the scored STL through this repository's own make_3mf.py and back through tools/e2e.py:read_three_mf.",
@@ -274,21 +514,55 @@
       "three_mf_why": "30x the measured round-trip p99 and 15x its max. make_3mf.py writes vertices at %.6g (docs/defects.md D2), so the transport is a coordinate quantisation of about 1e-4 mm on this part's coordinates -- which this band absorbs and a stale or substituted body does not."
     },
     "what_this_band_cannot_catch": [
-      "any deviation under 0.3 mm anywhere. The brief states a 1.0 mm nominal wall, so a wall 30% thin is inside the band on the surface metric alone.",
-      "a defect confined to under one percent of the sampled surface, because the gate is p99. On this part one percent is roughly 100 mm2 of surface -- larger than a single magnet pocket's wall, which is why no_bores_in_base is a separate predicate and not left to this one.",
+      "any deviation under 0.3 mm anywhere on the surfaces it does judge. The brief states a 1.0 mm nominal wall, so a wall 30% thin is inside the band on the surface metric alone.",
+      "a defect confined to under one percent of the retained surface, because the gate is p99. On this part one percent is roughly 100 mm2 of surface -- larger than a single magnet pocket's wall, which is why no_bores_in_base is a separate predicate and not left to this one.",
       "anything at all when the candidate is scored in a pose outside the 24 proper rotations. The pose set is the cuboid rotation group, so a candidate rotated by an arbitrary angle registers badly and fails; that is a refusal to guess rather than a detection.",
-      "handedness on THIS part, because there is nothing handed to catch. Measured, not assumed: the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation. So probe 6 of the brief's required seven ('mirrored/incorrect-handed transformation IF the fixture gains any handed feature') has no handed feature to act on here, and the mutation that stands in its place probes the property that would matter if it did -- that the registration cannot fit a reflection."
-    ]
+      "handedness on THIS part, because there is nothing handed to catch. Measured, not assumed: the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation. So probe 6 of the brief's required seven ('mirrored/incorrect-handed transformation IF the fixture gains any handed feature') has no handed feature to act on here, and the mutation that stands in its place probes the property that would matter if it did -- that the registration cannot fit a reflection.",
+      "REVISION 2, the masked regions: the internal floor transition from 7.0 to 9.8 mm above the base, and everything above 23.5 mm. Both are reported as a diagnostic (diagnostics.surface_distance_unmasked) and both are covered by named predicates instead -- compartment_floor_height_mm for the one, stack_lip_depth_mm and stack_lip_seat_height_mm and height_mm for the other.",
+      "REVISION 2, the one undetermined feature the mask does NOT remove: the vertical fillet where the divider meets the compartment walls, and the 0.25 mm blend where the feet meet the body. The reference fillets the first at r = 1.1 and blends the second over 0.25 mm; the publication fixes neither. Measured against a sharp-junction implementation of the same published figures, the two together put 0.086% of retained samples beyond the band, with a worst point of 0.454 mm. They are left in because that is far under the p99 cut and because removing them would need a mask defined by something other than height -- and left recorded, because the alternative is a later reader finding them."
+    ],
+    "mask_validation": {
+      "why_this_is_not_tuning": "measured against tools/f1_candidate.py, which is this benchmark's own compliant bin: it is built from the published figures the request states, it existed before any revision-2 candidate did, and it is not a designer result. Brief section 5 forbids choosing a tolerance by looking at agent results; the band was not moved by any of this, and the mask's two bounds are arithmetic on request-side numbers rather than on either of the numbers below.",
+      "masked_p99_mm": 0.0018,
+      "masked_max_mm": 0.4539,
+      "masked_fraction_within_band": 0.99914,
+      "unmasked_p99_mm": 0.3,
+      "unmasked_max_mm": 0.6617,
+      "what_it_shows": "an independent implementation of the published figures scores 0.0018 mm against a 0.3 mm band on the determined surfaces -- and 0.300 mm, exactly on the boundary, when the undetermined internal floor transition is left in. That is the case for the mask stated as a number: without it a correct answer passes or fails on which fillet radius it chose, which is the defect the reviewer's ruling names."
+    }
   },
+  "revision_history": [
+    {
+      "revision": 1,
+      "what_it_was": "the request withheld the base and lip profile, and reference_surface_distance_p99_mm judged them anyway.",
+      "why_it_changed": "the reviewer's ruling on run 01. The manifest said the standard fixes the answer and therefore hard acceptance may use registered surface similarity, while the request deliberately withheld the base/lip profile; the live run then failed the hard surface-distance row entirely on those withheld surfaces. Useful discovery evidence, not yet a fair reusable benchmark. The ruling also refused the alternative repair: do NOT perturb the 42 mm pitch, because F1 was chosen as a real standard-driven fixture and not an anti-memory synthetic task."
+    },
+    {
+      "revision": 2,
+      "what_changed": [
+        "the request states the published base profile, lip profile, widest section, corner radius, base height and height-unit convention, each with its public source",
+        "footprint_long_mm and footprint_short_mm changed from a range on the undersize to the published figure within the stated tolerance",
+        "height_mm narrowed from 21.0..28.0 to 23.5..25.4, both ends computed from published numbers",
+        "six hard predicates added: base_plug_profile_mm, base_feet, outer_corner_radius_mm, compartment_floor_height_mm, stack_lip_depth_mm, stack_lip_seat_height_mm",
+        "registration seats both solids on their own base plane and footprint centre instead of centring bounding boxes, so a legitimate difference in overall height is not spread over every surface",
+        "the hard reference distance masks the internal floor transition and everything above the lip's published land; the unmasked distribution is reported as a diagnostic",
+        "the scorer now honours the fixture's probe_samples, which revision 1 declared and did not read"
+      ],
+      "what_did_not_change": "the reference bytes and their digests, the 0.3 mm band and its calibration record, the 3MF gate, and run 01 -- which is preserved below as evidence about revision 1 and is not evidence about this one."
+    }
+  ],
   "run_findings": {
-    "note": "Non-normative. Nothing in this block is applied to a candidate; it records what the first real run measured about the FIXTURE. `revision` is unchanged at 1 because a revision names the contract a candidate is judged against, and no predicate, band, brief line or request value moved. The full write-up is C:/projects/3d/qa-f1-gridbin/runs/run-01/post-mortem.md, which is project evidence and stays out of this repository per AGENTS.md.",
+    "note": "Non-normative. Nothing in this block is applied to a candidate; it records what a run measured about the FIXTURE.",
     "run_01": {
+      "which_revision": "REVISION 1. Preserved as discovery evidence, exactly as it was recorded. It was NOT re-scored against revision 2, it is not evidence that revision 2 is fair, and revision 2 was not tuned to this candidate -- every figure revision 2 adds to the request came from the public source named in `published_interface`, and the two request-side numbers this candidate got wrong (a 2.4 mm upper chamfer against a published 2.15, and a 4.0 mm corner radius against a published 3.75) are wrong against that source and not against this run.",
       "verdict": "CAD_FAIL / 3MF_PASS",
       "candidate_sha256": "827a99eeada0ab81017a131add28981e0c142e87012a8cbb5bc54bd463cd7fd3",
-      "failed": ["reference_surface_distance_p99_mm at 2.300 mm against a 0.300 mm band"],
+      "failed": [
+        "reference_surface_distance_p99_mm at 2.300 mm against a 0.300 mm band"
+      ],
       "where_the_disagreement_is": "measured, not inferred: over 30000 samples bucketed by height, the compartment walls and divider (z 8-18) sit at a median of 0.000 mm and a p95 of 0.100 mm, and every one of the 17.9% of samples beyond 1 mm is below z = 21. The parts the brief dimensioned agree; the base profile, the floor height and the lip profile -- none of which the brief gives -- are the whole of the failure.",
       "the_finding_that_matters": "THE REQUEST IDENTIFIES THE STANDARD BY RECALL, SO THIS FIXTURE CANNOT SEPARATE RECALL FROM DERIVATION. The brief names no standard and gives no base profile, and the designer reported deriving the plug from FDM first principles. Both profiles were then measured off the meshes at 0.05 mm steps: reference 0.00-0.80 chamfer, 0.80-2.65 land, 2.65-4.75 chamfer, all 45 degrees; candidate 0.00-0.80, 0.80-2.65, 2.65-5.00, all 45 degrees. The first two segments agree to the sampling step and only the capture ramp differs, by 0.25 mm. Independent derivation does not land on a matching chamfer height, land height, segment count, angle and direction. 42 mm is the most identifying number in the brief, and a model whose training data holds the published standard does not need the brief to reproduce it. benchmarks/corpus.json already records the same failure mode in another ecosystem: a designer told 'Voron' and 'deck panel' had the topology fixed by recall, and reported it unprompted.",
-      "why_withholding_more_does_not_fix_it": "take the pitch out and the request is unanswerable; leave it in and the standard is named in all but words. The two honest repairs are both FIXTURE changes and neither is a scorer change: state the base and lip profile as request-side data from a public source, which turns F1 into a precision-implementation test of F3's class; or perturb the interface off the published standard -- a 40 mm pitch -- so recall is actively wrong and only derivation can pass. The second is the stronger instrument.",
+      "why_withholding_more_does_not_fix_it": "take the pitch out and the request is unanswerable; leave it in and the standard is named in all but words. The two honest repairs are both FIXTURE changes and neither is a scorer change: state the base and lip profile as request-side data from a public source, which turns F1 into a precision-implementation test of F3's class; or perturb the interface off the published standard -- a 40 mm pitch -- so recall is actively wrong and only derivation can pass. The reviewer ruled for the first and against the second, and revision 2 is the first.",
       "brief_gaps_the_run_priced": [
         "total height: 'three height units of 7 mm' does not say whether 21 mm is the overall height or the stack pitch. The designer read it as stack pitch and built 25.4 mm; the reference is 24.8. This is the largest single ambiguity in the brief.",
         "lip profile, corner radius and floor height: withheld, chosen, and together with the height they are the whole of the CAD failure.",

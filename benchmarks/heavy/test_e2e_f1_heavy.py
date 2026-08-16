@@ -95,16 +95,58 @@ class TheHiddenReferencePassesEveryHardPredicateTest(unittest.TestCase):
 
     def test_the_reference_and_the_synthetic_bin_are_not_the_same_solid(self) -> None:
         """Both pass, and they are different geometry. Otherwise the two states
-        are one state and neither distinguishes anything."""
+        are one state and neither distinguishes anything.
+
+        At revision 1 the two differed in the base, the lip inset and the
+        height, because revision 1's request fixed none of them. Revision 2
+        fixes all three except the last, so the difference that remains is
+        exactly the freedom the publication leaves: how far to truncate the
+        lip's final chamfer, and how to fillet the inside. Asserting on the
+        height alone would be thin, so the shape of the difference is asserted
+        too -- see the class below.
+        """
         sys.path.insert(0, str(REPO / "tools"))
         import f1_candidate
 
         self.assertNotAlmostEqual(float(f1_candidate.HEIGHT_MM),
                                   measured()["features"]["height_mm"],
                                   places=2)
-        self.assertNotAlmostEqual(float(f1_candidate.LIP_INSET_MM),
-                                  measured()["rows"]["stack_lip_present"]["measured"],
+        self.assertNotAlmostEqual(float(f1_candidate.LIP_TOP_CHAMFER_MM),
+                                  GEOMETRY["lip_profile"]["upper_chamfer_mm"],
                                   places=2)
+
+
+@unittest.skipUnless(HAVE, WHY)
+class TheMaskSeparatesTheDeterminedFromTheChosenTest(unittest.TestCase):
+    """Revision 2's central claim, measured on the only two solids that can
+    test it.
+
+    Two independent implementations of the same published figures -- one
+    written here, one produced by a third-party generator nobody here ran --
+    must agree to the tessellation floor on every surface the publication
+    fixes, and are free to differ on the ones it does not. A mask that removed
+    too much would make both statements trivially true, so the second is
+    asserted as a ratio against the first rather than as a bare threshold.
+    """
+
+    def test_they_agree_where_the_request_determines_and_differ_where_it_does_not(self) -> None:
+        sys.path.insert(0, str(REPO / "tools"))
+        import f1_candidate
+
+        found = e2e.register(
+            f1_candidate.build(), measured()["mesh"],
+            samples=8000, seed=FAST["reference_comparison"]["seed"],
+            band_mm=GEOMETRY["reference_comparison"]["band_mm"],
+            probe_samples=FAST["reference_comparison"]["probe_samples"],
+            mask=e2e.distance_mask(GEOMETRY))
+        band = GEOMETRY["reference_comparison"]["band_mm"]
+        self.assertLess(found["distance"]["p99_mm"], band / 10.0)
+        self.assertGreater(found["distance_unmasked"]["p99_mm"],
+                           found["distance"]["p99_mm"] * 10.0)
+        self.assertGreater(found["distance"]["masked_out"], 0)
+        rows = {row["predicate"]: row
+                for row in e2e.comparison_rows(found, GEOMETRY)}
+        self.assertTrue(all(row["passes"] for row in rows.values()), rows)
 
 
 @unittest.skipUnless(HAVE, WHY)
@@ -185,7 +227,8 @@ class TheWholeArmRunsEndToEndTest(unittest.TestCase):
                                               "authoring turn was run")
         self.assertEqual("CAD_PASS", report["verdict"])
         self.assertEqual(SPEC["reference"]["sha256"], report["reference_sha256"])
-        self.assertEqual(["extent_y"], report["request_audit"]["declared"])
+        self.assertEqual(["extent_x", "extent_y"],
+                         report["request_audit"]["declared"])
         # The two clocks are reported apart and never summed, which is what the
         # reviewer asked for: a blended number cannot say whether a slow run is
         # an expensive benchmark or expensive CAD, and those have different

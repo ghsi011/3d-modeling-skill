@@ -1,6 +1,6 @@
 {
-  "target": "F1's hard acceptance: the ten predicates that decide CAD_PASS, the two that decide 3MF_PASS, and the two structural guards -- the request leak audit and the reference digest",
-  "note": "Run with: uv run python tools/mutate.py benchmarks/mutations/e2e-f1-gridbin.json\n\nTWO KINDS OF MUTATION, AND THE DIFFERENCE IS THE POINT. Rows against tools/f1_candidate.py mutate the CANDIDATE: they build a defective bin and prove the predicate notices the defect, which is what the brief's section 6/F1 'required mutation probes' asks for. Rows against tools/e2e.py mutate the INSTRUMENT: they weaken a gate and prove a test notices the gate weakening. A fixture with only the second kind proves its tests read its own code; a fixture with only the first proves nothing about the gates the candidate never trips.\n\nThe brief requires seven probes. Six are here as candidate mutations -- divider removed, divider on the wrong axis, lip removed, magnet holes added, one axis scaled, an extra body in the STL (and again in the 3MF). The seventh, a mirrored or wrong-handed transform, is qualified in the brief itself: 'IF the fixture gains any handed feature'. This one has not, and that is measured rather than assumed -- the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation (benchmarks/e2e/f1-gridbin.json, calibration.measurements.mirror_p99_mm). So the probe that stands in its place is the property that would matter if the fixture ever did gain one: that the registration cannot fit a reflection at all. It is exercised against a deliberately handed solid, because a reflection guard tested on an achiral part passes whether or not it exists.\n\nEvery entry below was run against the real code and observed to fail its named test.",
+  "target": "F1's hard acceptance at fixture revision 2: the sixteen predicates that decide CAD_PASS, the two that decide 3MF_PASS, and the structural guards -- the request leak audit, the reference digest, the registration datum and the distance mask",
+  "note": "Run with: uv run python tools/mutate.py benchmarks/mutations/e2e-f1-gridbin.json\n\nTWO KINDS OF MUTATION, AND THE DIFFERENCE IS THE POINT. Rows against tools/f1_candidate.py mutate the CANDIDATE: they build a defective bin and prove the predicate notices the defect, which is what the brief's section 6/F1 'required mutation probes' asks for. Rows against tools/e2e.py mutate the INSTRUMENT: they weaken a gate and prove a test notices the gate weakening. A fixture with only the second kind proves its tests read its own code; a fixture with only the first proves nothing about the gates the candidate never trips.\n\nThe brief requires seven probes. Six are here as candidate mutations -- divider removed, divider on the wrong axis, lip removed, magnet holes added, one axis scaled, an extra body in the STL (and again in the 3MF). The seventh, a mirrored or wrong-handed transform, is qualified in the brief itself: 'IF the fixture gains any handed feature'. This one has not, and that is measured rather than assumed -- the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation (benchmarks/e2e/f1-gridbin.json, calibration.measurements.mirror_p99_mm). So the probe that stands in its place is the property that would matter if the fixture ever did gain one: that the registration cannot fit a reflection at all. It is exercised against a deliberately handed solid, because a reflection guard tested on an achiral part passes whether or not it exists.\n\nREVISION 2 ADDED SIX HARD PREDICATES AND TWO STRUCTURAL CHANGES, AND SECTION 12 OF THE BRIEF SAYS WHAT THAT COSTS: 'Every predicate that can cause PASS/FAIL must have a mutation that proves it can fail.' Each of the six has one below, and two of them reproduce the exact deviations the first real run produced -- a 2.4 mm capture ramp against a published 2.15, and a 4.0 mm corner radius against a published 3.75 -- so the fixture's claim to be able to see them is a measurement rather than an argument. The registration datum and the distance mask are gates too, and both are mutated: a mask that stops masking, a mask that masks everything, and a datum that goes back to centring bounding boxes.\n\nEvery entry below was run against the real code and observed to fail its named test.",
   "mutations": [
     {
       "name": "divider-removed",
@@ -10,7 +10,7 @@
       "tests": [
         "tools/test_e2e.py::TheDividerIsCountedAndPlacedTest"
       ],
-      "why": "probe 1. One divider is two compartments, and the cavity cross-section is where that is visible: two interior rings become one. A bin with no divider has the right footprint, the right height, the right wall and the right lip, so every other predicate accepts it"
+      "why": "probe 1. One divider is two compartments, and the cavity cross-section is where that is visible: two interior rings become one. A bin with no divider has the right footprint, the right base, the right height, the right wall and the right lip, so every other predicate accepts it"
     },
     {
       "name": "divider-on-the-short-axis",
@@ -25,12 +25,72 @@
     {
       "name": "stack-lip-removed",
       "file": "tools/f1_candidate.py",
-      "anchor": "LIP_INSET_MM = 0.9 ",
-      "replacement": "LIP_INSET_MM = 0.0 ",
+      "anchor": "LIP_DEPTH_MM = 2.6 ",
+      "replacement": "LIP_DEPTH_MM = 1.0 ",
       "tests": [
         "tools/test_e2e.py::TheStackLipIsRequiredTest"
       ],
-      "why": "probe 3. Without the inward ledge the next bin up has nothing to land on. The bin's envelope, volume and compartment topology barely move, so a dimensional score would call this correct"
+      "why": "probe 3. A lip as deep as the wall is no ledge at all, so the next bin up has nothing to land on. The bin's envelope, volume and compartment topology barely move, so a dimensional score would call this correct"
+    },
+    {
+      "name": "the-lip-is-too-shallow",
+      "file": "tools/f1_candidate.py",
+      "anchor": "LIP_DEPTH_MM = 2.6 ",
+      "replacement": "LIP_DEPTH_MM = 2.0 ",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedInterfaceRowsCanFailTest"
+      ],
+      "why": "revision 2, and the difference from the row above is the whole reason both exist. A 2.0 mm lip is still a ledge -- `stack_lip_present` accepts it, because it protrudes 1.0 mm past the wall -- and it is 0.6 mm off the published depth, which is the surface the next bin's foot actually seats against. Only a predicate that reads the published figure can refuse it"
+    },
+    {
+      "name": "the-lip-seat-sits-high",
+      "file": "tools/f1_candidate.py",
+      "anchor": "LIP_TIP_OFFSET_MM = 0.0 ",
+      "replacement": "LIP_TIP_OFFSET_MM = 0.4 ",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedInterfaceRowsCanFailTest"
+      ],
+      "why": "revision 2. The lip is the published shape at the published depth and it is 0.4 mm too high, so a stack of ten runs 4 mm long. Chosen at 0.4 rather than something gross on purpose: the overall height stays inside the published band, so `height_mm` still passes and this is the only row that can see it"
+    },
+    {
+      "name": "the-base-plug-runs-the-capture-ramp-long",
+      "file": "tools/f1_candidate.py",
+      "anchor": "BASE_UPPER_CHAMFER_MM = 2.15",
+      "replacement": "BASE_UPPER_CHAMFER_MM = 2.4",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedBaseProfileIsHeldTest"
+      ],
+      "why": "revision 2, and the exact deviation the first real run produced: a 2.4 mm upper chamfer where the publication says 2.15. Revision 1 could not fault it, because revision 1 did not state the profile -- it failed the surface distance instead, on a surface the request had withheld, which is the whole of the reviewer's ruling. The footprint, height, corner radius, floor, divider and lip rows all still pass"
+    },
+    {
+      "name": "the-bin-stands-on-one-plinth",
+      "file": "tools/f1_candidate.py",
+      "anchor": "SEPARATE_FEET = True ",
+      "replacement": "SEPARATE_FEET = False ",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedBaseProfileIsHeldTest"
+      ],
+      "why": "revision 2. The published base profile is stated per grid unit with the published gap kept between units, so a two-cell bin stands on two feet -- and one plinth of the same outline has the SAME bounding box at every height, so both footprint rows and the profile row accept it while it will not seat on a baseplate. Measured on the reference: two rounded squares at z = 4.75 (area 3420.306 mm2) becoming one outline at z = 5.00 (3453.161)"
+    },
+    {
+      "name": "the-corner-radius-is-four-millimetres",
+      "file": "tools/f1_candidate.py",
+      "anchor": "OUTER_RADIUS_MM = 3.75 ",
+      "replacement": "OUTER_RADIUS_MM = 4.0 ",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedInterfaceRowsCanFailTest"
+      ],
+      "why": "revision 2, and the other deviation the first real run produced. A corner rounder than the socket it drops into jams on the way in, and it costs 0.25 mm on a published 3.75 -- invisible to every span, every count and every band the fixture had at revision 1"
+    },
+    {
+      "name": "the-floor-is-the-top-of-the-plug",
+      "file": "tools/f1_candidate.py",
+      "anchor": "FLOOR_MM = 7.0 ",
+      "replacement": "FLOOR_MM = 5.0 ",
+      "tests": [
+        "tools/test_e2e.py::ThePublishedInterfaceRowsCanFailTest"
+      ],
+      "why": "revision 2, and the third of the first run's choices. The published base is one height unit including the structure tying the feet together, so a floor at the top of the plug hollows out the base itself -- two millimetres of extra usable depth bought from the part of the bin that does the locating"
     },
     {
       "name": "magnet-pockets-in-the-base",
@@ -60,7 +120,7 @@
       "tests": [
         "tools/test_e2e.py::TheForbiddenFeaturesAreRefusedTest"
       ],
-      "why": "the fourth forbidden feature. The tab is drawn deep enough to reach inside the compartment band on purpose: a flange confined to the top seven millimetres is outside what this predicate can see, and that limit is recorded in the fixture rather than hidden by a mutation drawn to avoid it"
+      "why": "the fourth forbidden feature. The tab is drawn deep enough to reach inside the compartment band on purpose: a flange confined to the top of the compartment is outside what this predicate can see, and that limit is recorded in the fixture rather than hidden by a mutation drawn to avoid it"
     },
     {
       "name": "the-long-axis-scaled-five-percent",
@@ -70,27 +130,27 @@
       "tests": [
         "tools/test_e2e.py::TheFootprintMustDropIntoTheGridTest"
       ],
-      "why": "probe 5. A bin wider than its cells does not drop into the grid. The predicate is a band on the UNDERSIZE rather than a target dimension, so it is derived from the published pitch and the requirement to lift the bin out again -- and states no measurement of the hidden reference"
+      "why": "probe 5. A bin wider than its cells does not drop into the grid. At revision 2 the requirement is the published footprint rather than a range on the undersize, because the request now states the gap the family leaves in a cell"
     },
     {
       "name": "the-short-axis-exactly-one-pitch",
       "file": "tools/f1_candidate.py",
-      "anchor": "WIDTH_MM = UNITS_SHORT * PITCH_MM - CLEARANCE_MM",
+      "anchor": "WIDTH_MM = UNITS_SHORT * PITCH_MM - GAP_MM",
       "replacement": "WIDTH_MM = UNITS_SHORT * PITCH_MM",
       "tests": [
         "tools/test_e2e.py::TheFootprintMustDropIntoTheGridTest"
       ],
-      "why": "the other footprint axis, and the boundary rather than a gross error: a bin exactly as wide as its cell binds. A one-sided minimum would accept it, which is why the predicate is a band"
+      "why": "the other footprint axis, and the boundary rather than a gross error: a bin exactly as wide as its cell binds. The published gap is 0.5 mm and the stated tolerance is 0.2, so this is refused by 0.3 mm"
     },
     {
-      "name": "the-bin-is-far-too-tall",
+      "name": "the-bin-is-a-height-unit-too-tall",
       "file": "tools/f1_candidate.py",
-      "anchor": "BASE_MM = 4.75",
-      "replacement": "BASE_MM = 40.0",
+      "anchor": "HEIGHT_UNITS = 3\n",
+      "replacement": "HEIGHT_UNITS = 4\n",
       "tests": [
         "tools/test_e2e.py::TheHeightMustBeThreeUnitsTest"
       ],
-      "why": "the height predicate is a deliberately wide band -- three height units plus a standard base allowance -- because narrowing it would encode the hidden reference's own total height. A band that wide still has to be able to fail, or it is a row that reads as a check"
+      "why": "the height band at revision 2 is the published body plus somewhere between the lip's published land and the whole published lip -- 23.5 to 25.4 -- so it is narrow enough to be worth mutating, where revision 1's 21 to 28 was not. A bin one height unit tall by mistake is the defect a requester notices when the drawer will not close"
     },
     {
       "name": "an-extra-body-in-the-stl",
@@ -123,10 +183,50 @@
       "why": "probe 6, in the only form this fixture can honestly carry it. Brief section 4: a mirrored part must not become a PASS because a fitter found a reflection. The bin is achiral so it cannot detect this; the test uses a right-handed tripod whose three arms have distinct lengths, so a proper rotation cannot map it onto its mirror image and an improper one can"
     },
     {
+      "name": "the-registration-centres-bounding-boxes-again",
+      "file": "tools/e2e.py",
+      "anchor": "                                    -low[2]], dtype=float))",
+      "replacement": "                                    -(low[2] + high[2]) / 2.0], dtype=float))",
+      "tests": [
+        "tools/test_e2e.py::TheRegistrationSeatsBothSolidsOnTheirBaseTest"
+      ],
+      "why": "revision 2's datum, which is a gate and not a convenience. The publication cannot fix the overall height, so two correct bins may differ by up to 1.9 mm; a centroid fit turns half of that into a z offset on every surface, including the base plug the request now dimensions exactly. The mutation is the revision-1 behaviour, restored"
+    },
+    {
+      "name": "the-distance-mask-stops-masking-the-lip",
+      "file": "tools/e2e.py",
+      "anchor": "    keep &= z <= mask[\"lip_land_top_mm\"]",
+      "replacement": "    keep &= z <= 1e9",
+      "tests": [
+        "tools/test_e2e.py::TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest"
+      ],
+      "why": "the ruling in one line: a surface judged by reference distance must be determined by request-side facts, and the region above the lip's published land is not -- the final chamfer cannot be built in full at a 1.0 mm wall and the publication does not say how far to truncate it. A mask that stops applying there fails a candidate for choosing a legal truncation, which is the defect the whole revision exists to remove"
+    },
+    {
+      "name": "the-distance-mask-stops-masking-the-floor-transition",
+      "file": "tools/e2e.py",
+      "anchor": "    keep &= ~((z >= mask[\"floor_low_mm\"]) & (z <= mask[\"floor_high_mm\"]))",
+      "replacement": "    keep &= True",
+      "tests": [
+        "tools/test_e2e.py::TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest"
+      ],
+      "why": "the other masked range, and the one that is measured rather than argued: with it in place an independent implementation of the published figures scores p99 = 0.0018 mm, and without it 0.300 -- exactly on the band. The publication fixes the floor height and not the fillet that meets it, and the same public file offers 2.8 mm where the reference uses 1.1"
+    },
+    {
+      "name": "a-mask-that-removes-everything-reports-a-clean-distance",
+      "file": "tools/e2e.py",
+      "anchor": "    if not both.size:",
+      "replacement": "    if False:",
+      "tests": [
+        "tools/test_e2e.py::TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest"
+      ],
+      "why": "the failure mode a mask introduces that a band does not have: a mask wide enough to drop every sample leaves a row that cannot fail, and a row that cannot fail reads exactly like one that holds. The refusal is loud on purpose, and it has to be a refusal rather than a percentile of nothing"
+    },
+    {
       "name": "the-surface-distance-is-one-way",
       "file": "tools/e2e.py",
-      "anchor": "    both = np.concatenate([np.asarray(da, dtype=float),\n                           np.asarray(db, dtype=float)])",
-      "replacement": "    both = np.asarray(da, dtype=float)",
+      "anchor": "    distances = np.concatenate([np.asarray(da, dtype=float),\n                                np.asarray(db, dtype=float)])",
+      "replacement": "    distances = np.concatenate([np.asarray(da, dtype=float),\n                                np.asarray(da, dtype=float)])",
       "tests": [
         "tools/test_e2e.py::TheSurfaceDistanceIsBidirectionalTest"
       ],
@@ -190,7 +290,7 @@
       "tests": [
         "tools/test_e2e.py::TheRequestPackageCarriesNoAnswerTest"
       ],
-      "why": "the requester-side prohibition, and the one guard whose absence produces a number indistinguishable from a real one. The boundary covers derived measurements and not only the reference mesh: on the bee fixture the designer voluntarily avoided the measurement scripts, and a harness that depends on that restraint is measuring the designer's manners"
+      "why": "the requester-side prohibition, and the one guard whose absence produces a number indistinguishable from a real one. It matters more at revision 2, not less: the request now legitimately states two of the reference's three extents, so the guard is the only thing standing between a declared disclosure and an undeclared one"
     },
     {
       "name": "the-reference-digest-is-not-verified",
