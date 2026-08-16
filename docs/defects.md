@@ -167,9 +167,29 @@ it was: rows 2 and 3 have always said what they mean, and row 1 did not.
    under the real restricted low-integrity token: `1.1.1.1:443` connects,
    `1.1.1.1:80` connects, `93.184.215.14:80` connects. All three firewall
    profiles are `DefaultOutboundAction=NotConfigured` and none of 741 enumerable
-   rules blocks outbound 53. DNS resolves too, and by a second route:
-   `gethostbyname` opens no socket in the calling process, it goes through the
-   DNS Client service over RPC.
+   rules blocks outbound 53.
+
+   **The DNS half of this row is retired, and the route is now explicitly
+   unproven.** It read "DNS resolves too, and by a second route: `gethostbyname`
+   opens no socket in the calling process, it goes through the DNS Client service
+   over RPC" — and the suite never observed that. Its probe resolved
+   `example.com`, which does not resolve on this machine with no confinement at
+   all, so the row reported denied here whatever the boundary did. Re-aiming it
+   at `localhost` made it deterministic and stopped it observing the property:
+   measured, after `ipconfig /flushdns`, resolving `localhost` leaves no
+   `localhost` entry in the DNS Client cache while hosts-file names like
+   `kubernetes.docker.internal` are cached, so that lookup does not traverse the
+   service. The only names that both resolve offline and traverse it are this
+   machine's own hosts-file entries, which a suite cannot rely on and must not
+   write, so **no deterministic instrument in this repository establishes that
+   the DNS Client route is open.** The row is renamed `local_name_resolution`,
+   removed from the limitations tuple, and a guard fails if any DNS row returns
+   to it. The socket evidence above stands on its own and is unaffected: the
+   network is open, and `network_tcp_connect` measures it.
+
+   That `gethostbyname` reached the service was observed by hand on one machine.
+   It is kept here as exactly that — a machine-specific observation, not durable
+   release evidence.
 
    So the candidate can read the repository, the project directory and
    `acceptance_contract.json`, and post all three. Nothing in this boundary
@@ -193,9 +213,13 @@ it was: rows 2 and 3 have always said what they mean, and row 1 did not.
 **Evidence.** `test_isolation.WhatTheConfinementEnforcesTest` runs one probe
 model under the real boundary and reports sixteen rows. Eleven are asserted
 closed, one — writing the build directory — is the capability the candidate is
-supposed to have, and four are asserted *open*: the three limitations above, with
-row 1 measured twice because an outbound socket and a DNS query are two different
-mechanisms and both work. A change that closes one turns that test red, which is
+supposed to have, and three are asserted *open*: the three limitations above.
+Row 1 was measured twice, by an outbound socket and by a DNS query, on the
+argument that they are two different mechanisms. **That second measurement is
+withdrawn** — see row 1 — and the socket carries the row alone. A neutral
+`local_name_resolution` row still runs and is deliberately not among the
+limitations, because local name resolution is not a property this boundary
+contract cares about. A change that closes one turns that test red, which is
 the point: a limitation that quietly stops being one is a limitation nobody
 updates the documentation for.
 

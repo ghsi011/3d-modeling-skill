@@ -553,7 +553,30 @@ def _connect(port):
 # no confinement at all -- so the green row was measuring a third-party firewall
 # and would have been green on a box with no boundary whatsoever. D11.
 _try("network_tcp_connect", lambda: _connect(443))
-_try("dns_resolution", lambda: socket.gethostbyname("example.com"))
+# NOT a named limitation, and the rename is the point. This row asked for
+# `dns_resolution` and was read as evidence that the DNS Client route is open --
+# D9's second mechanism for row 1. It cannot carry that claim.
+#
+# It aimed at `example.com`, which does not resolve on this machine with **no
+# confinement at all** (`gaierror 11001`, while `pypi.org`, `github.com` and
+# `google.com` do), so the row reported denied here whatever the boundary did and
+# the failure was reported as the boundary changing. Re-aiming it at `localhost`
+# removed the network as a variable and stopped observing the property: measured,
+# after `ipconfig /flushdns`, resolving `localhost` leaves **no `localhost` entry
+# in the DNS Client cache** while hosts-file names like
+# `kubernetes.docker.internal` are cached -- so `localhost` does not traverse the
+# service route the row existed to observe. An instrument made deterministic by
+# measuring something adjacent has been redefined rather than repaired.
+#
+# The only names found that both resolve offline *and* traverse the service are
+# this machine's own hosts-file entries, which a suite cannot rely on and must
+# not write. So the DNS Client route is now **explicitly unproven by this suite**
+# rather than replaced with something that resembles it, and `network_tcp_connect`
+# above carries the network-capability claim on its own.
+#
+# What is left is a neutral capability check: name resolution works in the child.
+# It is deliberately absent from the named-limitations tuple.
+_try("local_name_resolution", lambda: socket.gethostbyname("localhost"))
 
 # No `cmd.exe`: `mklink /J` is a process, and since D12 there are none. The
 # junction is created through the filesystem itself, so the reparse-point row

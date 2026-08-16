@@ -14,8 +14,10 @@ import ast
 import dataclasses
 import importlib.util
 import inspect
+import ipaddress
 import json
 import os
+import re
 import sys
 import tempfile
 import textwrap
@@ -582,7 +584,7 @@ class WhatTheConfinementEnforcesTest(_AttackTest):
               "spawn_process",
               "open_parent_for_write")
     ALLOWED = ("write_build_directory", "read_project_directory",
-               "write_low_integrity_profile", "dns_resolution",
+               "write_low_integrity_profile",
                # Open, and this is the honest row. `PROC_THREAD_ATTRIBUTE`s do
                # not gate sockets, Low integrity does not gate sockets, and the
                # restricting-SID set does not either -- the WSAEACCES this file
@@ -691,6 +693,73 @@ class WhatTheConfinementEnforcesTest(_AttackTest):
         self.assertNotEqual(
             "ALLOWED", report["network_tcp_connect"],
             "the candidate opened a TCP connection to 1.1.1.1:443")
+
+    def test_the_name_resolution_check_stays_deterministic(self) -> None:
+        """The neutral capability row must not become a test about the network.
+
+        **This proves the row's answer is a fact about the machine's own
+        resolver, because it fails when the probe names anything whose
+        resolution depends on public DNS.** Point it at `example.com` and it
+        fails on *any* machine: either the name does not resolve, or it resolves
+        to a routable address.
+
+        **What it deliberately does NOT prove.** It says nothing about the
+        Windows DNS Client route. Measured: after `ipconfig /flushdns`, resolving
+        `localhost` leaves no `localhost` entry in the DNS Client cache while
+        hosts-file names are cached -- so this lookup does not traverse the
+        service. That claim is retired rather than relocated, `network_tcp_connect`
+        carries the network-capability evidence alone, and D9 says so.
+
+        The history is worth keeping because it is one defect twice. The row
+        aimed at `example.com`, which does not resolve on this machine
+        unconfined, so it could never pass while sitting in the named-limitations
+        tuple and its failure read as the boundary changing. Re-aiming it at
+        `localhost` fixed the determinism and quietly changed the property
+        measured. D11's port-53 row was green everywhere and measured nothing;
+        this one was red here, then green about something else.
+        """
+        import socket                                    # noqa: PLC0415 - local
+
+        source = (PACKAGE_ROOT / "test_isolation.py").read_text(encoding="utf-8")
+        match = re.search(
+            r'_try\("local_name_resolution",\s*lambda:\s*'
+            r'socket\.gethostbyname\("([^"]+)"\)\)',
+            source)
+        self.assertIsNotNone(
+            match, "the local_name_resolution probe is no longer a gethostbyname "
+                   "call; this guard reads its hostname out of the source and is "
+                   "blind if the shape changes")
+        host = match.group(1)
+
+        try:
+            address = socket.gethostbyname(host)
+        except OSError as exc:                           # pragma: no cover - the defect
+            self.fail(f"the local_name_resolution probe asks for {host!r}, which "
+                      f"does not resolve on this machine unconfined ({exc}), so "
+                      "the row would report denied whatever the boundary did")
+
+        self.assertTrue(
+            ipaddress.ip_address(address).is_loopback,
+            f"the probe asks for {host!r}, which resolves to {address} -- a "
+            "routable address, so the row's answer depends on public DNS being "
+            "available rather than on this machine. That is the defect D11 "
+            "recorded for network_tcp_connect against port 53.")
+
+    def test_the_named_limitations_do_not_claim_dns(self) -> None:
+        """`dns_resolution` is retired, and nothing may quietly restore it.
+
+        **This proves the DNS claim is gone, because it fails if any row naming
+        DNS reappears in `ALLOWED`** -- the tuple that D9 cites as the suite's
+        evidence for its open limitations. The suite no longer establishes that
+        the DNS Client route is open; a row put back here would make D9 true
+        again by assertion rather than by measurement.
+        """
+        self.assertNotIn("dns_resolution", self.ALLOWED)
+        self.assertFalse(
+            [row for row in self.ALLOWED + self.DENIED if "dns" in row.lower()],
+            "a DNS row is back in the named limitations; the deterministic suite "
+            "cannot observe the DNS Client route, so any such row is a claim "
+            "without an instrument")
 
     def test_the_child_token_is_restricted_low_integrity_and_unprivileged(self) -> None:
         """Read out of the child's own token, not restated from the constants.
