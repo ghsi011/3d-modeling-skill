@@ -184,7 +184,7 @@
     {
       "name": "the-child-stops-installing-the-facade",
       "file": "skills/3d-modeling/scripts/pipeline/build_child.py",
-      "anchor": "    L.install()",
+      "anchor": "    L.install(input_dir)",
       "replacement": "    pass",
       "tests": [
         "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheBoundaryInstallsItInOnePlaceTest::test_the_child_installs_the_facade_after_the_seal_and_inside_the_clock"
@@ -270,6 +270,26 @@
         "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheFacadeStepsAsideTest::test_it_declines_a_loader_that_cannot_hand_over_the_code"
       ],
       "why": "PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader`, so a vendored, plugin or metapath loader the import system handles perfectly can lack it. Reading it unguarded raised `AttributeError` out of `install()` -- an unhandled exception in the boundary on an import that would otherwise have succeeded. An independent probe reported this REFUTED on the previous head, but only because its fabricated search location is not a listable directory and the inventory rule declined first; against the real build123d directory it still raised, which is why the fixture uses that directory"
+    },
+    {
+      "name": "the-facade-installs-over-a-complete-candidate-package",
+      "file": "skills/3d-modeling/scripts/pipeline/lazy_build123d.py",
+      "anchor": "    if _is_the_candidates_own(spec, candidate_dir):\n        return False",
+      "replacement": "    if False:\n        return False",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheFacadeStepsAsideTest::test_it_declines_a_complete_package_the_candidate_supplied"
+      ],
+      "why": "the shadow defect in the form the shape rule cannot see, and the third time this one has been repaired. `_carries_the_inventory` asks whether a package *looks like* build123d; a candidate that ships a `build123d/` carrying all 24 submodule names looks exactly like it, and is also the candidate that most deliberately meant to supply its own. Measured at d5e9a7f with this line absent: the shape rule returned True and `install()` returned True over the candidate's package, after which `installed_version()` reads site-packages' metadata -- a fact about a release the candidate never supplied -- and arms the search against theirs"
+    },
+    {
+      "name": "the-origin-rule-is-asked-about-nothing",
+      "file": "skills/3d-modeling/scripts/pipeline/build_child.py",
+      "anchor": "    L.install(input_dir)",
+      "replacement": "    L.install()",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_lazy_build123d.py::TheBoundaryInstallsItInOnePlaceTest::test_the_child_names_the_directory_it_sealed_when_it_installs"
+      ],
+      "why": "the boundary's half, and the way this protection actually goes wrong: `candidate_dir` defaults to `None` so that fixtures and external probes without a candidate can call `install()`, so dropping the argument at the one call site that has a candidate is a silent no-op that restores the defect in full. Nothing about a return value can see it -- the facade installs, the build succeeds, the mesh is identical -- so the call site is read as syntax, and the identifier must be the same one inserted into `sys.path`"
     }
   ]
 }
