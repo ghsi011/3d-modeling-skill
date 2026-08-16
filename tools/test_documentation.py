@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -247,6 +248,37 @@ def test_every_built_verb_is_named_by_the_adr_that_owns_the_command_surface() ->
 _CITATION = re.compile(r"ARCHITECTURE(?:\.md)?`?\s+(?:§\s*)?(\d+\.\d+)")
 
 
+def _tracked_sources() -> list[Path]:
+    """This repository's own `.py` and `.md`, and nothing else's.
+
+    `rglob` was reading the wrong corpus and paying 223x for it. It walked
+    **58 945** files where this repository tracks **264**, and the skip list it
+    filtered them through tested only `parts[0]` against `.venv`, `.git`,
+    `build` and `dist` -- so `.venv312` went through it, and so did every nested
+    worktree under `.slim/` and `.claude/`, 742 files between them.
+
+    The cost was the visible half: `sorted(ROOT.rglob("*.py"))` materialises the
+    whole tree before the filter ever runs, which is why this test breached the
+    5 s L0 ceiling at 19.4 s once two merges landed, and why it had been failing
+    about one run in five before that -- the walk is I/O bound, so a cold page
+    cache decided it.
+
+    The correctness half is worse and is the reason this is `git ls-files`
+    rather than a longer skip list. A citation inside a *vendored library* is not
+    this repository citing anything. A citation inside `.claude/worktrees/<x>/`
+    is **another checkout of this repository**, possibly at a commit where the
+    section it names still existed -- so a guard meant to prove that this tree's
+    citations resolve against this tree's `ARCHITECTURE.md` was reading someone
+    else's tree and blaming this one. Tracked files are the definition of "this
+    repository's sources", they cannot include a virtualenv or a sibling
+    worktree by construction, and a longer skip list would only have postponed
+    the next directory nobody thought of.
+    """
+    out = subprocess.run(["git", "ls-files", "*.py", "*.md"],
+                         cwd=ROOT, capture_output=True, check=True)
+    return [ROOT / name for name in out.stdout.decode("utf-8").splitlines() if name]
+
+
 def _architecture_sections() -> set[str]:
     text = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     return set(re.findall(r"^#{2,3}\s+(\d+\.\d+)\s", text, re.MULTILINE))
@@ -257,10 +289,7 @@ def test_every_architecture_section_cited_by_name_exists() -> None:
     assert "6.8" in sections, "the heading format changed; this guard is blind"
 
     offenders: list[str] = []
-    for path in sorted(ROOT.rglob("*.py")) + sorted(ROOT.rglob("*.md")):
-        parts = path.relative_to(ROOT).parts
-        if parts[0] in (".venv", ".git", "build", "dist"):
-            continue
+    for path in _tracked_sources():
         if path.name == "test_documentation.py":
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
