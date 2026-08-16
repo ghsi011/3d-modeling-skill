@@ -141,6 +141,59 @@ elif mode == "dironly":
     out["dir"] = sorted(dir(build123d))
     out["dir_len"] = len(out["dir"])
 
+elif mode == "reload":
+    # `importlib.reload` executes `__init__.py` into this module itself, and
+    # `SourceLoader.exec_module` reads `module.__dict__` to exec *into* -- which
+    # is the facade's namespace hook. Measured before the repair: the hook forced
+    # the fallback, so `__init__.py` ran once there and once for the reload, and
+    # `modify_copyreg` -- the package's one side effect beyond its imports -- ran
+    # twice where the real package runs it once. Counted after first contact, so
+    # what is counted is the reload's own doing.
+    import importlib
+    import build123d as b
+    _ = b.Box                                   # first contact, still lazy
+    counts = {"exec": 0, "modify": 0}
+    persistence = sys.modules["build123d.persistence"]
+    real_modify = persistence.modify_copyreg
+    def counting_modify():
+        counts["modify"] += 1
+        return real_modify()
+    persistence.modify_copyreg = counting_modify
+    installed_loader = b.__spec__.loader
+    real_exec = installed_loader.exec_module
+    def counting_exec(m):
+        counts["exec"] += 1
+        return real_exec(m)
+    installed_loader.exec_module = counting_exec
+
+    importlib.reload(b)
+
+    out["exec_module_calls"] = counts["exec"]
+    out["modify_copyreg_calls"] = counts["modify"]
+    out["type_after"] = type(b).__name__
+    out["namespace"] = sorted(vars(b))
+    out["box_is_a_class"] = isinstance(b.Box, type)
+
+elif mode == "monkeypatch":
+    # A candidate patches a name the search served, then reads one of the seven
+    # names only a deferred submodule carries. That read forces the real
+    # `__init__.py`, which rebinds every name it binds -- so the write was
+    # reverted, where the real package keeps it because an ordinary attribute
+    # read re-executes nothing. Laziness is checked through `types.ModuleType`'s
+    # own descriptor: asking `vars()` would force the fallback and the patch
+    # would be made against an already-real package, which is exactly how this
+    # went unmeasured.
+    import build123d as b
+    _ = b.Box
+    out["lazy_when_patched"] = (arm != "lazy"
+                                or "__getattr__" in RAW.__get__(b))
+    b.Box = "PATCHED-BY-THE-CANDIDATE"
+    b._a_name_the_package_never_had = 7
+    _ = b.import_dxf                            # deferred-only: forces the real init
+    out["fell_back"] = "__getattr__" not in RAW.__get__(b)
+    out["still_patched"] = b.Box == "PATCHED-BY-THE-CANDIDATE"
+    out["a_new_name_survives"] = getattr(b, "_a_name_the_package_never_had", None)
+
 elif mode == "submoduleimport":
     # The route where the *import system* writes the facade's namespace. `import
     # build123d.pack` binds the submodule onto its parent by `setattr`, which no

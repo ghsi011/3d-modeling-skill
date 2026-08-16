@@ -298,6 +298,19 @@ def install() -> bool:
         return False
     if spec is None or spec.loader is None or not _carries_the_inventory(spec):
         return False
+    # PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader` and is
+    # not part of the loader protocol, so a loader the import system handles
+    # perfectly may not have it -- a vendored, plugin or metapath loader over a
+    # real package directory. Reading it unguarded raised `AttributeError:
+    # 'NoGetCodeLoader' object has no attribute 'get_code'` out of `install()`,
+    # which is an unhandled exception in the boundary on an import that would
+    # otherwise have succeeded. Measured against a fabricated loader over the
+    # real build123d directory. Declining is the answer rather than skipping the
+    # docstring: `__doc__` read off the code object is the only way this module
+    # has to answer it correctly, and a facade that cannot is one more release it
+    # was not proven against.
+    if not hasattr(spec.loader, "get_code"):
+        return False
 
     module = importlib.util.module_from_spec(spec)
     loader = spec.loader
@@ -326,6 +339,14 @@ def install() -> bool:
     module.__doc__ = consts[0] if consts and isinstance(consts[0], str) else None
 
     served: set[str] = set()
+    # Everything written onto the package from outside this module. The facade
+    # caches what it serves straight into `ns`, so a write that arrives through
+    # `__setattr__` is by definition somebody else's, and `_full()` puts them
+    # back after it executes `__init__.py`. Without that, a candidate's
+    # `build123d.Box = ...` was reverted by the *next* lookup of a name only a
+    # deferred submodule carries -- measured against the real package, which
+    # keeps the write, because nothing in it re-executes.
+    patched: dict[str, Any] = {}
     state = {"armed": False, "lazy": False, "full": False}
 
     def _submodule(sub: str) -> Any:
@@ -351,8 +372,11 @@ def install() -> bool:
         state["armed"] = True
         # Before anything else can ask for it: `_full()` executes `__init__.py`,
         # whose first statement imports a submodule, which reads `__path__` off
-        # this module and would re-enter `__getattr__`.
-        module.__path__ = real_path
+        # this module and would re-enter `__getattr__`. Written into `ns` rather
+        # than through `setattr`, because a write that reaches `__setattr__` is
+        # recorded as somebody else's and put back after the fallback, and this
+        # one is the facade's own.
+        ns["__path__"] = real_path
         if installed_version() in PROVEN_VERSIONS:
             state["lazy"] = True
             # `__init__.py`'s only side effect beyond its imports. It has to
@@ -362,6 +386,36 @@ def install() -> bool:
         else:
             _full()
         return state["lazy"]
+
+    def _retire() -> None:
+        """Take the facade off the module without executing anything.
+
+        The half of `_full()` that removes the facade, split out because there is
+        one caller that must have it *without* the execution: the import system,
+        when it is about to execute `__init__.py` into this module itself.
+        """
+        if state["full"]:
+            return
+        state["full"] = True
+        state["armed"] = True
+        for name in ("__getattr__", "__dir__", *served):
+            ns.pop(name, None)
+        served.clear()
+        # The third hook, and it comes out here for the same reason as the other
+        # two rather than being left as a harmless subclass: `type(build123d)` is
+        # observable, and a module the boundary handed back with a repo-owned
+        # class is not what an ordinary import leaves. It is also the ordering
+        # `exec_module` needs -- it executes `__init__.py` into `module.__dict__`,
+        # which would otherwise be the property calling back into here.
+        #
+        # No submodule has to be put back either. Only a submodule's *first*
+        # import binds it onto its parent, so a search that removed those
+        # bindings afterwards owed the namespace 21 names that `__init__.py`
+        # could no longer restore, and there used to be a loop here that did.
+        # `__setattr__` declines the two writes that are wrong instead of the
+        # search undoing all 24, so the bindings the search makes are the ones an
+        # ordinary import makes and they are already here.
+        module.__class__ = types.ModuleType
 
     def _full() -> None:
         """Execute the real `__init__.py` into this module object.
@@ -373,27 +427,17 @@ def install() -> bool:
         """
         if state["full"]:
             return
-        state["full"] = True
-        for name in ("__getattr__", "__dir__", *served):
-            ns.pop(name, None)
-        served.clear()
-        # The third hook, and it comes out here for the same reason as the other
-        # two rather than being left as a harmless subclass: `type(build123d)` is
-        # observable, and a module the boundary handed back with a repo-owned
-        # class is not what an ordinary import leaves. It is also the ordering
-        # `exec_module` needs -- it executes `__init__.py` into `module.__dict__`,
-        # which would otherwise be the property calling back into here.
-        module.__class__ = types.ModuleType
-        # Nothing has to be put back. Only a submodule's *first* import binds it
-        # onto its parent, so a search that removed those bindings afterwards
-        # owed the namespace 21 names that `__init__.py` could no longer restore
-        # -- and this used to be the loop that did. `__setattr__` declines the
-        # two writes that are wrong instead of the search undoing all 24, so the
-        # bindings the search makes are the ones an ordinary import makes and
-        # they are already here. Measured: with the loop deleted,
-        # `the-submodules-are-not-put-back-before-the-real-init-runs` SURVIVED,
-        # which is what a repair that removed the need for a repair looks like.
+        _retire()
         loader.exec_module(module)
+        # And what somebody else put on the package goes back on top of it,
+        # because executing `__init__.py` is this module's business and not
+        # theirs. A candidate that set `build123d.Box = ...` and then read one of
+        # the seven names only a deferred submodule carries had the write
+        # reverted by the fallback -- measured, against a real package that keeps
+        # it, because an ordinary attribute read re-executes nothing. `_retire()`
+        # deliberately does not do this: the one caller it has is a *reload*,
+        # which is supposed to wipe a monkeypatch, and does so on both sides.
+        ns.update(patched)
 
     def _getattr(name: str) -> Any:
         lazy = _arm()
@@ -410,7 +454,11 @@ def install() -> bool:
             for sub in SEARCH:
                 found = getattr(_submodule(sub), name, _MISSING)
                 if found is not _MISSING:
-                    setattr(module, name, found)
+                    # Into `ns`, not through `setattr`: what the facade caches is
+                    # its own, and a write that reaches `__setattr__` has to be
+                    # somebody else's for `_full()` to know which ones to put
+                    # back afterwards.
+                    ns[name] = found
                     served.add(name)
                     return found
         _full()
@@ -483,10 +531,31 @@ def install() -> bool:
             function, identical object -- and `import_dxf` is omitted from the
             search, so it falls through to the real `__init__` like every other
             name the search cannot serve, which is where its function is.
+
+            It is also the only place that sees a write *arrive*, so it is where
+            the other two things a namespace write can mean are answered: a
+            candidate patching a name, which `_full()` must put back after it
+            executes `__init__.py`, and the import system re-initialising this
+            module, which means the facade is finished.
             """
             if name in REBOUND and value is sys.modules.get(f"{PACKAGE}.{name}"):
                 return
             super().__setattr__(name, value)
+            if not state["full"]:
+                patched[name] = value
+            # `importlib.reload` rebinds `__spec__` to a *fresh* spec object and
+            # then executes `__init__.py` into this module itself -- and
+            # `SourceLoader.exec_module` reads `module.__dict__` to exec into,
+            # which is the property above. Measured on the head before this line:
+            # the property forced `_full()`, `__init__.py` ran once there and
+            # once for the reload, and `modify_copyreg` ran **twice** where the
+            # real package runs it once. Traced to
+            # `_bootstrap_external.exec_module` reading `module.__dict__`; the
+            # rebinding is the first attribute `_init_module_attrs` sets, well
+            # before the exec, so retiring here is in time. Retire and not
+            # `_full()`: the caller is about to do the executing.
+            if name == "__spec__" and value is not spec:
+                _retire()
 
     module.__getattr__ = _getattr
     module.__dir__ = _dir
