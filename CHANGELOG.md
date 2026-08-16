@@ -41,7 +41,7 @@ object by object (0.11.1: 474 names, 0 conflicts). Any other release executes th
 keeps `build123d>=0.9`: narrowing a dependency range to protect a speedup would pay for
 it with the ability to install.
 
-**Nine defects found before this shipped, none of which a build could have seen behind a
+**Ten defects found before this shipped, none of which a build could have seen behind a
 byte-identical mesh, and every one of them a route into the package the facade's hooks
 did not answer the way build123d does.** Three the equivalence sweep caught while the
 slice was being written: `dir(build123d)` returning 11 names where the package returns
@@ -63,12 +63,19 @@ about a lookup that *failed*:
   submodule names: exactly `pack` and `import_dxf` are rebound, and those two writes are
   declined. The other 22 are what an ordinary import leaves and they stand;
 * `install()` stepped aside for a candidate's own `build123d.py` and installed itself
-  over a candidate's own `build123d/`. One rule declines both — the spec must resolve to
-  a package carrying the submodule inventory the search is written against — and before
-  it, the candidate's first attribute access died with `ModuleNotFoundError: No module
-  named 'build123d.persistence'`, from a package it had supplied itself.
+  over a candidate's own `build123d/`. Before the repair the candidate's first attribute
+  access died with `ModuleNotFoundError: No module named 'build123d.persistence'`, from a
+  package it had supplied itself. **A third reading found that repair incomplete**, and
+  it is the clearest case in this entry of a rule answering the wrong question: requiring
+  the spec to carry the search's 24-name inventory proves *shape*, and a candidate that
+  ships a complete `build123d/` has exactly that shape — while `installed_version()` goes
+  on reading the installed distribution's metadata, which is a fact about site-packages
+  and not about the package on `sys.path`. Measured: the shape rule returned True and
+  `install()` returned True over a 24-name candidate package. A `build123d` is now
+  declined on **origin** as well — the boundary passes the sealed input directory it put
+  on `sys.path`, and a spec resolved out of it is the candidate's whatever it looks like.
 
-And three more from independent probes against the head that repaired those, which is the
+And four more from independent probes against the heads that repaired those, which is the
 plainest statement available that a repair is a change and has to be measured like one:
 
 * **`importlib.reload` executed the package body twice, and the `vars()` repair is what
@@ -93,7 +100,7 @@ plainest statement available that a repair is a change and has to be measured li
 `install()` also stopped raising `AttributeError` on a loader without `get_code`, which
 PEP 451 does not require of a loader the import system handles perfectly.
 
-26 mutations attempted, 26 killed, 0 survived
+28 mutations attempted, 28 killed, 0 survived
 (`benchmarks/mutations/lazy-build123d-facade.json`). The `dir()` guard survived twice and
 moved its fixture twice rather than being dropped: first because the whole-surface
 comparison reads `__version__` before it asks for `dir`, then because the `vars()` repair
