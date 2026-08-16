@@ -279,7 +279,7 @@ class ThePublishedBaseProfileIsHeldTest(unittest.TestCase):
 
 
 class ThePublishedInterfaceRowsCanFailTest(unittest.TestCase):
-    """The other three revision-2 rows, each pinned in both states.
+    """The other four revision-2 rows, each pinned in both states.
 
     Fed as measurements rather than as built geometry: each of these reads one
     number off the section stack, and the question here is whether the
