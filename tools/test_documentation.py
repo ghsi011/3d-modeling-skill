@@ -248,8 +248,14 @@ def test_every_built_verb_is_named_by_the_adr_that_owns_the_command_surface() ->
 _CITATION = re.compile(r"ARCHITECTURE(?:\.md)?`?\s+(?:§\s*)?(\d+\.\d+)")
 
 
-def _tracked_sources() -> list[Path]:
+def _tracked_sources(root: Path | None = None) -> list[Path]:
     """This repository's own `.py` and `.md`, and nothing else's.
+
+    `root` exists so the corpus rule can be exercised against a throwaway
+    repository rather than only against this one. Without it the only available
+    evidence is that the guard still recognises a bad citation -- which the
+    *previous* implementation also did, and which an empty corpus would not
+    disturb.
 
     `rglob` was reading the wrong corpus and paying 223x for it. It walked
     **58 945** files where this repository tracks **264**, and the skip list it
@@ -274,9 +280,28 @@ def _tracked_sources() -> list[Path]:
     worktree by construction, and a longer skip list would only have postponed
     the next directory nobody thought of.
     """
+    where = ROOT if root is None else root
     out = subprocess.run(["git", "ls-files", "*.py", "*.md"],
-                         cwd=ROOT, capture_output=True, check=True)
-    return [ROOT / name for name in out.stdout.decode("utf-8").splitlines() if name]
+                         cwd=where, capture_output=True, check=True)
+    return [where / name for name in out.stdout.decode("utf-8").splitlines() if name]
+
+
+def _bad_citations(root: Path, sections: set[str]) -> list[str]:
+    """Every tracked file under `root` citing a section not in `sections`.
+
+    Factored out of the guard so the guard and the regression below run the
+    *same* code over different corpora. A regression that reimplements the rule
+    it is checking proves only that two people can agree.
+    """
+    offenders: list[str] = []
+    for path in _tracked_sources(root):
+        if path.name == "test_documentation.py":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for cited in _CITATION.findall(text):
+            if cited not in sections:
+                offenders.append(f"{path.relative_to(root)} cites {cited}")
+    return offenders
 
 
 def _architecture_sections() -> set[str]:
@@ -288,16 +313,64 @@ def test_every_architecture_section_cited_by_name_exists() -> None:
     sections = _architecture_sections()
     assert "6.8" in sections, "the heading format changed; this guard is blind"
 
-    offenders: list[str] = []
-    for path in _tracked_sources():
-        if path.name == "test_documentation.py":
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        for cited in _CITATION.findall(text):
-            if cited not in sections:
-                offenders.append(f"{path.relative_to(ROOT)} cites {cited}")
+    offenders = _bad_citations(ROOT, sections)
 
     assert not offenders, (
         "these cite an ARCHITECTURE.md section that does not exist:\n  "
         + "\n  ".join(offenders)
         + "\nA citation nobody resolved is the defect this guard exists for.")
+
+
+def _throwaway_repo(root: Path) -> None:
+    """A repository with one tracked source and one nested checkout.
+
+    The nested checkout is a *repository of its own*, which is what a worktree
+    under `.claude/` or a vendored package under `.venv312/` looks like from
+    here: `git ls-files` in the outer repository does not report it, and the
+    old `rglob` walk did.
+    """
+    def _git(*args: str, cwd: Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True)
+
+    _git("init", "-q", cwd=root)
+    _git("config", "user.email", "t@example.invalid", cwd=root)
+    _git("config", "user.name", "t", cwd=root)
+    (root / "tracked.md").write_text("nothing cited here\n", encoding="utf-8")
+    _git("add", "tracked.md", cwd=root)
+    _git("commit", "-qm", "one tracked source", cwd=root)
+
+    nested = root / ".claude" / "worktrees" / "sibling"
+    nested.mkdir(parents=True)
+    _git("init", "-q", cwd=nested)
+
+
+def test_the_guard_reads_tracked_sources_and_not_a_nested_checkout(tmp_path: Path) -> None:
+    """The corpus rule itself, which the planted-citation probes cannot reach.
+
+    Those probes prove `_CITATION` still recognises an invalid section. They
+    would have passed against the `rglob` implementation this replaced, and most
+    of them would say nothing at all if `_tracked_sources` quietly returned
+    nothing -- so they are evidence about the pattern, not about the corpus.
+
+    This is the corpus. One bad citation in a tracked file **must** be found;
+    the same bad citation inside a nested checkout **must not** be, because that
+    file belongs to another repository and may name a section that existed when
+    it was written. The two assertions are the defect and its absence, and the
+    first one is what makes the second one mean something: a corpus that found
+    nothing would fail the first.
+    """
+    _throwaway_repo(tmp_path)
+    sections = {"6.8"}
+
+    nested_file = tmp_path / ".claude" / "worktrees" / "sibling" / "stale.md"
+    nested_file.write_text("ARCHITECTURE.md 99.9\n", encoding="utf-8")
+    assert _bad_citations(tmp_path, sections) == [], (
+        "a citation inside a nested checkout was inspected; that file belongs to "
+        "another repository and its sections are not this tree's to resolve")
+
+    (tmp_path / "tracked.md").write_text("ARCHITECTURE.md 88.8\n", encoding="utf-8")
+    found = _bad_citations(tmp_path, sections)
+    assert found == ["tracked.md cites 88.8"], (
+        f"a tracked source citing a missing section must be found, got {found!r} "
+        "-- an empty corpus reports no offenders and looks exactly like a clean one")
