@@ -493,6 +493,23 @@ def _notch_lip_support(bin_):
     return trimesh.boolean.difference([bin_, cut], engine="manifold")
 
 
+_VARIANTS: dict[str, object] = {}
+
+
+def _variants() -> dict[str, object]:
+    """The two derived solids, built once for the module.
+
+    Same reason `compliant()` is cached: a boolean per test is the L0 ceiling's
+    problem rather than the assertion's, and a mutation run is a fresh
+    interpreter, so nothing unmutated can survive into a mutated sweep.
+    """
+    if not _VARIANTS:
+        whole = compliant()["mesh"]
+        _VARIANTS["short"] = _chop_divider(whole)
+        _VARIANTS["notched"] = _notch_lip_support(whole)
+    return _VARIANTS
+
+
 class TheDividerExclusionIsAVolumeAndNotAHeightBandTest(unittest.TestCase):
     """Revision 4, and the pair of claims that make it a repair rather than a
     wider mask.
@@ -510,17 +527,25 @@ class TheDividerExclusionIsAVolumeAndNotAHeightBandTest(unittest.TestCase):
     """
 
     BAND = GEOMETRY["reference_comparison"]["band_mm"]
+    # L0 caps a test at five seconds and this class registers solid pairs, which
+    # is the expensive thing in the harness. The sample count is what shrinks:
+    # both claims here are about a p99 that is either ~0 or ~0.8, five hundred
+    # times the band's own resolution apart, so the estimator's standard error
+    # is not what decides either of them. The frozen 20000 is what the
+    # calibration and the live runs use; the heavy half re-checks this same pair
+    # against the real reference at 8000.
+    SAMPLES, PROBE = 2500, 200
 
     def _p99(self, a, b) -> float:
-        found = e2e.register(a, b, samples=8000, seed=7, band_mm=self.BAND,
-                             probe_samples=300, mask=e2e.distance_mask(GEOMETRY))
+        found = e2e.register(a, b, samples=self.SAMPLES, seed=7,
+                             band_mm=self.BAND, probe_samples=self.PROBE,
+                             mask=e2e.distance_mask(GEOMETRY))
         return found["distance"]["p99_mm"]
 
     def test_two_bins_differing_only_in_divider_height_both_pass(self) -> None:
         """Both directions, because the exclusion has to be symmetric. A rule
         that is not identical on both sides is a handicap, not a scope."""
-        whole = compliant()["mesh"]
-        short = _chop_divider(whole)
+        whole, short = compliant()["mesh"], _variants()["short"]
         self.assertGreater(whole.volume - short.volume, 1.0)
         self.assertLessEqual(self._p99(short, whole), self.BAND)
         self.assertLessEqual(self._p99(whole, short), self.BAND)
@@ -528,8 +553,8 @@ class TheDividerExclusionIsAVolumeAndNotAHeightBandTest(unittest.TestCase):
     def test_a_lip_support_defect_at_those_same_heights_still_fails(self) -> None:
         """The control. If this ever passes, the exclusion has widened into a
         height band and the row has stopped judging the lip."""
-        whole = compliant()["mesh"]
-        self.assertGreater(self._p99(_notch_lip_support(whole), whole), self.BAND)
+        self.assertGreater(self._p99(_variants()["notched"], compliant()["mesh"]),
+                           self.BAND)
 
     def test_the_excluded_region_is_bounded_on_all_three_axes(self) -> None:
         """A slab, not a band. Pinned as coordinates rather than as prose,
