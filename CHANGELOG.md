@@ -41,17 +41,41 @@ object by object (0.11.1: 474 names, 0 conflicts). Any other release executes th
 keeps `build123d>=0.9`: narrowing a dependency range to protect a speedup would pay for
 it with the ability to install.
 
-Three defects the sweeps found before this shipped, none of which a build could have
-seen behind a byte-identical mesh: `dir(build123d)` returning 11 names where the package
-returns 485; `build123d.pack` answering with the submodule where `__init__` binds a
-function of the same name; and `build123d.__doc__` reading `None`.
+**Six defects found before this shipped, none of which a build could have seen behind a
+byte-identical mesh, and every one of them a route to the package that does not reach
+`__getattr__`** — which PEP 562 consults only about a lookup that *failed*. Three the
+equivalence sweep caught while the slice was being written: `dir(build123d)` returning 11
+names where the package returns 485; `build123d.pack` answering with the submodule where
+`__init__` binds a function of the same name; and `build123d.__doc__` reading `None`.
+Three more were found by independent reads at a head where every suite was green and
+seventeen mutations were killed:
 
-17 mutations attempted, 17 killed, 0 survived
-(`benchmarks/mutations/lazy-build123d-facade.json`) — after a first sweep of 17/16/1.
-The survivor was the `dir()` guard, which was correct while the fixture named against it
-could not fail for what it was named after: that test reads `__version__` and resolves a
-fallback name before it asks for `dir`, so the package is fully imported by then. The
-fixture was strengthened with a `dir()`-and-nothing-else probe, not the mutation dropped.
+* `vars(build123d)` and `build123d.__dict__` carried **9** names against **485**, and
+  `'Box' in vars(build123d)` was `False`. A module's `__dict__` cannot fail, so nothing
+  was ever asked. The module's *class* is the only hook for it, and the facade now has
+  one whose `__dict__` executes the real `__init__.py` — putting `types.ModuleType` back
+  when it does, so nothing of it outlives the fallback;
+* the import system *writes* that namespace. `import build123d.pack` binds the submodule
+  onto its parent by `setattr`, and `__init__.py` leaves a *function* there, so
+  `build123d.pack(shapes)` raised `TypeError: 'module' object is not callable` through
+  the boundary and worked without it. Measured against the executed package, all 24
+  submodule names: exactly `pack` and `import_dxf` are rebound, and those two writes are
+  declined. The other 22 are what an ordinary import leaves and they stand;
+* `install()` stepped aside for a candidate's own `build123d.py` and installed itself
+  over a candidate's own `build123d/`. One rule declines both — the spec must resolve to
+  a package carrying the submodule inventory the search is written against — and before
+  it, the candidate's first attribute access died with `ModuleNotFoundError: No module
+  named 'build123d.persistence'`, from a package it had supplied itself.
+
+21 mutations attempted, 21 killed, 0 survived
+(`benchmarks/mutations/lazy-build123d-facade.json`). The `dir()` guard survived twice and
+moved its fixture twice rather than being dropped: first because the whole-surface
+comparison reads `__version__` before it asks for `dir`, then because the `vars()` repair
+answers `dir()` before `__dir__` is reached — CPython fetches `__dict__` through ordinary
+attribute access first — so it is now named against a direct `build123d.__dir__()` call.
+Two entries were removed rather than kept as survivors, because declining the two wrong
+writes at the write left nothing for the search's own cleanup or the fallback's
+restoration loop to do.
 
 Deliberately not done, so the scope is legible later: no generic lazy-import machinery,
 nothing under `site-packages` touched, no library stubbed, no warm child kept alive, no
