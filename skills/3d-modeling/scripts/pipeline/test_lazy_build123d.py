@@ -251,6 +251,64 @@ class TheFacadeStepsAsideTest(unittest.TestCase):
             "package resolves the way it always did -- and being a package "
             "rather than a module is not what decides it")
 
+    def test_it_declines_a_complete_package_the_candidate_supplied(self) -> None:
+        """The shadow the shape rule cannot see, and the one that meant it most.
+
+        A candidate that ships a `build123d/` carrying all 24 submodule names
+        satisfies `_carries_the_inventory` exactly -- asserted below, because a
+        fixture that declined for the *old* reason would prove nothing about the
+        new one. `installed_version()` then reads the installed distribution's
+        metadata, which is a fact about site-packages and not about the package
+        on `sys.path`, so first contact would arm against a release the candidate
+        never supplied and rewrite the one it did.
+
+        Measured at `d5e9a7f`, before the origin rule existed: the shape rule
+        returned True and `install()` returned **True** over this exact package.
+        Only where it came from separates the two, so the boundary says which
+        directory is the candidate's and this is what it buys.
+        """
+        def write(root: Path) -> None:
+            package = root / L.PACKAGE
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                "SHADOW = 'supplied on purpose'\n", encoding="utf-8")
+            for sub in L.SUBMODULES:
+                (package / f"{sub}.py").write_text(
+                    "# supplied by the candidate\n", encoding="utf-8")
+
+        self._shadowed_by(write)
+        candidate_dir = sys.path[0]
+
+        spec = importlib.util.find_spec(L.PACKAGE)
+        self.assertTrue(
+            L._carries_the_inventory(spec),
+            "this fixture is supposed to satisfy the shape rule -- if it does "
+            "not, it is being declined for the old reason and says nothing "
+            "about the origin rule it was written for")
+        self.assertTrue(L._is_the_candidates_own(spec, candidate_dir))
+
+        self.assertFalse(
+            L.install(candidate_dir),
+            "the boundary installed over a complete, well-formed build123d the "
+            "candidate deliberately supplied")
+        self.assertNotIn(L.PACKAGE, sys.modules)
+
+    def test_a_package_outside_the_candidates_directory_is_not_theirs(self) -> None:
+        """The other direction, so the origin rule cannot pass by declining all.
+
+        The installed build123d is not in the sealed input directory, and a rule
+        that answered True for everything would decline the real package too --
+        which is a facade that never installs and a slice that ships nothing.
+        """
+        real = importlib.util.find_spec(L.PACKAGE)
+        self.assertIsNotNone(real)
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        self.assertFalse(L._is_the_candidates_own(real, raw.name))
+        self.assertFalse(L._is_the_candidates_own(real, None),
+                         "with no candidate directory there is nothing for a "
+                         "package to be inside of")
+
     def test_it_declines_a_loader_that_cannot_hand_over_the_code(self) -> None:
         """PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader`.
 
@@ -371,6 +429,50 @@ class TheBoundaryInstallsItInOnePlaceTest(unittest.TestCase):
                                         "child faster")
         self.assertLess(install, load, "the candidate's first import must find "
                                        "the facade already in sys.modules")
+
+    def test_the_child_names_the_directory_it_sealed_when_it_installs(self) -> None:
+        """The same directory on both lines, read as syntax.
+
+        The facade declines a `build123d` resolved out of the candidate's own
+        directory, and it cannot know which directory that is -- the boundary
+        does, because it is the one that put it on `sys.path`. So the property is
+        that the identifier inserted into `sys.path` is the identifier handed to
+        `install()`. Passing *a* directory is not enough and passing none at all
+        silently restores the defect: `install()` takes `candidate_dir=None` so
+        that the probes and fixtures which have no candidate can call it, which
+        makes the call site the only place this can be checked.
+
+        D8's finding, again: a protection whose absence is invisible to any
+        assertion about a return value has to be read out of the syntax tree.
+        """
+        body = self._build_body()
+
+        def names_in(node: ast.AST) -> set[str]:
+            return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+        sealed: set[str] = set()
+        handed: set[str] = set()
+        for node in body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
+                continue
+            call = node.value
+            if not isinstance(call.func, ast.Attribute):
+                continue
+            if call.func.attr == "insert" and names_in(call.func).issuperset({"sys"}):
+                sealed |= names_in(call) - {"sys", "str"}
+            elif call.func.attr == "install":
+                handed = names_in(call) - {"L"}
+
+        self.assertNotEqual(
+            set(), handed,
+            "build_child calls `install()` with no directory, so the facade has "
+            "nothing to compare a spec against and a candidate's own complete "
+            "build123d package is installed over -- measured at d5e9a7f")
+        self.assertTrue(
+            handed <= sealed,
+            f"the directory handed to install() ({sorted(handed)}) is not the "
+            f"one the boundary inserted into sys.path ({sorted(sealed)}), so the "
+            "origin rule is being asked about the wrong directory")
 
     def test_the_boundary_never_imports_build123d_at_module_level(self) -> None:
         """The facade is only worth anything if nothing above it has already

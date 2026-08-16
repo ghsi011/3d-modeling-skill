@@ -142,7 +142,13 @@ def _build(spec: dict[str, Any]) -> dict[str, Any]:
     # -- measured on the bearing candidate, `docs/baseline.md` -- and it serves
     # nothing lazily on a build123d release whose public surface has not been
     # swept, so an unknown one builds exactly as it did before.
-    L.install()
+    #
+    # `input_dir` is passed because this is the side that knows it: the directory
+    # inserted above is the candidate's own, and a `build123d` resolved out of it
+    # is one the designer supplied deliberately. The facade declines those on
+    # origin, which is the only question that separates a complete, well-formed
+    # candidate package from the installed one.
+    L.install(input_dir)
     model, builder = A.load(model_path)
     part = builder() if callable(builder) else builder
     kernel = _export(part, stl_path, step_path)

@@ -255,14 +255,13 @@ def _carries_the_inventory(spec: importlib.machinery.ModuleSpec) -> bool:
     against the ~1.6 ms `install()` already cost, and a shadow is refused on the
     first name that misses.
 
-    It is deliberately a question about *shape* and not about identity. Proving
-    this is the swept release means reading distribution metadata, which costs
-    132 ms and is the reason `_arm()` defers it to first contact. What that
-    leaves open is a candidate shipping a package that carries all 24 names,
-    which this cannot tell from the real one -- and which is why the version
-    guard, not this, is what says the search order is safe. A release that
-    renamed a submodule fails here and gets ordinary build123d, the same
-    direction `PROVEN_VERSIONS` fails.
+    It is a question about *shape* and it cannot be more than that, which is why
+    it is not the only rule. A candidate that ships a `build123d/` carrying all
+    24 names passes here -- measured, `install()` returned True over it -- and
+    `_is_the_candidates_own` is what declines that one, by asking where the
+    package came from instead of what it looks like. A release that renamed a
+    submodule fails here and gets ordinary build123d, the same direction
+    `PROVEN_VERSIONS` fails.
     """
     entries: set[str] = set()
     for location in spec.submodule_search_locations or ():
@@ -275,7 +274,45 @@ def _carries_the_inventory(spec: importlib.machinery.ModuleSpec) -> bool:
                for sub in SUBMODULES)
 
 
-def install() -> bool:
+def _is_the_candidates_own(spec: importlib.machinery.ModuleSpec,
+                           candidate_dir: str | os.PathLike[str] | None) -> bool:
+    """True when this `build123d` was resolved out of the candidate's own directory.
+
+    The other rule asks *does this look like build123d*. This one asks **where
+    did it come from**, and it is the only one of the two that can answer for a
+    candidate who ships a complete, well-formed package -- which is also the
+    candidate with the strongest claim to be left alone, because supplying it was
+    deliberate.
+
+    Shape cannot settle it and the facade must not pretend otherwise: a
+    candidate-local `build123d/` carrying all 24 submodule names satisfies
+    `_carries_the_inventory` exactly, and `installed_version()` then reads the
+    *installed distribution's* metadata -- `0.11.1`, a fact about site-packages
+    and not about the package on `sys.path` -- so first contact would arm against
+    a release the candidate never supplied and rewrite the one it did. Measured
+    at `d5e9a7f` before this existed: `install()` returned **True** over a
+    24-name candidate package.
+
+    The boundary is what knows which directory is the candidate's -- it is the
+    one that sealed it and put it on `sys.path` -- so it says so rather than this
+    module guessing from `sys.path[0]`. `build_child.py` passes the same
+    `input_dir` it inserted, and `test_lazy_build123d.py` reads both out of the
+    syntax tree to check they are the same directory. Called with `None`, there
+    is no candidate directory to be inside and only the shape rule applies.
+
+    `normcase(realpath(...))` on both sides: symlinks and, on Windows, case.
+    """
+    if candidate_dir is None or not spec.origin:
+        return False
+    try:
+        root = os.path.normcase(os.path.realpath(candidate_dir))
+        origin = os.path.normcase(os.path.realpath(spec.origin))
+    except (OSError, ValueError):   # unresolvable: not a directory we can trust
+        return True
+    return origin == root or origin.startswith(root + os.sep)
+
+
+def install(candidate_dir: str | os.PathLike[str] | None = None) -> bool:
     """Bind `build123d` to the facade. True if it was installed.
 
     Cheap by construction -- one `find_spec`, one directory listing and one
@@ -283,13 +320,20 @@ def install() -> bool:
     decides nothing about *which* build123d this is; `_arm()` does that on first
     contact, so the decision costs nothing to a candidate that never asks.
 
-    It declines whenever `find_spec` does not resolve to a package carrying the
-    inventory the search is written against, which is what keeps a candidate's
-    own `build123d` working exactly as it does today: the sealed input directory
-    is `sys.path[0]` by the time this runs, a shadowing *module* has no
-    `submodule_search_locations` and a shadowing *package* has none of the
-    submodules, and the facade steps aside rather than deciding what the
-    candidate's file meant. `_carries_the_inventory` is the one rule both fail.
+    `candidate_dir` is the sealed input directory the boundary put on `sys.path`,
+    and passing it is how the boundary says *this one is theirs*. Two rules keep
+    a candidate's own `build123d` working exactly as it does today, and they
+    answer different questions:
+
+    * **shape** -- `_carries_the_inventory`. A shadowing *module* has no
+      `submodule_search_locations` and a shadowing *package* usually has none of
+      the submodules, so neither is a package this search can serve;
+    * **origin** -- `_is_the_candidates_own`. A candidate that ships a complete
+      24-name `build123d/` passes the shape rule, and it is precisely the
+      candidate that meant it. Only where it came from can say so.
+
+    Either way the facade steps aside rather than deciding what the candidate's
+    file meant.
     """
     if PACKAGE in sys.modules:
         return False
@@ -298,6 +342,8 @@ def install() -> bool:
     except (ImportError, ValueError):              # a broken or shadowed install
         return False
     if spec is None or spec.loader is None or not _carries_the_inventory(spec):
+        return False
+    if _is_the_candidates_own(spec, candidate_dir):
         return False
     # PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader` and is
     # not part of the loader protocol, so a loader the import system handles
