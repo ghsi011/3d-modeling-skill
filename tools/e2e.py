@@ -103,6 +103,38 @@ def fixture(path: Path | None = None) -> dict[str, Any]:
     return json.loads(Path(path or FIXTURE).read_text(encoding="utf-8"))
 
 
+def scorer_commit() -> str | None:
+    """The commit this scorer is, or None when that cannot be established.
+
+    Brief section 10 requires the run report to bind the scorer's version
+    alongside the candidate and reference digests, and it is the one binding a
+    report cannot reconstruct later: two runs of the same candidate against the
+    same reference can disagree, and without this there is nothing in the
+    payload that says which scorer produced which.
+
+    `None` rather than a guess when the tree is dirty or git cannot answer. A
+    commit id printed beside uncommitted changes is a stronger claim than the
+    evidence supports -- it says "this is the code that ran" about code that is
+    not what ran.
+    """
+    import subprocess
+
+    try:
+        head = subprocess.run(["git", "-c", "safe.directory=*", "rev-parse",
+                               "HEAD"], cwd=str(ROOT), capture_output=True,
+                              text=True, check=False)
+        dirty = subprocess.run(["git", "-c", "safe.directory=*", "status",
+                                "--porcelain"], cwd=str(ROOT),
+                               capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    if head.returncode != 0 or dirty.returncode != 0:
+        return None
+    if dirty.stdout.strip():
+        return None
+    return head.stdout.strip() or None
+
+
 def _digest(path: Path) -> str:
     reader = hashlib.sha256()
     with path.open("rb") as handle:
@@ -851,6 +883,7 @@ def score(candidate_stl: Path, three_mf: Path | None = None,
         "fixture": spec["id"],
         "fixture_revision": spec["revision"],
         "scorer": "tools/e2e.py",
+        "scorer_commit": scorer_commit(),
         "candidate_stl_sha256": _digest(candidate_stl),
         "three_mf_sha256": _digest(Path(three_mf)) if three_mf and
         Path(three_mf).is_file() else None,
@@ -869,7 +902,15 @@ def score(candidate_stl: Path, three_mf: Path | None = None,
             "compartment_inner_box_mm": got["compartment_inner_box_mm"][:1],
             "cavity_area_mm2": got["compartment_cavity_area_mm2"][:1],
             "outer_profile_drift": outer_profile_drift(got),
-            "interior_usable_volume_mm3": round(
+            # NOT the interior usable volume, which is what this was first
+            # called. It is the open area integrated over `compartment_band`
+            # only -- the floor fillet below it and the lip region above it are
+            # outside the band -- so it understates the usable volume by
+            # whatever those contribute. Renamed rather than corrected because
+            # the band is what the prismatic predicate reads, and a diagnostic
+            # that reports the quantity a predicate actually saw is worth more
+            # than one that reports a different quantity under a better name.
+            "cavity_area_integrated_over_band_mm3": round(
                 sum(got["compartment_cavity_area_mm2"]) *
                 geometry["section_step_mm"], 3),
         },

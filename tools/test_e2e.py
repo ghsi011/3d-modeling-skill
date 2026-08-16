@@ -486,6 +486,38 @@ class TheThreeMfGateCountsPlacedBodiesTest(unittest.TestCase):
         self.assertIn("lxml", " ".join(extras["bambu"]))
 
 
+class TheReportBindsTheScorerItWasProducedByTest(unittest.TestCase):
+    """Brief section 10: the report binds the scorer's version.
+
+    Not covered by a mutation, because the property that matters is a refusal
+    and refusals are what the two states below check directly: a clean tree
+    yields a commit, and a dirty one yields `None` rather than a commit id that
+    would claim to name code which is not what ran.
+    """
+
+    def test_a_dirty_tree_yields_no_commit_rather_than_the_wrong_one(self) -> None:
+        from unittest import mock
+
+        class Done:
+            def __init__(self, out: str) -> None:
+                self.returncode, self.stdout = 0, out
+
+        with mock.patch("subprocess.run",
+                        side_effect=[Done("abc123\n"), Done(" M tools/e2e.py\n")]):
+            self.assertIsNone(e2e.scorer_commit())
+
+    def test_a_clean_tree_yields_the_head_commit(self) -> None:
+        from unittest import mock
+
+        class Done:
+            def __init__(self, out: str) -> None:
+                self.returncode, self.stdout = 0, out
+
+        with mock.patch("subprocess.run",
+                        side_effect=[Done("abc123\n"), Done("\n")]):
+            self.assertEqual("abc123", e2e.scorer_commit())
+
+
 class TheFixtureHalvesAgreeTest(unittest.TestCase):
     """The brief and the predicates state the same request in two languages.
 
