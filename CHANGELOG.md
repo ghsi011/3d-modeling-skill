@@ -6,6 +6,38 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — revision 3's first run: sixteen named rows pass, one whole-shape row does not
+
+A fresh isolated designer, dispatched after revision 3 was frozen and pushed, scored
+`CAD_FAIL / 3MF_PASS`. **All sixteen named predicates passed** on geometry nobody here
+authored — the base profile to 0.0 mm, the two feet, the floor height, both lip rows,
+and `outer_corner_radius_mm` at 3.7549, which is the row run 02 failed. The revision-3
+fix is confirmed by a candidate dispatched after it.
+
+`reference_surface_distance_p99_mm` failed at 0.3849 against 0.300, and the residual is
+one feature. Every height band from the plate to 18.2 mm reads median 0.0000 and p99 at
+or under 0.0227; all 282 samples beyond the band (1.07 %) sit between z = 18.2 and 21.0
+with |x| ≤ 0.95 mm, and the worst is exactly 2.800 = 21.0 − 18.2. Measured on both
+solids: the interior ring count drops from two to one at 18.25 on the candidate and at
+21.00 on the reference, while the opening at every height between them is identical to
+three decimals. **It is the divider's top height, and the request does not determine
+it** — the brief gives the divider's existence, axis and 1.2 mm thickness, and no cited
+figure touches its height.
+
+The candidate's own argument for stopping at 18.2 was checked and partly corrected: a
+second copy of the reference seated on the reference interferes by 0.001 mm³ at a
+20.65 mm lift and 19.438 mm³ at 20.60, so 20.65 is the seat — but the reference's own
+divider reaches 20.95 and still does not foul, because the upper bin's feet are 0.5 mm
+apart there and the divider passes between them. Any divider from 18.2 to the lip tip
+is functionally sound.
+
+**Left open on purpose.** This is run 02's defect class in a fourth place, but the three
+repairs available — exclude the divider geometrically, demote the distance row to a
+diagnostic (which the ruling permits), or have the requester state a divider height
+(which has no published source) — are not equivalent and change what F1 measures. The
+reviewer ruled once on this axis; the choice goes back rather than being taken while
+looking at a failing candidate. Nothing in revision 3 was changed by this run.
+
 ### Changed — F1's first revision-2 run found a defect in revision 2 (revision 3)
 
 The fresh candidate scored `CAD_FAIL / 3MF_PASS` on one row, `outer_corner_radius_mm`
