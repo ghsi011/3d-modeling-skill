@@ -41,7 +41,7 @@
     "primary": {
       "source": "src/core/standard.scad of kennetek/gridfinity-rebuilt-openscad",
       "url": "https://github.com/kennetek/gridfinity-rebuilt-openscad/blob/main/src/core/standard.scad",
-      "commit": "bed60a4296fe83f1bb7170ee17a069ae4a73bfcf",
+      "commit": "bed60a4296fe83f1bb7170ee17a069ae4a73bfcf -- the last commit to touch src/core/standard.scad, where every figure below but the last comes from. The height-unit convention is quoted from a second file in the same repository, src/core/gridfinity-rebuilt-utility.scad, whose own last commit is 5c091c73a250cef7e12c7a2da80dd537b696858a.",
       "read_utc": "2026-08-16",
       "what_it_is": "the constants file of a widely used public implementation of the grid standard, which cites https://gridfinity.xyz/specification/ in its own comment headers as the source of both the base and the stacking-lip constants. It is an implementation and it is named as one; it is not the reference's generator and shares no author, language or geometry kernel with it.",
       "figures": {
@@ -55,7 +55,7 @@
         "d_div": "1.2 -- 'width of divider between compartments'",
         "d_wall": "0.95 -- 'minimum wall thickness'",
         "r_f2": "2.8 -- 'internal fillet radius'",
-        "fromGridfinityUnits": "gridfinityUnit * 7, documented in src/core/gridfinity-rebuilt-utility.scad as 'The final value in mm. **Excluding** base height, and stacking lip height (if present).'",
+        "fromGridfinityUnits": "gridfinityUnit * 7, documented in src/core/gridfinity-rebuilt-utility.scad (5c091c7) as 'The final value in mm. **Excluding** base height, and stacking lip height (if present).'",
         "BASE_GAP_MM": "GRID_DIMENSIONS_MM - BASE_TOP_DIMENSIONS = [0.5, 0.5] -- 'How much overhang is expected by the standard per base. There should be a 0.5mm gap between each base. This must be kept constant, even at half/quarter grid sizes. Otherwise, they won't fit in normal grids.' The base is stated per base, and the file's grid helpers place one per unit."
       }
     },
@@ -72,7 +72,7 @@
     "primary_source_checked_and_insufficient": {
       "url": "https://gridfinity.xyz/specification/",
       "read_utc": "2026-08-16",
-      "finding": "opened, and it does not carry the profile figures in text. What it states dimensionally is the magnet size (6 mm diameter, 2 mm thick) and M3 corner screws; the rest of the page directs the reader to a community channel. Recorded because a citation nobody opened is this repository's most common defect, and because the two sources above both name this page as theirs -- so a reader who follows the chain should know where it ends."
+      "finding": "opened, and it does not carry the profile figures in text. Asked to list every numeric dimension in the page, it returns three: a 6 mm magnet diameter, a 2 mm magnet thickness and M3 corner screws. There is no base profile and no stacking-lip profile with segment heights; the page invites the reader to join a chat channel to help write the specification. Recorded because a citation nobody opened is this repository's most common defect, and because the two sources above both name this page as theirs -- so a reader following the chain should know where it ends."
     },
     "what_the_publication_does_not_fix": [
       "the truncation of the stacking lip's final 1.9 mm chamfer. Run out in full it opens the socket to the outer surface and leaves the rim a knife edge at a 1.0 mm wall, so every implementation stops it early and the publication does not say where. This is why the overall height is a band here and not a figure.",

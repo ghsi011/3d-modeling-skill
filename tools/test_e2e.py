@@ -845,6 +845,25 @@ class TheFixtureHalvesAgreeTest(unittest.TestCase):
                 ("stated tolerance", GEOMETRY["published_tolerance_mm"])):
             self.assertIn(f"{value:g} mm", brief, label)
 
+    def test_the_published_profiles_add_up(self) -> None:
+        """Each profile is stated twice -- as segments and as a total -- and the
+        predicates read both. `base_profile_deviation` takes the run from one
+        and the segments from the other, so a fixture where they disagreed would
+        measure a shape that is in neither the publication nor the brief."""
+        plug, lip = GEOMETRY["base_profile"], GEOMETRY["lip_profile"]
+        self.assertAlmostEqual(plug["lower_chamfer_mm"] + plug["upper_chamfer_mm"],
+                               plug["run_mm"], places=9)
+        self.assertAlmostEqual(plug["lower_chamfer_mm"] + plug["land_mm"] +
+                               plug["upper_chamfer_mm"], plug["rise_mm"], places=9)
+        self.assertAlmostEqual(lip["lower_chamfer_mm"] + lip["land_mm"] +
+                               lip["upper_chamfer_mm"], lip["height_mm"], places=9)
+
+    def test_the_published_footprint_is_the_pitch_less_the_published_gap(self) -> None:
+        """The one arithmetic identity the request rests on, and the reason both
+        footprint axes are declared disclosures rather than leaks."""
+        self.assertAlmostEqual(GEOMETRY["grid_pitch_mm"] - GEOMETRY["grid_gap_mm"],
+                               GEOMETRY["unit_widest_mm"], places=9)
+
     def test_the_brief_cites_the_sources_the_fixture_records(self) -> None:
         """Provenance on the request side, which is what the ruling asked for.
 
