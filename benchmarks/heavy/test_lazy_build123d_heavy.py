@@ -141,6 +141,54 @@ elif mode == "dironly":
     out["dir"] = sorted(dir(build123d))
     out["dir_len"] = len(out["dir"])
 
+elif mode == "twothread":
+    # Two threads on first contact, interleaved deterministically instead of by
+    # luck. The thread that wins the fallback is held *inside* `exec_module`
+    # until the second has reached the same fallback, which is the only window
+    # where a second thread can read a namespace `__init__.py` is still being
+    # executed into -- and a window a sleep-based storm does not reliably hit.
+    # Both names are ones only a deferred submodule carries, so both threads must
+    # go through the real `__init__`.
+    import threading
+    import time
+    import build123d as b
+    results, errors, execs = {}, [], []
+    inside, release = threading.Event(), threading.Event()
+
+    if arm == "lazy":
+        facade_loader = b.__spec__.loader
+        real_exec = facade_loader.exec_module
+        def held_exec(m):
+            execs.append(time.monotonic())
+            inside.set()
+            release.wait(120)
+            return real_exec(m)
+        facade_loader.exec_module = held_exec
+
+    def ask(tag, name):
+        try:
+            results[tag] = type(getattr(b, name)).__name__
+        except BaseException as exc:
+            errors.append([tag, type(exc).__name__, str(exc)[:110]])
+
+    first = threading.Thread(target=ask, args=("A", "ExportSVG"), name="A")
+    first.start()
+    out["winner_entered_exec"] = inside.wait(180) if arm == "lazy" else None
+    second = threading.Thread(target=ask, args=("B", "ExportDXF"), name="B")
+    second.start()
+    time.sleep(1.5)                     # the second thread is now in the fallback
+    out["second_still_waiting"] = second.is_alive() if arm == "lazy" else None
+    release.set()
+    first.join(180)
+    second.join(180)
+    out["both_finished"] = not first.is_alive() and not second.is_alive()
+    out["exec_count"] = len(execs)
+    out["errors"] = errors
+    out["results"] = results
+    out["box_is_a_class"] = isinstance(b.Box, type)
+    out["type_after"] = type(b).__name__
+    out["namespace"] = sorted(vars(b))
+
 elif mode == "reload":
     # `importlib.reload` executes `__init__.py` into this module itself, and
     # `SourceLoader.exec_module` reads `module.__dict__` to exec *into* -- which
@@ -583,6 +631,96 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
                          "importing one cheap submodule pulled in ezdxf, so the "
                          "write is being declined by forcing the real __init__ "
                          "rather than by letting the search answer")
+
+    def test_reload_executes_the_package_body_exactly_once(self) -> None:
+        """The side effect that ran twice, counted against the package itself.
+
+        `importlib.reload` executes `__init__.py` into this module, and
+        `SourceLoader.exec_module` reads `module.__dict__` to execute *into* --
+        which is the namespace hook. Measured at `e403d50`: the hook forced the
+        fallback, so the package body ran there and again for the reload, and
+        `modify_copyreg` -- its one side effect beyond its imports -- ran **2**
+        times where the real package runs it **1**. Both counters are wrapped
+        after first contact, so what they count is the reload's own doing.
+        """
+        lazy, plain = _probe("reload", "lazy"), _probe("reload", "plain")
+        self.assertEqual(1, plain["modify_copyreg_calls"],
+                         "the real package runs its one side effect once per "
+                         "reload; if that ever changes this comparison is moot")
+        self.assertEqual(plain["modify_copyreg_calls"],
+                         lazy["modify_copyreg_calls"],
+                         "reload under the facade ran the package's side effect "
+                         "a different number of times than the real package")
+        self.assertEqual(plain["exec_module_calls"], lazy["exec_module_calls"])
+        self.assertEqual("module", lazy["type_after"])
+        self.assertEqual(plain["namespace"], lazy["namespace"])
+        self.assertTrue(lazy["box_is_a_class"])
+
+    def test_two_threads_on_first_contact_see_a_finished_package(self) -> None:
+        """Deterministic, because a storm that never overlaps proves nothing.
+
+        The thread that wins the fallback is held inside `exec_module` until the
+        second thread has reached the same fallback; both ask for names only a
+        deferred submodule carries, so both must go through the real `__init__`.
+        Two things are asserted that a lucky run cannot give: the second thread
+        was *still waiting* while the first was held -- which is the protection
+        doing its job rather than the interleaving failing to happen -- and
+        neither thread raised.
+
+        Measured with the wait removed: the second thread returned from the
+        fallback while the namespace was half-executed and raised
+        `AttributeError: module 'build123d' has no attribute 'ExportDXF'`, for a
+        name the package has.
+        """
+        lazy, plain = _probe("twothread", "lazy"), _probe("twothread", "plain")
+        self.assertTrue(lazy["winner_entered_exec"],
+                        "the first thread never reached the real __init__, so "
+                        "the interleaving this test is named for did not happen "
+                        "and everything below it would pass vacuously")
+        self.assertTrue(lazy["second_still_waiting"],
+                        "the second thread was not waiting while the first was "
+                        "held inside the package body, so nothing made it wait")
+        self.assertEqual([], lazy["errors"])
+        self.assertEqual([], plain["errors"])
+        self.assertTrue(lazy["both_finished"], "a thread did not come back")
+        self.assertEqual(1, lazy["exec_count"],
+                         "the package body was executed more than once for one "
+                         "first contact")
+        self.assertEqual(plain["results"], lazy["results"])
+        self.assertEqual(plain["namespace"], lazy["namespace"])
+        self.assertEqual("module", lazy["type_after"])
+        self.assertTrue(lazy["box_is_a_class"])
+
+    def test_a_candidates_write_survives_the_fallback(self) -> None:
+        """The monkeypatch case, resolved against the package instead of guessed.
+
+        A candidate patches a name the search served, then reads one of the seven
+        names only a deferred submodule carries. That read executes the real
+        `__init__.py`, which rebinds every name it binds -- so the write was
+        reverted, where the real package keeps it because an ordinary attribute
+        read re-executes nothing.
+
+        The probe that first asked this returned INCONCLUSIVE, and its reason is
+        worth keeping: its liveness check was `"__getattr__" in vars(b)`, and
+        `vars()` now forces the fallback, so measuring laziness destroyed it.
+        Laziness is checked here through `types.ModuleType`'s own descriptor,
+        which is the one route into a namespace that no facade can intercept.
+        """
+        lazy, plain = _probe("monkeypatch", "lazy"), _probe("monkeypatch", "plain")
+        self.assertTrue(lazy["lazy_when_patched"],
+                        "the facade had already fallen back when the patch was "
+                        "made, so this ran against the real package twice and "
+                        "could not have failed")
+        self.assertTrue(lazy["fell_back"],
+                        "reading a deferred-only name did not force the real "
+                        "__init__, so the situation was not constructed")
+        self.assertTrue(plain["still_patched"],
+                        "the real package kept the write; if it ever stops, "
+                        "this comparison no longer means what it says")
+        self.assertEqual(plain["still_patched"], lazy["still_patched"])
+        self.assertEqual(7, lazy["a_new_name_survives"])
+        self.assertEqual(plain["a_new_name_survives"],
+                         lazy["a_new_name_survives"])
 
     def test_vars_and_the_namespace_are_still_the_packages_own(self) -> None:
         """The same defect one route over, and the route `__dir__` cannot cover.

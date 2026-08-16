@@ -26,6 +26,7 @@ What is left here is not a residue. It is the two claims that no run can make:
 from __future__ import annotations
 
 import ast
+import importlib.machinery
 import importlib.util
 import sys
 import tempfile
@@ -249,6 +250,48 @@ class TheFacadeStepsAsideTest(unittest.TestCase):
             "declining means leaving the name alone, so the candidate's own "
             "package resolves the way it always did -- and being a package "
             "rather than a module is not what decides it")
+
+    def test_it_declines_a_loader_that_cannot_hand_over_the_code(self) -> None:
+        """PEP 451 requires `exec_module`; `get_code` belongs to `SourceLoader`.
+
+        `install()` reads `loader.get_code(PACKAGE).co_consts` to answer
+        `__doc__` correctly, and read unguarded that raised `AttributeError:
+        'NoGetCodeLoader' object has no attribute 'get_code'` out of the boundary
+        -- an unhandled exception on an import the import system handles
+        perfectly, since a vendored, plugin or metapath loader need not have it.
+
+        The search locations are the **real** build123d directory on purpose. A
+        fabricated one is not a listable directory, so `_carries_the_inventory`
+        declines first and the guard below is never reached -- which is exactly
+        how this looked repaired when it was not.
+        """
+        real = importlib.util.find_spec(L.PACKAGE)
+        self.assertIsNotNone(real)
+
+        class NoGetCode:
+            def create_module(self, spec):
+                return None
+
+            def exec_module(self, module):
+                module.marker = 42
+
+        def spec_without_get_code(name: str, package: str | None = None):
+            if name != L.PACKAGE:
+                return original(name, package)
+            spec = importlib.machinery.ModuleSpec(
+                name, NoGetCode(), origin=real.origin, is_package=True)
+            spec.submodule_search_locations = list(
+                real.submodule_search_locations)
+            return spec
+
+        original = importlib.util.find_spec
+        importlib.util.find_spec = spec_without_get_code
+        self.addCleanup(setattr, importlib.util, "find_spec", original)
+
+        self.assertFalse(L.install(), "the facade installed over a loader whose "
+                                      "code it cannot read, so `__doc__` would "
+                                      "be answered wrongly")
+        self.assertNotIn(L.PACKAGE, sys.modules)
 
     def test_it_declines_when_build123d_cannot_be_found_at_all(self) -> None:
         """A checkout without the dependency gets a normal ImportError from the
