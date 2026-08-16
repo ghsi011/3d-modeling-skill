@@ -659,6 +659,32 @@
         "design_tool_run_seconds": 6.3,
         "note": "the harness is 20.64 s here against 32.18 s on run 02 -- same scorer, same reference, same sample counts. The difference is the candidate: this mesh is 6448 triangles against run 02's ~16000, and the cost is dominated by closest-point queries against it. Reported rather than averaged, because a harness figure that moves with the candidate is a fact about the harness worth knowing. The design path is the authoring turn plus the design-tool invocations and is never summed with it; it excludes a first dispatch of this same commission that a session limit killed before it wrote anything."
       }
+    },
+    "run_04": {
+      "which_revision": "REVISION 4, frozen and pushed at 8a0c0089e41e09ca0ef268b565ecf77c47fc6816 before this candidate was materialised or dispatched. Nothing in this run changed a predicate, a band, a mask bound or a brief line.",
+      "verdict": "CAD_PASS / 3MF_PASS",
+      "candidate_sha256": "7cfa4c00434278fb762aadd606f80a6019c0bc576776824013c663969fbf37ec",
+      "passed": "all eighteen CAD rows and all five 3MF rows. The sixteen named predicates, the proper-rotation row, and reference_surface_distance_p99_mm at 0.0011 mm against a 0.300 mm band.",
+      "the_first_passing_run": "and the first evidence that a designer working only from the request can satisfy F1's hard acceptance end to end -- request in, editable source, one STL, one 3MF, every gate cleared. Runs 01 through 03 each failed one row, and in two of the three the row was the fixture's fault.",
+      "WHAT_IT_DOES_NOT_EXERCISE": {
+        "the_divider_exclusion": "THIS RUN DOES NOT TEST REVISION 4'S CHANGE. Measured: this candidate's interior ring count drops from two to one at z = 20.95, and so does the reference's -- the two agree on divider height to the sampling step. The divider region therefore had nothing to exclude, and the row would have read the same at revision 3. What establishes the exclusion is the adversarial pair, in tools/test_e2e.py and again against the hidden reference in benchmarks/heavy/test_e2e_f1_heavy.py, on constructed geometry that differs only in that height -- not this run.",
+        "why_that_matters": "a passing live run is the easiest thing in this fixture to over-read. It says the sixteen named rows and the three height masks work on geometry nobody here authored. It says nothing about the one thing revision 4 added, because this candidate happened to make the same choice the reference did."
+      },
+      "the_masks_did_work_here": "measured, so the pass is not an artefact of masking everything: the retained p99 is 0.0011 mm and the unmasked p99 is 0.251 with a worst point of 0.8824. The three height ranges -- the feet-to-body tie, the internal floor transition and everything above the lip's published land -- are carrying real disagreement, and the row still passed on what remains.",
+      "the_row_can_still_fail": "not inferred from this run, which passed. Proven three ways at this head: a lip support missing along one long side, at the same heights the divider exclusion operates in and outside it in space, fails the row at p99 = 0.8097; the mutation that makes the row always pass is killed; and the mutation that broadens the divider exclusion into the whole height band is killed by that same control.",
+      "isolation": "a directory created empty for this run, outside both the repository and the project tree, holding only the materialised request, a copy of the skill at the freeze commit, and a venv from a wheel built at it with dependencies pinned to the scoring environment. Checked for pointers before dispatch, with the check itself corrected first: the pattern used on earlier runs over-matched the directory's own name, and re-run without that term it reports clean. Measured rather than trusted -- overall height 24.4 against the reference's 24.8, lip final chamfer 0.95 against 1.3, both undisclosed and neither reproduced. The floor transition reads 1.05 against 1.1 and the probe flags it; the designer's stated reason is independent and the residual gap between candidate and reference elsewhere is inconsistent with having seen it.",
+      "what_this_run_does_not_establish": [
+        "it does NOT establish that revision 4's divider exclusion is correct, for the reason above: this candidate and the reference chose the same divider height.",
+        "it does not establish that F1 is calibrated for difficulty. One candidate passing says the gates are satisfiable, not that they are discriminating; the mutations and the two adversarial controls are what say the latter.",
+        "it says nothing about runs 01, 02 or 03, which stay their own revisions' evidence and were not re-scored.",
+        "no independent verification ran. final_status is NEEDS_MORE_EVIDENCE with commission_verdict PASS, because the compiled plan sets verification_dispatch NEVER and no renderer exists in that environment. Brief section 1.5 forbids manufacturing a receipt to get past it, so the CAD_PASS above is the benchmark's verdict and not the pipeline's."
+      ],
+      "cost": {
+        "harness_seconds": 20.38,
+        "design_path_seconds": 2300,
+        "design_tool_run_seconds": 6.4,
+        "note": "harness and design path are never summed. 20.38 s here against 32.18 s on run 02 and 20.64 s on run 03: the scorer, reference, seed and sample counts are identical across all three, and the spread is the candidate's own triangle count driving the closest-point queries."
+      }
     }
   },
   "mutations": "benchmarks/mutations/e2e-f1-gridbin.json"

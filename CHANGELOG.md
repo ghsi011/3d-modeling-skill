@@ -6,6 +6,30 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — revision 4's run: the first `CAD_PASS / 3MF_PASS`
+
+A fresh isolated designer, dispatched after revision 4 was frozen and pushed, cleared
+**all eighteen CAD rows and all five 3MF rows** — the first time a candidate working only
+from the request has satisfied F1's hard acceptance end to end. The surface distance read
+0.0011 mm against the 0.300 mm band.
+
+**It does not exercise revision 4's change, and that is stated in the fixture rather than
+left to be assumed.** Measured: this candidate's interior ring count drops from two to one
+at z = 20.95, and so does the reference's — they agree on divider height, so the divider
+region had nothing to exclude and the row would have read the same at revision 3. What
+establishes the exclusion is the adversarial pair on constructed geometry, not this run.
+
+The height masks did carry real work here, so the pass is not an artefact of masking
+everything: retained p99 0.0011 against an unmasked p99 of 0.251 and a worst point of
+0.8824. And the row can still fail — proven three ways at this head, not inferred from a
+run that passed: the lip-support control fails at 0.8097, the mutation that makes the row
+always pass is killed, and the mutation that broadens the divider exclusion into the whole
+height band is killed by that same control.
+
+Still `NEEDS_MORE_EVIDENCE` from the pipeline itself, for the reason every run has hit:
+the compiled plan sets `verification_dispatch: NEVER` and no renderer is installed, so the
+`CAD_PASS` is the benchmark's verdict and not the pipeline's.
+
 ### Changed — the distance row's scope now matches the request at the divider (revision 4)
 
 The reviewer's ruling on run 03: do not state a divider height from the hidden reference,
