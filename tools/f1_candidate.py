@@ -319,20 +319,19 @@ def build():
         cutters.append(bore)
     bin_ = trimesh.boolean.difference([outer, *cutters], engine="manifold")
 
-    # The dividers, put back into the hollow. Started a millimetre inside the
-    # floor and run past the walls in the other axis, so no face of the addition
-    # is coplanar with a face of the body -- coplanar union faces are where a
-    # manifold engine leaves a sliver, and a sliver here would cost the
-    # watertight row for a reason that has nothing to do with the design.
+    # The dividers, put back into the hollow. Each one starts a millimetre below
+    # the floor and ends half a millimetre inside the wall at either end, so no
+    # face of the addition is coplanar with a face of the body: coplanar union
+    # faces are where a manifold engine leaves a sliver, and a sliver here would
+    # cost the watertight row for a reason that has nothing to do with the
+    # design. Half a millimetre is inside a 1.0 mm wall, so the union cannot
+    # grow the bin's footprint either.
     additions = []
     across = (WIDTH_MM if SPLIT_AXIS == 0 else LENGTH_MM) - 2.0 * WALL_MM
-    # Half a millimetre into the wall at each end, which is inside a 1.0 mm
-    # wall: far enough that no face of the divider is coplanar with a face of
-    # the cavity, and not so far that the union grows the bin's footprint.
     buried = across + WALL_MM
+    cells = _compartments()
     for index in range(DIVIDER_COUNT):
-        offset = _compartments()[index][0] + _compartments()[index][1] / 2.0 \
-            + DIVIDER_MM / 2.0
+        offset = cells[index][0] + cells[index][1] / 2.0 + DIVIDER_MM / 2.0
         extents = ((DIVIDER_MM, buried, CAVITY_TOP_MM - FLOOR_MM + 1.0)
                    if SPLIT_AXIS == 0
                    else (buried, DIVIDER_MM, CAVITY_TOP_MM - FLOOR_MM + 1.0))
