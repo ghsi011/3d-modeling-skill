@@ -63,7 +63,7 @@ evidence about revision 2, and revision 2 was not tuned to it: the two figures t
 candidate got wrong — a 2.4 mm capture ramp and a 4.0 mm corner radius — are wrong
 against the public source, and both are now mutation probes.
 
-Thirty-one mutations, all killed. Also fixed on the way: the scorer ignored the
+Thirty mutations, all killed. Also fixed on the way: the scorer ignored the
 `probe_samples` the fixture declared, and the masked row and its unmasked diagnostic now
 come from one sampling pass rather than two — which halves the dominant harness cost and
 makes it impossible for the two to disagree about the same pair of solids.

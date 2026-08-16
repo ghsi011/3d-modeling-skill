@@ -78,7 +78,8 @@
       "the truncation of the stacking lip's final 1.9 mm chamfer. Run out in full it opens the socket to the outer surface and leaves the rim a knife edge at a 1.0 mm wall, so every implementation stops it early and the publication does not say where. This is why the overall height is a band here and not a figure.",
       "the internal fillet or chamfer where the floor and the divider meet the walls. The same public file offers r_f2 = 2.8 as an internal fillet radius while the reference uses 1.1 -- two readings of one source disagreeing, which is the proof that it is a design decision rather than an interface.",
       "the divider's own thickness. d_div = 1.2 sits in that file without a spec attribution, so the request states 1.2 as the requester's own family convention rather than as a published interface figure -- honest about which of the two it is."
-    ]
+    ],
+    "authorised_by": "docs/agents/qa-e2e-implementation.md, F1's 'Candidate input package': 'If a base mating profile must be described numerically, source it from a public standard/reference document and treat it as request-side stated data. Do not leak the hidden generator's actual output measurements.' Revision 2 is that sentence carried out -- the implementing brief allowed it before the reviewer's ruling required it, and revision 1 simply did not do it."
   },
   "spec_conformance": {
     "what_this_block_is": "whether the hidden reference agrees with the published figures above. Answer-side, and the reason revision 2 can hard-judge anything at all: a predicate written from the publication is only fair if the reference satisfies it, and a surface where the two disagree must be masked instead. Measured on the scored reference with C:/projects/3d/qa-f1-gridbin/spec-conformance/measure_profile.py, outer and cavity cross-sections at 0.05 mm steps.",
@@ -393,7 +394,7 @@
       {
         "requirement": "widest_section_per_unit_mm",
         "measurement": "extent_y",
-        "why": "the published widest section is 41.5 mm per grid unit in a 42 mm cell, so a one-unit-wide bin is 41.5 mm wide and stating the interface states the short footprint. Public source: BASE_TOP_DIMENSIONS in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad, and 'It is 41.5mm square' at https://github.com/gridfinity-unofficial/specification. It passes the test docs/agents/review-workflow.md section 3a sets -- it would be true of the family if this reference had never been generated -- and the reviewer's ruling requires the interface on the request side. The report marks that axis given rather than reconstructed."
+        "why": "the published widest section is 41.5 mm per grid unit in a 42 mm cell, so a one-unit-wide bin is 41.5 mm wide and stating the interface states the short footprint. Public source: BASE_TOP_DIMENSIONS in src/core/standard.scad of https://github.com/kennetek/gridfinity-rebuilt-openscad, and 'It is 41.5mm square' at https://github.com/gridfinity-unofficial/specification. It passes the test docs/agents/review-workflow.md section 3a sets -- it would be true of the family if this reference had never been generated -- and the reviewer's ruling requires the interface on the request side. The report marks that axis given rather than reconstructed. This is docs/defects.md D30's shape and D30's remedy: for some references the interface dimension IS the answer dimension, and refusing it makes the benchmark unanswerable rather than hard."
       },
       {
         "requirement": "widest_section_per_unit_mm",
