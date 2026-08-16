@@ -149,11 +149,13 @@ elif mode == "twothread":
     # executed into -- and a window a sleep-based storm does not reliably hit.
     # Both names are ones only a deferred submodule carries, so both threads must
     # go through the real `__init__`.
+    import importlib
     import threading
     import time
     import build123d as b
     results, errors, execs = {}, [], []
     inside, release = threading.Event(), threading.Event()
+    second_at_the_end_of_its_search = threading.Event()
 
     if arm == "lazy":
         facade_loader = b.__spec__.loader
@@ -164,6 +166,20 @@ elif mode == "twothread":
             release.wait(120)
             return real_exec(m)
         facade_loader.exec_module = held_exec
+
+        # The second thread's arrival is *observed*, not slept for. Asking for a
+        # deferred-only name walks the whole search and misses, so the last
+        # submodule the search imports is the last thing that happens before the
+        # fallback -- and watching for it on that thread puts the measurement two
+        # statements away from the block instead of a hopeful interval away.
+        real_import = importlib.import_module
+        last_of_the_search = "build123d." + L.SEARCH[-1]
+        def watched_import(name, package=None):
+            if (name == last_of_the_search
+                    and threading.current_thread().name == "B"):
+                second_at_the_end_of_its_search.set()
+            return real_import(name, package)
+        importlib.import_module = watched_import
 
     def ask(tag, name):
         try:
@@ -176,7 +192,9 @@ elif mode == "twothread":
     out["winner_entered_exec"] = inside.wait(180) if arm == "lazy" else None
     second = threading.Thread(target=ask, args=("B", "ExportDXF"), name="B")
     second.start()
-    time.sleep(1.5)                     # the second thread is now in the fallback
+    out["second_reached_its_fallback"] = (
+        second_at_the_end_of_its_search.wait(180) if arm == "lazy" else None)
+    time.sleep(0.3)                     # the two statements between there and the block
     out["second_still_waiting"] = second.is_alive() if arm == "lazy" else None
     release.set()
     first.join(180)
@@ -677,6 +695,11 @@ class TheFacadeIsTheSamePackageTest(unittest.TestCase):
                         "the first thread never reached the real __init__, so "
                         "the interleaving this test is named for did not happen "
                         "and everything below it would pass vacuously")
+        self.assertTrue(lazy["second_reached_its_fallback"],
+                        "the second thread never reached the end of its search, "
+                        "so it never got to the fallback and the wait below "
+                        "would be measuring nothing -- this is the assertion "
+                        "that stops a dwell from passing by being too short")
         self.assertTrue(lazy["second_still_waiting"],
                         "the second thread was not waiting while the first was "
                         "held inside the package body, so nothing made it wait")
