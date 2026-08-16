@@ -553,7 +553,24 @@ def _connect(port):
 # no confinement at all -- so the green row was measuring a third-party firewall
 # and would have been green on a box with no boundary whatsoever. D11.
 _try("network_tcp_connect", lambda: _connect(443))
-_try("dns_resolution", lambda: socket.gethostbyname("example.com"))
+# `localhost`, and the name matters for the same reason the port above does.
+# This row aimed at `example.com` until D11's lesson was applied to it rather
+# than only to its neighbour: that name does not resolve on this machine **with
+# no confinement at all** -- `gaierror 11001`, while `pypi.org`, `github.com`
+# and `google.com` all resolve -- so the row reported `denied` here whatever the
+# boundary did, and the whole test failed for a reason that was never about the
+# boundary. The port-53 version was green everywhere and measured nothing; this
+# was red here and measured nothing, which is the same defect wearing the other
+# sign.
+#
+# What it proves and what would break it: this row proves the boundary does not
+# stop the child resolving a name -- a declared limitation, since resolution
+# goes through a service rather than a socket and nothing in a restricted token,
+# Low integrity or the job object gates it. It fails if resolution stops working
+# inside the child, which is what a future tightening would look like. It does
+# **not** change when public DNS is unavailable, and that is the point: that is
+# a fact about somebody's network, not about this boundary.
+_try("dns_resolution", lambda: socket.gethostbyname("localhost"))
 
 # No `cmd.exe`: `mklink /J` is a process, and since D12 there are none. The
 # junction is created through the filesystem itself, so the reparse-point row
