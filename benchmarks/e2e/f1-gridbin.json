@@ -280,5 +280,29 @@
       "handedness on THIS part, because there is nothing handed to catch. Measured, not assumed: the mirrored reference registers back onto the original at p99 = 4.4e-11 mm through a proper rotation. So probe 6 of the brief's required seven ('mirrored/incorrect-handed transformation IF the fixture gains any handed feature') has no handed feature to act on here, and the mutation that stands in its place probes the property that would matter if it did -- that the registration cannot fit a reflection."
     ]
   },
+  "run_findings": {
+    "note": "Non-normative. Nothing in this block is applied to a candidate; it records what the first real run measured about the FIXTURE. `revision` is unchanged at 1 because a revision names the contract a candidate is judged against, and no predicate, band, brief line or request value moved. The full write-up is C:/projects/3d/qa-f1-gridbin/runs/run-01/post-mortem.md, which is project evidence and stays out of this repository per AGENTS.md.",
+    "run_01": {
+      "verdict": "CAD_FAIL / 3MF_PASS",
+      "candidate_sha256": "827a99eeada0ab81017a131add28981e0c142e87012a8cbb5bc54bd463cd7fd3",
+      "failed": ["reference_surface_distance_p99_mm at 2.300 mm against a 0.300 mm band"],
+      "where_the_disagreement_is": "measured, not inferred: over 30000 samples bucketed by height, the compartment walls and divider (z 8-18) sit at a median of 0.000 mm and a p95 of 0.100 mm, and every one of the 17.9% of samples beyond 1 mm is below z = 21. The parts the brief dimensioned agree; the base profile, the floor height and the lip profile -- none of which the brief gives -- are the whole of the failure.",
+      "the_finding_that_matters": "THE REQUEST IDENTIFIES THE STANDARD BY RECALL, SO THIS FIXTURE CANNOT SEPARATE RECALL FROM DERIVATION. The brief names no standard and gives no base profile, and the designer reported deriving the plug from FDM first principles. Both profiles were then measured off the meshes at 0.05 mm steps: reference 0.00-0.80 chamfer, 0.80-2.65 land, 2.65-4.75 chamfer, all 45 degrees; candidate 0.00-0.80, 0.80-2.65, 2.65-5.00, all 45 degrees. The first two segments agree to the sampling step and only the capture ramp differs, by 0.25 mm. Independent derivation does not land on a matching chamfer height, land height, segment count, angle and direction. 42 mm is the most identifying number in the brief, and a model whose training data holds the published standard does not need the brief to reproduce it. benchmarks/corpus.json already records the same failure mode in another ecosystem: a designer told 'Voron' and 'deck panel' had the topology fixed by recall, and reported it unprompted.",
+      "why_withholding_more_does_not_fix_it": "take the pitch out and the request is unanswerable; leave it in and the standard is named in all but words. The two honest repairs are both FIXTURE changes and neither is a scorer change: state the base and lip profile as request-side data from a public source, which turns F1 into a precision-implementation test of F3's class; or perturb the interface off the published standard -- a 40 mm pitch -- so recall is actively wrong and only derivation can pass. The second is the stronger instrument.",
+      "brief_gaps_the_run_priced": [
+        "total height: 'three height units of 7 mm' does not say whether 21 mm is the overall height or the stack pitch. The designer read it as stack pitch and built 25.4 mm; the reference is 24.8. This is the largest single ambiguity in the brief.",
+        "lip profile, corner radius and floor height: withheld, chosen, and together with the height they are the whole of the CAD failure.",
+        "divider thickness and stack mating clearance: withheld, chosen, and both landed inside every predicate and inside the band."
+      ],
+      "cost": {
+        "harness_seconds": 18.77,
+        "harness_share_of_run": 0.011,
+        "dominant_harness_cost": "registration and the 40000-sample surface distance, 14.94 s of 18.77",
+        "design_path_seconds": 1711,
+        "design_tool_run_seconds": 64.5
+      },
+      "blind_score_coupling": "NOT reproduced here, and the coupling is real. tools/blind.py:score reads corpus.request_view, which is the QUESTION validator, so a fault in the question half denies a score outright -- reproduced on a synthetic entry with the candidate, the reference and the scorer untouched. tools/e2e.py calls only corpus.numbers_in and corpus.coincidences, and only on the request side, so a malformed request package fails the audit and cannot make a measured candidate unscoreable."
+    }
+  },
   "mutations": "benchmarks/mutations/e2e-f1-gridbin.json"
 }

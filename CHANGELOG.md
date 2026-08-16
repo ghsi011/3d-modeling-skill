@@ -6,6 +6,69 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Added — F1's live end-to-end arm, and the first real run through it
+
+Slice A of [`docs/agents/qa-e2e-implementation.md`](docs/agents/qa-e2e-implementation.md):
+the minimum needed to materialise the grid-bin request, run the real design path, gate
+what comes back, and say so in one report. F1 only. No interface framework, no scorer
+generalisation, no new dependency.
+
+`tools/e2e.py` decides twelve hard CAD predicates and four 3MF ones. Ten of the CAD
+rows are measured off horizontal cross-sections rather than a CAD feature tree — the
+compartment count is the number of interior rings, the divider axis is the
+disjointness of the two cavity footprints, a stacking lip is an opening that narrows
+near the rim, and "no scoops and no label flange" is one statement, that the
+compartment is prismatic. The other two are the registered comparison: bidirectional
+sampled surface distance, with a pose set of the **24 proper rotations of a cuboid**,
+so no reflection is available to the fitter.
+
+**The bands are calibrated from same-geometry noise, not chosen.** 0.3 mm is 2.6× the
+coarsest measured re-tessellation p99 (0.1135 mm at 860 faces) and 2.8× below the
+smallest real defect measured (0.835 mm for a two percent single-axis scale); the 3MF
+band of 0.001 mm is 30× the measured round trip. The calibration caught its own first
+attempt: OCCT reuses an existing triangulation, so three deflections returned one
+identical mesh until `BRepTools.Clean_s` was added — a measurement of nothing, reading
+as zero noise.
+
+**Two states, not one.** `tools/f1_candidate.py` is a compliant bin this benchmark
+wrote; `benchmarks/heavy/test_e2e_f1_heavy.py` puts the hidden reference — 21 120
+faces from a pinned third-party generator — through the same ten predicates, and it
+passes all of them. Twenty mutations in
+`benchmarks/mutations/e2e-f1-gridbin.json`, all killed: six of the brief's seven
+probes as candidate mutations, and the seventh as a reflection-guard mutation because
+this bin is achiral — measured, the mirrored reference registers back at
+p99 = 4.4e-11 mm.
+
+**The requester-side prohibition is structural.** `audit_request` runs
+`corpus.numbers_in` and `corpus.coincidences` over the materialised request package,
+so a reference measurement that reached the brief is a hard failure rather than a
+review finding. One coincidence is declared with its public source: the published
+42 mm pitch states the short footprint to within 1.2%.
+
+**The first real run: `CAD_FAIL / 3MF_PASS`, and the fixture learned more than the
+designer did.** Eleven of twelve CAD rows passed; the surface distance failed at
+p99 = 2.300 mm. Bucketed by height, the compartment walls and divider sit at a median
+of 0.000 mm and every sample beyond 1 mm is below z = 21 — the parts the brief
+dimensioned agree, and the base profile, floor height and lip profile, which it
+withholds, are the whole of the failure. The finding that matters is worse than a
+failed row: measured at 0.05 mm steps, the blind candidate's base plug matches the
+reference's chamfer height, land height, segment count and 45° angle, differing only
+in the capture ramp. 42 mm identifies the standard, so **F1 as built cannot separate
+recall from derivation**, and withholding more cannot fix it — the repairs are a
+fixture change, recorded in the fixture's own `run_findings`.
+
+Harness overhead is reported apart from the design path and never summed: 18.77 s
+against 1711 s, so 1.1% of the run, four fifths of it in one surface-distance call.
+
+Two known defects reproduced on the way. `trimesh` cannot read a 3MF without `lxml`,
+which is not in the default install, so `make_3mf.py`'s round-trip verification has
+never run here (**D3**) — `e2e.read_three_mf` parses the archive with the standard
+library instead, and walks build items through their components so a body hidden as a
+second component is counted. And `make_3mf.py`'s `%.6g` vertices (**D2**) are now
+quantified: p99 3.27e-05 mm, volume delta 0.0013 mm³.
+
+L0 grew by 35 tests to 1296 collected, against a ceiling of 1440.
+
 ### Fixed — a JSON `null` unit became the string `"None"` and passed the check against it (D33)
 
 The rule that requires a unit tests `if not str(self.unit).strip()`. The loader read
