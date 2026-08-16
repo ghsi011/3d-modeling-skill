@@ -358,11 +358,11 @@ def _corner_radius(mesh, z: float) -> float | None:
     3.75). The fixture records both; only one of them is cheap enough to run on
     every candidate, and it is this one.
     """
+    import math
+
     got = _outer(mesh, z)
     if got is None or got["x"] <= 0 or got["y"] <= 0:
         return None
-    import math
-
     deficit = got["x"] * got["y"] - got["area"]
     if deficit <= 0:
         return 0.0
