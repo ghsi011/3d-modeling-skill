@@ -674,11 +674,49 @@ def undetermined(points, mask: dict[str, float] | None):
     keep = np.ones(len(points), dtype=bool)
     if not mask:
         return ~keep
-    z = np.asarray(points, dtype=float)[:, 2]
+    seen = np.asarray(points, dtype=float)
+    z = seen[:, 2]
     keep &= ~((z >= mask["tie_low_mm"]) & (z <= mask["tie_high_mm"]))
     keep &= ~((z >= mask["floor_low_mm"]) & (z <= mask["floor_high_mm"]))
     keep &= z <= mask["lip_land_top_mm"]
+    keep &= ~_divider_region(seen, mask)
     return ~keep
+
+
+def _divider_region(points, mask: dict[str, float]):
+    """The divider's own region in space, above the compartment band.
+
+    A **volume**, not a height band, and the difference is the whole of the
+    reviewer's third condition. Above the compartment band the request stops
+    fixing how far the divider continues toward the lip -- but it goes on fixing
+    the lip and its support at those very same heights, and those must stay
+    hard-judged. A rule phrased as *ignore samples between z = A and z = B*
+    would drop both, which is the truth-model defect over again with the sign
+    reversed.
+
+    So the region is a slab about the divider's own plane, bounded three ways
+    and every bound taken from a request-side fact:
+
+    * across the divider, its stated 1.2 mm thickness plus the stated 0.2 mm
+      tolerance plus the 2.8 mm internal fillet the cited public file
+      contemplates -- a designer may fillet the divider into what it meets, and
+      that fillet is as undetermined as the height;
+    * along the divider, stopped short of the lip's published footprint by the
+      stated tolerance, so the lip ring on the long sides is never inside it;
+    * below, the top of the compartment band, which the request already fixes.
+
+    Nothing here is measured off the reference or off any candidate. The rule is
+    a function of the sample's own coordinates in the datum frame and is applied
+    identically to both solids -- an exclusion that differed between them would
+    be a handicap rather than a scope.
+    """
+    import numpy as np
+
+    across = points[:, 0 if mask["divider_normal_is_x"] else 1]
+    along = points[:, 1 if mask["divider_normal_is_x"] else 0]
+    return ((np.abs(across) <= mask["divider_half_across_mm"])
+            & (np.abs(along) <= mask["divider_half_along_mm"])
+            & (points[:, 2] > mask["divider_low_z_mm"]))
 
 
 def surface_distance(a, b, *, samples: int, seed: int, band_mm: float,
@@ -1072,13 +1110,27 @@ def distance_mask(geometry: dict[str, Any]) -> dict[str, float]:
     """
     lip = geometry["lip_profile"]
     floor = geometry["base_height_mm"]
+    tol = geometry["published_tolerance_mm"]
+    fillet = geometry["internal_fillet_allowance_mm"]
+    units_x, units_y = geometry["footprint_units"]
+    normal_is_x = geometry["split_axis"] == "x"
+    # The divider runs ACROSS the other axis, so its length is bounded by that
+    # axis's published footprint -- less the lip's published depth, so the lip
+    # ring on those sides is never inside the region.
+    spans = geometry["grid_pitch_mm"] * (units_y if normal_is_x else units_x) \
+        - geometry["grid_gap_mm"]
     return {
         "tie_low_mm": geometry["base_profile"]["rise_mm"],
         "tie_high_mm": floor,
         "floor_low_mm": floor,
-        "floor_high_mm": floor + geometry["internal_fillet_allowance_mm"],
+        "floor_high_mm": floor + fillet,
         "lip_land_top_mm": (geometry["height_units"] * geometry["height_unit_mm"]
                             + lip["lower_chamfer_mm"] + lip["land_mm"]),
+        "divider_normal_is_x": normal_is_x,
+        "divider_half_across_mm": (geometry["divider_thickness_mm"] / 2.0 + tol
+                                   + fillet),
+        "divider_half_along_mm": spans / 2.0 - lip["depth_mm"] - tol,
+        "divider_low_z_mm": geometry["compartment_band"]["high_mm"],
     }
 
 

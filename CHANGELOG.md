@@ -6,6 +6,39 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed — the distance row's scope now matches the request at the divider (revision 4)
+
+The reviewer's ruling on run 03: do not state a divider height from the hidden reference,
+and do not demote the whole registered-distance row. Keep the row, and make its scope
+match the request — above the compartment band, exclude the **divider region
+geometrically, not the whole z band**, because the lip and its support at those same
+heights remain determined and must stay hard-judged.
+
+The exclusion is a slab about the divider's own plane: ±3.6 mm across (half the stated
+1.2 mm thickness, plus the stated 0.2 mm tolerance, plus the 2.8 mm internal fillet the
+cited file contemplates), ±17.95 mm along it (the published short footprint less the
+published lip depth less the tolerance, so the lip ring is never inside it), above
+z = 18.0 (the compartment band's own top). Every bound is arithmetic on a request-side
+fact; none comes from run 03, the reference, or any measured residual. It is applied
+identically to both solids — an asymmetric rule would be a handicap, not a scope.
+
+**The control was built first, and it had to be re-sized.** A 10 mm notch in the lip
+support removes 65.68 mm³ — about half a percent of the sampled surface — and p99 could
+not see it at all (0.0000), which is the limit the fixture already records. The control
+that ships removes the lip support along a whole long side (463.31 mm³) and failed the
+row at p99 = 0.7931 against revision 3, *before* the exclusion existed. With the
+exclusion in place it still fails, at 0.8097 — so the repair did not collapse into a
+height band.
+
+Two bins differing only in divider top height now both clear the row (p99 = 0.0000 in
+both directions), in L0 and again against the hidden reference in L0-heavy. What the
+exclusion deliberately does not reach is recorded: the divider's last stretch where it
+meets the lip ring leaves 0.427 % of samples beyond the band, worst point 1.97 mm, under
+the p99 cut. Extending the bound further would start excluding the lip ring itself.
+
+Two mutations added — removing the exclusion, and broadening it into the whole height
+band — both killed. 34 in the manifest.
+
 ### Added — revision 3's first run: sixteen named rows pass, one whole-shape row does not
 
 A fresh isolated designer, dispatched after revision 3 was frozen and pushed, scored

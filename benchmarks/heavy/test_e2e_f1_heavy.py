@@ -175,6 +175,46 @@ class TheReferenceScoresCleanAgainstItselfTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE, WHY)
+class TheDividerHeightIsNotJudgedAgainstTheReferenceTest(unittest.TestCase):
+    """Revision 4's adversarial pair, against the solid that actually has the
+    other answer.
+
+    The L0 half proves the exclusion's shape on two bins this benchmark wrote.
+    This is the case that matters: the hidden reference runs its divider to the
+    lip's tip, run 03's candidate stopped it where the compartment stops being
+    straight-sided, and the request fixes neither. Two bins that differ only in
+    that must both clear the hard row *against the reference itself*, or the row
+    is still judging a choice the request leaves open.
+
+    The control rides along, because a pair that only ever passes proves the row
+    stopped working rather than that it got its scope right.
+    """
+
+    BAND = GEOMETRY["reference_comparison"]["band_mm"]
+
+    def _p99(self, candidate) -> float:
+        found = e2e.register(
+            candidate, measured()["mesh"], samples=8000,
+            seed=FAST["reference_comparison"]["seed"], band_mm=self.BAND,
+            probe_samples=FAST["reference_comparison"]["probe_samples"],
+            mask=e2e.distance_mask(GEOMETRY))
+        return found["distance"]["p99_mm"]
+
+    def test_both_divider_heights_clear_the_row_against_the_reference(self) -> None:
+        sys.path.insert(0, str(REPO / "tools"))
+        import f1_candidate
+        from test_e2e import _chop_divider, _notch_lip_support
+
+        whole = f1_candidate.build()
+        short = _chop_divider(whole)
+        self.assertGreater(whole.volume - short.volume, 1.0)
+        self.assertLessEqual(self._p99(whole), self.BAND)
+        self.assertLessEqual(self._p99(short), self.BAND)
+        # ...and the row has not simply stopped failing.
+        self.assertGreater(self._p99(_notch_lip_support(whole)), self.BAND)
+
+
+@unittest.skipUnless(HAVE, WHY)
 class TheRepositorysOwnThreeMfWriterIsReadableTest(unittest.TestCase):
     """`make_3mf.py`'s real output through `e2e.read_three_mf`.
 

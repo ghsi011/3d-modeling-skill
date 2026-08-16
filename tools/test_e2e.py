@@ -398,8 +398,12 @@ class TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest(unittest.TestCase):
         mask = e2e.distance_mask(GEOMETRY)
         heights = np.array([0.0, 3.0, 4.7, 4.75, 6.0, 7.0, 8.4, 9.8, 9.9,
                             23.5, 23.6, 30.0])
-        points = np.stack([np.zeros_like(heights), np.zeros_like(heights),
-                           heights], axis=1)
+        # Sampled well off the divider plane, so this measures the three height
+        # ranges and only those. On the plane itself the divider region takes
+        # over above the compartment band, which is a different rule with its
+        # own test.
+        away = np.full_like(heights, 30.0)
+        points = np.stack([away, np.zeros_like(heights), heights], axis=1)
         dropped = e2e.undetermined(points, mask).tolist()
         self.assertEqual([False, False, False, True, True, True, True, True,
                           False, False, True, True], dropped)
@@ -457,7 +461,117 @@ class TheHardDistanceJudgesOnlyWhatTheRequestDeterminesTest(unittest.TestCase):
                          found["distance_unmasked"]["samples"])
 
 
-class TheRegistrationSeatsBothSolidsOnTheirBaseTest(unittest.TestCase):
+def _chop_divider(bin_, above: float = 21.2):
+    """The same bin with its divider cut down, and nothing else touched.
+
+    A subtraction rather than a second build, so the two solids are provably
+    identical everywhere the box does not reach: same walls, same lip, same
+    feet, same floor, same fillets. That is what "differ only in divider top
+    height" has to mean for the pair to prove anything.
+    """
+    import trimesh
+
+    chop = trimesh.creation.box(extents=(4.0, 44.0, 6.0))
+    chop.apply_translation((0.0, 0.0, above))
+    return trimesh.boolean.difference([bin_, chop], engine="manifold")
+
+
+def _notch_lip_support(bin_):
+    """The same bin with the lip's support missing along one long side.
+
+    Sits at the *same heights* the divider exclusion operates in and outside it
+    in space, which is the only reason it can tell a geometric exclusion from a
+    height band. Sized to run the length of the side on purpose: a 10 mm notch
+    is about half a percent of the sampled surface and p99 cannot see it -- the
+    fixture already records that limit, and a control that small would have read
+    as a passing gate rather than a failing one.
+    """
+    import trimesh
+
+    cut = trimesh.creation.box(extents=(70.0, 4.0, 3.0))
+    cut.apply_translation((0.0, 19.5, 19.75))
+    return trimesh.boolean.difference([bin_, cut], engine="manifold")
+
+
+class TheDividerExclusionIsAVolumeAndNotAHeightBandTest(unittest.TestCase):
+    """Revision 4, and the pair of claims that make it a repair rather than a
+    wider mask.
+
+    Above the compartment band the request stops fixing how far the divider
+    continues toward the lip. It does **not** stop fixing the lip or its support
+    at those same heights. So the exclusion has to be the divider's own region
+    in space, and the two tests below are what separates that from "ignore
+    everything up there": two bins differing only in divider height must both
+    pass, and a lip-support defect at the same heights must still fail.
+
+    The control was written and shown to discriminate *before* the exclusion
+    existed -- at revision 3 it failed the row at p99 = 0.7931 -- because a
+    control written afterwards tends to be shaped to pass.
+    """
+
+    BAND = GEOMETRY["reference_comparison"]["band_mm"]
+
+    def _p99(self, a, b) -> float:
+        found = e2e.register(a, b, samples=8000, seed=7, band_mm=self.BAND,
+                             probe_samples=300, mask=e2e.distance_mask(GEOMETRY))
+        return found["distance"]["p99_mm"]
+
+    def test_two_bins_differing_only_in_divider_height_both_pass(self) -> None:
+        """Both directions, because the exclusion has to be symmetric. A rule
+        that is not identical on both sides is a handicap, not a scope."""
+        whole = compliant()["mesh"]
+        short = _chop_divider(whole)
+        self.assertGreater(whole.volume - short.volume, 1.0)
+        self.assertLessEqual(self._p99(short, whole), self.BAND)
+        self.assertLessEqual(self._p99(whole, short), self.BAND)
+
+    def test_a_lip_support_defect_at_those_same_heights_still_fails(self) -> None:
+        """The control. If this ever passes, the exclusion has widened into a
+        height band and the row has stopped judging the lip."""
+        whole = compliant()["mesh"]
+        self.assertGreater(self._p99(_notch_lip_support(whole), whole), self.BAND)
+
+    def test_the_excluded_region_is_bounded_on_all_three_axes(self) -> None:
+        """A slab, not a band. Pinned as coordinates rather than as prose,
+        because "geometric, not band-wise" is the whole ruling and a later edit
+        that dropped one bound would still read as an exclusion.
+        """
+        import numpy as np
+
+        mask = e2e.distance_mask(GEOMETRY)
+        across = mask["divider_half_across_mm"]
+        along = mask["divider_half_along_mm"]
+        low = mask["divider_low_z_mm"]
+        cases = {
+            "on the divider, above the band": ((0.0, 0.0, low + 1.0), True),
+            "on the divider, inside the band": ((0.0, 0.0, low - 1.0), False),
+            "past the divider across": ((across + 0.1, 0.0, low + 1.0), False),
+            "past the divider along, where the lip ring is":
+                ((0.0, along + 0.1, low + 1.0), False),
+            "the lip ring on a long side": ((20.0, 19.5, low + 1.5), False),
+            "the lip ring on a short end": ((40.0, 0.0, low + 1.5), False),
+        }
+        for name, (point, expected) in cases.items():
+            got = bool(e2e._divider_region(np.array([point]), mask)[0])
+            self.assertEqual(expected, got, name)
+
+    def test_every_bound_is_arithmetic_on_request_side_facts(self) -> None:
+        """No bound may come from the reference or from any candidate. Asserted
+        against the request-side numbers themselves, so a bound quietly retuned
+        to a measured residual stops matching."""
+        mask = e2e.distance_mask(GEOMETRY)
+        tol = GEOMETRY["published_tolerance_mm"]
+        fillet = GEOMETRY["internal_fillet_allowance_mm"]
+        self.assertAlmostEqual(GEOMETRY["divider_thickness_mm"] / 2.0 + tol + fillet,
+                               mask["divider_half_across_mm"], places=9)
+        short = GEOMETRY["grid_pitch_mm"] * GEOMETRY["footprint_units"][1] \
+            - GEOMETRY["grid_gap_mm"]
+        self.assertAlmostEqual(short / 2.0 - GEOMETRY["lip_profile"]["depth_mm"] - tol,
+                               mask["divider_half_along_mm"], places=9)
+        self.assertEqual(GEOMETRY["compartment_band"]["high_mm"],
+                         mask["divider_low_z_mm"])
+        self.assertEqual(GEOMETRY["split_axis"] == "x", mask["divider_normal_is_x"])
+
     """The named datum, and why it is not a bounding-box centroid.
 
     Measured rather than argued: two solids that differ only in overall height
