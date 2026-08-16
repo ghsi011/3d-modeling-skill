@@ -92,7 +92,7 @@
       "outer_corner_radius": "3.7528 mm by area deficit and 3.7500 mm by the shortest distance from a bounding-box corner, against a published 7.5 / 2. Two methods sharing no assumption, agreeing to 0.003 mm; only the first is cheap enough to run on every candidate and it is the one the predicate uses.",
       "floor_height": "the first section with an interior ring is z = 7.000, against a published BASE_HEIGHT of 7",
       "wall": "cavity 81.5 x 39.5 against an outer 83.5 x 41.5: 1.0 mm, which the request states",
-      "cavity_outer_corner_radius": "2.75 = 3.75 - 1.0, recovered from the measured cavity area 3164.309 mm2 to 0.01 mm2 -- a uniform wall, which follows from two request-side numbers",
+      "cavity_outer_corner_radius": "2.75 = 3.75 - 1.0, a uniform wall, which follows from two request-side numbers. Recovered from the section rather than assumed: two compartments of 40.15 x 39.50 with two corners at 2.75 against the outer wall and two at the reference's own 1.1 against the divider predict 3164.3196 mm2, and the measured cavity area at z = 12 is 3164.309 -- 0.011 mm2 apart, which is the tessellation.",
       "divider": "1.200 mm thick, centred on x = 0",
       "lip_depth": "(83.50 - 78.30) / 2 = 2.60 from the outer surface, against a published 2.6",
       "lip_inner_tip_height": "z = 21.000, against a published 3 height units of 7 mm excluding the lip",
