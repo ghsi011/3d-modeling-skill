@@ -90,6 +90,17 @@
       "max_mm": 0.0, "p99_mm": 0.0, "mean_mm": 0.0,
       "conclusion": "repeated generation differs in BYTES and not in geometry: the STEP header carries a build timestamp and the STL moves by 8 bytes of 831884, while the measured surface distance between regenerations is 0.000000 mm. So the honest claim is the ruled one -- the geometric operation is deterministic, serialization and tessellation bytes are not -- and the mask needs no margin for regeneration."
     },
+    "preservation": {
+      "metric": "two-sided surface distance, source-to-candidate and candidate-to-source, sampled outside the mask",
+      "threshold_mm": 0.10,
+      "why_this_threshold": "Two independent justifications that agree. The measured cross-tessellation control is max 0.05974 mm and p99.9 0.03697 mm, so 0.10 is above the noise a no-edit comparison produces; and the pipeline's own declared preservation band for this class of job is 0.1 mm, so the fixture is not inventing a looser number than production uses.",
+      "control_cross_tessellation": {
+        "method": "the UNEDITED source tessellated twice, at tolerance 0.010 and 0.002 (16108 vs 45750 triangles), compared with this exact metric",
+        "probes": 79179, "max_mm": 0.05974, "p999_mm": 0.03697, "p99_mm": 0.00891, "mean_mm": 0.00031
+      },
+      "why_not_ray_length": "Ray length counts crossings, so a ray grazing a curved shell either catches it or slips through depending on the chord approximation, and when it slips the measured length jumps by the whole cavity. On the first live candidate that produced 5 failing rays at up to 18.8679 mm; the same control -- unedited source against a second tessellation of itself -- reproduced 5 rays at 18.8686 mm, so the entire signal was the instrument. Four of the five sat on the hood's R16.070 curved shoulder.",
+      "how_this_fixture_got_it_wrong_first": "The frozen noise floor was measured on REGENERATION -- one generator, one tolerance, 0.000000 mm -- while the comparison actually made is CROSS-TESSELLATION, our STL against whatever the pipeline exported. That is the failure this file warns about, committed inside this file: a calibration answering a different question from the claim resting on it. Corroborated independently by the run's own metrologist, unprompted: the B-rep-to-mesh volume deficit is -6.349 mm3 and pre-exists any edit, 'so a preservation audit must not read it as material lost by the modification'."
+    },
     "no_registration": {
       "decision": "F4 does not solve for pose.",
       "why": "a MODIFY candidate is derived from the supplied source and is therefore already in the source frame. F1 must register because its reference comes from a third-party generator in an arbitrary pose; F4 asserts frame agreement instead, which removes the most expensive and most failure-prone step in the comparison and cannot silently mask a translation, because a translated candidate fails the preservation region immediately."

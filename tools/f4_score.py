@@ -96,6 +96,29 @@ def solid_lengths(mesh, yz: np.ndarray, lo: float, hi: float) -> np.ndarray:
     return out
 
 
+def _outside(pts, mask) -> np.ndarray:
+    return ~((pts[:, 0] >= mask["x"][0]) & (pts[:, 0] <= mask["x"][1]) &
+             (pts[:, 1] >= mask["y"][0]) & (pts[:, 1] <= mask["y"][1]) &
+             (pts[:, 2] >= mask["z"][0]) & (pts[:, 2] <= mask["z"][1]))
+
+
+def _two_sided_distance(a, b, mask, n: int = 40000, seed: int = 5) -> np.ndarray:
+    """Distances from each mesh's surface to the other, outside the mask.
+
+    Two-sided because one direction alone is blind in one of the two ways that
+    matter: sampling only the source misses material the candidate *added*, and
+    sampling only the candidate misses material it *removed*.
+    """
+    out = []
+    for first, second in ((a, b), (b, a)):
+        pts, _ = trimesh.sample.sample_surface(first, n, seed=seed)
+        pts = pts[_outside(pts, mask)]
+        if not len(pts):
+            continue
+        out.append(np.abs(trimesh.proximity.signed_distance(second, pts)))
+    return np.concatenate(out) if out else np.zeros(0)
+
+
 def _row(name, ok, got, want, why=""):
     return {"row": name, "ok": bool(ok), "got": got, "want": want, "why": why}
 
@@ -161,22 +184,29 @@ def score(src, cnd, spec: dict, pitch: float) -> list[dict]:
                      "no material on the slot axis within the mask",
                      f"topological; the source carries {s_here:.4f} mm there and the depth is never scored"))
 
-    # Preservation: the same instrument, over the whole part, outside the mask.
-    ys_all = np.arange(-47.0, 65.0, 0.5)
-    zs_all = np.arange(0.5, 30.0, 0.5)
-    ay, az = np.meshgrid(ys_all, zs_all, indexing="ij")
-    all_yz = np.column_stack([ay.ravel(), az.ravel()])
-    in_mask = ((all_yz[:, 0] >= mask["y"][0]) & (all_yz[:, 0] <= mask["y"][1]) &
-               (all_yz[:, 1] >= mask["z"][0]) & (all_yz[:, 1] <= mask["z"][1]))
-    out_yz = all_yz[~in_mask]
-    s_all = solid_lengths(src, out_yz, -40.0, 40.0)
-    c_all = solid_lengths(cnd, out_yz, -40.0, 40.0)
-    ok = ~(np.isnan(s_all) | np.isnan(c_all))
-    diff = np.abs(s_all[ok] - c_all[ok])
-    bad = int((diff > 0.05).sum())
-    rows.append(_row("source_equivalence_outside_the_mask", bad == 0,
-                     f"{bad} of {int(ok.sum())} rays differ by >0.05 mm (max {diff.max():.4f})",
-                     "no ray outside the mask differs beyond the noise floor",
+    # Preservation: two-sided surface distance outside the mask.
+    #
+    # NOT ray length, and the reason is measured. Ray length counts *crossings*,
+    # so a ray grazing a curved shell either catches it or slips through
+    # depending on the chord approximation, and when it slips the length jumps by
+    # the whole cavity. On this part that produced 5 failing rays at up to
+    # 18.87 mm -- and a control of the UNEDITED source against a second
+    # tessellation of itself reproduced the same 5 rays at 18.8686 mm, so the
+    # signal was entirely the instrument. Surface distance measures geometry
+    # rather than topology: the same control gives max 0.0597 mm.
+    #
+    # This is the calibration mistake the fixture warns about, made in the
+    # fixture: the frozen noise floor was measured on *regeneration* (one
+    # generator, one tolerance, 0.000000 mm) while the comparison actually made
+    # is *cross-tessellation* -- our STL against whatever the pipeline exported.
+    # A floor calibrated on the wrong pairing is a different question from the
+    # claim resting on it.
+    thresh = float(spec["calibration"]["preservation"]["threshold_mm"])
+    d = _two_sided_distance(src, cnd, mask)
+    worst = float(d.max()) if len(d) else 0.0
+    rows.append(_row("source_equivalence_outside_the_mask", worst <= thresh,
+                     f"worst {worst:.5f} mm over {len(d)} probes",
+                     f"<= {thresh} mm outside the mask",
                      "any change outside the authorized region fails, whatever it looks like"))
     rows.append(_row("nothing_added_inside_the_mask", int(added.sum()) == 0,
                      f"{int(added.sum())} rays gained material",
