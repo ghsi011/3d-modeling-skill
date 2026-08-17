@@ -305,6 +305,41 @@ def read_step(path, *, tolerance: float = BREP_READ_LINEAR_DEFLECTION,
                            keep_geometry=keep_geometry)
 
 
+def _step_as_mesh(path, *, process: bool) -> trimesh.Trimesh:
+    """A supplied STEP as triangles, or a refusal naming the faces that failed.
+
+    **The completeness check is the reason this helper exists.** OCC
+    triangulates face by face, and a face it cannot triangulate still leaves
+    every other face's triangles in the result -- `BrepTessellation`'s docstring
+    says the partial reading is returned *precisely* so that a caller has to
+    decide in the open what to do with it. Both loaders used to decide nothing:
+    they took `vertices` and `triangles` unconditionally, so a STEP with one bad
+    face became a mesh with a hole in it and then acquired an area, an overhang
+    figure and a preservation sample count that all describe a part nobody
+    supplied. Every one of those numbers looks authoritative and none of them
+    are, which is worse than the read failing outright.
+
+    `validate_brep_tessellation` below already had the right shape -- read,
+    check `complete`, raise `summary()`. This is that rule applied at the two
+    entry points that skipped it, in one place so they cannot drift apart again:
+    the drift `load_mesh`'s own contract exists to prevent is a file readable by
+    one loader and not the other, and a file *refused* by one and measured by the
+    other is the same defect wearing better clothes.
+
+    `complete` is deliberately not spelled `not failures` here. It is three
+    conjuncts, and the third -- a shape nobody could enumerate -- produces an
+    empty failure list, so the shorter test would pass the one input it can
+    learn least about.
+    """
+    brep = read_step(path)
+    if not brep.complete:
+        raise ValueError(
+            f"{path} could not be read completely as a B-rep, so it "
+            f"is refused rather than measured with a hole in it: {brep.summary()}")
+    return trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles,
+                           process=process)
+
+
 def validate_brep_tessellation(shape: Any, *, tolerance: float,
                                angular_tolerance: float) -> None:
     """Fail with face-level diagnostics before a B-rep is exported."""
@@ -522,9 +557,7 @@ def load_mesh_raw(path) -> tuple[trimesh.Trimesh, MeshIntegrity]:
     # candidate. On the MODIFY lane, whose whole subject is preservation, that is
     # the one gate that had to work.
     if str(path).lower().endswith((".step", ".stp")):
-        brep = read_step(path)
-        tm = trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles,
-                             process=False)
+        tm = _step_as_mesh(path, process=False)
     else:
         try:
             tm = trimesh.load(path, force="mesh", process=False)
@@ -557,8 +590,7 @@ def load_mesh(path):
     # about which files are readable, which is exactly the drift `as_mesh`'s own
     # docstring says it exists to prevent.
     if str(path).lower().endswith((".step", ".stp")):
-        brep = read_step(path)
-        tm = trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles)
+        tm = _step_as_mesh(path, process=True)
     else:
         try:
             tm = trimesh.load(path, force="mesh")

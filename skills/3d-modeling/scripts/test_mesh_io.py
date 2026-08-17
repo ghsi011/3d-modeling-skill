@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import numpy as np
@@ -348,6 +349,97 @@ class ConnectedComponentCountTest(unittest.TestCase):
         for _ in range(4):
             strip = strip.subdivide()
         self.assertEqual(mesh_io.connected_component_count(strip), 1)
+
+
+class APartiallyTessellatedStepIsRefusedRatherThanMeasuredTest(unittest.TestCase):
+    """**This proves an incomplete B-rep read cannot become an authoritative
+    measurement, because it fails when the loaders take `brep.triangles` without
+    consulting `brep.complete`.**
+
+    That was the state routing STEP through the kernel first shipped in. OCC
+    triangulates per face, and a face it cannot triangulate still leaves every
+    other face's triangles in the result -- `BrepTessellation`'s own docstring
+    says the partial reading is returned precisely so a caller has to decide in
+    the open what to do with it. Both loaders decided nothing. A STEP with one
+    failed face therefore became a mesh with a hole in it, and then acquired an
+    area, an overhang figure and a preservation sample count that all describe a
+    part nobody supplied.
+
+    `validate_brep_tessellation` in the same module already had the correct
+    shape -- read, check `complete`, raise `summary()` -- so this is that rule
+    applied at the two entry points that skipped it, not a new policy.
+
+    The reading is injected rather than provoked from a real file: making OCC
+    fail on one face of a genuine STEP is not reproducible across kernel
+    versions, and the property under test is what the *loader* does with a
+    partial reading, not whether this month's OCC can be made to stumble. It
+    also keeps the row in the commit gate, where a B-rep read costs seconds.
+    """
+
+    @staticmethod
+    def _reading(*, failures: tuple[str, ...]) -> mesh_io.BrepTessellation:
+        box = _box()
+        return mesh_io.BrepTessellation(
+            faces=12, tessellated=12 - len(failures), failures=failures,
+            linear_deflection=0.01, angular_deflection=0.1,
+            vertices=np.asarray(box.vertices, dtype=np.float64),
+            triangles=np.asarray(box.faces, dtype=np.int64))
+
+    def _step(self, tmp: str) -> Path:
+        path = Path(tmp) / "probe.step"
+        path.write_text("ISO-10303-21;\n", encoding="utf-8")
+        return path
+
+    def test_load_mesh_raw_refuses_a_partial_reading(self) -> None:
+        partial = self._reading(failures=("face 7 (BSplineSurface): null triangulation",))
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=partial):
+                with self.assertRaises(ValueError) as caught:
+                    mesh_io.load_mesh_raw(step)
+        self.assertIn("face 7", str(caught.exception),
+                      "the refusal has to name the face that failed; a bare "
+                      "'could not read' sends the reader back to OCC with "
+                      "nothing to go on")
+
+    def test_load_mesh_refuses_a_partial_reading(self) -> None:
+        """The second entry point, which is the one the toolkit goes through."""
+        partial = self._reading(failures=("face 3 (Cone): empty triangulation",))
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=partial):
+                with self.assertRaises(ValueError):
+                    mesh_io.load_mesh(step)
+
+    def test_a_complete_reading_is_still_accepted_by_both_loaders(self) -> None:
+        """The control. Without it a guard that refuses everything passes."""
+        whole = self._reading(failures=())
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=whole):
+                raw, _ = mesh_io.load_mesh_raw(step)
+                normalized = mesh_io.load_mesh(step)
+        self.assertGreater(len(raw.faces), 0)
+        self.assertGreater(len(normalized.faces), 0)
+
+    def test_a_shape_nobody_could_walk_is_refused_too(self) -> None:
+        """`enumerated=False` is the third answer `complete` exists to keep
+        separate: not 'every face read' and not 'a face failed', but nobody
+        looked. It produces an empty failure list, so a guard written as
+        `not failures` would pass it."""
+        unwalkable = mesh_io.BrepTessellation(
+            faces=0, tessellated=0, failures=(), linear_deflection=0.01,
+            angular_deflection=0.1, vertices=np.zeros((0, 3)),
+            triangles=np.zeros((0, 3), dtype=np.int64), enumerated=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=unwalkable):
+                with self.assertRaises(ValueError):
+                    mesh_io.load_mesh_raw(step)
 
 
 if __name__ == "__main__":
