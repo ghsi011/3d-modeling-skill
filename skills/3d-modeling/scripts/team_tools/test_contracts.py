@@ -413,6 +413,137 @@ class HashFormatTest(unittest.TestCase):
             self.assertTrue(C.is_hash_format(value), value)
         for value in bad:
             self.assertFalse(C.is_hash_format(value), value)
+_DELIVERABLE = {
+    "format": "3mf",
+    "purpose": "the archive that goes to the slicer",
+    "source_geometry": "the accepted candidate solid",
+    "units": "millimetre",
+    "frame": "installed frame, identity transform",
+    "export_path": "make_3mf.py from the exported STL",
+    "acceptance": "unit is millimetre, one printable body, matches the accepted STL",
+}
+
+_EXPORT_FIDELITY = {
+    "applies_because": "the STL is what the preservation comparison measures",
+    "basis": "four-point convergence ladder on this part",
+    "chord_tolerance_mm": [0.005, 0.010],
+    "angular_tolerance_deg": [0.05, 0.10],
+    "worst_error_mm": 0.004,
+    "tolerance_it_must_not_consume_mm": 0.1,
+}
+
+
+class PrintPlanDeliverableClosureTest(unittest.TestCase):
+    """**This proves a deliverable the commission names cannot vanish from the
+    plan, because it fails when that deliverable's entry is removed.**
+
+    Not hypothetical. On a real MODIFY commission whose brief listed both an STL
+    and a 3MF, a plan was authored that never mentioned the 3MF at all -- zero
+    occurrences -- and passed every structural check there was, because nothing
+    checked that a named deliverable had been closed. A deliverable nobody
+    constrained is one nobody can reject, and it reaches a printer anyway.
+    """
+
+    def _plan(self) -> dict:
+        plan = clone(_PRINT_PLAN)
+        plan["deliverables"] = [clone(_DELIVERABLE)]
+        return plan
+
+    def test_a_named_deliverable_that_is_closed_passes(self) -> None:
+        """The control. Without it, a check that refuses everything would pass."""
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}}, required_deliverables=["3mf"])
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_a_named_deliverable_the_plan_omits_is_an_error(self) -> None:
+        plan = clone(_PRINT_PLAN)          # no `deliverables` at all
+        issues = V.validate_print_plan(
+            plan, feature_ids={"F01": {}}, required_deliverables=["stl", "3mf"])
+        ids = issue_ids(issues)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[stl]", ids)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_one_of_two_named_deliverables_is_still_an_error(self) -> None:
+        """The case that actually happened: the STL closed, the 3MF forgotten."""
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}},
+            required_deliverables=["stl", "3mf"])
+        ids = issue_ids(issues)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[stl]", ids)
+        self.assertNotIn("MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_a_deliverable_present_but_unbound_is_an_error(self) -> None:
+        """Naming a format is not closing it: the plan has to say what the thing
+        is for, where it comes from, in what units and frame, how it is produced
+        and what would reject it."""
+        thin = self._plan()
+        del thin["deliverables"][0]["units"]
+        del thin["deliverables"][0]["acceptance"]
+        ids = issue_ids(V.validate_print_plan(
+            thin, feature_ids={"F01": {}}, required_deliverables=["3mf"]))
+        self.assertIn("MISSING_FIELD@print_plan.deliverables[3mf].units", ids)
+        self.assertIn("MISSING_FIELD@print_plan.deliverables[3mf].acceptance", ids)
+
+    def test_nothing_is_required_when_the_commission_names_nothing(self) -> None:
+        """The second control, and it is what keeps this from becoming a tax on
+        every existing plan: absent a stated deliverable list, this check is
+        silent."""
+        issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+
+class PrintPlanExportFidelityTest(unittest.TestCase):
+    """**This proves an export-fidelity envelope is required wherever
+    discretization decides something, because it fails when that block is removed
+    from a job that declares such a decision -- and passes when the job declares
+    none.**
+
+    The measured case: one plan froze a chord band on a convergence ladder that
+    excluded both the deflection where the mesh reads non-watertight and the
+    coarse one where volume error reached 10% of the material the edit removes;
+    its cheaper sibling left the export unconstrained entirely, which makes a
+    mass-based preservation comparison meaningless without any rule appearing to
+    fail.
+    """
+
+    def _plan(self) -> dict:
+        plan = clone(_PRINT_PLAN)
+        plan["export_fidelity"] = clone(_EXPORT_FIDELITY)
+        return plan
+
+    def test_a_declared_envelope_passes(self) -> None:
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}}, discretized_decision=True)
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_no_envelope_where_discretization_decides_is_an_error(self) -> None:
+        issues = V.validate_print_plan(
+            clone(_PRINT_PLAN), feature_ids={"F01": {}}, discretized_decision=True)
+        self.assertIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity",
+                      issue_ids(issues))
+
+    def test_an_envelope_without_a_measured_basis_is_an_error(self) -> None:
+        """A band with no measurement behind it is a number somebody chose, which
+        is the thing the charter forbids -- and copying another part's band is the
+        specific way that happens."""
+        guessed = self._plan()
+        del guessed["export_fidelity"]["basis"]
+        self.assertIn("MISSING_FIELD@print_plan.export_fidelity.basis",
+                      issue_ids(V.validate_print_plan(
+                          guessed, feature_ids={"F01": {}},
+                          discretized_decision=True)))
+
+    def test_a_job_that_decides_nothing_on_a_mesh_is_not_forced_to_invent_one(self) -> None:
+        """The control, and it owes the same proof as the regression: a job where
+        discretization is irrelevant must not be pushed into inventing
+        tessellation figures, because a fabricated envelope is itself a defect."""
+        issues = V.validate_print_plan(
+            clone(_PRINT_PLAN), feature_ids={"F01": {}}, discretized_decision=False)
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+        issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+
 class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
         issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})

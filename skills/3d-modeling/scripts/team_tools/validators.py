@@ -323,12 +323,52 @@ def _matrix_shape_issues(matrix: Any, *, where: str) -> list[Issue]:
     return issues
 
 
+#: What closing a deliverable means. Naming a format is not closing it: a plan
+#: that says "3MF" and nothing else has constrained nothing, and the thing still
+#: reaches a printer. Each of these answers a question somebody downstream has.
+_DELIVERABLE_BINDING = {
+    "format": str,
+    "purpose": str,
+    "source_geometry": str,
+    "units": str,
+    "frame": str,
+    "export_path": str,
+    "acceptance": str,
+}
+
+#: An export-fidelity envelope has to rest on a measurement. `basis` is the
+#: required field rather than the numbers, because the numbers are only as good
+#: as what produced them -- and copying another part's band is the specific way a
+#: guess arrives looking like a calibration.
+_EXPORT_FIDELITY_BINDING = {
+    "applies_because": str,
+    "basis": str,
+}
+
+
 def validate_print_plan(
     data: dict[str, Any],
     *,
     where: str = "print_plan",
     feature_ids: dict[str, Any] | None = None,
+    required_deliverables: Any = None,
+    discretized_decision: bool | None = None,
 ) -> list[Issue]:
+    """Validate a print plan's machine-readable projection.
+
+    `required_deliverables` is the set of artifact formats the commission names,
+    and `discretized_decision` says whether anything in this job is decided on a
+    triangulated or serialized artifact. Both default to *unstated*, and while
+    unstated the corresponding checks are silent -- so this does not become a tax
+    on every plan already written, and a caller that knows nothing about the
+    commission cannot invent an obligation.
+
+    Both checks exist because a real commission produced a plan that satisfied
+    every structural check while leaving a brief-required 3MF entirely
+    unmentioned, and a sibling plan left the export unconstrained on a MODIFY job
+    whose whole acceptance rests on comparing meshes. Neither failure was visible
+    to any gate; both were found by a human reading prose.
+    """
     issues: list[Issue] = []
     issues += _check_contract_header(
         data, contract_key="print-plan", expected_owners=_EXPECTED_OWNERS["print_plan"], where=where
@@ -370,9 +410,60 @@ def validate_print_plan(
             "expected_bodies": int,
             "interfaces": list,
             "threshold_source": str,
+            # Charter rule 10: every deliverable the commission names, closed.
+            "deliverables": list,
+            # Charter rule 11: the export envelope, where discretization decides.
+            "export_fidelity": dict,
         },
         where=where,
     )
+
+    # -- charter rule 10: a named deliverable cannot simply be absent ---------
+    if required_deliverables is not None:
+        closed: dict[str, dict[str, Any]] = {}
+        for position, row in enumerate(data.get("deliverables") or ()):
+            if not isinstance(row, dict):
+                issues.append(error("BAD_TYPE", f"{where}.deliverables[{position}]",
+                                    "expected an object"))
+                continue
+            fmt = str(row.get("format") or "").strip().lower()
+            if fmt:
+                closed[fmt] = row
+        for wanted in required_deliverables:
+            key = str(wanted).strip().lower()
+            row = closed.get(key)
+            if row is None:
+                issues.append(error(
+                    "MISSING_DELIVERABLE", f"{where}.deliverables[{key}]",
+                    f"the commission requires a {key!r} deliverable and the plan "
+                    "does not close one; a deliverable nobody constrained is one "
+                    "nobody can reject",
+                ))
+                continue
+            issues += check_object_fields(
+                row, required=dict(_DELIVERABLE_BINDING), optional={},
+                where=f"{where}.deliverables[{key}]",
+            )
+
+    # -- charter rule 11: bound the export where it decides something ---------
+    if discretized_decision:
+        envelope = data.get("export_fidelity")
+        if not isinstance(envelope, dict):
+            issues.append(error(
+                "MISSING_EXPORT_FIDELITY", f"{where}.export_fidelity",
+                "this job decides something on a triangulated or serialized "
+                "artifact, so export error is part of that decision and has to be "
+                "bounded before design rather than discovered after",
+            ))
+        else:
+            issues += check_object_fields(
+                envelope, required=dict(_EXPORT_FIDELITY_BINDING),
+                optional={"chord_tolerance_mm": list,
+                          "angular_tolerance_deg": list,
+                          "worst_error_mm": (int, float),
+                          "tolerance_it_must_not_consume_mm": (int, float)},
+                where=f"{where}.export_fidelity",
+            )
     if "schema_version" in data:
         version = data["schema_version"]
         if version != 4:

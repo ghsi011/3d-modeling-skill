@@ -109,6 +109,23 @@ verification.
 9. Write `print_plan_checks.json` as the exact machine-readable projection of every plan
    Edge ID, support rule, and declared interface. The Markdown and JSON ID sets, transforms,
    thresholds, and dispositions must agree before candidate dispatch.
+10. **Close every deliverable the commission names.** For each one, bind its purpose, the
+    geometry it comes from, its units and frame, the path that produces it, and the
+    acceptance constraints that apply to it. A required STL, STEP, 3MF or native project
+    may not simply be absent from the plan: a deliverable nobody constrained is one nobody
+    can reject, and it reaches a printer anyway. Project them into
+    `print_plan_checks.json` so an omission is a machine finding rather than something a
+    reader has to notice.
+11. **Freeze an export-fidelity envelope wherever discretization decides anything.** If a
+    triangulated or serialized artifact is what gets sliced, compared for preservation, or
+    measured for an acceptance decision, then export error is part of that decision, and it
+    must be bounded *before* design rather than discovered after. Derive the envelope by
+    measurement — a convergence ladder, or a calibration against the comparison actually
+    made — and freeze it, with the test being that export error cannot consume the
+    engineering tolerance or the signal the comparison depends on. Do not copy another
+    job's numbers: a band measured on one part is a fact about that part. Where nothing is
+    decided on a discretized artifact, this rule does not apply and inventing tessellation
+    figures to satisfy it is itself a defect.
 
 ### Post-verification
 
