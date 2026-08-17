@@ -1,0 +1,137 @@
+{
+  "id": "e2e-prusa-mini-display-box-modify",
+  "revision": 1,
+  "class": "MODIFY",
+  "required_hosted": false,
+  "note": "F4 of docs/agents/qa-e2e-implementation.md, and Slice B. One targeted edit to a real production STEP, scored as two independent regions: the requested edit inside an authorized mask, and source equivalence everywhere outside it. A global bbox/volume/inertia score cannot substitute and is not used.",
+
+  "source": {
+    "root": {"env": "QA_E2E_REFERENCE_ROOT", "default": "C:/projects/3d"},
+    "path": "qa-f4-prusa-modify/source/MINI-display-box.stp",
+    "sha256": "0cbce7139089d4feb493b02a0f27a429514f3251af5969f166aed4c6ce705855",
+    "blob_sha1": "6762c97f04c70ef91f09a0e67bd57d81f58be5d5",
+    "bytes": 321781,
+    "upstream": "prusa3d/Original-Prusa-MINI",
+    "pin": "853bc30c4b10190f1d669ed6d0a567e333c28f21",
+    "upstream_path": "STEP/PRINTED PARTS/MINI-display-box.stp",
+    "licence": "GPL-3.0",
+    "redistribution": "EXTERNAL_ONLY",
+    "why_external": "GPL-3.0. Vendoring it would impose that licence on this repository, so it lives outside the tree and is bound by hash, exactly as F1 keeps its reference external.",
+    "verify_note": "`git hash-object` run inside this repository applies .gitattributes CRLF normalisation and returns 2452e59007f8d40452e2ac1eb883d2bd07413d31 for these identical bytes. Use --no-filters from outside the repo, or compare the sha256 above."
+  },
+
+  "source_geometry": {
+    "what_this_block_is": "measured from the pinned bytes, answer-side. None of it may be restated in a candidate-visible brief except where the request block says so.",
+    "solids": 1,
+    "watertight": true,
+    "faces": 183,
+    "planar_faces": 123,
+    "bbox_mm": {"x": [-34.930, 29.680], "y": [-47.830, 65.030], "z": [0.0, 30.0]},
+    "volume_mm3_brep": 24951.3057,
+    "volume_mm3_tessellated": 24945.0,
+    "tessellation": {"tolerance": 0.01, "angular_tolerance": 0.1}
+  },
+
+  "edit": {
+    "ruled_utc": "2026-08-17",
+    "face": "+X outer wall, plane x = +29.680 mm",
+    "slot_y_mm": 20.00,
+    "slot_z_mm": 4.00,
+    "corner_radius_mm": 1.00,
+    "centre_canonical": {"y": 0.00, "z": 10.50},
+    "centre_from_datums": "47.83 mm from the source bounding-box Y-min plane, and 10.50 mm above the Z-min base plane",
+    "why_datums": "A candidate cannot know what y = 0 signified to the part's author. The request states the centre as offsets from the source bounding box; the generator resolves them the same way and asserts they land on the canonical coordinates, so a source whose bbox moved stops the generator instead of cutting in the wrong place.",
+    "direction": "cut toward -X",
+    "depth": "through the complete wall. Topological, not a nominal depth.",
+    "cad_tolerance_mm": 0.20,
+    "cad_tolerance_applies_to": ["slot_y_mm", "slot_z_mm", "corner_radius_mm", "centre y", "centre z"]
+  },
+
+  "wall_at_edit": {
+    "thickness_mm": 2.4300,
+    "classification": "ANSWER_SIDE",
+    "may_appear_in_candidate_brief": false,
+    "use": "a sanity check on the pinned source and the generated target, and nothing else. No predicate scores a candidate on reproducing a nominal 2.4300 mm depth; throughness is topological.",
+    "how_measured": "ray cast at 45 points across the slot footprint: min = mean = max = 2.4300 mm, so the wall is uniform there.",
+    "why_not_2_25": "The first ingest survey marched inward on a 0.25 mm grid and took the first void sample as the far face, which quantises thickness DOWN by up to one step and read 2.25. Arithmetic caught it, not inspection: the cut removed 192.317 mm^3 where 2.25 predicts 178.07, and 192.317 / 79.1416 = 2.4300 exactly. Anyone re-marching at 0.25 mm will get 2.25 again."
+  },
+
+  "safe_window": {
+    "what_this_block_is": "where the +X wall is uniform with clear space behind it, so an edit there cannot collide with interior structure. Measured, and the reason this face was chosen over the two end walls.",
+    "face_x_mm": 29.680,
+    "y_mm": [-36.0, 50.0],
+    "z_mm": [5.0, 16.0],
+    "criterion": "wall ~2.43 mm AND at least 8 mm clear behind it",
+    "rejected_faces": {
+      "+Y end wall y=+65.03": "2.25-2.43 mm mid-span but 10.75-14.75 mm at the corners: thick corner structure, fails 'safe from ambiguous hidden interior conflicts'",
+      "-Y end wall y=-47.83": "same shape, 9.25-9.75 mm at the corners"
+    },
+    "note": "The brief's preferred edit is 'a slot on a broad non-mating planar wall'. Two of the three broad planar walls would have been the wrong choice, and only measurement separates them."
+  },
+
+  "mask": {
+    "what_this_block_is": "the authorized edit mask, constructed MECHANICALLY and frozen before any candidate run. Hand-picking a generous mask after seeing a candidate is forbidden.",
+    "construction": "nominal slot swept volume + permitted dimensional/position tolerance + calibrated comparison noise margin",
+    "arithmetic": "half-extent grows by tolerance/2 (the size band) and the centre may shift by the full tolerance, so half + tol/2 + tol on each of Y and Z; X spans from the outer face plus tolerance inward through the wall plus tolerance",
+    "box_mm": {"x": [27.0500, 29.8800], "y": [-10.3000, 10.3000], "z": [8.2000, 12.8000]},
+    "noise_margin_mm": 0.0,
+    "noise_margin_is_measured": true,
+    "margin_to_safe_window_mm": {"y_low": 25.70, "y_high": 39.70, "z_low": 3.20, "z_high": 3.20},
+    "preservation_region": "everything outside this box"
+  },
+
+  "calibration": {
+    "measured_utc": "2026-08-17",
+    "machine": "Windows-11-10.0.26200, python 3.12.6, build123d 0.11.1, trimesh 4.12.2",
+    "why": "the brief forbids choosing a comparison tolerance without calibrating it, and the mask's noise margin has to come from a measurement rather than a guess",
+    "regeneration_noise": {
+      "method": "three independent runs of tools/f4_target.py on the same pinned source; each pair compared with tools/e2e.py sampled_distances at 20000 samples, seed 7",
+      "verts": 8310, "tris": 16636, "watertight": true, "volume_mm3": 24752.6495,
+      "max_mm": 0.0, "p99_mm": 0.0, "mean_mm": 0.0,
+      "conclusion": "repeated generation differs in BYTES and not in geometry: the STEP header carries a build timestamp and the STL moves by 8 bytes of 831884, while the measured surface distance between regenerations is 0.000000 mm. So the honest claim is the ruled one -- the geometric operation is deterministic, serialization and tessellation bytes are not -- and the mask needs no margin for regeneration."
+    },
+    "no_registration": {
+      "decision": "F4 does not solve for pose.",
+      "why": "a MODIFY candidate is derived from the supplied source and is therefore already in the source frame. F1 must register because its reference comes from a third-party generator in an arbitrary pose; F4 asserts frame agreement instead, which removes the most expensive and most failure-prone step in the comparison and cannot silently mask a translation, because a translated candidate fails the preservation region immediately."
+    },
+    "what_this_band_cannot_catch": [
+      "a defect entirely inside the mask that still satisfies every edit predicate -- the edit rows, not the noise floor, are what constrain that",
+      "an error smaller than the tessellation tolerance of 0.01 mm",
+      "anything about print quality: this is geometry only"
+    ]
+  },
+
+  "hard_acceptance": {
+    "what_this_block_is": "two independent regions, per the fixture brief. Every row below must be independently failed by a mutation before this fixture is trusted.",
+    "edit_region": [
+      {"row": "slot_width_mm", "want": 20.00, "tolerance": 0.20},
+      {"row": "slot_height_mm", "want": 4.00, "tolerance": 0.20},
+      {"row": "corner_radius_mm", "want": 1.00, "tolerance": 0.20},
+      {"row": "centre_y_mm", "want": 0.00, "tolerance": 0.20},
+      {"row": "centre_z_mm", "want": 10.50, "tolerance": 0.20},
+      {"row": "on_the_plus_x_wall", "want": "the slot is in the x = +29.680 face, correctly oriented"},
+      {"row": "through_the_wall", "want": "topological: the slot connects the outer face to the interior void", "note": "NOT a depth measurement, and never scored against 2.4300"}
+    ],
+    "preservation_region": [
+      {"row": "source_equivalence_outside_the_mask", "want": "no geometry differs from the pinned source outside the mask box beyond the calibrated noise floor"}
+    ],
+    "explicitly_not_used": "global bbox, total volume, or inertia as a substitute for either region"
+  },
+
+  "candidate_sees": {
+    "source": "source.step -- byte-identical to the pinned source, under a neutral filename",
+    "request": "the target feature, its source datums, dimensions and tolerance; an instruction to preserve every other feature; print/manufacturing requirements; and that final STL and 3MF are required",
+    "never_sees": ["the edited target", "wall_at_edit.thickness_mm", "source_geometry", "mask", "calibration", "hard_acceptance"]
+  },
+
+  "target": {
+    "generator": "tools/f4_target.py",
+    "generated_once_and_pinned": true,
+    "why_pinned_not_reproduced": "the generator is not byte-deterministic, so the artifact that gets scored is a stored external file bound by hash. 'Rerunning the generator reproduces this SHA-256' is not claimed anywhere.",
+    "path": "qa-f4-prusa-modify/reference/target.stl",
+    "sha256": "PENDING -- filled when the artifact is stored under QA_E2E_REFERENCE_ROOT",
+    "measured": {"volume_mm3_brep": 24758.9888, "removed_mm3": 192.3170, "removed_nominal_mm3": 192.3141}
+  },
+
+  "status": "FROZEN_EXCEPT_TARGET_HASH -- edit, mask and calibration are frozen; predicates and mutations are not yet implemented and no live candidate run has happened."
+}
