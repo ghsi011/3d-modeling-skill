@@ -90,6 +90,20 @@
       "max_mm": 0.0, "p99_mm": 0.0, "mean_mm": 0.0,
       "conclusion": "repeated generation differs in BYTES and not in geometry: the STEP header carries a build timestamp and the STL moves by 8 bytes of 831884, while the measured surface distance between regenerations is 0.000000 mm. So the honest claim is the ruled one -- the geometric operation is deterministic, serialization and tessellation bytes are not -- and the mask needs no margin for regeneration."
     },
+    "three_mf": {
+      "what_this_calibrates": "the band tools/e2e.py:three_mf_rows uses for three_mf_matches_the_accepted_stl. Measured on the pairing actually compared -- this fixture's honest candidate STL against the 3MF written from that same STL -- for the same reason the preservation floor below had to be recalibrated: a band measured on a different pairing answers a different question from the claim resting on it.",
+      "control_export_reload": {
+        "method": "honest candidate STL exported to 3MF through skills/3d-modeling/scripts/make_3mf.py, read back through e2e.read_three_mf, compared with e2e.surface_distance at seed 7",
+        "verts": 8310, "tris": 16636, "unit_read_back": "millimeter", "printable_bodies": 1,
+        "samples_20000": {"max_mm": 0.000056, "p99_mm": 0.000033, "mean_mm": 0.000003},
+        "samples_40000": {"max_mm": 0.000060, "p99_mm": 0.000033, "mean_mm": 0.000003},
+        "volume_delta_mm3": -0.001612
+      },
+      "band_mm": 0.01,
+      "samples": 20000,
+      "why_this_band": "0.01 mm is about 170x the measured export/reload noise, so the row cannot fail for coordinate quantisation, and about 240x BELOW the 2.4300 mm a stale pre-edit archive differs by, so it cannot pass a substituted or earlier body. The separation is five orders of magnitude; nothing about this band is finely balanced."
+    },
+    "reference_comparison": {"seed": 7, "why": "the sampling seed for the 3MF comparison above, beside three_mf rather than inside it because tools/e2e.py reads both keys from this level"},
     "preservation": {
       "metric": "two-sided surface distance, source-to-candidate and candidate-to-source, sampled outside the mask",
       "threshold_mm": 0.10,
@@ -127,8 +141,13 @@
       {"row": "source_equivalence_outside_the_mask", "want": "no geometry differs from the pinned source outside the mask box beyond the calibrated noise floor"}
     ],
     "manufacturing_gate": [
-      {"row": "candidate_3mf_is_usable", "want": "pipeline.diagnose classifies the delivered 3MF USABLE_EXACT or USABLE_MESH", "note": "asked through the pipeline's own common validation path rather than a second opinion grown in the scorer"},
-      {"row": "candidate_3mf_carries_the_requested_edit", "want": "the delivered 3MF satisfies the same edit predicates as the candidate mesh", "note": "the 3MF is a required input, not an optional one: before this gate the scorer took only --source and --candidate, so a correct STL paired with a stale pre-edit archive passed every row while the artifact anybody would actually print was the unmodified part. The request already asks for the solid as both STL and 3MF, so this scores a deliverable the candidate was told to produce."}
+      {"what_this_block_is": "the delivery gate, run through tools/e2e.py:three_mf_rows -- the same implementation F1 uses -- so two fixtures cannot disagree about what a valid 3MF is. The 3MF is a REQUIRED input: before this gate the scorer took only --source and --candidate, so a correct STL paired with a stale pre-edit archive passed every row while the artifact anybody would actually print was the unmodified part. The request already asks for the solid as both STL and 3MF, so this scores a deliverable the candidate was told to produce."},
+      {"row": "three_mf_present", "want": "the run produced a 3MF"},
+      {"row": "three_mf_readable", "want": "a readable OPC archive with 3D/3dmodel.model"},
+      {"row": "three_mf_unit_is_millimetre", "want": "millimeter", "note": "3MF's default unit is the MICRON, so an unstated or wrong unit is a thousandfold scale error that no geometry check would report as a unit problem. The scorer's own earlier gate did not ask this, which is why it was replaced by the common one."},
+      {"row": "three_mf_printable_body_count", "want": 1, "note": "counted through the build items and their components, so a second body welded into the placed assembly is a finding rather than extra triangles in one mesh"},
+      {"row": "three_mf_matches_the_accepted_stl", "want": "p99 surface distance within the calibrated band", "note": "catches a wholly substituted or grossly wrong body. It does NOT catch this fixture's stale pre-edit archive, and that is arithmetic rather than tuning -- see the row below."},
+      {"row": "three_mf_carries_the_requested_edit", "want": "the delivered 3MF satisfies the same edit predicates as the candidate mesh", "note": "F4's own row, and the one that owns the stale/pre-edit property. MEASURED: a pre-edit archive against the accepted candidate gives p95 0.000023 mm and p99 0.000042 mm -- inside the 0.010 mm band -- while max is 1.997931 mm, because the slot is 79.14 mm2 of a 19,656.7 mm2 surface, 0.403%, so 99% of samples land on geometry the two artifacts share. A 99th-percentile statistic is structurally blind to an edit that small; widening the band would not help because the band is not what is blind. On F1 the same row works, because its comparison is whole-part. This is not a second opinion about 3MF validity -- that stays delegated to tools/e2e.py -- it is a different question."}
     ],
     "explicitly_not_used": "global bbox, total volume, or inertia as a substitute for any of the three regions"
   },

@@ -33,26 +33,22 @@ inside the mask. It is never compared against the wall's 2.4300 mm, which is
 answer-side.
 
 **A separate manufacturing gate, and it is required.** The mesh handed to the
-scorer is not the artifact anybody prints. `--candidate-3mf` is therefore
-mandatory rather than optional, and `three_mf_rows` asks two questions of it: is
-it a readable 3MF at all, through `pipeline.diagnose` rather than a second
-opinion grown here, and does it carry the requested edit, by running these same
-predicates against its geometry. Without that gate the scorer could return
-success from a source and a candidate STL while the archive beside them was a
-stale pre-edit export -- every geometric row green and the printed part
-unmodified. That is the case the fixture owes a mutation for.
+scorer is not the artifact anybody prints, so `--candidate-3mf` is mandatory
+rather than optional -- an optional gate is one a passing run can decline to
+take. Without it this scorer could return success from a source and a candidate
+STL while the archive beside them was a stale pre-edit export: every geometric
+row green and the printed part unmodified. That is the case the fixture owes a
+mutation for.
 
-Reading the archive needs `lxml`, which trimesh's 3MF loader imports and this
-project deliberately does not carry. It is supplied per-run with `--with`, the
-same way `embreex` is: an isolated accelerator or reader for an answer-side tool
-is not a dependency of the skill. The alternative was assembling the archive's
-geometry here from `pipeline/diagnose`'s XML helpers, which was rejected -- that
-means reimplementing 3MF build-transform resolution, and a gate that silently
-mis-reads a transformed archive is precisely the false confidence it exists to
-prevent.
+The gate itself is `tools/e2e.py:three_mf_rows`, the one this repository already
+had, and F4 supplies only its own calibration. An earlier version of this file
+grew a second one, and replacing it is worth recording rather than quietly
+fixing: being newer it was also *weaker*, because it never checked the declared
+unit -- and 3MF's default unit is the **micron**, so an archive silently a
+thousand times too small would have passed every row it could ask.
 
 Usage:
-    uv run --with embreex --with lxml python tools/f4_score.py --source <src> \
+    uv run --with embreex python tools/f4_score.py --source <src> \
         --candidate <cand> --candidate-3mf <cand.3mf>
 
 Exit 0 if every row passes, 1 if any fails, 2 if it could not measure.
@@ -234,78 +230,91 @@ def score(src, cnd, spec: dict, pitch: float) -> list[dict]:
     return rows
 
 
-def _as_single_mesh(loaded):
-    """One mesh from whatever `trimesh.load` returned.
-
-    A 3MF is a *scene*: objects, components and build transforms. Concatenating
-    it is correct here and only here -- the question this gate asks is whether
-    the shipped archive carries the requested edit, which is a question about the
-    geometry as placed. `pipeline/diagnose` is what reports the scene structure
-    as authored, and it runs first, so nothing about the scene is lost by this
-    step; it is asked separately.
-    """
-    if isinstance(loaded, trimesh.Trimesh):
-        return loaded
-    dumped = loaded.dump(concatenate=True)
-    if isinstance(dumped, trimesh.Trimesh):
-        return dumped
-    raise ValueError("the 3MF carries no triangles this gate can measure")
-
-
-def three_mf_rows(path: Path, src, spec: dict, pitch: float) -> list[dict]:
-    """The separate manufacturing gate, and why it is not optional.
+def three_mf_rows(path: Path, src, candidate, spec: dict, pitch: float) -> list[dict]:
+    """The separate manufacturing gate, delegated to the one that already exists.
 
     F4 owes a gate on the artifact that would actually be *printed*, not only on
-    the mesh handed to the scorer. Without it the scorer could return success
+    the mesh handed to the scorer. Without it this scorer could return success
     from `--source` and `--candidate` alone while the 3MF beside them was a
     stale, pre-edit export -- every geometric row passing on the STL and the
-    thing a person sends to a printer still being the unmodified part. That is
-    the failure the fixture explicitly owes a mutation for, and a gate that
-    cannot see it is not a gate.
+    thing a person sends to a printer still being the unmodified part.
 
-    Two questions, kept apart because they fail for unrelated reasons:
+    **`tools/e2e.py:three_mf_rows` is that gate and this calls it.** An earlier
+    version of this function grew its own: readability through
+    `pipeline.diagnose`, then F4's geometric predicates re-run against the
+    archive. It worked, and it was still wrong to keep, for two reasons that are
+    worth recording rather than quietly fixing. It was a second opinion about
+    what a valid 3MF is, on a repository that already had one -- so two fixtures
+    could disagree about the same archive and a reader would have to know which
+    implementation ran. And being newer, it was *weaker*: it never checked the
+    declared unit, and 3MF's default unit is the **micron**, so an archive
+    silently a thousand times too small would have passed every row this file
+    could ask. It also needed `lxml` for trimesh's loader, where the common path
+    reads the OPC archive directly.
 
-    * is the archive a readable, usable 3MF at all -- asked through
-      `pipeline.diagnose`, the pipeline's own common validation path, so this
-      tool does not grow a second opinion about what a valid 3MF is;
-    * does the archive carry the requested edit -- asked by running the *same*
-      geometric predicates against the 3MF's own geometry. Reused rather than
-      reimplemented: a stale pre-edit archive fails `slot_exists` for the same
-      reason a candidate with no slot does, and a wrong-sized slot fails the same
-      dimensional rows. A second implementation of those predicates could
-      disagree with the first, and then the gate's verdict would depend on which
-      one a reader happened to believe.
+    So the rows here are the common ones -- present, readable, millimetres, one
+    printable body, and matches the accepted STL -- and F4 supplies only its own
+    calibration for the last of those.
+
+    The band is measured, not chosen, on the pairing actually compared: this
+    fixture's honest candidate STL against the 3MF written from that same STL.
+    Export and reload move the surface by **max 0.000060 mm, p99 0.000033 mm**
+    at 8310 vertices, and the volume by -0.001612 mm3. The declared band sits
+    far above that and far below any real staleness -- a pre-edit archive differs
+    by the whole 2.4300 mm wall -- so the row cannot fail for quantisation and
+    cannot pass a substituted body.
     """
-    rows: list[dict] = []
-    scripts = ROOT / "skills" / "3d-modeling" / "scripts"
-    if str(scripts) not in sys.path:
-        sys.path.insert(0, str(scripts))
-    from pipeline.diagnose import diagnose
+    tools = ROOT / "tools"
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    import e2e
 
-    report = diagnose(path)
-    classification = str(report.get("classification"))
-    usable = classification in ("USABLE_EXACT", "USABLE_MESH")
-    findings = report.get("findings") or []
-    rows.append(_row(
-        "candidate_3mf_is_usable", usable,
-        f"{classification}" + (f", {len(findings)} finding(s)" if findings else ""),
-        "USABLE_EXACT or USABLE_MESH from pipeline.diagnose",
-        "the archive that gets printed has to be readable on its own terms"))
-    if not usable:
-        # Measuring geometry inside an archive the pipeline calls unusable would
-        # produce numbers nobody should act on, so the remaining rows are not
-        # invented -- their absence is the finding.
-        return rows
+    # `e2e.three_mf_rows` reads `geometry["three_mf"]` and
+    # `geometry["reference_comparison"]`, so the calibration block itself is
+    # what it wants -- not the three_mf entry inside it.
+    common = e2e.three_mf_rows(Path(path), candidate, spec["calibration"])
 
-    inner = score(src, _as_single_mesh(_load(path)), spec, pitch)
-    failed = [r["row"] for r in inner if not r["ok"]]
-    rows.append(_row(
-        "candidate_3mf_carries_the_requested_edit", not failed,
-        "every geometric row passes on the archive" if not failed
-        else f"{len(failed)} row(s) fail on the archive: {', '.join(failed)}",
-        "the 3MF satisfies the same edit predicates as the candidate mesh",
-        "a stale pre-edit 3MF passes every STL row and still ships the "
-        "unmodified part"))
+    # Shape adapter, and only that: `e2e` names its fields
+    # predicate/passes/measured/required while this scorer's rows are
+    # row/ok/got/want. Translating here keeps one row shape in the report and
+    # one conjunction in `main`, rather than two dialects a reader has to know.
+    #
+    # `passes is None` marks a diagnostic that e2e reports without gating. It is
+    # carried through as ok=True deliberately: a diagnostic must not fail the run,
+    # and mapping None to False would invent a failure out of a measurement
+    # nobody claimed was a gate.
+    rows = [_row(r["predicate"], True if r["passes"] is None else r["passes"],
+                 r["measured"], r["required"], r.get("why", ""))
+            for r in common]
+
+    # --- and one row the common gate structurally cannot supply -------------
+    #
+    # `three_mf_matches_the_accepted_stl` bands the **p99** surface distance, and
+    # on this fixture that is blind to the very failure F4 owes a mutation for.
+    # Measured: the stale pre-edit archive against the accepted candidate gives
+    # p95 0.000023 mm, p99 0.000042 mm -- inside a 0.010 mm band -- while max is
+    # 1.997931 mm. The reason is arithmetic rather than tuning: the slot is
+    # 79.14 mm2 of a 19,656.7 mm2 surface, **0.403%**, so 99% of samples land on
+    # geometry the two artifacts share and a 99th-percentile statistic cannot see
+    # the edit at all. Raising the band would not help; the band is not the
+    # problem. On F1 that row works because its comparison is whole-part.
+    #
+    # So F4 adds its own question -- does the archive carry the requested edit --
+    # answered by the same predicates the candidate mesh is scored with. This is
+    # not a second opinion about 3MF *validity*, which stays delegated above; it
+    # is a different question, and it is the one that fails for a stale archive.
+    if all(r["ok"] for r in rows):
+        read = e2e.read_three_mf(Path(path))
+        archive = trimesh.util.concatenate(read["bodies"])
+        inner = score(src, archive, spec, pitch)
+        failed = [r["row"] for r in inner if not r["ok"]]
+        rows.append(_row(
+            "three_mf_carries_the_requested_edit", not failed,
+            "every edit row passes on the archive" if not failed
+            else f"{len(failed)} row(s) fail on the archive: {', '.join(failed)}",
+            "the 3MF satisfies the same edit predicates as the candidate mesh",
+            "a stale pre-edit archive passes every whole-surface statistic and "
+            "still ships the unmodified part"))
     return rows
 
 
@@ -323,8 +332,9 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     spec = json.loads(a.fixture.read_text(encoding="utf-8"))
     src = _load(a.source)
-    rows = score(src, _load(a.candidate), spec, a.pitch)
-    rows += three_mf_rows(a.candidate_3mf, src, spec, a.pitch)
+    candidate = _load(a.candidate)
+    rows = score(src, candidate, spec, a.pitch)
+    rows += three_mf_rows(a.candidate_3mf, src, candidate, spec, a.pitch)
     if a.json:
         print(json.dumps(rows, indent=2))
     else:

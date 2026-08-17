@@ -16,11 +16,7 @@ conversation, turn count drives token cost roughly quadratically. Twenty results
 from one invocation cost a fraction of the same twenty from twenty.
 
 Usage:
-    uv run --with embreex --with lxml python tools/f4_mutate.py --source <source.step>
-
-`lxml` is what trimesh's 3MF loader imports, needed by the stale-pre-edit-3MF
-mutation below. Supplied per-run rather than added to the project, like
-`embreex`.
+    uv run --with embreex python tools/f4_mutate.py --source <source.step>
 """
 from __future__ import annotations
 
@@ -145,8 +141,9 @@ def main(argv=None) -> int:
     # 3MF gate existed the scorer could not see it at all -- it took only
     # --source and --candidate, so a pre-edit archive sitting beside a correct
     # STL was invisible and the run reported success.
+    honest_mesh = trimesh.load(str(honest))
     honest_3mf = write_3mf(a.work / "honest" / "candidate.3mf", honest)
-    control = f4_score.three_mf_rows(honest_3mf, src_mesh, spec, a.pitch)
+    control = f4_score.three_mf_rows(honest_3mf, src_mesh, honest_mesh, spec, a.pitch)
     control_failed = [r["row"] for r in control if not r["ok"]]
     print(f"CONTROL  honest 3MF: "
           f"{'ALL ROWS PASS' if not control_failed else 'FAILED — gate suspect'}")
@@ -163,9 +160,17 @@ def main(argv=None) -> int:
     stale_stl.parent.mkdir(parents=True, exist_ok=True)
     src_mesh.export(str(stale_stl))
     stale_3mf = write_3mf(a.work / "stale_3mf" / "candidate.3mf", stale_stl)
-    stale_rows = f4_score.three_mf_rows(stale_3mf, src_mesh, spec, a.pitch)
+    # The candidate STL is the honest edit; only the archive is pre-edit. So the
+    # gate is asked whether the archive matches the candidate it shipped with.
+    stale_rows = f4_score.three_mf_rows(stale_3mf, src_mesh, honest_mesh, spec, a.pitch)
     stale_failed = [r["row"] for r in stale_rows if not r["ok"]]
-    target = "candidate_3mf_carries_the_requested_edit"
+    # The row that OWNS this property, which is not the common
+    # `three_mf_matches_the_accepted_stl`. That one bands the p99 surface
+    # distance, and the slot is 79.14 mm2 of a 19,656.7 mm2 surface -- 0.403% --
+    # so 99% of samples land on shared geometry and p99 reads 0.000042 mm for a
+    # stale archive whose max is 1.997931 mm. Measured, not assumed: a wider
+    # band would not help, because the band is not what is blind.
+    target = "three_mf_carries_the_requested_edit"
     stale_hit = target in stale_failed
     caught += stale_hit
     print(f"[{'KILLED' if stale_hit else 'SURVIVED':8}] {target:<{width}}  "
