@@ -16,12 +16,17 @@ conversation, turn count drives token cost roughly quadratically. Twenty results
 from one invocation cost a fraction of the same twenty from twenty.
 
 Usage:
-    uv run --with embreex python tools/f4_mutate.py --source <source.step>
+    uv run --with embreex --with lxml python tools/f4_mutate.py --source <source.step>
+
+`lxml` is what trimesh's 3MF loader imports, needed by the stale-pre-edit-3MF
+mutation below. Supplied per-run rather than added to the project, like
+`embreex`.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +50,21 @@ MUTATIONS = [
     ("source_equivalence_outside_the_mask",
      "correct slot PLUS a 6 mm hole at y=+30 outside the mask", dict(extra_hole=True)),
 ]
+
+
+def write_3mf(out: Path, part: Path) -> Path:
+    """A real 3MF, written by the pipeline's own writer rather than by this file.
+
+    Through `make_3mf.py` as a subprocess because that is the archive the rest of
+    the repository produces and reads. A 3MF hand-assembled here could differ
+    from a shipped one in exactly the structural way the gate is meant to notice,
+    and then the mutation would be proving something about this file.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    writer = ROOT / "skills" / "3d-modeling" / "scripts" / "make_3mf.py"
+    subprocess.run([sys.executable, str(writer), str(out), f"part={part}"],
+                   check=True, capture_output=True, text=True)
+    return out
 
 
 def build_variant(source: Path, out: Path, *, face_x, w, h, r, cy, cz, depth,
@@ -115,8 +135,50 @@ def main(argv=None) -> int:
             got = next((r["got"] for r in rows if r["row"] == target_row), "?")
             print(f"{'':11}!! {target_row} still passed, got {got}")
     print()
-    print(f"{caught} of {len(MUTATIONS)} mutations killed by their own row")
-    return 0 if caught == len(MUTATIONS) else 1
+
+    # --- the stale pre-edit 3MF -------------------------------------------
+    #
+    # Structurally unlike the rows above: nothing is wrong with the geometry the
+    # scorer is handed. The candidate STL is the honest edit and passes every
+    # geometric row. What is wrong is the artifact that would actually be
+    # printed. This is the mutation the fixture explicitly owes, and before the
+    # 3MF gate existed the scorer could not see it at all -- it took only
+    # --source and --candidate, so a pre-edit archive sitting beside a correct
+    # STL was invisible and the run reported success.
+    honest_3mf = write_3mf(a.work / "honest" / "candidate.3mf", honest)
+    control = f4_score.three_mf_rows(honest_3mf, src_mesh, spec, a.pitch)
+    control_failed = [r["row"] for r in control if not r["ok"]]
+    print(f"CONTROL  honest 3MF: "
+          f"{'ALL ROWS PASS' if not control_failed else 'FAILED — gate suspect'}")
+    if control_failed:
+        # A gate that refuses the correct archive would "kill" the mutation
+        # below for a reason that has nothing to do with staleness, which is the
+        # shape of a control that was never taken.
+        for r in control:
+            if not r["ok"]:
+                print(f"    unexpected FAIL {r['row']}: got {r['got']}")
+        return 2
+
+    stale_stl = a.work / "stale_3mf" / "pre_edit.stl"
+    stale_stl.parent.mkdir(parents=True, exist_ok=True)
+    src_mesh.export(str(stale_stl))
+    stale_3mf = write_3mf(a.work / "stale_3mf" / "candidate.3mf", stale_stl)
+    stale_rows = f4_score.three_mf_rows(stale_3mf, src_mesh, spec, a.pitch)
+    stale_failed = [r["row"] for r in stale_rows if not r["ok"]]
+    target = "candidate_3mf_carries_the_requested_edit"
+    stale_hit = target in stale_failed
+    caught += stale_hit
+    print(f"[{'KILLED' if stale_hit else 'SURVIVED':8}] {target:<{width}}  "
+          "correct candidate STL paired with a pre-edit 3MF")
+    print(f"{'':11}rows that failed: {stale_failed or 'NONE'}")
+    if not stale_hit:
+        print(f"{'':11}!! the printed artifact was the unmodified part and the "
+              "gate passed it")
+    print()
+
+    total = len(MUTATIONS) + 1
+    print(f"{caught} of {total} mutations killed by their own row")
+    return 0 if caught == total else 1
 
 
 if __name__ == "__main__":

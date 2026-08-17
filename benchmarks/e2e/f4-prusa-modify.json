@@ -126,7 +126,11 @@
     "preservation_region": [
       {"row": "source_equivalence_outside_the_mask", "want": "no geometry differs from the pinned source outside the mask box beyond the calibrated noise floor"}
     ],
-    "explicitly_not_used": "global bbox, total volume, or inertia as a substitute for either region"
+    "manufacturing_gate": [
+      {"row": "candidate_3mf_is_usable", "want": "pipeline.diagnose classifies the delivered 3MF USABLE_EXACT or USABLE_MESH", "note": "asked through the pipeline's own common validation path rather than a second opinion grown in the scorer"},
+      {"row": "candidate_3mf_carries_the_requested_edit", "want": "the delivered 3MF satisfies the same edit predicates as the candidate mesh", "note": "the 3MF is a required input, not an optional one: before this gate the scorer took only --source and --candidate, so a correct STL paired with a stale pre-edit archive passed every row while the artifact anybody would actually print was the unmodified part. The request already asks for the solid as both STL and 3MF, so this scores a deliverable the candidate was told to produce."}
+    ],
+    "explicitly_not_used": "global bbox, total volume, or inertia as a substitute for any of the three regions"
   },
 
   "candidate_sees": {

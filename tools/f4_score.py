@@ -32,8 +32,28 @@ quietly re-aligned into passing.
 inside the mask. It is never compared against the wall's 2.4300 mm, which is
 answer-side.
 
+**A separate manufacturing gate, and it is required.** The mesh handed to the
+scorer is not the artifact anybody prints. `--candidate-3mf` is therefore
+mandatory rather than optional, and `three_mf_rows` asks two questions of it: is
+it a readable 3MF at all, through `pipeline.diagnose` rather than a second
+opinion grown here, and does it carry the requested edit, by running these same
+predicates against its geometry. Without that gate the scorer could return
+success from a source and a candidate STL while the archive beside them was a
+stale pre-edit export -- every geometric row green and the printed part
+unmodified. That is the case the fixture owes a mutation for.
+
+Reading the archive needs `lxml`, which trimesh's 3MF loader imports and this
+project deliberately does not carry. It is supplied per-run with `--with`, the
+same way `embreex` is: an isolated accelerator or reader for an answer-side tool
+is not a dependency of the skill. The alternative was assembling the archive's
+geometry here from `pipeline/diagnose`'s XML helpers, which was rejected -- that
+means reimplementing 3MF build-transform resolution, and a gate that silently
+mis-reads a transformed archive is precisely the false confidence it exists to
+prevent.
+
 Usage:
-    uv run --with embreex python tools/f4_score.py --source <src> --candidate <cand>
+    uv run --with embreex --with lxml python tools/f4_score.py --source <src> \
+        --candidate <cand> --candidate-3mf <cand.3mf>
 
 Exit 0 if every row passes, 1 if any fails, 2 if it could not measure.
 """
@@ -214,16 +234,97 @@ def score(src, cnd, spec: dict, pitch: float) -> list[dict]:
     return rows
 
 
+def _as_single_mesh(loaded):
+    """One mesh from whatever `trimesh.load` returned.
+
+    A 3MF is a *scene*: objects, components and build transforms. Concatenating
+    it is correct here and only here -- the question this gate asks is whether
+    the shipped archive carries the requested edit, which is a question about the
+    geometry as placed. `pipeline/diagnose` is what reports the scene structure
+    as authored, and it runs first, so nothing about the scene is lost by this
+    step; it is asked separately.
+    """
+    if isinstance(loaded, trimesh.Trimesh):
+        return loaded
+    dumped = loaded.dump(concatenate=True)
+    if isinstance(dumped, trimesh.Trimesh):
+        return dumped
+    raise ValueError("the 3MF carries no triangles this gate can measure")
+
+
+def three_mf_rows(path: Path, src, spec: dict, pitch: float) -> list[dict]:
+    """The separate manufacturing gate, and why it is not optional.
+
+    F4 owes a gate on the artifact that would actually be *printed*, not only on
+    the mesh handed to the scorer. Without it the scorer could return success
+    from `--source` and `--candidate` alone while the 3MF beside them was a
+    stale, pre-edit export -- every geometric row passing on the STL and the
+    thing a person sends to a printer still being the unmodified part. That is
+    the failure the fixture explicitly owes a mutation for, and a gate that
+    cannot see it is not a gate.
+
+    Two questions, kept apart because they fail for unrelated reasons:
+
+    * is the archive a readable, usable 3MF at all -- asked through
+      `pipeline.diagnose`, the pipeline's own common validation path, so this
+      tool does not grow a second opinion about what a valid 3MF is;
+    * does the archive carry the requested edit -- asked by running the *same*
+      geometric predicates against the 3MF's own geometry. Reused rather than
+      reimplemented: a stale pre-edit archive fails `slot_exists` for the same
+      reason a candidate with no slot does, and a wrong-sized slot fails the same
+      dimensional rows. A second implementation of those predicates could
+      disagree with the first, and then the gate's verdict would depend on which
+      one a reader happened to believe.
+    """
+    rows: list[dict] = []
+    scripts = ROOT / "skills" / "3d-modeling" / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from pipeline.diagnose import diagnose
+
+    report = diagnose(path)
+    classification = str(report.get("classification"))
+    usable = classification in ("USABLE_EXACT", "USABLE_MESH")
+    findings = report.get("findings") or []
+    rows.append(_row(
+        "candidate_3mf_is_usable", usable,
+        f"{classification}" + (f", {len(findings)} finding(s)" if findings else ""),
+        "USABLE_EXACT or USABLE_MESH from pipeline.diagnose",
+        "the archive that gets printed has to be readable on its own terms"))
+    if not usable:
+        # Measuring geometry inside an archive the pipeline calls unusable would
+        # produce numbers nobody should act on, so the remaining rows are not
+        # invented -- their absence is the finding.
+        return rows
+
+    inner = score(src, _as_single_mesh(_load(path)), spec, pitch)
+    failed = [r["row"] for r in inner if not r["ok"]]
+    rows.append(_row(
+        "candidate_3mf_carries_the_requested_edit", not failed,
+        "every geometric row passes on the archive" if not failed
+        else f"{len(failed)} row(s) fail on the archive: {', '.join(failed)}",
+        "the 3MF satisfies the same edit predicates as the candidate mesh",
+        "a stale pre-edit 3MF passes every STL row and still ships the "
+        "unmodified part"))
+    return rows
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Score an F4 candidate")
     ap.add_argument("--source", required=True, type=Path)
     ap.add_argument("--candidate", required=True, type=Path)
+    # Required, not optional. An optional manufacturing gate is one a passing
+    # run can decline to take, which is the same as not having it.
+    ap.add_argument("--candidate-3mf", required=True, type=Path,
+                    dest="candidate_3mf")
     ap.add_argument("--fixture", type=Path, default=FIXTURE)
     ap.add_argument("--pitch", type=float, default=0.05)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     spec = json.loads(a.fixture.read_text(encoding="utf-8"))
-    rows = score(_load(a.source), _load(a.candidate), spec, a.pitch)
+    src = _load(a.source)
+    rows = score(src, _load(a.candidate), spec, a.pitch)
+    rows += three_mf_rows(a.candidate_3mf, src, spec, a.pitch)
     if a.json:
         print(json.dumps(rows, indent=2))
     else:
