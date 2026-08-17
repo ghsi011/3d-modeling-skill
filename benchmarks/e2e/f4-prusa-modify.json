@@ -139,8 +139,18 @@
     "generator": "tools/f4_target.py",
     "generated_once_and_pinned": true,
     "why_pinned_not_reproduced": "the generator is not byte-deterministic, so the artifact that gets scored is a stored external file bound by hash. 'Rerunning the generator reproduces this SHA-256' is not claimed anywhere.",
+    "root": {"env": "QA_E2E_REFERENCE_ROOT", "default": "C:/projects/3d"},
     "path": "qa-f4-prusa-modify/reference/target.stl",
-    "sha256": "PENDING -- filled when the artifact is stored under QA_E2E_REFERENCE_ROOT",
+    "sha256": "46f12f62fa905ac4697d8fc6fe2146958bffdf78b0df9ae8941d97e243adbac6",
+    "bytes": 831884,
+    "scored_artifact": "target.stl -- this file's bytes are the pin. The scorer measures against it, never against a fresh generation.",
+    "also_stored": {
+      "path": "qa-f4-prusa-modify/reference/target.step",
+      "sha256": "81ddedcd5747755f039f8fe21bd1e8c432cbad18e3fb21b6c06771dcb07568a7",
+      "bytes": 871464,
+      "not_pinnable": "OCC stamps wall-clock time into the STEP header, so this digest changes on every generation and nothing may bind it. Recorded as provenance only. The same defect exists in the pipeline's own candidate.step, where artifact_manifest.json DOES bind it -- so a review answer expires on a rerun that changed nothing."
+    },
+    "regeneration_note": "This STL's digest happens to equal the first generation made hours earlier, and a third run in between differed by 8 bytes of 831884. That is the ruled claim exactly: the geometric operation is deterministic and the serialization is not, which is why the stored file is the pin rather than a reproduction recipe.",
     "measured": {"volume_mm3_brep": 24758.9888, "removed_mm3": 192.3170, "removed_nominal_mm3": 192.3141}
   },
 
