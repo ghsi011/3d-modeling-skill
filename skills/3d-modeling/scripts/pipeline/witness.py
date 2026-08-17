@@ -116,7 +116,13 @@ def generate(ctx, contract, out_dir: Path, *, level: str = "W1",
             preview.render_multi_view(ctx.normalized, str(multi), view_size=MAX_RESOLUTION_PX)
             images.append(str(multi.name))
             section = out_dir / "section_x.png"
-            section_render(str(ctx.path), str(section))
+            # And the same budget on this call, which is the defect the first
+            # repair uncovered rather than introduced: making the multi-view
+            # reachable meant a section was rendered too, at `section_render`'s
+            # own `tile=640` default, while line 43 publishes
+            # `resolution_px: MAX_RESOLUTION_PX` as this witness's budget. A
+            # budget nothing enforces is a number in a receipt.
+            section_render(str(ctx.path), str(section), tile=MAX_RESOLUTION_PX)
             images.append(str(section.name))
         except Exception as exc:            # noqa: BLE001 - a missing renderer is a
             renderer = f"unavailable: {exc}"  # reportable state, not a crash
