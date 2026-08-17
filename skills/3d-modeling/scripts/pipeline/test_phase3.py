@@ -1032,40 +1032,35 @@ class ADeclarationMustNotBreakOrBeIgnoredTest(unittest.TestCase):
     """
 
     def test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
-        """An unreadable source is a finding; a readable STEP is a sample count.
+        """A source that genuinely cannot be read refuses by name.
 
-        **This test used to assert the defect.** Its trigger was a real vendored
-        STEP, on the reasoning that "`analysis.load` refuses it" -- true at the
-        time, because the loader dispatched STEP to `cascadio`, which this
-        repository deliberately does not carry. So the row that exists to prove
-        *declaring a sensitivity must not break a job* was passing for the wrong
-        reason: the audit was not handling an exotic failure, it was disabled on
-        every STEP source, which on the MODIFY lane is the one class whose whole
-        subject is preservation.
+        **This test used to assert the defect, and it used to be cheap for the
+        same reason.** Its trigger was a real vendored STEP, on the reasoning
+        that "`analysis.load` refuses it" -- true at the time, because the loader
+        dispatched STEP to `cascadio`, which this repository deliberately does
+        not carry. So the row proving *declaring a sensitivity must not break a
+        job* was passing because the audit was disabled on an entire source
+        class, and it ran in milliseconds because the read failed instantly.
 
-        `mesh_io` now routes STEP through the kernel, so the trigger is gone and
-        the property is not. Both halves are asserted here, which the single
-        raise could not do: a readable STEP yields a count, and a genuinely
-        unreadable file still refuses by name.
+        `mesh_io` now routes STEP through the kernel, which makes the old trigger
+        readable and, at 11.72 s, far too expensive for a 5 s commit gate. So the
+        row is split by cost rather than weakened: the cheap half -- an
+        unreadable source is a finding, not a crash -- stays here, and the half
+        that needs a real B-rep read (a readable STEP yields a sample count) is
+        asserted in `benchmarks/heavy/test_step_reader_routing_heavy.py`, whose
+        tier exists for exactly that.
+
+        The unreadable file is an `.stl` rather than a `.step`, and that is a
+        cost decision with a reason: a `.step` suffix now routes through the CAD
+        kernel, so even a file of prose pays a ~3.5 s `build123d` import before
+        failing to parse -- 3.86 s measured, against a 5 s ceiling, which is too
+        thin to survive a slower runner. The property is *unreadable input
+        refuses*, so the cheapest unreadable input proves it, and the sibling row
+        below already uses an `.stl` for the same reason.
         """
         from . import commission
         with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
-
-            # A STEP this runtime writes itself, so the row does not depend on a
-            # vendored fixture being present.
-            from build123d import Box, export_step
-            readable = work / "box.step"
-            export_step(Box(12.0, 8.0, 4.0), str(readable))
-            count = commission._preservation_samples(
-                {"minimum_detectable_defect_mm": 0.3}, readable)
-            self.assertIsInstance(count, int)
-            self.assertGreater(count, 0,
-                               "a readable STEP must yield a sample count: this is "
-                               "the audit the old behaviour silently disabled")
-
-            # And the refusal it replaced still fires on something truly unreadable.
-            corrupt = work / "corrupt.step"
+            corrupt = Path(raw) / "corrupt.stl"
             corrupt.write_text("this is not a STEP file at all\n", encoding="utf-8")
             with self.assertRaises(commission.SampleAreaUnreadable) as caught:
                 commission._preservation_samples(

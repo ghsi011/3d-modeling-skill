@@ -93,6 +93,27 @@ class AStepFileIsReadableByEveryLoaderTest(unittest.TestCase):
         area = metrics.overhang_area(str(self.step))
         self.assertIsInstance(area, float)
 
+    def test_a_readable_step_yields_a_preservation_sample_count(self) -> None:
+        """The audit the old behaviour silently disabled.
+
+        This is the other half of `test_phase3`'s
+        `test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash`. That
+        row keeps the cheap property -- an unreadable source refuses -- and this
+        one keeps the property that needs a real B-rep read, because deriving a
+        sample count from a STEP's surface area costs 11.72 s against a 5 s
+        commit gate.
+
+        It matters because `minimum_detectable_defect_mm` on a STEP source used
+        to disable the preservation audit outright: coverage fell and the job
+        failed a gate for a reason unrelated to the candidate, on the one lane
+        whose whole subject is preservation.
+        """
+        from pipeline import commission
+        count = commission._preservation_samples(
+            {"minimum_detectable_defect_mm": 0.3}, self.step)
+        self.assertIsInstance(count, int)
+        self.assertGreater(count, 0)
+
     def test_it_is_read_in_millimetres_and_not_metres(self) -> None:
         """The reason cascadio is refused, asserted rather than trusted.
 
