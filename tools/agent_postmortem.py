@@ -113,6 +113,19 @@ class Decomposition:
     def visible_total_chars(self) -> int:
         return sum(self.visible_chars.values())
 
+    @property
+    def is_parent(self) -> bool:
+        """Whether this transcript dispatched children of its own.
+
+        A parent's tool time is its children's spans, which appear again in
+        their own transcripts, so the two classes are never summed. This is not
+        a refinement: on the first agent-driven run, summing them reported 59.7%
+        model time where the leaf roles that do the work were at 87.1%, and the
+        difference is the whole question of whether the model or the harness is
+        the thing to optimise.
+        """
+        return bool(self.tool_calls.get("Agent"))
+
     def generation_rate(self) -> float:
         """Billed output tokens per second of model time.
 
@@ -190,6 +203,29 @@ def residual(d: Decomposition, *, chars_per_token: float = CHARS_PER_TOKEN) -> f
     return d.billed_output - d.visible_total_chars / chars_per_token
 
 
+def summarise(pairs: list[tuple[str, Decomposition]]) -> dict[str, dict[str, float]]:
+    """Aggregate leaf roles and parent orchestrators separately.
+
+    Two dictionaries and never one, because the only correct way to combine a
+    parent with its children is not to.
+    """
+    out = {
+        "leaf": {"n": 0, "span_s": 0.0, "model_s": 0.0, "tool_s": 0.0,
+                 "billed_output": 0, "visible_chars": 0},
+        "parent": {"n": 0, "span_s": 0.0, "model_s": 0.0, "tool_s": 0.0,
+                   "billed_output": 0, "visible_chars": 0},
+    }
+    for _, d in pairs:
+        bucket = out["parent" if d.is_parent else "leaf"]
+        bucket["n"] += 1
+        bucket["span_s"] += d.span_s
+        bucket["model_s"] += d.model_s
+        bucket["tool_s"] += d.tool_s
+        bucket["billed_output"] += d.billed_output
+        bucket["visible_chars"] += d.visible_total_chars
+    return out
+
+
 def read_transcript(path: Path) -> list[dict]:
     rows: list[dict] = []
     with io.open(path, encoding="utf-8", errors="replace") as handle:
@@ -218,16 +254,14 @@ def report(session_dir: Path, *, since: str = "") -> dict[str, Any]:
     print(f"{len(rows)} transcript(s) in {session_dir}"
           + (f" ending at or after {since}" if since else ""))
     print()
-    span = model = tool = 0.0
-    billed = 0
-    visible = 0
+    billed = sum(d.billed_output for _, d in rows)
+    visible = sum(d.visible_total_chars for _, d in rows)
     for name, d in rows:
-        span += d.span_s; model += d.model_s; tool += d.tool_s
-        billed += d.billed_output; visible += d.visible_total_chars
-        pct = lambda x: 100.0 * x / d.span_s if d.span_s else 0.0
-        print(f"--- {name}  {d.span_s/60:.1f} min")
-        print(f"    MODEL {d.model_s/60:6.1f} min ({pct(d.model_s):4.1f}%)   "
-              f"TOOL {d.tool_s/60:6.1f} min ({pct(d.tool_s):4.1f}%)")
+        scale = d.span_s or 1.0
+        kind = "parent" if d.is_parent else "leaf"
+        print(f"--- {name}  {d.span_s/60:.1f} min  [{kind}]")
+        print(f"    MODEL {d.model_s/60:6.1f} min ({100*d.model_s/scale:4.1f}%)   "
+              f"TOOL {d.tool_s/60:6.1f} min ({100*d.tool_s/scale:4.1f}%)")
         print(f"    turns {d.turns:4d}   billed_out {d.billed_output:>9,}   "
               f"{d.generation_rate():5.1f} tok/s   "
               f"stored thinking on {d.turns_with_stored_thinking}/{d.turns} turns")
@@ -237,9 +271,19 @@ def report(session_dir: Path, *, since: str = "") -> dict[str, Any]:
                 f"{k} {v/60:.1f}m x{d.tool_calls.get(k, 0)}" for k, v in busiest))
     print()
     print("=" * 72)
-    if span:
-        print(f"span {span/3600:.2f} h   MODEL {model/3600:.2f} h "
-              f"({100*model/span:.1f}%)   TOOL {tool/3600:.2f} h ({100*tool/span:.1f}%)")
+    totals = summarise(rows)
+    for label, note in (("leaf", "roles that do the work"),
+                        ("parent", "orchestrators -- their TOOL time IS the children")):
+        b = totals[label]
+        if not b["n"]:
+            continue
+        s = b["span_s"] or 1.0
+        print(f"{label.upper():<7} n={b['n']:<3} span {b['span_s']/3600:5.2f} h   "
+              f"MODEL {b['model_s']/3600:5.2f} h ({100*b['model_s']/s:4.1f}%)   "
+              f"TOOL {b['tool_s']/3600:5.2f} h ({100*b['tool_s']/s:4.1f}%)   {note}")
+    print("The two are never summed: a parent's wait is its child's span, counted")
+    print("again in that child's own transcript.")
+    print()
     print(f"billed output {billed:,} tok   visible in transcript "
           f"{visible/CHARS_PER_TOKEN:,.0f} tok")
     print("residual (billed - visible), swept over the chars/token calibration:")
@@ -247,8 +291,7 @@ def report(session_dir: Path, *, since: str = "") -> dict[str, Any]:
         left = billed - visible / cpt
         share = 100.0 * left / billed if billed else 0.0
         print(f"  {cpt:.2f} chars/tok -> {left:>12,.0f} tok ({share:5.1f}% of billed)")
-    return {"transcripts": len(rows), "span_s": span, "model_s": model,
-            "tool_s": tool, "billed_output": billed}
+    return {"transcripts": len(rows), "totals": totals, "billed_output": billed}
 
 
 def main(argv: list[str] | None = None) -> int:

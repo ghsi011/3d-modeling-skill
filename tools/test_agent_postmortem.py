@@ -86,6 +86,41 @@ class GapsAreAttributedToTheSideThatSpentThemTest(unittest.TestCase):
         self.assertAlmostEqual(30.0, d.tool_s, places=3)
 
 
+class AParentsToolTimeIsItsChildrensSpanTest(unittest.TestCase):
+    """The correction that changed the headline number.
+
+    An orchestrator waiting on `Agent` is not waiting on the harness in the
+    sense a leaf role is -- that gap *is* the child's whole span, which appears
+    again in the child's own transcript. Summing the two double-counts, and it
+    double-counts in the direction that makes tool time look like the lever:
+    over one real run it reported 59.7% model time where the roles that do the
+    work were at 87.1%.
+    """
+
+    def test_a_transcript_that_dispatches_children_is_a_parent(self) -> None:
+        rows = [assistant("2026-08-17T10:00:00Z", tools=[("Agent", {"p": "go"})]),
+                result("2026-08-17T10:30:00Z")]
+        self.assertTrue(PM.decompose(rows).is_parent)
+
+    def test_a_transcript_that_only_runs_tools_is_a_leaf(self) -> None:
+        rows = [assistant("2026-08-17T10:00:00Z", tools=[("Bash", {"c": "1"})]),
+                result("2026-08-17T10:00:10Z")]
+        self.assertFalse(PM.decompose(rows).is_parent)
+
+    def test_the_two_classes_are_summarised_apart(self) -> None:
+        parent = PM.decompose(
+            [assistant("2026-08-17T10:00:00Z", tools=[("Agent", {"p": "go"})]),
+             result("2026-08-17T10:30:00Z")])
+        leaf = PM.decompose(
+            [result("2026-08-17T10:00:00Z"),
+             assistant("2026-08-17T10:10:00Z", out=1)])
+        summary = PM.summarise([("p.jsonl", parent), ("l.jsonl", leaf)])
+        self.assertAlmostEqual(1800.0, summary["parent"]["tool_s"], places=3)
+        self.assertAlmostEqual(600.0, summary["leaf"]["model_s"], places=3)
+        # The leaf aggregate must not carry the parent's waiting-on-children time.
+        self.assertAlmostEqual(0.0, summary["leaf"]["tool_s"], places=3)
+
+
 class TheResidualIsASubtractionAndSaysSoTest(unittest.TestCase):
     def test_visible_characters_are_counted_per_block_kind(self) -> None:
         rows = [assistant("2026-08-17T10:00:00Z", out=100,
