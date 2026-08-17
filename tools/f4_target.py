@@ -15,11 +15,26 @@ bounding box moved would stop this script instead of quietly producing a target
 in the wrong place.
 
 **The cut goes deeper than the wall on purpose.** "Through the complete wall"
-is a topological requirement, not a depth of 2.25 mm. Behind this wall the
-ingest survey measured at least 8 mm of void across the whole safe window, so a
-cut of `CUT_DEPTH_MM` removes exactly the wall and then nothing -- the result is
-identical to a cut of precisely 2.25 mm, and it does not depend on the wall
-thickness being uniform to the micron.
+is a topological requirement, not a nominal depth. The tool cuts 5.00 mm inward
+from the outer face, traversing the 2.4300 mm wall and extending 2.5700 mm into
+the measured-clear void, which the ingest survey found to be at least 8 mm deep
+across the whole safe window. So it removes exactly the wall and then nothing:
+the result is identical to a cut of precisely 2.4300 mm, and it does not depend
+on the wall thickness being uniform to the micron.
+
+**The wall thickness is answer-side.** 2.4300 mm is a source-derived ingest
+fact, not a candidate-visible design requirement. It lives here and in the
+fixture record as a sanity check on the pinned source and target; the request
+the candidate reads says only *cut through the complete wall*, and no predicate
+scores a candidate on reproducing a nominal 2.4300 mm depth.
+
+**This generator is not byte-deterministic, and the fixture must not claim it
+is.** The honest claim is narrower: *the geometric operation is deterministic;
+serialization and tessellation bytes are not.* Two equivalent runs differ
+because the STEP header embeds a build timestamp and the STL's floats move --
+measured at 8 bytes of 831,884. The artifact that gets scored is therefore a
+stored, hash-pinned external file, exactly as F1 pins its reference, and
+"rerunning this script reproduces that SHA-256" is never asserted anywhere.
 
 Usage:
     uv run python tools/f4_target.py --source <source.step> --out <dir>
@@ -46,7 +61,8 @@ SLOT_Z_MM = 4.00            # slot height along Z
 CORNER_R_MM = 1.00          # rounded rectangle
 CENTRE_FROM_YMIN_MM = 47.83  # datum-expressed: offset from the bbox Y-min plane
 CENTRE_ABOVE_ZMIN_MM = 10.50  # datum-expressed: height above the Z-min base plane
-CUT_DEPTH_MM = 5.00         # through the 2.25 mm wall, into measured void
+CUT_DEPTH_MM = 5.00         # inward from the outer face: 2.4300 of wall,
+                            # then 2.5700 into void measured at >= 8 mm clear
 
 # What the source must be for those numbers to mean anything.
 #
