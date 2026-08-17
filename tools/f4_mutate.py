@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -50,8 +49,8 @@ MUTATIONS = [
 
 def build_variant(source: Path, out: Path, *, face_x, w, h, r, cy, cz, depth,
                   extra_hole=False):
-    from build123d import (Location, Plane, RectangleRounded, export_stl,
-                           extrude, import_step, Cylinder, Axis)
+    from build123d import (Cylinder, Location, Plane, RectangleRounded,
+                           export_stl, extrude, import_step)
     shape = import_step(str(source))
     prof = Plane.YZ * Location((cy, cz, 0))
     tool = extrude(prof * RectangleRounded(w, h, r), amount=-(depth + 0.50))

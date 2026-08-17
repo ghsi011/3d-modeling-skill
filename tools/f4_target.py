@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import sys
 from pathlib import Path
 
 # --- the frozen edit -------------------------------------------------------
@@ -91,8 +90,8 @@ def sha256(path: Path) -> str:
 
 
 def build(source: Path, out_dir: Path) -> dict[str, str]:
-    from build123d import (Axis, Box, Location, Plane, RectangleRounded,
-                           export_step, export_stl, extrude, import_step)
+    from build123d import (Location, Plane, RectangleRounded, export_step,
+                           export_stl, extrude, import_step)
 
     raw = source.read_bytes()
     got = hashlib.sha256(raw).hexdigest()
