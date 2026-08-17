@@ -442,5 +442,111 @@ class APartiallyTessellatedStepIsRefusedRatherThanMeasuredTest(unittest.TestCase
                     mesh_io.load_mesh_raw(step)
 
 
+class APerFaceStepIsWeldedBeforeIntegrityIsReportedTest(unittest.TestCase):
+    """**This proves a sound multi-face STEP is not reported as broken, because
+    it fails when the loader builds the mesh without merging seam vertices.**
+
+    OCC emits its own vertex block per face and offsets that block's triangle
+    indices, so every seam is duplicated points at identical coordinates.
+    `BrepTessellation.mesh()` is the authority on what to do about it -- "The
+    merge is the parse, exactly as it is for an STL" -- and the first version of
+    the STEP routing did not use it. It built the raw mesh with `process=False`
+    instead, so adjacent faces shared no indexed edges and `load_mesh_raw`
+    reported an ordinary six-face box as twelve components and not watertight.
+
+    That number is worse than useless on the raw path specifically, because the
+    raw path exists to state integrity *authoritatively before any repair*. A
+    caller reading twelve components sees a finding about the supplied part when
+    what it really describes is how this loader assembled it -- the same defect
+    as measuring a partial read, wearing different clothes.
+
+    The STL caveat in this module's own docstring does not transfer. For an STL
+    the merge would hide a genuine defect in the file; for a per-face B-rep the
+    merge is what turns the representation into a mesh at all.
+    """
+
+    @staticmethod
+    def _unwelded(mesh) -> tuple[np.ndarray, np.ndarray]:
+        """The same geometry with a private vertex per triangle corner.
+
+        Maximally unwelded, which is the shape of what OCC hands over: no
+        triangle shares an index with any neighbour.
+        """
+        corners = np.asarray(mesh.vertices, dtype=np.float64)[
+            np.asarray(mesh.faces, dtype=np.int64).ravel()]
+        return corners, np.arange(len(corners), dtype=np.int64).reshape(-1, 3)
+
+    def _reading(self) -> mesh_io.BrepTessellation:
+        verts, tris = self._unwelded(_box())
+        return mesh_io.BrepTessellation(
+            faces=6, tessellated=6, failures=(), linear_deflection=0.01,
+            angular_deflection=0.1, vertices=verts, triangles=tris)
+
+    def _step(self, tmp: str) -> Path:
+        path = Path(tmp) / "box.step"
+        path.write_text("ISO-10303-21;\n", encoding="utf-8")
+        return path
+
+    def test_the_fixture_really_is_unwelded(self) -> None:
+        """The control for the control. If this box arrived already welded, every
+        assertion below would pass without the loader doing anything."""
+        verts, tris = self._unwelded(_box())
+        soup = trimesh.Trimesh(vertices=verts, faces=tris, process=False)
+        self.assertEqual(12, mesh_io.connected_component_count(soup))
+        self.assertFalse(soup.is_watertight)
+
+    def test_the_raw_step_read_is_watertight_and_one_component(self) -> None:
+        reading = self._reading()
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=reading):
+                raw, integrity = mesh_io.load_mesh_raw(step)
+        self.assertEqual(1, mesh_io.connected_component_count(raw),
+                         "a sound six-face solid read as more than one component, "
+                         "which is a fact about the loader and not about the part")
+        self.assertTrue(raw.is_watertight)
+        self.assertEqual(1, integrity.components)
+        self.assertTrue(integrity.watertight,
+                        "raw_integrity is the authoritative pre-repair statement, "
+                        "so a seam artefact here is reported as a defect in the "
+                        "supplied STEP")
+
+    def test_the_normalized_step_read_is_also_one_solid(self) -> None:
+        reading = self._reading()
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=reading):
+                normalized = mesh_io.load_mesh(step)
+        self.assertEqual(1, mesh_io.connected_component_count(normalized))
+        self.assertTrue(normalized.is_watertight)
+
+    def test_an_incomplete_reading_still_refuses_before_any_of_this(self) -> None:
+        """Welding must not have moved the completeness refusal downstream of a
+        mesh: an incomplete read has to fail before there is anything to weld."""
+        verts, tris = self._unwelded(_box())
+        partial = mesh_io.BrepTessellation(
+            faces=6, tessellated=5, failures=("face 2 (Plane): null triangulation",),
+            linear_deflection=0.01, angular_deflection=0.1,
+            vertices=verts, triangles=tris)
+        with tempfile.TemporaryDirectory() as tmp:
+            step = self._step(tmp)
+            with unittest.mock.patch.object(mesh_io, "read_step",
+                                            return_value=partial):
+                with self.assertRaises(ValueError):
+                    mesh_io.load_mesh_raw(step)
+
+    def test_a_non_step_raw_read_is_still_unwelded(self) -> None:
+        """The STL path must keep its raw semantics. Welding every format would
+        hide the genuine defects `raw_integrity` exists to surface, and this
+        module's docstring promises an unwelded STL reads as triangle soup."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "box.stl"
+            _box().export(path)
+            raw, _ = mesh_io.load_mesh_raw(path)
+        self.assertEqual(12, mesh_io.connected_component_count(raw))
+
+
 if __name__ == "__main__":
     unittest.main()

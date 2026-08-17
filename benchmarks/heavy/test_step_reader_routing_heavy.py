@@ -114,6 +114,27 @@ class AStepFileIsReadableByEveryLoaderTest(unittest.TestCase):
         self.assertIsInstance(count, int)
         self.assertGreater(count, 0)
 
+    def test_a_real_multi_face_step_reads_as_one_watertight_solid(self) -> None:
+        """The end-to-end truth behind the L0 seam-welding rows.
+
+        Those inject a per-face tessellation to keep the property in the commit
+        gate. This one takes the same property through an actual OCC read of an
+        actual six-face solid, because the injected fixture proves what the
+        *loader* does with per-face blocks and only a real read proves OCC still
+        hands them over that way.
+
+        On the raw path specifically: `load_mesh_raw` exists to state integrity
+        authoritatively before any repair, so a seam artefact here is reported as
+        a defect in the supplied STEP. Before the merge it read as 12 components
+        and not watertight for this box.
+        """
+        import mesh_io
+        raw, integrity = mesh_io.load_mesh_raw(self.step)
+        self.assertEqual(1, mesh_io.connected_component_count(raw))
+        self.assertTrue(raw.is_watertight)
+        self.assertEqual(1, integrity.components)
+        self.assertTrue(integrity.watertight)
+
     def test_it_is_read_in_millimetres_and_not_metres(self) -> None:
         """The reason cascadio is refused, asserted rather than trusted.
 

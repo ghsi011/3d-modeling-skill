@@ -305,7 +305,7 @@ def read_step(path, *, tolerance: float = BREP_READ_LINEAR_DEFLECTION,
                            keep_geometry=keep_geometry)
 
 
-def _step_as_mesh(path, *, process: bool) -> trimesh.Trimesh:
+def _step_as_mesh(path) -> trimesh.Trimesh:
     """A supplied STEP as triangles, or a refusal naming the faces that failed.
 
     **The completeness check is the reason this helper exists.** OCC
@@ -330,14 +330,31 @@ def _step_as_mesh(path, *, process: bool) -> trimesh.Trimesh:
     conjuncts, and the third -- a shape nobody could enumerate -- produces an
     empty failure list, so the shorter test would pass the one input it can
     learn least about.
+
+    **Through `BrepTessellation.mesh()`, and the seam merge is not optional.**
+    OCC emits its own vertex block per face, so every seam is duplicated points
+    at identical coordinates. `mesh()`'s docstring is the authority: "The merge
+    is the parse, exactly as it is for an STL." Building the mesh here with
+    `process=False` instead -- which this helper did first -- left adjacent faces
+    with no shared indexed edges, so `load_mesh_raw` reported an ordinary sound
+    six-face STEP as twelve components and not watertight, and did it on the
+    *raw* path whose whole job is to state integrity authoritatively before any
+    repair. That is the same defect as measuring a partial read: a number that
+    looks like a finding about the supplied part and is really a fact about how
+    this loader assembled it.
+
+    So there is no `process` switch. The STL distinction between a raw and a
+    repaired read does not carry over: for an STL the merge would hide a genuine
+    defect in the file, while for a per-face B-rep the merge is what turns the
+    representation into a mesh at all. One representation, one parse, and
+    `mesh()` owns it rather than a second seam policy written here.
     """
     brep = read_step(path)
     if not brep.complete:
         raise ValueError(
             f"{path} could not be read completely as a B-rep, so it "
             f"is refused rather than measured with a hole in it: {brep.summary()}")
-    return trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles,
-                           process=process)
+    return brep.mesh()
 
 
 def validate_brep_tessellation(shape: Any, *, tolerance: float,
@@ -557,7 +574,7 @@ def load_mesh_raw(path) -> tuple[trimesh.Trimesh, MeshIntegrity]:
     # candidate. On the MODIFY lane, whose whole subject is preservation, that is
     # the one gate that had to work.
     if str(path).lower().endswith((".step", ".stp")):
-        tm = _step_as_mesh(path, process=False)
+        tm = _step_as_mesh(path)
     else:
         try:
             tm = trimesh.load(path, force="mesh", process=False)
@@ -590,7 +607,7 @@ def load_mesh(path):
     # about which files are readable, which is exactly the drift `as_mesh`'s own
     # docstring says it exists to prevent.
     if str(path).lower().endswith((".step", ".stp")):
-        tm = _step_as_mesh(path, process=True)
+        tm = _step_as_mesh(path)
     else:
         try:
             tm = trimesh.load(path, force="mesh")
