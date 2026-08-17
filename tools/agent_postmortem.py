@@ -39,15 +39,37 @@ message.
 So nothing here is apportioned. Characters are counted per block kind directly,
 and the difference between billed tokens and visible ones is reported as a
 **residual**: a subtraction of two measured quantities, not a model of anything.
-On that same run the residual was 71.6% of all billed output, stable between
-66.6% and 75.3% across a +/-15% sweep of the chars-per-token constant -- which is
-why `report` prints the sweep rather than a single number. A residual computed
-from a wrong constant is a units error wearing a conclusion's clothes.
+On that same run the residual was 71.6% of all billed output. A residual computed
+from a wrong constant is a units error wearing a conclusion's clothes, which is
+why `report` never prints a single number -- see the bound and the two
+corroborations below.
 
 `residual` deliberately returns a negative number when visible output exceeds
 billed output. That can only mean the constant is wrong, and it is the single
 signal that says so; clamping it to zero would delete the instrument's own
 error term.
+
+**The residual is a bound, and it is corroborated without the constant.**
+Sweeping the same chars-per-token estimate is not an independent check of that
+estimate, so two further lines are reported beside it:
+
+* *A wide bound rather than a point estimate.* The sweep runs 2.5 to 6.0
+  chars/token -- 2.5 below any measured ratio for English prose or Python source,
+  6.0 far above -- and across all of it the residual on this repository's
+  transcripts stays between **60.1% and 83.4%**. So "most billed output is absent
+  from the transcript" does not rest on the calibration anywhere in that range.
+* *A line that uses no token arithmetic at all.* `stored_thinking_share` is the
+  fraction of assistant turns carrying a thinking block: **31.4%** here. Every
+  turn on a reasoning model reasons, so the other **68.6%** reasoned without the
+  transcript holding it, however tokens are counted.
+
+An empirical calibration was attempted and deliberately **not** adopted. Messages
+whose only block is text should yield a clean characters-per-token ratio; over the
+18 such messages here the median is **2.03** and the mean **1.69**, far below any
+plausible ratio for prose. That is not a usable constant -- it is more evidence of
+the same phenomenon, because those messages' billed output also includes reasoning
+the transcript does not store, which inflates the denominator. A constant derived
+that way would be contaminated by the very quantity it was meant to measure.
 
 Usage:
 
@@ -226,6 +248,25 @@ def summarise(pairs: list[tuple[str, Decomposition]]) -> dict[str, dict[str, flo
     return out
 
 
+def parse_instant(text: str) -> dt.datetime:
+    """An ISO 8601 instant, tolerant of the `Z` suffix, as an aware datetime.
+
+    Comparing these as *strings* was a real defect: `_timestamp` normalises a
+    transcript's `Z` to `+00:00`, so `"...+00:00" < "...Z"` is true on spelling
+    alone -- `+` sorts below `Z` -- and a transcript ending exactly at the cutoff
+    was excluded from a filter documented as inclusive. Two equal instants
+    written with different offsets ordered by spelling rather than by time for
+    the same reason. So the cutoff is parsed and the comparison is between
+    datetimes.
+
+    A naive cutoff is read as UTC rather than rejected, because `--since
+    2026-08-17T06:00` is the form a person types and refusing it would be
+    pedantry about a value this program can only sensibly read one way.
+    """
+    parsed = dt.datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
 def read_transcript(path: Path) -> list[dict]:
     rows: list[dict] = []
     with io.open(path, encoding="utf-8", errors="replace") as handle:
@@ -242,11 +283,13 @@ def read_transcript(path: Path) -> list[dict]:
 def report(session_dir: Path, *, since: str = "") -> dict[str, Any]:
     """Every subagent transcript in one session, slowest first."""
     rows: list[tuple[str, Decomposition]] = []
+    cutoff = parse_instant(since) if since else None
     for path in sorted(Path(session_dir).glob("agent-*.jsonl")):
         d = decompose(read_transcript(path))
         if d.events < 2:
             continue
-        if since and d.ended < since:
+        # Inclusive, and compared as instants: see `parse_instant`.
+        if cutoff is not None and parse_instant(d.ended) < cutoff:
             continue
         rows.append((path.name, d))
     rows.sort(key=lambda pair: pair[1].span_s, reverse=True)
@@ -286,11 +329,23 @@ def report(session_dir: Path, *, since: str = "") -> dict[str, Any]:
     print()
     print(f"billed output {billed:,} tok   visible in transcript "
           f"{visible/CHARS_PER_TOKEN:,.0f} tok")
-    print("residual (billed - visible), swept over the chars/token calibration:")
-    for cpt in (CHARS_PER_TOKEN * 0.85, CHARS_PER_TOKEN, CHARS_PER_TOKEN * 1.15):
+    print("residual (billed - visible) as a BOUND, swept far wider than the")
+    print("calibration's own uncertainty -- 2.5 is below any measured ratio for")
+    print("prose or source, 6.0 far above:")
+    for cpt in (2.5, 3.0, CHARS_PER_TOKEN, 4.5, 6.0):
         left = billed - visible / cpt
         share = 100.0 * left / billed if billed else 0.0
-        print(f"  {cpt:.2f} chars/tok -> {left:>12,.0f} tok ({share:5.1f}% of billed)")
+        mark = "  <- calibration" if cpt == CHARS_PER_TOKEN else ""
+        print(f"  {cpt:>4.1f} chars/tok -> {left:>12,.0f} tok "
+              f"({share:5.1f}% of billed){mark}")
+    turns = sum(d.turns for _, d in rows)
+    stored = sum(d.turns_with_stored_thinking for _, d in rows)
+    if turns:
+        print()
+        print(f"corroboration that uses no token arithmetic: {stored:,} of "
+              f"{turns:,} turns ({100*stored/turns:.1f}%) stored a thinking block,")
+        print(f"so {100-100*stored/turns:.1f}% reasoned without the transcript "
+              "holding it.")
     return {"transcripts": len(rows), "totals": totals, "billed_output": billed}
 
 

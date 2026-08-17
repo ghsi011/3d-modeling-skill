@@ -121,6 +121,35 @@ class AParentsToolTimeIsItsChildrensSpanTest(unittest.TestCase):
         self.assertAlmostEqual(0.0, summary["leaf"]["tool_s"], places=3)
 
 
+class TheSinceCutoffIsAnInstantNotATest(unittest.TestCase):
+    """**This proves `--since` filters by time, because it fails when the cutoff
+    is compared as text.**
+
+    `_timestamp` normalises a transcript's `Z` to `+00:00`. Compared as strings,
+    `"...+00:00" < "...Z"` is true on spelling alone -- `+` sorts below `Z` -- so
+    a transcript ending exactly at a `Z`-spelled cutoff was dropped from a filter
+    documented as inclusive, and two equal instants written with different
+    offsets ordered by spelling rather than by time.
+    """
+
+    def test_the_z_suffix_and_the_offset_are_the_same_instant(self) -> None:
+        self.assertEqual(PM.parse_instant("2026-08-17T06:00:00Z"),
+                         PM.parse_instant("2026-08-17T06:00:00+00:00"))
+
+    def test_a_naive_cutoff_is_read_as_utc(self) -> None:
+        """`--since 2026-08-17T06:00` is the form a person types."""
+        self.assertEqual(PM.parse_instant("2026-08-17T06:00:00"),
+                         PM.parse_instant("2026-08-17T06:00:00Z"))
+
+    def test_equal_instants_do_not_order_by_spelling(self) -> None:
+        z = PM.parse_instant("2026-08-17T06:00:00Z")
+        offset = PM.parse_instant("2026-08-17T08:00:00+02:00")
+        self.assertEqual(z, offset)
+        self.assertFalse(z < offset)
+        # The string comparison this replaced gets it backwards.
+        self.assertTrue("2026-08-17T06:00:00+00:00" < "2026-08-17T06:00:00Z")
+
+
 class TheResidualIsASubtractionAndSaysSoTest(unittest.TestCase):
     def test_visible_characters_are_counted_per_block_kind(self) -> None:
         rows = [assistant("2026-08-17T10:00:00Z", out=100,
