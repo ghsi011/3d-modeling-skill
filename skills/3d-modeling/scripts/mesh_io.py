@@ -502,10 +502,34 @@ def load_mesh_raw(path) -> tuple[trimesh.Trimesh, MeshIntegrity]:
     checked here before any normalization is attempted -- a raw hard
     failure can never be converted into a pass by later repair.
     """
-    try:
-        tm = trimesh.load(path, force="mesh", process=False)
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
+    # STEP goes through this runtime's own kernel, never through `trimesh.load`.
+    #
+    # `trimesh.load` dispatches STEP to `cascadio`, which this repository
+    # deliberately does not carry: `read_step` below records why, measured on
+    # `vent_mount.step` -- cascadio returns the part in METRES where the kernel
+    # path returns millimetres, the silent unit substitution ARCHITECTURE.md
+    # section 12 forbids. So the dispatch could only ever fail here, and it did,
+    # with `Failed to load STL: No module named 'cascadio'`.
+    #
+    # That failure was not loud. `cli._inherited_overhang` swallowed it into
+    # `unmeasured` and returned None, leaving a MODIFY job's inherited-overhang
+    # ceiling at the generated 0.0 -- so a candidate was charged for the
+    # 54.79 mm2 of downward area it inherited from the very part it was told to
+    # preserve. And `commission._preservation_samples` raised through it, which
+    # disables the preservation audit entirely whenever
+    # `minimum_detectable_defect_mm` is declared on a STEP source: coverage drops
+    # and the job fails a gate for a reason that has nothing to do with the
+    # candidate. On the MODIFY lane, whose whole subject is preservation, that is
+    # the one gate that had to work.
+    if str(path).lower().endswith((".step", ".stp")):
+        brep = read_step(path)
+        tm = trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles,
+                             process=False)
+    else:
+        try:
+            tm = trimesh.load(path, force="mesh", process=False)
+        except Exception as e:
+            raise ValueError(f"Failed to load STL: {e}") from e
     _require_parsed_mesh(tm, label="STL file")
     integrity = compute_integrity(tm)
     return tm, integrity
@@ -524,10 +548,22 @@ def load_mesh(path):
     integrity metrics and a mutation log, use ``load_mesh_report`` instead --
     acceptance/verification checks should read the raw side, never this one.
     """
-    try:
-        tm = trimesh.load(path, force="mesh")
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
+    # STEP through the kernel, for the reason `load_mesh_raw` records at
+    # length. Routed here as well and not only there, because `as_mesh` in
+    # `designer_toolkit/_bootstrap.py` sends every toolkit entry point through
+    # THIS function -- so `overhang_area` on a STEP path died on cascadio even
+    # after the raw loader was fixed. Two entry points, one substitution: the
+    # branch has to exist at both or the toolkit and the analysis path disagree
+    # about which files are readable, which is exactly the drift `as_mesh`'s own
+    # docstring says it exists to prevent.
+    if str(path).lower().endswith((".step", ".stp")):
+        brep = read_step(path)
+        tm = trimesh.Trimesh(vertices=brep.vertices, faces=brep.triangles)
+    else:
+        try:
+            tm = trimesh.load(path, force="mesh")
+        except Exception as e:
+            raise ValueError(f"Failed to load STL: {e}") from e
     _require_parsed_mesh(tm, label="STL file")
     # OCC's tessellator emits zero-area triangles at the poles of
     # spherical faces (and similar degenerate spots). They carry no

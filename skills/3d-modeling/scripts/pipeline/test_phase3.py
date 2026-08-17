@@ -1032,23 +1032,48 @@ class ADeclarationMustNotBreakOrBeIgnoredTest(unittest.TestCase):
     """
 
     def test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
-        """A STEP source: `analysis.load` refuses it, `PR.audit` handles it.
+        """An unreadable source is a finding; a readable STEP is a sample count.
 
-        So *declaring* a sensitivity turned a working audit into an uncaught
-        stage crash, on the one source class the module was extended to support.
+        **This test used to assert the defect.** Its trigger was a real vendored
+        STEP, on the reasoning that "`analysis.load` refuses it" -- true at the
+        time, because the loader dispatched STEP to `cascadio`, which this
+        repository deliberately does not carry. So the row that exists to prove
+        *declaring a sensitivity must not break a job* was passing for the wrong
+        reason: the audit was not handling an exotic failure, it was disabled on
+        every STEP source, which on the MODIFY lane is the one class whose whole
+        subject is preservation.
+
+        `mesh_io` now routes STEP through the kernel, so the trigger is gone and
+        the property is not. Both halves are asserted here, which the single
+        raise could not do: a readable STEP yields a count, and a genuinely
+        unreadable file still refuses by name.
         """
         from . import commission
-        step = (Path(__file__).resolve().parents[4] / "benchmarks" / "fixtures"
-                / "vent-ball-combine" / "public" / "sources" / "vent_mount.step")
-        if not step.is_file():                       # pragma: no cover
-            self.skipTest("the vendored STEP fixture is not on this machine")
-        with self.assertRaises(commission.SampleAreaUnreadable) as caught:
-            commission._preservation_samples(
-                {"minimum_detectable_defect_mm": 0.3}, step)
-        self.assertIn("0.3", str(caught.exception))
-        self.assertIn(step.name, str(caught.exception))
-        # And it is not the other refusal: the two mean different things.
-        self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+
+            # A STEP this runtime writes itself, so the row does not depend on a
+            # vendored fixture being present.
+            from build123d import Box, export_step
+            readable = work / "box.step"
+            export_step(Box(12.0, 8.0, 4.0), str(readable))
+            count = commission._preservation_samples(
+                {"minimum_detectable_defect_mm": 0.3}, readable)
+            self.assertIsInstance(count, int)
+            self.assertGreater(count, 0,
+                               "a readable STEP must yield a sample count: this is "
+                               "the audit the old behaviour silently disabled")
+
+            # And the refusal it replaced still fires on something truly unreadable.
+            corrupt = work / "corrupt.step"
+            corrupt.write_text("this is not a STEP file at all\n", encoding="utf-8")
+            with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+                commission._preservation_samples(
+                    {"minimum_detectable_defect_mm": 0.3}, corrupt)
+            self.assertIn("0.3", str(caught.exception))
+            self.assertIn(corrupt.name, str(caught.exception))
+            # And it is not the other refusal: the two mean different things.
+            self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
 
     def test_a_row_naming_both_a_count_and_a_size_is_refused(self) -> None:
         """Previously the count won and the declaration vanished silently.
