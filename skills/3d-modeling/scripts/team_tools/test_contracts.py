@@ -429,8 +429,15 @@ _EXPORT_FIDELITY = {
     "basis": "four-point convergence ladder on this part",
     "chord_tolerance_mm": [0.005, 0.010],
     "angular_tolerance_deg": [0.05, 0.10],
+    # The two numbers the gate is about: measured error, and the budget it must
+    # stay strictly inside. 0.004 against 0.100 is the honest case.
     "worst_error_mm": 0.004,
     "tolerance_it_must_not_consume_mm": 0.1,
+}
+
+_PROSE_ONLY_ENVELOPE = {
+    "applies_because": "preservation compares meshes",
+    "basis": "measured on this part",
 }
 
 
@@ -633,9 +640,141 @@ class CommissionObligationsReachProductionTest(unittest.TestCase):
                 "expected_artifacts": ["candidate.stl", "candidate.3mf"],
                 "edit_scopes": [{"preservation_tolerance_mm": 0.1}],
             }), encoding="utf-8")
-            required, discretized = P.commission_obligations(tmp)
+            required, discretized, tolerance = P.commission_obligations(tmp)
         self.assertEqual(("stl", "3mf"), required)
         self.assertTrue(discretized)
+        self.assertEqual(0.1, tolerance)
+
+
+class ExportFidelityIsNumericNotProseTest(unittest.TestCase):
+    """**This proves an export-fidelity envelope must bound export error against
+    the commission's own tolerance, because the over-budget case passes again the
+    moment the numeric comparison is removed.**
+
+    The gate this replaces could be satisfied by two sentences:
+
+        {"applies_because": "preservation compares meshes",
+         "basis": "measured on this part"}
+
+    which supplies neither a measured bound nor any evidence that export error is
+    below the decision tolerance -- and so recreated exactly the omission Rule 11
+    exists to prevent, while reporting success.
+
+    Every row here goes through `load_project`, because the claim is about what a
+    real commission cannot do, not about what the helper rejects when told.
+    """
+
+    def _validate(self, tmp, *, envelope, tolerance=0.1):
+        plan = clone(_PRINT_PLAN)
+        if envelope is not None:
+            plan["export_fidelity"] = envelope
+        (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        (tmp / "project.json").write_text(json.dumps(
+            {"edit_scopes": [{"preservation_tolerance_mm": tolerance}]}),
+            encoding="utf-8")
+        return {i.id for i in P.load_project(tmp).all_issues()}
+
+    def test_a_prose_only_envelope_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=clone(_PROSE_ONLY_ENVELOPE))
+        self.assertIn(
+            "MISSING_FIELD@print_plan.export_fidelity.worst_error_mm", ids)
+        self.assertIn(
+            "MISSING_FIELD@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_measured_error_inside_the_budget_passes(self) -> None:
+        """The control. Without it a gate that refuses every envelope would pass
+        every other row in this class."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=clone(_EXPORT_FIDELITY))
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+        self.assertEqual([], [i for i in ids
+                              if i.startswith("MISSING_EXPORT_FIDELITY")])
+
+    def test_a_measured_error_above_the_budget_fails(self) -> None:
+        over = clone(_EXPORT_FIDELITY)
+        over["worst_error_mm"] = 0.101
+        over["tolerance_it_must_not_consume_mm"] = 0.100
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=over)
+        self.assertIn(
+            "EXPORT_ERROR_EXCEEDS_BUDGET@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_an_error_equal_to_the_budget_fails(self) -> None:
+        """Strictly below, not merely within: an error equal to the whole budget
+        consumes all of it and leaves the decision resting on nothing."""
+        equal = clone(_EXPORT_FIDELITY)
+        equal["worst_error_mm"] = 0.100
+        equal["tolerance_it_must_not_consume_mm"] = 0.100
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=equal)
+        self.assertIn(
+            "EXPORT_ERROR_EXCEEDS_BUDGET@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_a_plan_may_not_budget_looser_than_the_commission(self) -> None:
+        """A plan may hold itself to a tighter tolerance than it was given, never
+        a looser one -- otherwise a plan widens its own authority over an
+        acceptance tolerance it does not own."""
+        wide = clone(_EXPORT_FIDELITY)
+        wide["tolerance_it_must_not_consume_mm"] = 0.200
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=wide, tolerance=0.1)
+        self.assertIn(
+            "EXPORT_BUDGET_WIDER_THAN_COMMISSION@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_plan_may_budget_tighter_than_the_commission(self) -> None:
+        """The other half of that rule, and it owes the same proof."""
+        tight = clone(_EXPORT_FIDELITY)
+        tight["tolerance_it_must_not_consume_mm"] = 0.050
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=tight, tolerance=0.1)
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+
+    def test_a_boolean_is_not_a_measurement(self) -> None:
+        """`True` is an int in Python, so a type-only check would accept it."""
+        lying = clone(_EXPORT_FIDELITY)
+        lying["worst_error_mm"] = True
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=lying)
+        self.assertIn(
+            "EXPORT_ERROR_UNBOUNDED@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_the_tightest_declared_tolerance_binds(self) -> None:
+        """Two scopes, and a budget legal under the looser one only. A plan
+        satisfying just the loosest would still violate the other."""
+        plan = clone(_PRINT_PLAN)
+        envelope = clone(_EXPORT_FIDELITY)
+        envelope["tolerance_it_must_not_consume_mm"] = 0.150
+        plan["export_fidelity"] = envelope
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps({"edit_scopes": [
+                {"preservation_tolerance_mm": 0.200},
+                {"preservation_tolerance_mm": 0.100},
+            ]}), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertIn(
+            "EXPORT_BUDGET_WIDER_THAN_COMMISSION@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_job_deciding_nothing_on_a_mesh_invents_no_numbers(self) -> None:
+        """Preservation, restated at the endpoint against the numeric gate: no
+        discretized decision means no envelope and no fabricated figures."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(
+                json.dumps(clone(_PRINT_PLAN)), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps(
+                {"edit_scopes": [{"region": "a slot"}]}), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+        self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
 
 
 class PrintPlanValidatorTest(unittest.TestCase):

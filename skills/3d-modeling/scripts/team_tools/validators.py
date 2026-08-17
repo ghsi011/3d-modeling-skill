@@ -13,6 +13,8 @@ this module defines the *structured JSON* mirror of those Markdown contracts
 
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 from typing import Any
 
@@ -342,8 +344,98 @@ _DELIVERABLE_BINDING = {
 #: guess arrives looking like a calibration.
 _EXPORT_FIDELITY_BINDING = {
     "applies_because": str,
+    # Required, and the field that separates a calibration from a guess: a number
+    # without provenance is not evidence, and copying another part's band is the
+    # specific way a guess arrives looking like one.
     "basis": str,
+    # Required as *numbers*, because an envelope of two prose fields is not a
+    # frozen envelope -- it recreates the exact omission Rule 11 exists to make
+    # impossible. `worst_error_mm` is what export error was measured to be;
+    # `tolerance_it_must_not_consume_mm` is the budget it must stay inside.
+    "worst_error_mm": (int, float),
+    "tolerance_it_must_not_consume_mm": (int, float),
 }
+
+
+def _finite_number(value):
+    """The value as a float, or None if it is not a finite number.
+
+    Booleans are rejected deliberately: `True` is an `int` in Python, so a plan
+    writing `worst_error_mm: true` would otherwise satisfy a numeric requirement.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _export_fidelity_relationships(envelope, *, where, decision_tolerance_mm):
+    """The substance of Rule 11: the numbers have to stand in the right order.
+
+    Checking that fields are present and numeric is not the rule. The rule is
+    that measured export error sits *inside* a budget, and that the budget does
+    not quietly exceed the tolerance the commission set. Without these
+    comparisons an envelope can carry two plausible numbers and still say
+    nothing -- which is how the first version of this gate could be satisfied by
+    two sentences.
+
+    Deliberately no universal ratio: no "export error must be under a tenth of
+    tolerance", because there is no evidence for such a number and a fabricated
+    constant here would be the same defect as a copied band.
+    """
+    issues = []
+    measured = _finite_number(envelope.get("worst_error_mm"))
+    budget = _finite_number(envelope.get("tolerance_it_must_not_consume_mm"))
+
+    if measured is None:
+        issues.append(error(
+            "EXPORT_ERROR_UNBOUNDED", f"{where}.worst_error_mm",
+            "an export-fidelity envelope needs a finite measured error bound; "
+            "prose describing a measurement is not the measurement",
+        ))
+    elif measured < 0:
+        issues.append(error(
+            "BAD_VALUE", f"{where}.worst_error_mm",
+            f"a measured error cannot be negative, got {measured!r}",
+        ))
+
+    if budget is None:
+        issues.append(error(
+            "EXPORT_BUDGET_MISSING", f"{where}.tolerance_it_must_not_consume_mm",
+            "the envelope has to name the budget the export error must stay "
+            "inside, as a finite number",
+        ))
+    elif budget <= 0:
+        issues.append(error(
+            "BAD_VALUE", f"{where}.tolerance_it_must_not_consume_mm",
+            f"the budget must be positive, got {budget!r}",
+        ))
+
+    # A plan may hold itself to a tighter budget than the commission requires; it
+    # may not hold itself to a looser one, because that lets a plan widen its own
+    # authority over an acceptance tolerance it does not own.
+    if budget is not None and budget > 0 and decision_tolerance_mm is not None:
+        allowed = _finite_number(decision_tolerance_mm)
+        if allowed is not None and budget > allowed:
+            issues.append(error(
+                "EXPORT_BUDGET_WIDER_THAN_COMMISSION",
+                f"{where}.tolerance_it_must_not_consume_mm",
+                f"the plan budgets {budget!r} mm against the commission's "
+                f"{allowed!r} mm; a plan may be tighter than the tolerance it "
+                "was given and never looser",
+            ))
+
+    # Strictly below, not merely within: an export error equal to the whole
+    # budget consumes all of it and leaves the decision resting on nothing.
+    if measured is not None and budget is not None and measured >= 0 and budget > 0:
+        if measured >= budget:
+            issues.append(error(
+                "EXPORT_ERROR_EXCEEDS_BUDGET", f"{where}.worst_error_mm",
+                f"measured export error {measured!r} mm is not below the "
+                f"{budget!r} mm budget, so export error can consume the signal "
+                "the decision depends on",
+            ))
+    return issues
 
 
 def validate_print_plan(
@@ -353,6 +445,7 @@ def validate_print_plan(
     feature_ids: dict[str, Any] | None = None,
     required_deliverables: Any = None,
     discretized_decision: bool | None = None,
+    decision_tolerance_mm: float | None = None,
 ) -> list[Issue]:
     """Validate a print plan's machine-readable projection.
 
@@ -456,14 +549,16 @@ def validate_print_plan(
                 "bounded before design rather than discovered after",
             ))
         else:
+            envelope_where = f"{where}.export_fidelity"
             issues += check_object_fields(
                 envelope, required=dict(_EXPORT_FIDELITY_BINDING),
                 optional={"chord_tolerance_mm": list,
-                          "angular_tolerance_deg": list,
-                          "worst_error_mm": (int, float),
-                          "tolerance_it_must_not_consume_mm": (int, float)},
-                where=f"{where}.export_fidelity",
+                          "angular_tolerance_deg": list},
+                where=envelope_where,
             )
+            issues += _export_fidelity_relationships(
+                envelope, where=envelope_where,
+                decision_tolerance_mm=decision_tolerance_mm)
     if "schema_version" in data:
         version = data["schema_version"]
         if version != 4:
