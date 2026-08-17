@@ -307,12 +307,29 @@ def three_mf_rows(path: Path, src, candidate, spec: dict, pitch: float) -> list[
         read = e2e.read_three_mf(Path(path))
         archive = trimesh.util.concatenate(read["bodies"])
         inner = score(src, archive, spec, pitch)
-        failed = [r["row"] for r in inner if not r["ok"]]
+        # **Only the edit-region rows.** `score` returns preservation rows too,
+        # and letting this one inherit `source_equivalence_outside_the_mask`
+        # would make a row whose stated question is "does the archive carry the
+        # requested edit" quietly also a second preservation verdict -- asked of
+        # a re-tessellated archive rather than of the candidate, so it could
+        # disagree with the preservation row that actually owns that question.
+        # The set is read from the fixture's own `hard_acceptance.edit_region`
+        # rather than listed here, so the fixture and the scorer cannot drift
+        # apart about which rows are the edit.
+        allowed = {str(r["row"]) for r in spec["hard_acceptance"]["edit_region"]
+                   if isinstance(r, dict) and r.get("row")}
+        # `slot_exists` is not in that table because it is not a tolerance row:
+        # it is what `score` returns *instead* of the table when nothing was cut
+        # at all, which on an archive is precisely the stale case.
+        allowed.add("slot_exists")
+        judged = [r for r in inner if r["row"] in allowed]
+        failed = [r["row"] for r in judged if not r["ok"]]
         rows.append(_row(
-            "three_mf_carries_the_requested_edit", not failed,
-            "every edit row passes on the archive" if not failed
-            else f"{len(failed)} row(s) fail on the archive: {', '.join(failed)}",
-            "the 3MF satisfies the same edit predicates as the candidate mesh",
+            "three_mf_carries_the_requested_edit", bool(judged) and not failed,
+            "every edit row passes on the archive" if judged and not failed
+            else f"{len(failed)} row(s) fail on the archive: {', '.join(failed)}"
+            if failed else "no edit row could be evaluated on the archive",
+            "the 3MF satisfies the F4 edit-region predicates",
             "a stale pre-edit archive passes every whole-surface statistic and "
             "still ships the unmodified part"))
     return rows
