@@ -149,17 +149,27 @@ fallback to one.
 
 ## What a job costs, and where it actually goes
 
-Measured on a live run of this pipeline, end to end, with a real agent driving
-it: the deterministic pipeline took **33.99 s** and the job took **2 h 57 m**.
-The pipeline is **0.32%** of the wall clock. Optimising it is not where the time
-is.
+Measured on **one** live agent-driven `CUSTOM` run of this pipeline, end to end:
+the deterministic pipeline took **33.99 s** while the job took **2 h 57 m**, so
+the pipeline was **0.32%** of that run's wall clock. That ratio is a measurement
+of one commission on one route, not a constant of this software: a job whose
+geometry is expensive to build, or one that needs no agent at all, sits somewhere
+else entirely. What generalises is the shape, not the number — on an
+agent-driven job, deterministic build time is small next to the roles.
 
-The time is in the roles, and the dominant term is **how many turns each role
-takes**, because every turn re-sends the whole conversation. A role's cost grows
-roughly with the *square* of its turn count: two roles on one job measured 50
-events for 251 kB of transcript against 181 events for 548 kB, and the second
-paid for its own history about ninety times over against twenty-five. Tool
-output was only a quarter of the total; the rest was the role's own turns.
+The time is in the roles, and it is spent **generating tokens**. Measured across
+eleven role transcripts and 5.09 h of leaf-role span: **86.5%** of that span was
+spent waiting on the model and 13.3% on tools, and generation ran at 78–122
+tokens per second in every role. So a role's wall clock is close to its output
+tokens divided by about a hundred per second — output tokens *are* the clock,
+not merely the bill.
+
+Most of those tokens are reasoning rather than text anybody reads: **71.5%** of
+billed output does not appear in the transcript at all (stable between 66.5% and
+75.2% across a ±15% sweep of the chars-per-token calibration). That is why turn
+count matters — each turn carries its own reasoning pass, so a job's cost tracks
+the number of times a role has to stop and think, not the size of its history.
+Re-sent context is cached and cheap; the thinking is not.
 
 In order of what it saves:
 
@@ -169,13 +179,27 @@ reading ten results. One ingest pass here ran twenty measurements as twenty
 commands; as one script it is one turn. This is the largest lever a role has and
 it costs nothing to obey.
 
-**Do not re-derive what the dispatch already gave you.** If the packet names the
-interpreter, the command surface or a measured fact, take it. Re-verifying a
-supplied fact spends a turn to learn something you were handed.
+**Do not re-derive the dispatch's own metadata.** If the packet names the
+interpreter, the command surface, a path, or an immutable identifier such as an
+artifact hash, take it — re-deriving those spends a turn to learn something you
+were handed, and the dispatch owns them.
 
-**Ask for concurrency where the work is independent.** Metrology and the print
-plan do not depend on each other. Dispatched together they cost the slower one;
-in sequence they cost the sum.
+**This does not extend to evidence.** A measurement or a conclusion that your
+role is chartered to establish independently must still be established from the
+bound artifact, however it reached you. A figure arriving in a packet says
+nothing about whether it is current or who produced it, and a metrologist or
+verifier that accepts a supplied measurement because it was convenient has
+silently promoted somebody else's number to evidence — which is the one thing
+an independent context exists not to do. Saving a turn is never a reason to
+inherit a fact you owe.
+
+**Ask for concurrency only where the work is genuinely independent.** Two roles
+that do not read each other's output cost the slower one dispatched together and
+the sum dispatched in sequence. But check the direction of the dependency first:
+on `FITTED` and `FULL`, print planning *consumes* metrology — the plan is written
+against recovered dimensions — so those two are sequential there, and running
+them together buys nothing while risking a plan built on numbers that changed.
+Independence is a property of the route, not a default.
 
 **Never put two writers in one directory.** Two roles authoring the same
 contract will clobber each other, and here that destroyed a revision no receipt
