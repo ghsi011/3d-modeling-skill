@@ -21,6 +21,7 @@ carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 from __future__ import annotations
 
 import copy
+import re
 import json
 import sys
 import tempfile
@@ -37,6 +38,7 @@ if _PACKAGE_DIR not in sys.path:
 import common as C  # noqa: E402  (import after sys.path bootstrap above)
 import contracts as CLI  # noqa: E402
 import manifest_checks as MC  # noqa: E402
+import project as P  # noqa: E402
 import receipts as R  # noqa: E402
 import status as S  # noqa: E402
 import validators as V  # noqa: E402
@@ -413,6 +415,552 @@ class HashFormatTest(unittest.TestCase):
             self.assertTrue(C.is_hash_format(value), value)
         for value in bad:
             self.assertFalse(C.is_hash_format(value), value)
+_DELIVERABLE = {
+    "format": "3mf",
+    "purpose": "the archive that goes to the slicer",
+    "source_geometry": "the accepted candidate solid",
+    "units": "millimetre",
+    "frame": "installed frame, identity transform",
+    "export_path": "make_3mf.py from the exported STL",
+    "acceptance": "unit is millimetre, one printable body, matches the accepted STL",
+}
+
+_EXPORT_FIDELITY = {
+    "applies_because": "the STL is what the preservation comparison measures",
+    "basis": "four-point convergence ladder on this part",
+    "chord_tolerance_mm": [0.005, 0.010],
+    "angular_tolerance_deg": [0.05, 0.10],
+    # The two numbers the gate is about: measured error, and the budget it must
+    # stay strictly inside. 0.004 against 0.100 is the honest case.
+    "worst_error_mm": 0.004,
+    "tolerance_it_must_not_consume_mm": 0.1,
+}
+
+_PROSE_ONLY_ENVELOPE = {
+    "applies_because": "preservation compares meshes",
+    "basis": "measured on this part",
+}
+
+
+class PrintPlanDeliverableClosureTest(unittest.TestCase):
+    """**This proves a deliverable the commission names cannot vanish from the
+    plan, because it fails when that deliverable's entry is removed.**
+
+    Not hypothetical. On a real MODIFY commission whose brief listed both an STL
+    and a 3MF, a plan was authored that never mentioned the 3MF at all -- zero
+    occurrences -- and passed every structural check there was, because nothing
+    checked that a named deliverable had been closed. A deliverable nobody
+    constrained is one nobody can reject, and it reaches a printer anyway.
+    """
+
+    def _plan(self) -> dict:
+        plan = clone(_PRINT_PLAN)
+        plan["deliverables"] = [clone(_DELIVERABLE)]
+        return plan
+
+    def test_a_named_deliverable_that_is_closed_passes(self) -> None:
+        """The control. Without it, a check that refuses everything would pass."""
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}}, required_deliverables=["3mf"])
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_a_named_deliverable_the_plan_omits_is_an_error(self) -> None:
+        plan = clone(_PRINT_PLAN)          # no `deliverables` at all
+        issues = V.validate_print_plan(
+            plan, feature_ids={"F01": {}}, required_deliverables=["stl", "3mf"])
+        ids = issue_ids(issues)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[stl]", ids)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_one_of_two_named_deliverables_is_still_an_error(self) -> None:
+        """The case that actually happened: the STL closed, the 3MF forgotten."""
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}},
+            required_deliverables=["stl", "3mf"])
+        ids = issue_ids(issues)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[stl]", ids)
+        self.assertNotIn("MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_a_deliverable_present_but_unbound_is_an_error(self) -> None:
+        """Naming a format is not closing it: the plan has to say what the thing
+        is for, where it comes from, in what units and frame, how it is produced
+        and what would reject it."""
+        thin = self._plan()
+        del thin["deliverables"][0]["units"]
+        del thin["deliverables"][0]["acceptance"]
+        ids = issue_ids(V.validate_print_plan(
+            thin, feature_ids={"F01": {}}, required_deliverables=["3mf"]))
+        self.assertIn("MISSING_FIELD@print_plan.deliverables[3mf].units", ids)
+        self.assertIn("MISSING_FIELD@print_plan.deliverables[3mf].acceptance", ids)
+
+    def test_nothing_is_required_when_the_commission_names_nothing(self) -> None:
+        """The second control, and it is what keeps this from becoming a tax on
+        every existing plan: absent a stated deliverable list, this check is
+        silent."""
+        issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+
+class PrintPlanExportFidelityTest(unittest.TestCase):
+    """**This proves an export-fidelity envelope is required wherever
+    discretization decides something, because it fails when that block is removed
+    from a job that declares such a decision -- and passes when the job declares
+    none.**
+
+    The measured case: one plan froze a chord band on a convergence ladder that
+    excluded both the deflection where the mesh reads non-watertight and the
+    coarse one where volume error reached 10% of the material the edit removes;
+    its cheaper sibling left the export unconstrained entirely, which makes a
+    mass-based preservation comparison meaningless without any rule appearing to
+    fail.
+    """
+
+    def _plan(self) -> dict:
+        plan = clone(_PRINT_PLAN)
+        plan["export_fidelity"] = clone(_EXPORT_FIDELITY)
+        return plan
+
+    def test_a_declared_envelope_passes(self) -> None:
+        issues = V.validate_print_plan(
+            self._plan(), feature_ids={"F01": {}}, discretized_decision=True)
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+    def test_no_envelope_where_discretization_decides_is_an_error(self) -> None:
+        issues = V.validate_print_plan(
+            clone(_PRINT_PLAN), feature_ids={"F01": {}}, discretized_decision=True)
+        self.assertIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity",
+                      issue_ids(issues))
+
+    def test_an_envelope_without_a_measured_basis_is_an_error(self) -> None:
+        """A band with no measurement behind it is a number somebody chose, which
+        is the thing the charter forbids -- and copying another part's band is the
+        specific way that happens."""
+        guessed = self._plan()
+        del guessed["export_fidelity"]["basis"]
+        self.assertIn("MISSING_FIELD@print_plan.export_fidelity.basis",
+                      issue_ids(V.validate_print_plan(
+                          guessed, feature_ids={"F01": {}},
+                          discretized_decision=True)))
+
+    def test_a_job_that_decides_nothing_on_a_mesh_is_not_forced_to_invent_one(self) -> None:
+        """The control, and it owes the same proof as the regression: a job where
+        discretization is irrelevant must not be pushed into inventing
+        tessellation figures, because a fabricated envelope is itself a defect."""
+        issues = V.validate_print_plan(
+            clone(_PRINT_PLAN), feature_ids={"F01": {}}, discretized_decision=False)
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+        issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
+        self.assertEqual([], [i for i in issues if i.severity == "error"], issues)
+
+
+class CommissionObligationsReachProductionTest(unittest.TestCase):
+    """**This proves a real commission cannot omit a required deliverable or a
+    needed fidelity envelope, because these go through `load_project` -- the
+    production validation path -- and they pass again the moment the wiring is
+    removed.**
+
+    The distinction is the whole finding. The unit tests above prove *the helper
+    rejects this when somebody hands it the commission facts*. The claim the
+    charter actually makes is *a real commission cannot omit these*. Those are
+    different questions, and the first version of this slice only answered the
+    first: `load_project` called the validator without either fact, both default
+    to unstated, and so every normal validation silently disabled both rules
+    while the unit tests stayed green.
+
+    The facts are read from `project.json` -- the job's own machine-authoritative
+    description -- rather than from a flag a caller remembers to pass, because an
+    obligation somebody has to switch on is one a plan omits by nobody switching
+    it on.
+    """
+
+    def _project(self, tmp: Path, *, plan: dict, project: dict | None) -> Path:
+        (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        if project is not None:
+            (tmp / "project.json").write_text(json.dumps(project), encoding="utf-8")
+        return tmp
+
+    def _issues(self, tmp: Path) -> set[str]:
+        return {i.id for i in P.load_project(tmp).all_issues()}
+
+    def test_a_commission_named_deliverable_the_plan_omits_is_reported(self) -> None:
+        plan = clone(_PRINT_PLAN)
+        plan["deliverables"] = [clone(_DELIVERABLE)]          # closes 3mf only
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._project(
+                Path(raw), plan=plan,
+                project={"expected_artifacts": ["candidate.stl", "candidate.3mf"]})
+            ids = self._issues(tmp)
+        self.assertIn("MISSING_DELIVERABLE@print_plan.deliverables[stl]", ids)
+        self.assertNotIn("MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_a_preservation_job_with_no_fidelity_envelope_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._project(
+                Path(raw), plan=clone(_PRINT_PLAN),
+                project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+            ids = self._issues(tmp)
+        self.assertIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
+
+    def test_a_job_declaring_neither_obligation_is_unchanged(self) -> None:
+        """The preservation rule, at the endpoint: the many projects that predate
+        this contract must validate exactly as before."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._project(Path(raw), plan=clone(_PRINT_PLAN), project=None)
+            ids = self._issues(tmp)
+        self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
+        self.assertEqual([], [i for i in ids if i.startswith("MISSING_DELIVERABLE")])
+
+    def test_an_edit_scope_without_a_preservation_tolerance_obliges_nothing(self) -> None:
+        """`False` and `None` are different answers and both must be safe: the job
+        has been described and nothing is decided on a mesh."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._project(
+                Path(raw), plan=clone(_PRINT_PLAN),
+                project={"edit_scopes": [{"region": "a slot"}]})
+            ids = self._issues(tmp)
+        self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
+
+    def test_a_malformed_project_json_decides_no_obligation(self) -> None:
+        """It is a finding somewhere else, and it must not silently decide a print
+        plan's obligations either way."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(clone(_PRINT_PLAN)),
+                                                 encoding="utf-8")
+            (tmp / "project.json").write_text("{ not json", encoding="utf-8")
+            ids = self._issues(tmp)
+        self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
+
+    def test_the_obligations_are_read_from_the_commission_not_invented(self) -> None:
+        """`commission_obligations` is the seam, so pin what it returns: formats
+        come from `expected_artifacts`, and the mesh-decision fact from a declared
+        preservation tolerance."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "project.json").write_text(json.dumps({
+                "expected_artifacts": ["candidate.stl", "candidate.3mf"],
+                "edit_scopes": [{"preservation_tolerance_mm": 0.1}],
+            }), encoding="utf-8")
+            required, discretized, tolerance = P.commission_obligations(tmp)
+        self.assertEqual(("stl", "3mf"), required)
+        self.assertTrue(discretized)
+        self.assertEqual(0.1, tolerance)
+
+
+class ExportFidelityIsNumericNotProseTest(unittest.TestCase):
+    """**This proves an export-fidelity envelope must bound export error against
+    the commission's own tolerance, because the over-budget case passes again the
+    moment the numeric comparison is removed.**
+
+    The gate this replaces could be satisfied by two sentences:
+
+        {"applies_because": "preservation compares meshes",
+         "basis": "measured on this part"}
+
+    which supplies neither a measured bound nor any evidence that export error is
+    below the decision tolerance -- and so recreated exactly the omission Rule 11
+    exists to prevent, while reporting success.
+
+    Every row here goes through `load_project`, because the claim is about what a
+    real commission cannot do, not about what the helper rejects when told.
+    """
+
+    def _validate(self, tmp, *, envelope, tolerance=0.1):
+        plan = clone(_PRINT_PLAN)
+        if envelope is not None:
+            plan["export_fidelity"] = envelope
+        (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        (tmp / "project.json").write_text(json.dumps(
+            {"edit_scopes": [{"preservation_tolerance_mm": tolerance}]}),
+            encoding="utf-8")
+        return {i.id for i in P.load_project(tmp).all_issues()}
+
+    def test_a_prose_only_envelope_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=clone(_PROSE_ONLY_ENVELOPE))
+        self.assertIn(
+            "MISSING_FIELD@print_plan.export_fidelity.worst_error_mm", ids)
+        self.assertIn(
+            "MISSING_FIELD@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_measured_error_inside_the_budget_passes(self) -> None:
+        """The control. Without it a gate that refuses every envelope would pass
+        every other row in this class."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=clone(_EXPORT_FIDELITY))
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+        self.assertEqual([], [i for i in ids
+                              if i.startswith("MISSING_EXPORT_FIDELITY")])
+
+    def test_a_measured_error_above_the_budget_fails(self) -> None:
+        over = clone(_EXPORT_FIDELITY)
+        over["worst_error_mm"] = 0.101
+        over["tolerance_it_must_not_consume_mm"] = 0.100
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=over)
+        self.assertIn(
+            "EXPORT_ERROR_EXCEEDS_BUDGET@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_an_error_equal_to_the_budget_fails(self) -> None:
+        """Strictly below, not merely within: an error equal to the whole budget
+        consumes all of it and leaves the decision resting on nothing."""
+        equal = clone(_EXPORT_FIDELITY)
+        equal["worst_error_mm"] = 0.100
+        equal["tolerance_it_must_not_consume_mm"] = 0.100
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=equal)
+        self.assertIn(
+            "EXPORT_ERROR_EXCEEDS_BUDGET@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_a_plan_may_not_budget_looser_than_the_commission(self) -> None:
+        """A plan may hold itself to a tighter tolerance than it was given, never
+        a looser one -- otherwise a plan widens its own authority over an
+        acceptance tolerance it does not own."""
+        wide = clone(_EXPORT_FIDELITY)
+        wide["tolerance_it_must_not_consume_mm"] = 0.200
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=wide, tolerance=0.1)
+        self.assertIn(
+            "EXPORT_BUDGET_WIDER_THAN_COMMISSION@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_plan_may_budget_tighter_than_the_commission(self) -> None:
+        """The other half of that rule, and it owes the same proof."""
+        tight = clone(_EXPORT_FIDELITY)
+        tight["tolerance_it_must_not_consume_mm"] = 0.050
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=tight, tolerance=0.1)
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+
+    def test_a_boolean_is_not_a_measurement(self) -> None:
+        """`True` is an int in Python, so a type-only check would accept it."""
+        lying = clone(_EXPORT_FIDELITY)
+        lying["worst_error_mm"] = True
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._validate(Path(raw), envelope=lying)
+        self.assertIn(
+            "EXPORT_ERROR_UNBOUNDED@print_plan.export_fidelity.worst_error_mm",
+            ids)
+
+    def test_the_tightest_declared_tolerance_binds(self) -> None:
+        """Two scopes, and a budget legal under the looser one only. A plan
+        satisfying just the loosest would still violate the other."""
+        plan = clone(_PRINT_PLAN)
+        envelope = clone(_EXPORT_FIDELITY)
+        envelope["tolerance_it_must_not_consume_mm"] = 0.150
+        plan["export_fidelity"] = envelope
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps({"edit_scopes": [
+                {"preservation_tolerance_mm": 0.200},
+                {"preservation_tolerance_mm": 0.100},
+            ]}), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertIn(
+            "EXPORT_BUDGET_WIDER_THAN_COMMISSION@print_plan.export_fidelity."
+            "tolerance_it_must_not_consume_mm", ids)
+
+    def test_a_job_deciding_nothing_on_a_mesh_invents_no_numbers(self) -> None:
+        """Preservation, restated at the endpoint against the numeric gate: no
+        discretized decision means no envelope and no fabricated figures."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(
+                json.dumps(clone(_PRINT_PLAN)), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps(
+                {"edit_scopes": [{"region": "a slot"}]}), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+        self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
+
+
+class BlankBindingsBindNothingTest(unittest.TestCase):
+    """**This proves a required binding must state something, because mutating
+    any one of them to an empty or whitespace string makes that exact field a
+    finding, while the honest row keeps passing.**
+
+    The shared `check_object_fields` asks `isinstance(value, str)`, which is the
+    right question for the contracts that already existed and the wrong one for
+    these. A deliverable whose purpose, units, frame, export path and acceptance
+    are all `""` has bound nothing -- functionally the same failure as naming a
+    format and stopping, which is what Rule 10 exists to prevent. `basis: ""` is
+    worse than absent, because it occupies the field that carries provenance.
+
+    Mutated one field at a time rather than all at once: a single blanket row
+    would pass if any one field were checked, and would not tell us which.
+    """
+
+    SEMANTIC = ("purpose", "source_geometry", "units", "frame", "export_path",
+                "acceptance")
+
+    def _ids(self, tmp, *, deliverable=None, envelope=None, project=None):
+        plan = clone(_PRINT_PLAN)
+        if deliverable is not None:
+            plan["deliverables"] = [deliverable]
+        if envelope is not None:
+            plan["export_fidelity"] = envelope
+        (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        (tmp / "project.json").write_text(
+            json.dumps(project if project is not None
+                       else {"expected_artifacts": ["candidate.3mf"]}),
+            encoding="utf-8")
+        return {i.id for i in P.load_project(tmp).all_issues()}
+
+    def test_the_honest_row_passes(self) -> None:
+        """The control this whole class rests on."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(Path(raw), deliverable=clone(_DELIVERABLE))
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+        self.assertEqual([], [i for i in ids if i.startswith("MISSING_DELIVERABLE")])
+
+    def test_each_semantic_binding_must_say_something(self) -> None:
+        for field in self.SEMANTIC:
+            for blank in ("", "   "):
+                with self.subTest(field=field, blank=repr(blank)):
+                    row = clone(_DELIVERABLE)
+                    row[field] = blank
+                    with tempfile.TemporaryDirectory() as raw:
+                        ids = self._ids(Path(raw), deliverable=row)
+                    self.assertIn(
+                        f"BLANK_BINDING@print_plan.deliverables[3mf].{field}", ids)
+
+    def test_a_blank_format_does_not_close_the_deliverable(self) -> None:
+        """A row that names no format closes nothing, so the commission's
+        requirement is still unmet -- reported as the missing deliverable rather
+        than as a blank field, which is the more useful finding."""
+        for blank in ("", "   "):
+            with self.subTest(blank=repr(blank)):
+                row = clone(_DELIVERABLE)
+                row["format"] = blank
+                with tempfile.TemporaryDirectory() as raw:
+                    ids = self._ids(Path(raw), deliverable=row)
+                self.assertIn(
+                    "MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_a_blank_basis_is_not_provenance(self) -> None:
+        """The number stays, the provenance goes: exactly the case where a value
+        without a measurement behind it would otherwise read as calibration."""
+        for blank in ("", "  "):
+            with self.subTest(blank=repr(blank)):
+                envelope = clone(_EXPORT_FIDELITY)
+                envelope["basis"] = blank
+                with tempfile.TemporaryDirectory() as raw:
+                    ids = self._ids(
+                        Path(raw), envelope=envelope,
+                        project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+                self.assertIn(
+                    "BLANK_BINDING@print_plan.export_fidelity.basis", ids)
+
+    def test_a_blank_applies_because_is_a_finding(self) -> None:
+        envelope = clone(_EXPORT_FIDELITY)
+        envelope["applies_because"] = ""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(
+                Path(raw), envelope=envelope,
+                project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+        self.assertIn(
+            "BLANK_BINDING@print_plan.export_fidelity.applies_because", ids)
+
+    def test_an_honest_envelope_still_passes(self) -> None:
+        """The second control: tightening the strings must not break the case
+        that was already correct."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(
+                Path(raw), envelope=clone(_EXPORT_FIDELITY),
+                project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+
+    def test_strings_in_older_contracts_are_untouched(self) -> None:
+        """The scope control. `check_object_fields` was deliberately left alone,
+        so a pre-existing contract with an empty string elsewhere reports no
+        BLANK_BINDING -- this slice has no evidence about what those want."""
+        plan = clone(_PRINT_PLAN)
+        plan["final_prep_notes"] = ""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+
+
+class TheDocumentedProjectionMatchesTheEnforcedOneTest(unittest.TestCase):
+    """**This proves the role is not asked to guess field names, because it fails
+    when the contract and the validator disagree about even one of them.**
+
+    The role is required to follow `team-contracts-v4.md` exactly, and that file
+    documented `edges`, `support_rules` and `interfaces` while the validator had
+    begun enforcing `deliverables` and `export_fidelity`. A charter that omits the
+    field names its own validator requires leaves the author guessing, and a guess
+    that happens to be wrong then reads as the author's fault.
+
+    Documenting them once is not enough, which is why this is a test rather than a
+    careful edit: prose and code drift, and the drift is silent. The contract's own
+    worked example is parsed here and compared against the validator's required
+    sets, so renaming a field in either place fails until both agree.
+    """
+
+    CONTRACT = (Path(__file__).resolve().parents[2]
+                / "references" / "team-contracts-v4.md")
+
+    def _projection(self):
+        """The `print_plan_checks.json` example, taken from the contract itself."""
+        text = self.CONTRACT.read_text(encoding="utf-8")
+        for block in re.findall(r"```json\n(.*?)```", text, re.S):
+            try:
+                data = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict) and "support_rules" in data:
+                return data
+        self.fail("no print_plan_checks.json example found in the contract")
+
+    def test_the_contract_documents_a_deliverable_entry(self) -> None:
+        projection = self._projection()
+        self.assertIn("deliverables", projection,
+                      "the contract must show the field the validator enforces")
+        documented = set(projection["deliverables"][0])
+        self.assertEqual(
+            set(V._DELIVERABLE_BINDING), documented,
+            "the contract's deliverable entry and the validator's required "
+            "bindings have drifted; the role would be guessing")
+
+    def test_the_contract_documents_the_export_envelope(self) -> None:
+        projection = self._projection()
+        self.assertIn("export_fidelity", projection)
+        documented = set(projection["export_fidelity"])
+        required = set(V._EXPORT_FIDELITY_BINDING)
+        self.assertTrue(
+            required <= documented,
+            f"the contract omits required envelope fields: "
+            f"{sorted(required - documented)}")
+
+    def test_the_documented_example_actually_validates(self) -> None:
+        """The strongest form of the claim: an author copying the contract's own
+        example produces something the validator accepts. A schema that is
+        documented and then rejected is worse than one left undocumented."""
+        projection = self._projection()
+        plan = clone(_PRINT_PLAN)
+        plan["deliverables"] = projection["deliverables"]
+        plan["export_fidelity"] = projection["export_fidelity"]
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps({
+                "expected_artifacts": ["candidate.3mf"],
+                "edit_scopes": [{"preservation_tolerance_mm": 0.1}],
+            }), encoding="utf-8")
+            issues = P.load_project(tmp).all_issues()
+        blocking = [i.id for i in issues
+                    if i.id.startswith(("MISSING_DELIVERABLE", "BLANK_BINDING",
+                                        "EXPORT_", "MISSING_EXPORT_FIDELITY"))]
+        self.assertEqual([], blocking, issues)
+
+
 class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
         issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})

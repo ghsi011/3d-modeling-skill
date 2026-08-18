@@ -13,6 +13,8 @@ this module defines the *structured JSON* mirror of those Markdown contracts
 
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 from typing import Any
 
@@ -323,12 +325,172 @@ def _matrix_shape_issues(matrix: Any, *, where: str) -> list[Issue]:
     return issues
 
 
+#: What closing a deliverable means. Naming a format is not closing it: a plan
+#: that says "3MF" and nothing else has constrained nothing, and the thing still
+#: reaches a printer. Each of these answers a question somebody downstream has.
+_DELIVERABLE_BINDING = {
+    "format": str,
+    "purpose": str,
+    "source_geometry": str,
+    "units": str,
+    "frame": str,
+    "export_path": str,
+    "acceptance": str,
+}
+
+#: An export-fidelity envelope has to rest on a measurement. `basis` is the
+#: required field rather than the numbers, because the numbers are only as good
+#: as what produced them -- and copying another part's band is the specific way a
+#: guess arrives looking like a calibration.
+_EXPORT_FIDELITY_BINDING = {
+    "applies_because": str,
+    # Required, and the field that separates a calibration from a guess: a number
+    # without provenance is not evidence, and copying another part's band is the
+    # specific way a guess arrives looking like one.
+    "basis": str,
+    # Required as *numbers*, because an envelope of two prose fields is not a
+    # frozen envelope -- it recreates the exact omission Rule 11 exists to make
+    # impossible. `worst_error_mm` is what export error was measured to be;
+    # `tolerance_it_must_not_consume_mm` is the budget it must stay inside.
+    "worst_error_mm": (int, float),
+    "tolerance_it_must_not_consume_mm": (int, float),
+}
+
+
+def _semantic_strings(obj, fields, *, where):
+    """Every named field must say something once trimmed.
+
+    `check_object_fields` asks `isinstance(value, str)`, which is the right
+    question for the contracts that already existed and the wrong one for these:
+    a deliverable whose purpose, units, frame, export path and acceptance are all
+    `""` has bound nothing, and is the same failure as naming a format and
+    stopping. `basis: ""` is worse than absent, because it occupies the field
+    that is supposed to carry provenance.
+
+    Applied only to the bindings Rules 10 and 11 introduce. `check_object_fields`
+    is left alone deliberately -- widening string semantics repository-wide would
+    need proof that every existing contract wants it, and this slice has no such
+    evidence.
+    """
+    issues = []
+    for field in fields:
+        if field not in obj:
+            continue                      # absence is check_object_fields' job
+        value = obj[field]
+        if isinstance(value, str) and not value.strip():
+            issues.append(error(
+                "BLANK_BINDING", f"{where}.{field}",
+                "this field is required to state something; an empty or "
+                "whitespace value fills the slot without binding anything",
+            ))
+    return issues
+
+
+def _finite_number(value):
+    """The value as a float, or None if it is not a finite number.
+
+    Booleans are rejected deliberately: `True` is an `int` in Python, so a plan
+    writing `worst_error_mm: true` would otherwise satisfy a numeric requirement.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _export_fidelity_relationships(envelope, *, where, decision_tolerance_mm):
+    """The substance of Rule 11: the numbers have to stand in the right order.
+
+    Checking that fields are present and numeric is not the rule. The rule is
+    that measured export error sits *inside* a budget, and that the budget does
+    not quietly exceed the tolerance the commission set. Without these
+    comparisons an envelope can carry two plausible numbers and still say
+    nothing -- which is how the first version of this gate could be satisfied by
+    two sentences.
+
+    Deliberately no universal ratio: no "export error must be under a tenth of
+    tolerance", because there is no evidence for such a number and a fabricated
+    constant here would be the same defect as a copied band.
+    """
+    issues = []
+    measured = _finite_number(envelope.get("worst_error_mm"))
+    budget = _finite_number(envelope.get("tolerance_it_must_not_consume_mm"))
+
+    if measured is None:
+        issues.append(error(
+            "EXPORT_ERROR_UNBOUNDED", f"{where}.worst_error_mm",
+            "an export-fidelity envelope needs a finite measured error bound; "
+            "prose describing a measurement is not the measurement",
+        ))
+    elif measured < 0:
+        issues.append(error(
+            "BAD_VALUE", f"{where}.worst_error_mm",
+            f"a measured error cannot be negative, got {measured!r}",
+        ))
+
+    if budget is None:
+        issues.append(error(
+            "EXPORT_BUDGET_MISSING", f"{where}.tolerance_it_must_not_consume_mm",
+            "the envelope has to name the budget the export error must stay "
+            "inside, as a finite number",
+        ))
+    elif budget <= 0:
+        issues.append(error(
+            "BAD_VALUE", f"{where}.tolerance_it_must_not_consume_mm",
+            f"the budget must be positive, got {budget!r}",
+        ))
+
+    # A plan may hold itself to a tighter budget than the commission requires; it
+    # may not hold itself to a looser one, because that lets a plan widen its own
+    # authority over an acceptance tolerance it does not own.
+    if budget is not None and budget > 0 and decision_tolerance_mm is not None:
+        allowed = _finite_number(decision_tolerance_mm)
+        if allowed is not None and budget > allowed:
+            issues.append(error(
+                "EXPORT_BUDGET_WIDER_THAN_COMMISSION",
+                f"{where}.tolerance_it_must_not_consume_mm",
+                f"the plan budgets {budget!r} mm against the commission's "
+                f"{allowed!r} mm; a plan may be tighter than the tolerance it "
+                "was given and never looser",
+            ))
+
+    # Strictly below, not merely within: an export error equal to the whole
+    # budget consumes all of it and leaves the decision resting on nothing.
+    if measured is not None and budget is not None and measured >= 0 and budget > 0:
+        if measured >= budget:
+            issues.append(error(
+                "EXPORT_ERROR_EXCEEDS_BUDGET", f"{where}.worst_error_mm",
+                f"measured export error {measured!r} mm is not below the "
+                f"{budget!r} mm budget, so export error can consume the signal "
+                "the decision depends on",
+            ))
+    return issues
+
+
 def validate_print_plan(
     data: dict[str, Any],
     *,
     where: str = "print_plan",
     feature_ids: dict[str, Any] | None = None,
+    required_deliverables: Any = None,
+    discretized_decision: bool | None = None,
+    decision_tolerance_mm: float | None = None,
 ) -> list[Issue]:
+    """Validate a print plan's machine-readable projection.
+
+    `required_deliverables` is the set of artifact formats the commission names,
+    and `discretized_decision` says whether anything in this job is decided on a
+    triangulated or serialized artifact. Both default to *unstated*, and while
+    unstated the corresponding checks are silent -- so this does not become a tax
+    on every plan already written, and a caller that knows nothing about the
+    commission cannot invent an obligation.
+
+    Both checks exist because a real commission produced a plan that satisfied
+    every structural check while leaving a brief-required 3MF entirely
+    unmentioned, and a sibling plan left the export unconstrained on a MODIFY job
+    whose whole acceptance rests on comparing meshes. Neither failure was visible
+    to any gate; both were found by a human reading prose.
+    """
     issues: list[Issue] = []
     issues += _check_contract_header(
         data, contract_key="print-plan", expected_owners=_EXPECTED_OWNERS["print_plan"], where=where
@@ -370,9 +532,68 @@ def validate_print_plan(
             "expected_bodies": int,
             "interfaces": list,
             "threshold_source": str,
+            # Charter rule 10: every deliverable the commission names, closed.
+            "deliverables": list,
+            # Charter rule 11: the export envelope, where discretization decides.
+            "export_fidelity": dict,
         },
         where=where,
     )
+
+    # -- charter rule 10: a named deliverable cannot simply be absent ---------
+    if required_deliverables is not None:
+        closed: dict[str, dict[str, Any]] = {}
+        for position, row in enumerate(data.get("deliverables") or ()):
+            if not isinstance(row, dict):
+                issues.append(error("BAD_TYPE", f"{where}.deliverables[{position}]",
+                                    "expected an object"))
+                continue
+            fmt = str(row.get("format") or "").strip().lower()
+            if fmt:
+                closed[fmt] = row
+        for wanted in required_deliverables:
+            key = str(wanted).strip().lower()
+            row = closed.get(key)
+            if row is None:
+                issues.append(error(
+                    "MISSING_DELIVERABLE", f"{where}.deliverables[{key}]",
+                    f"the commission requires a {key!r} deliverable and the plan "
+                    "does not close one; a deliverable nobody constrained is one "
+                    "nobody can reject",
+                ))
+                continue
+            row_where = f"{where}.deliverables[{key}]"
+            issues += check_object_fields(
+                row, required=dict(_DELIVERABLE_BINDING), optional={},
+                where=row_where,
+            )
+            issues += _semantic_strings(
+                row, [f for f in _DELIVERABLE_BINDING if f != "format"],
+                where=row_where)
+
+    # -- charter rule 11: bound the export where it decides something ---------
+    if discretized_decision:
+        envelope = data.get("export_fidelity")
+        if not isinstance(envelope, dict):
+            issues.append(error(
+                "MISSING_EXPORT_FIDELITY", f"{where}.export_fidelity",
+                "this job decides something on a triangulated or serialized "
+                "artifact, so export error is part of that decision and has to be "
+                "bounded before design rather than discovered after",
+            ))
+        else:
+            envelope_where = f"{where}.export_fidelity"
+            issues += check_object_fields(
+                envelope, required=dict(_EXPORT_FIDELITY_BINDING),
+                optional={"chord_tolerance_mm": list,
+                          "angular_tolerance_deg": list},
+                where=envelope_where,
+            )
+            issues += _semantic_strings(
+                envelope, ["applies_because", "basis"], where=envelope_where)
+            issues += _export_fidelity_relationships(
+                envelope, where=envelope_where,
+                decision_tolerance_mm=decision_tolerance_mm)
     if "schema_version" in data:
         version = data["schema_version"]
         if version != 4:

@@ -297,6 +297,34 @@ skips when they are absent, because a part can satisfy every other gate while be
 wrong size, and one did, by 31%. `reference_sha256` is omitted when the job recreates no
 mating object; there is no hash to bind.
 
+The projection also carries the two obligations the pre-design checklist adds, and their field
+names are given here because a role required to follow this contract exactly should not have to
+guess what its validator enforces.
+
+`deliverables` closes every artifact the commission names. Each entry binds `format`,
+`purpose`, `source_geometry`, `units`, `frame`, `export_path` and `acceptance` — all required,
+and all required to say something: an entry naming a format with the rest left empty has bound
+nothing, which is the same failure as omitting it. The formats required come from the job's own
+`expected_artifacts`, so a plan that closes an STL while the commission also names a 3MF is a
+finding against the 3MF, not a matter of taste. One real plan omitted a brief-required 3MF
+entirely and passed every check that existed.
+
+`export_fidelity` appears when a triangulated or serialized artifact is what gets sliced,
+compared for preservation, or measured for an acceptance decision — and only then. It binds
+`applies_because` and `basis`, both non-empty, plus two numbers: `worst_error_mm`, the measured
+export error, and `tolerance_it_must_not_consume_mm`, the budget it must stay inside.
+`chord_tolerance_mm` and `angular_tolerance_deg` are optional ranges recording how the export
+was configured. Both required numbers must be finite — the measured error non-negative, the
+budget strictly positive — and they have to stand in the right order: measured error **strictly
+below** the budget, and the budget no looser than the tolerance the commission set. A plan may
+hold itself tighter than the job requires and never looser, because a looser budget would let a
+plan widen its own authority over a tolerance it does not own. Where the commission declares
+more than one preservation tolerance, **the tightest binds**: a plan satisfying only the loosest
+would still violate the others. `basis` is required because a band
+without provenance is not a calibration, and copying another part's numbers is the specific way
+a guess arrives looking like one. Where nothing is decided on a discretized artifact, this block
+is absent and inventing figures for it is itself a defect.
+
 ```json
 {
   "schema_version": 4,
@@ -335,7 +363,26 @@ mating object; there is no hash to bind.
       "acceptance_method": "gauge-pin pass/fail per lane",
       "reference": "mating_frame.stl"
     }
-  ]
+  ],
+  "deliverables": [
+    {
+      "format": "3mf",
+      "purpose": "the archive that goes to the slicer",
+      "source_geometry": "the accepted candidate solid",
+      "units": "millimetre",
+      "frame": "installed frame, identity transform",
+      "export_path": "make_3mf.py from the exported STL",
+      "acceptance": "unit is millimetre, one printable body, matches the accepted STL"
+    }
+  ],
+  "export_fidelity": {
+    "applies_because": "the STL is what the preservation comparison measures",
+    "basis": "four-point convergence ladder on this part",
+    "chord_tolerance_mm": [0.005, 0.010],
+    "angular_tolerance_deg": [0.05, 0.10],
+    "worst_error_mm": 0.004,
+    "tolerance_it_must_not_consume_mm": 0.1
+  }
 }
 ```
 

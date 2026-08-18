@@ -10,6 +10,8 @@ callers (status, hash) are not forced to pay for mesh loads they do not need.
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -172,8 +174,13 @@ def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectV
     # agent; there is no schema to hold it to.
     print_plan_file = files["print_plan"]
     if print_plan_file.data is not None and print_plan_file.source_format == "json":
+        required_deliverables, discretized, tolerance = commission_obligations(
+            project_dir)
         print_plan_file.issues += V.validate_print_plan(
-            print_plan_file.data, where="print_plan", feature_ids=None
+            print_plan_file.data, where="print_plan", feature_ids=None,
+            required_deliverables=required_deliverables,
+            discretized_decision=discretized,
+            decision_tolerance_mm=tolerance,
         )
 
     manifest_file = files["artifact_manifest"]
@@ -185,6 +192,87 @@ def load_project(project_dir: Path, *, required: Iterable[str] = ()) -> ProjectV
         manifest_file.index = index
 
     return ProjectValidation(project_dir=project_dir, files=files)
+
+
+def commission_obligations(
+    project_dir: Path,
+) -> tuple[tuple[str, ...] | None, bool | None, float | None]:
+    """What the job's own machine-authoritative description obliges the plan to.
+
+    Read from `project.json` -- the one machine-authoritative description of a
+    job -- and never from a validation flag a caller passes in. That distinction
+    is the whole point: an obligation somebody has to remember to switch on is
+    one a plan can omit by nobody switching it on, which is exactly how the
+    charter's two rules could be satisfied in a unit test and absent from every
+    real validation.
+
+    Two facts, and each is read from the field that already carries it:
+
+    * `expected_artifacts` names the files the job must produce, so their
+      formats are the deliverables the plan has to close. One real commission
+      named `candidate.3mf` there and got a plan that never mentioned a 3MF.
+    * an `edit_scopes` entry declaring `preservation_tolerance_mm` means an
+      acceptance decision is made by comparing geometry, and that comparison
+      happens on meshes -- so export error is inside the decision and the plan
+      owes a fidelity envelope. The **number** travels, not merely the fact that
+      one exists: a plan may hold itself to a tighter export budget than the
+      commission requires and may never hold itself to a looser one, and that
+      comparison is impossible without the authoritative value. The tightest
+      tolerance across the declared scopes is the one that binds, because a plan
+      satisfying only the loosest would violate the others.
+
+    Returns `(None, None, None)` when there is no `project.json`, or when it names
+    none of these facts. That is deliberate and is the preservation rule: a job that
+    obliges nothing must not have an obligation invented for it, and the many
+    projects that predate this contract keep validating exactly as before.
+    """
+    source = project_dir / "project.json"
+    if not source.is_file():
+        return None, None, None
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # A malformed project.json is a finding somewhere else; it must not
+        # decide a print plan's obligations by accident.
+        return None, None, None
+    if not isinstance(data, dict):
+        return None, None, None
+
+    formats: list[str] = []
+    for entry in data.get("expected_artifacts") or ():
+        name = entry if isinstance(entry, str) else (
+            entry.get("path") or entry.get("name") if isinstance(entry, dict) else None)
+        if not name:
+            continue
+        suffix = str(name).rsplit(".", 1)
+        if len(suffix) == 2 and suffix[1]:
+            formats.append(suffix[1].strip().lower())
+    required = tuple(dict.fromkeys(formats)) or None
+
+    discretized: bool | None = None
+    tolerance: float | None = None
+    scopes = data.get("edit_scopes")
+    if isinstance(scopes, list) and scopes:
+        declared: list[float] = []
+        for scope in scopes:
+            if not isinstance(scope, dict):
+                continue
+            value = scope.get("preservation_tolerance_mm")
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            number = float(value)
+            if number > 0:
+                declared.append(number)
+        # The tightest binds. A plan that satisfied only the loosest declared
+        # tolerance would still violate the others, so the minimum is the one an
+        # export budget has to fit inside.
+        tolerance = min(declared) if declared else None
+        # False rather than None once edit scopes exist and none declares a
+        # preservation tolerance: the job has been described, and the answer to
+        # "is anything decided on a discretized artifact" is then genuinely no,
+        # which is a different statement from "nobody said".
+        discretized = tolerance is not None
+    return required, discretized, tolerance
 
 
 def run_manifest_checks(project: ProjectValidation) -> None:
