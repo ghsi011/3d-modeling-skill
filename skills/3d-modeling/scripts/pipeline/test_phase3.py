@@ -1032,23 +1032,43 @@ class ADeclarationMustNotBreakOrBeIgnoredTest(unittest.TestCase):
     """
 
     def test_a_source_whose_area_cannot_be_read_is_a_finding_not_a_crash(self) -> None:
-        """A STEP source: `analysis.load` refuses it, `PR.audit` handles it.
+        """A source that genuinely cannot be read refuses by name.
 
-        So *declaring* a sensitivity turned a working audit into an uncaught
-        stage crash, on the one source class the module was extended to support.
+        **This test used to assert the defect, and it used to be cheap for the
+        same reason.** Its trigger was a real vendored STEP, on the reasoning
+        that "`analysis.load` refuses it" -- true at the time, because the loader
+        dispatched STEP to `cascadio`, which this repository deliberately does
+        not carry. So the row proving *declaring a sensitivity must not break a
+        job* was passing because the audit was disabled on an entire source
+        class, and it ran in milliseconds because the read failed instantly.
+
+        `mesh_io` now routes STEP through the kernel, which makes the old trigger
+        readable and, at 11.72 s, far too expensive for a 5 s commit gate. So the
+        row is split by cost rather than weakened: the cheap half -- an
+        unreadable source is a finding, not a crash -- stays here, and the half
+        that needs a real B-rep read (a readable STEP yields a sample count) is
+        asserted in `benchmarks/heavy/test_step_reader_routing_heavy.py`, whose
+        tier exists for exactly that.
+
+        The unreadable file is an `.stl` rather than a `.step`, and that is a
+        cost decision with a reason: a `.step` suffix now routes through the CAD
+        kernel, so even a file of prose pays a ~3.5 s `build123d` import before
+        failing to parse -- 3.86 s measured, against a 5 s ceiling, which is too
+        thin to survive a slower runner. The property is *unreadable input
+        refuses*, so the cheapest unreadable input proves it, and the sibling row
+        below already uses an `.stl` for the same reason.
         """
         from . import commission
-        step = (Path(__file__).resolve().parents[4] / "benchmarks" / "fixtures"
-                / "vent-ball-combine" / "public" / "sources" / "vent_mount.step")
-        if not step.is_file():                       # pragma: no cover
-            self.skipTest("the vendored STEP fixture is not on this machine")
-        with self.assertRaises(commission.SampleAreaUnreadable) as caught:
-            commission._preservation_samples(
-                {"minimum_detectable_defect_mm": 0.3}, step)
-        self.assertIn("0.3", str(caught.exception))
-        self.assertIn(step.name, str(caught.exception))
-        # And it is not the other refusal: the two mean different things.
-        self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
+        with tempfile.TemporaryDirectory() as raw:
+            corrupt = Path(raw) / "corrupt.stl"
+            corrupt.write_text("this is not a STEP file at all\n", encoding="utf-8")
+            with self.assertRaises(commission.SampleAreaUnreadable) as caught:
+                commission._preservation_samples(
+                    {"minimum_detectable_defect_mm": 0.3}, corrupt)
+            self.assertIn("0.3", str(caught.exception))
+            self.assertIn(corrupt.name, str(caught.exception))
+            # And it is not the other refusal: the two mean different things.
+            self.assertNotIsInstance(caught.exception, PR.SampleBudgetExceeded)
 
     def test_a_row_naming_both_a_count_and_a_size_is_refused(self) -> None:
         """Previously the count won and the declaration vanished silently.
