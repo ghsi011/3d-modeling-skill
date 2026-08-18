@@ -21,6 +21,7 @@ carries the rule and `benchmarks/heavy/README.md` the measurement behind it.
 from __future__ import annotations
 
 import copy
+import re
 import json
 import sys
 import tempfile
@@ -885,6 +886,79 @@ class BlankBindingsBindNothingTest(unittest.TestCase):
             (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
             ids = {i.id for i in P.load_project(tmp).all_issues()}
         self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+
+
+class TheDocumentedProjectionMatchesTheEnforcedOneTest(unittest.TestCase):
+    """**This proves the role is not asked to guess field names, because it fails
+    when the contract and the validator disagree about even one of them.**
+
+    The role is required to follow `team-contracts-v4.md` exactly, and that file
+    documented `edges`, `support_rules` and `interfaces` while the validator had
+    begun enforcing `deliverables` and `export_fidelity`. A charter that omits the
+    field names its own validator requires leaves the author guessing, and a guess
+    that happens to be wrong then reads as the author's fault.
+
+    Documenting them once is not enough, which is why this is a test rather than a
+    careful edit: prose and code drift, and the drift is silent. The contract's own
+    worked example is parsed here and compared against the validator's required
+    sets, so renaming a field in either place fails until both agree.
+    """
+
+    CONTRACT = (Path(__file__).resolve().parents[2]
+                / "references" / "team-contracts-v4.md")
+
+    def _projection(self):
+        """The `print_plan_checks.json` example, taken from the contract itself."""
+        text = self.CONTRACT.read_text(encoding="utf-8")
+        for block in re.findall(r"```json\n(.*?)```", text, re.S):
+            try:
+                data = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict) and "support_rules" in data:
+                return data
+        self.fail("no print_plan_checks.json example found in the contract")
+
+    def test_the_contract_documents_a_deliverable_entry(self) -> None:
+        projection = self._projection()
+        self.assertIn("deliverables", projection,
+                      "the contract must show the field the validator enforces")
+        documented = set(projection["deliverables"][0])
+        self.assertEqual(
+            set(V._DELIVERABLE_BINDING), documented,
+            "the contract's deliverable entry and the validator's required "
+            "bindings have drifted; the role would be guessing")
+
+    def test_the_contract_documents_the_export_envelope(self) -> None:
+        projection = self._projection()
+        self.assertIn("export_fidelity", projection)
+        documented = set(projection["export_fidelity"])
+        required = set(V._EXPORT_FIDELITY_BINDING)
+        self.assertTrue(
+            required <= documented,
+            f"the contract omits required envelope fields: "
+            f"{sorted(required - documented)}")
+
+    def test_the_documented_example_actually_validates(self) -> None:
+        """The strongest form of the claim: an author copying the contract's own
+        example produces something the validator accepts. A schema that is
+        documented and then rejected is worse than one left undocumented."""
+        projection = self._projection()
+        plan = clone(_PRINT_PLAN)
+        plan["deliverables"] = projection["deliverables"]
+        plan["export_fidelity"] = projection["export_fidelity"]
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            (tmp / "project.json").write_text(json.dumps({
+                "expected_artifacts": ["candidate.3mf"],
+                "edit_scopes": [{"preservation_tolerance_mm": 0.1}],
+            }), encoding="utf-8")
+            issues = P.load_project(tmp).all_issues()
+        blocking = [i.id for i in issues
+                    if i.id.startswith(("MISSING_DELIVERABLE", "BLANK_BINDING",
+                                        "EXPORT_", "MISSING_EXPORT_FIDELITY"))]
+        self.assertEqual([], blocking, issues)
 
 
 class PrintPlanValidatorTest(unittest.TestCase):
