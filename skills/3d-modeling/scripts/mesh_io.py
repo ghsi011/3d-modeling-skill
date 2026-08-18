@@ -305,6 +305,58 @@ def read_step(path, *, tolerance: float = BREP_READ_LINEAR_DEFLECTION,
                            keep_geometry=keep_geometry)
 
 
+def _step_as_mesh(path) -> trimesh.Trimesh:
+    """A supplied STEP as triangles, or a refusal naming the faces that failed.
+
+    **The completeness check is the reason this helper exists.** OCC
+    triangulates face by face, and a face it cannot triangulate still leaves
+    every other face's triangles in the result -- `BrepTessellation`'s docstring
+    says the partial reading is returned *precisely* so that a caller has to
+    decide in the open what to do with it. Both loaders used to decide nothing:
+    they took `vertices` and `triangles` unconditionally, so a STEP with one bad
+    face became a mesh with a hole in it and then acquired an area, an overhang
+    figure and a preservation sample count that all describe a part nobody
+    supplied. Every one of those numbers looks authoritative and none of them
+    are, which is worse than the read failing outright.
+
+    `validate_brep_tessellation` below already had the right shape -- read,
+    check `complete`, raise `summary()`. This is that rule applied at the two
+    entry points that skipped it, in one place so they cannot drift apart again:
+    the drift `load_mesh`'s own contract exists to prevent is a file readable by
+    one loader and not the other, and a file *refused* by one and measured by the
+    other is the same defect wearing better clothes.
+
+    `complete` is deliberately not spelled `not failures` here. It is three
+    conjuncts, and the third -- a shape nobody could enumerate -- produces an
+    empty failure list, so the shorter test would pass the one input it can
+    learn least about.
+
+    **Through `BrepTessellation.mesh()`, and the seam merge is not optional.**
+    OCC emits its own vertex block per face, so every seam is duplicated points
+    at identical coordinates. `mesh()`'s docstring is the authority: "The merge
+    is the parse, exactly as it is for an STL." Building the mesh here with
+    `process=False` instead -- which this helper did first -- left adjacent faces
+    with no shared indexed edges, so `load_mesh_raw` reported an ordinary sound
+    six-face STEP as twelve components and not watertight, and did it on the
+    *raw* path whose whole job is to state integrity authoritatively before any
+    repair. That is the same defect as measuring a partial read: a number that
+    looks like a finding about the supplied part and is really a fact about how
+    this loader assembled it.
+
+    So there is no `process` switch. The STL distinction between a raw and a
+    repaired read does not carry over: for an STL the merge would hide a genuine
+    defect in the file, while for a per-face B-rep the merge is what turns the
+    representation into a mesh at all. One representation, one parse, and
+    `mesh()` owns it rather than a second seam policy written here.
+    """
+    brep = read_step(path)
+    if not brep.complete:
+        raise ValueError(
+            f"{path} could not be read completely as a B-rep, so it "
+            f"is refused rather than measured with a hole in it: {brep.summary()}")
+    return brep.mesh()
+
+
 def validate_brep_tessellation(shape: Any, *, tolerance: float,
                                angular_tolerance: float) -> None:
     """Fail with face-level diagnostics before a B-rep is exported."""
@@ -502,10 +554,32 @@ def load_mesh_raw(path) -> tuple[trimesh.Trimesh, MeshIntegrity]:
     checked here before any normalization is attempted -- a raw hard
     failure can never be converted into a pass by later repair.
     """
-    try:
-        tm = trimesh.load(path, force="mesh", process=False)
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
+    # STEP goes through this runtime's own kernel, never through `trimesh.load`.
+    #
+    # `trimesh.load` dispatches STEP to `cascadio`, which this repository
+    # deliberately does not carry: `read_step` below records why, measured on
+    # `vent_mount.step` -- cascadio returns the part in METRES where the kernel
+    # path returns millimetres, the silent unit substitution ARCHITECTURE.md
+    # section 12 forbids. So the dispatch could only ever fail here, and it did,
+    # with `Failed to load STL: No module named 'cascadio'`.
+    #
+    # That failure was not loud. `cli._inherited_overhang` swallowed it into
+    # `unmeasured` and returned None, leaving a MODIFY job's inherited-overhang
+    # ceiling at the generated 0.0 -- so a candidate was charged for the
+    # 54.79 mm2 of downward area it inherited from the very part it was told to
+    # preserve. And `commission._preservation_samples` raised through it, which
+    # disables the preservation audit entirely whenever
+    # `minimum_detectable_defect_mm` is declared on a STEP source: coverage drops
+    # and the job fails a gate for a reason that has nothing to do with the
+    # candidate. On the MODIFY lane, whose whole subject is preservation, that is
+    # the one gate that had to work.
+    if str(path).lower().endswith((".step", ".stp")):
+        tm = _step_as_mesh(path)
+    else:
+        try:
+            tm = trimesh.load(path, force="mesh", process=False)
+        except Exception as e:
+            raise ValueError(f"Failed to load STL: {e}") from e
     _require_parsed_mesh(tm, label="STL file")
     integrity = compute_integrity(tm)
     return tm, integrity
@@ -524,10 +598,21 @@ def load_mesh(path):
     integrity metrics and a mutation log, use ``load_mesh_report`` instead --
     acceptance/verification checks should read the raw side, never this one.
     """
-    try:
-        tm = trimesh.load(path, force="mesh")
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
+    # STEP through the kernel, for the reason `load_mesh_raw` records at
+    # length. Routed here as well and not only there, because `as_mesh` in
+    # `designer_toolkit/_bootstrap.py` sends every toolkit entry point through
+    # THIS function -- so `overhang_area` on a STEP path died on cascadio even
+    # after the raw loader was fixed. Two entry points, one substitution: the
+    # branch has to exist at both or the toolkit and the analysis path disagree
+    # about which files are readable, which is exactly the drift `as_mesh`'s own
+    # docstring says it exists to prevent.
+    if str(path).lower().endswith((".step", ".stp")):
+        tm = _step_as_mesh(path)
+    else:
+        try:
+            tm = trimesh.load(path, force="mesh")
+        except Exception as e:
+            raise ValueError(f"Failed to load STL: {e}") from e
     _require_parsed_mesh(tm, label="STL file")
     # OCC's tessellator emits zero-area triangles at the poles of
     # spherical faces (and similar degenerate spots). They carry no

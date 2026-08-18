@@ -104,10 +104,25 @@ def generate(ctx, contract, out_dir: Path, *, level: str = "W1",
             from designer_toolkit.render import section_render
             renderer = "preview+section"
             multi = out_dir / "multi.png"
-            preview.render_multi_view(ctx.normalized, str(multi), resolution=MAX_RESOLUTION_PX)
+            # `view_size`, not `resolution`. The keyword was wrong since this
+            # call was written, so `render_multi_view` raised `TypeError` every
+            # time and the except below turned it into
+            # `renderer="unavailable: ..."` -- a reported state, so nothing
+            # crashed and nothing rendered, on every run for the life of the
+            # module. `preview.DEFAULT_VIEW_SIZE` documents itself as the
+            # width/height of each sub-view, which is what this module's
+            # `MAX_RESOLUTION_PX` budget is for, so the two line up by meaning
+            # and not merely by type-checking.
+            preview.render_multi_view(ctx.normalized, str(multi), view_size=MAX_RESOLUTION_PX)
             images.append(str(multi.name))
             section = out_dir / "section_x.png"
-            section_render(str(ctx.path), str(section))
+            # And the same budget on this call, which is the defect the first
+            # repair uncovered rather than introduced: making the multi-view
+            # reachable meant a section was rendered too, at `section_render`'s
+            # own `tile=640` default, while line 43 publishes
+            # `resolution_px: MAX_RESOLUTION_PX` as this witness's budget. A
+            # budget nothing enforces is a number in a receipt.
+            section_render(str(ctx.path), str(section), tile=MAX_RESOLUTION_PX)
             images.append(str(section.name))
         except Exception as exc:            # noqa: BLE001 - a missing renderer is a
             renderer = f"unavailable: {exc}"  # reportable state, not a crash
