@@ -314,9 +314,13 @@ compared for preservation, or measured for an acceptance decision — and only t
 `applies_because` and `basis`, both non-empty, plus two numbers: `worst_error_mm`, the measured
 export error, and `tolerance_it_must_not_consume_mm`, the budget it must stay inside.
 `chord_tolerance_mm` and `angular_tolerance_deg` are optional ranges recording how the export
-was configured. The numbers have to stand in the right order: the measured error strictly below
-the budget, and the budget no looser than the tolerance the commission set — a plan may hold
-itself tighter than the job requires and never looser. `basis` is required because a band
+was configured. Both required numbers must be finite — the measured error non-negative, the
+budget strictly positive — and they have to stand in the right order: measured error **strictly
+below** the budget, and the budget no looser than the tolerance the commission set. A plan may
+hold itself tighter than the job requires and never looser, because a looser budget would let a
+plan widen its own authority over a tolerance it does not own. Where the commission declares
+more than one preservation tolerance, **the tightest binds**: a plan satisfying only the loosest
+would still violate the others. `basis` is required because a band
 without provenance is not a calibration, and copying another part's numbers is the specific way
 a guess arrives looking like one. Where nothing is decided on a discretized artifact, this block
 is absent and inventing figures for it is itself a defect.
