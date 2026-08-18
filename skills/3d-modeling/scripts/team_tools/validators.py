@@ -357,6 +357,35 @@ _EXPORT_FIDELITY_BINDING = {
 }
 
 
+def _semantic_strings(obj, fields, *, where):
+    """Every named field must say something once trimmed.
+
+    `check_object_fields` asks `isinstance(value, str)`, which is the right
+    question for the contracts that already existed and the wrong one for these:
+    a deliverable whose purpose, units, frame, export path and acceptance are all
+    `""` has bound nothing, and is the same failure as naming a format and
+    stopping. `basis: ""` is worse than absent, because it occupies the field
+    that is supposed to carry provenance.
+
+    Applied only to the bindings Rules 10 and 11 introduce. `check_object_fields`
+    is left alone deliberately -- widening string semantics repository-wide would
+    need proof that every existing contract wants it, and this slice has no such
+    evidence.
+    """
+    issues = []
+    for field in fields:
+        if field not in obj:
+            continue                      # absence is check_object_fields' job
+        value = obj[field]
+        if isinstance(value, str) and not value.strip():
+            issues.append(error(
+                "BLANK_BINDING", f"{where}.{field}",
+                "this field is required to state something; an empty or "
+                "whitespace value fills the slot without binding anything",
+            ))
+    return issues
+
+
 def _finite_number(value):
     """The value as a float, or None if it is not a finite number.
 
@@ -533,10 +562,14 @@ def validate_print_plan(
                     "nobody can reject",
                 ))
                 continue
+            row_where = f"{where}.deliverables[{key}]"
             issues += check_object_fields(
                 row, required=dict(_DELIVERABLE_BINDING), optional={},
-                where=f"{where}.deliverables[{key}]",
+                where=row_where,
             )
+            issues += _semantic_strings(
+                row, [f for f in _DELIVERABLE_BINDING if f != "format"],
+                where=row_where)
 
     # -- charter rule 11: bound the export where it decides something ---------
     if discretized_decision:
@@ -556,6 +589,8 @@ def validate_print_plan(
                           "angular_tolerance_deg": list},
                 where=envelope_where,
             )
+            issues += _semantic_strings(
+                envelope, ["applies_because", "basis"], where=envelope_where)
             issues += _export_fidelity_relationships(
                 envelope, where=envelope_where,
                 decision_tolerance_mm=decision_tolerance_mm)

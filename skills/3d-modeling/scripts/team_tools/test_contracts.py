@@ -777,6 +777,116 @@ class ExportFidelityIsNumericNotProseTest(unittest.TestCase):
         self.assertNotIn("MISSING_EXPORT_FIDELITY@print_plan.export_fidelity", ids)
 
 
+class BlankBindingsBindNothingTest(unittest.TestCase):
+    """**This proves a required binding must state something, because mutating
+    any one of them to an empty or whitespace string makes that exact field a
+    finding, while the honest row keeps passing.**
+
+    The shared `check_object_fields` asks `isinstance(value, str)`, which is the
+    right question for the contracts that already existed and the wrong one for
+    these. A deliverable whose purpose, units, frame, export path and acceptance
+    are all `""` has bound nothing -- functionally the same failure as naming a
+    format and stopping, which is what Rule 10 exists to prevent. `basis: ""` is
+    worse than absent, because it occupies the field that carries provenance.
+
+    Mutated one field at a time rather than all at once: a single blanket row
+    would pass if any one field were checked, and would not tell us which.
+    """
+
+    SEMANTIC = ("purpose", "source_geometry", "units", "frame", "export_path",
+                "acceptance")
+
+    def _ids(self, tmp, *, deliverable=None, envelope=None, project=None):
+        plan = clone(_PRINT_PLAN)
+        if deliverable is not None:
+            plan["deliverables"] = [deliverable]
+        if envelope is not None:
+            plan["export_fidelity"] = envelope
+        (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        (tmp / "project.json").write_text(
+            json.dumps(project if project is not None
+                       else {"expected_artifacts": ["candidate.3mf"]}),
+            encoding="utf-8")
+        return {i.id for i in P.load_project(tmp).all_issues()}
+
+    def test_the_honest_row_passes(self) -> None:
+        """The control this whole class rests on."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(Path(raw), deliverable=clone(_DELIVERABLE))
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+        self.assertEqual([], [i for i in ids if i.startswith("MISSING_DELIVERABLE")])
+
+    def test_each_semantic_binding_must_say_something(self) -> None:
+        for field in self.SEMANTIC:
+            for blank in ("", "   "):
+                with self.subTest(field=field, blank=repr(blank)):
+                    row = clone(_DELIVERABLE)
+                    row[field] = blank
+                    with tempfile.TemporaryDirectory() as raw:
+                        ids = self._ids(Path(raw), deliverable=row)
+                    self.assertIn(
+                        f"BLANK_BINDING@print_plan.deliverables[3mf].{field}", ids)
+
+    def test_a_blank_format_does_not_close_the_deliverable(self) -> None:
+        """A row that names no format closes nothing, so the commission's
+        requirement is still unmet -- reported as the missing deliverable rather
+        than as a blank field, which is the more useful finding."""
+        for blank in ("", "   "):
+            with self.subTest(blank=repr(blank)):
+                row = clone(_DELIVERABLE)
+                row["format"] = blank
+                with tempfile.TemporaryDirectory() as raw:
+                    ids = self._ids(Path(raw), deliverable=row)
+                self.assertIn(
+                    "MISSING_DELIVERABLE@print_plan.deliverables[3mf]", ids)
+
+    def test_a_blank_basis_is_not_provenance(self) -> None:
+        """The number stays, the provenance goes: exactly the case where a value
+        without a measurement behind it would otherwise read as calibration."""
+        for blank in ("", "  "):
+            with self.subTest(blank=repr(blank)):
+                envelope = clone(_EXPORT_FIDELITY)
+                envelope["basis"] = blank
+                with tempfile.TemporaryDirectory() as raw:
+                    ids = self._ids(
+                        Path(raw), envelope=envelope,
+                        project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+                self.assertIn(
+                    "BLANK_BINDING@print_plan.export_fidelity.basis", ids)
+
+    def test_a_blank_applies_because_is_a_finding(self) -> None:
+        envelope = clone(_EXPORT_FIDELITY)
+        envelope["applies_because"] = ""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(
+                Path(raw), envelope=envelope,
+                project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+        self.assertIn(
+            "BLANK_BINDING@print_plan.export_fidelity.applies_because", ids)
+
+    def test_an_honest_envelope_still_passes(self) -> None:
+        """The second control: tightening the strings must not break the case
+        that was already correct."""
+        with tempfile.TemporaryDirectory() as raw:
+            ids = self._ids(
+                Path(raw), envelope=clone(_EXPORT_FIDELITY),
+                project={"edit_scopes": [{"preservation_tolerance_mm": 0.1}]})
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+        self.assertEqual([], [i for i in ids if i.startswith("EXPORT_")])
+
+    def test_strings_in_older_contracts_are_untouched(self) -> None:
+        """The scope control. `check_object_fields` was deliberately left alone,
+        so a pre-existing contract with an empty string elsewhere reports no
+        BLANK_BINDING -- this slice has no evidence about what those want."""
+        plan = clone(_PRINT_PLAN)
+        plan["final_prep_notes"] = ""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "print_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            ids = {i.id for i in P.load_project(tmp).all_issues()}
+        self.assertEqual([], [i for i in ids if i.startswith("BLANK_BINDING")])
+
+
 class PrintPlanValidatorTest(unittest.TestCase):
     def test_normal_pass(self) -> None:
         issues = V.validate_print_plan(clone(_PRINT_PLAN), feature_ids={"F01": {}})
