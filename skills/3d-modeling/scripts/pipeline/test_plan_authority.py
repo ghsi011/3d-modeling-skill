@@ -334,6 +334,67 @@ class TheRealRunEndpointLeavesTheAcceptedPlanAloneTest(unittest.TestCase):
             self.assertEqual(before, path.read_bytes())
 
 
+class AGeneratedPlanDoesNotOutliveItsCommissionTest(unittest.TestCase):
+    """**The cost of the fix, paid rather than hidden.**
+
+    Regenerating on every run is what kept the generated plan byte-stable. Once
+    an existing file is never rewritten, a template from an earlier commission
+    stays put and silently gates the candidate against a declaration nobody
+    holds any more -- a 60 mm envelope on a job that has since declared 20 mm.
+    That is not the defect D34 fixed; it is a defect the fix introduced, and it
+    was found by asking what the guard now prevents that used to happen.
+
+    Refused rather than replaced, even though the pipeline wrote the file
+    itself. The run drops that template at the engineer's own deliverable path
+    and *then* stops to commission them, so editing it in place is a workflow
+    this program invites -- and an overwrite here would be D34 again, aimed at
+    exactly the people D34 hurt.
+    """
+
+    def _run_twice(self, second: dict) -> tuple[int, dict, bytes, bytes]:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _seeded(Path(raw) / "job", None)
+            cli.run([str(directory), "--no-render"])
+            path = directory / cli.PLAN_FILE
+            before = path.read_bytes()
+            (directory / "project.json").write_text(
+                json.dumps(dict(_PROJECT, **second)), encoding="utf-8")
+            code = cli.run([str(directory), "--no-render"])
+            after = path.read_bytes()
+            return code, json.loads(after), before, after
+
+    def test_a_changed_commission_refuses_rather_than_gating_on_the_old_one(self) -> None:
+        code, plan, before, after = self._run_twice(
+            {"envelope_mm": {"x": 20.0, "y": 20.0, "z": 20.0}})
+        self.assertEqual(2, code, "the run gated against a superseded envelope")
+        self.assertEqual({"x": 60.0, "y": 60.0, "z": 60.0},
+                         plan["expected_bbox_mm"])
+        self.assertEqual(before, after,
+                         "the refusal still rewrote the file it refused")
+
+    def test_an_unchanged_rerun_is_not_refused(self) -> None:
+        """The control for the row above, and the ordinary case. A guard that
+        fired on every second run would make the tool unusable while looking
+        like caution."""
+        code, _plan, before, after = self._run_twice({})
+        self.assertEqual(3, code)
+        self.assertEqual(before, after)
+
+    def test_an_authored_plan_never_reaches_that_branch(self) -> None:
+        """The refusal keys on the generator's own `owner`, so it cannot fire on
+        a plan somebody wrote -- which would turn a correct authored plan into a
+        blocked run every time the project was edited."""
+        accepted = _accepted_plan()
+        with tempfile.TemporaryDirectory() as raw:
+            directory = _seeded(Path(raw) / "job", accepted)
+            (directory / "project.json").write_text(
+                json.dumps(dict(_PROJECT,
+                                envelope_mm={"x": 20.0, "y": 20.0, "z": 20.0})),
+                encoding="utf-8")
+            code = cli.run([str(directory), "--no-render"])
+        self.assertEqual(3, code, "an authored plan was refused as stale")
+
+
 class TheRunStillWritesAPlanForAJobThatHasNoneTest(unittest.TestCase):
     """**The endpoint control, and it passes in both builds.**
 

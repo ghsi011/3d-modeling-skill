@@ -951,8 +951,29 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     rather than repaired. A run that answers an unbuildable plan by substituting
     one it wrote itself turns the engineer's error into the pipeline's silent
     decision, and a half-written file is exactly what a crashed session leaves.
+
+    **A generated plan whose commission has moved is refused too, and that costs
+    something.** Regenerating on every run is what kept the generated plan
+    byte-stable; simply not writing left a 60 mm envelope gating a job that has
+    since declared 20 mm, silently. The plan carries the generator's own
+    `owner`, so this run can tell its own earlier output from an authored plan
+    and say so. It still does not overwrite it, because the run drops that
+    template at the engineer's deliverable path and *then* commissions them --
+    editing it in place is a workflow this program invites, and an overwrite
+    would be the same defect again aimed at the people it hurt before.
     """
     from designer_toolkit.plan import direct_template, validate_plan
+
+    envelope = project.envelope_mm
+    plan = direct_template(
+        (envelope["x"], envelope["y"], envelope["z"]),
+        job_id=project.job_id,
+        nozzle_mm=float(project.nozzle["diameter_mm"]),
+        material=str(project.material["material"]),
+        bodies=max(1, sum(c.count for c in project.components) or 1),
+        updated_utc=project.updated_utc,
+        consequence=project.consequence,
+        orientation=project.orientation)
 
     accepted_path = work_dir / PLAN_FILE
     if accepted_path.is_file():
@@ -966,21 +987,30 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
             return {}, [f"{PLAN_FILE} is already written and is not a JSON "
                         f"object. It is the print engineer's deliverable, so "
                         f"this run will not replace it."]
+        if (accepted.get("owner") == plan.get("owner")
+                and accepted != plan):
+            # This run's own template from a superseded commission. Keeping the
+            # generated plan byte-stable across runs was the point of
+            # regenerating it, and leaving this one in place silently gates the
+            # candidate against a declaration nobody holds any more -- a 60 mm
+            # envelope that has since become 20 mm.
+            #
+            # Refused rather than replaced, even though the pipeline wrote it:
+            # the run drops this template at the engineer's own deliverable
+            # path and then stops to commission them, so editing it in place is
+            # a workflow this program *invites*. An overwrite here would be the
+            # same defect again, aimed at exactly the people it hurt before.
+            return {}, [
+                f"{PLAN_FILE} is a generated plan from an earlier commission "
+                f"and no longer matches this one -- the project has changed "
+                f"since it was written. This run will not replace it, because "
+                f"it may have been edited in place. Delete it to regenerate, "
+                f"or supersede it with an accepted plan."]
         return accepted, validate_plan(accepted)
 
-    envelope = project.envelope_mm
-    plan = direct_template(
-        (envelope["x"], envelope["y"], envelope["z"]),
-        job_id=project.job_id,
-        nozzle_mm=float(project.nozzle["diameter_mm"]),
-        material=str(project.material["material"]),
-        bodies=max(1, sum(c.count for c in project.components) or 1),
-        updated_utc=project.updated_utc,
-        consequence=project.consequence,
-        orientation=project.orientation)
     problems = validate_plan(plan)
     if not problems:
-        (work_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
+        accepted_path.write_text(S.canonical_json(plan), encoding="utf-8")
     return plan, problems
 
 

@@ -30,6 +30,18 @@ decision, and a half-written file is exactly what a crashed session leaves behin
 detector reading it would hand the file back to the generator for every plan that happens
 not to carry it — the same defect over a smaller set of jobs.
 
+**The guard costs something, and the cost is paid rather than hidden.** Regenerating on
+every run is what kept the generated plan byte-stable; once an existing file is never
+rewritten, a template from an earlier commission stays put and silently gates the
+candidate against a declaration nobody holds any more — a 60 mm envelope on a job that
+has since declared 20 mm. The plan carries the generator's own `owner`, so a run can tell
+its own earlier output from an authored plan and **refuses** when the two commissions
+disagree. It still does not overwrite it: the run drops that template at the engineer's
+deliverable path and *then* commissions them, so editing it in place is a workflow this
+program invites, and an overwrite would be the same defect again aimed at the people it
+hurt before. Bumping `updated_utc` alone is enough to trigger the refusal; the remedy it
+names is to delete the generated file.
+
 Found twice independently: an external post-mortem of the shipped 0.2.0 build recorded
 three print-engineer sessions doing nothing but restoring the file the run had just
 deleted — 19.0 active minutes and 1.72M logical tokens — and the same read of `cli.py`
