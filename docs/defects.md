@@ -983,3 +983,50 @@ large multiple of its source's, with an unauthorised change outside the region;
 the reported limit must not claim a sensitivity the candidate-direction pass did
 not have. Reporting per-direction, or the conservative larger area, both satisfy
 it; the fixture should not pick one.
+
+## D34 — `design-tool run` overwrites the print engineer's accepted plan
+
+**Where.** `pipeline/cli.py::_print_plan`, reached from `_run_authored`.
+
+**What is wrong.** The function generates a plan template from the printer and
+the declared envelope and, whenever that template validates, writes it to
+`work_dir / print_plan_checks.json` with no test for whether that file already
+exists. For an unbranched project `Project.work_dir` returns the project root,
+which is exactly where the print engineer's accepted plan lives: `dt.py audit`
+defaults to `<project>/print_plan_checks.json`, `dt.py commission --plan` is
+pointed at it, and the role charter's pre-design rule 9 names it as the
+engineer's deliverable.
+
+So on any job where an engineer authored a plan, the run silently replaced it —
+every Edge ID, every declared interface, and, since the charter hardening
+landed, every `deliverables` and `export_fidelity` obligation — with a template
+that has none of them. The generated template is not wrong; generating it *over
+an author* is. Its own docstring justifies it by four archived runs in which no
+plan was bound and each designer set its own ceiling from its own measurement,
+and that argument holds exactly where nobody authored a plan.
+
+**Evidence.** Found twice independently. An external post-mortem of the shipped
+0.2.0 build recorded three separate print-engineer sessions doing nothing but
+restoring the file the run had just overwritten — 19.0 active minutes and 1.72M
+logical tokens re-authoring a deleted artifact — and reproduced here in one call
+on `776524b`: an accepted plan carrying `revision: 3`, `S-01` and `I-01` comes
+back as a generated template with `"edges": []`.
+
+**What it can cause.** A candidate gated against a plan nobody wrote. The
+failure is silent in the direction that matters: no rule reports, no receipt
+records a substitution, and the plan on disk afterwards is internally valid — it
+is simply not the plan the job accepted. It also defeats the charter's
+deliverable and export-fidelity obligations at run time on the authored lane,
+where a plan can be perfectly authored, perfectly validated, and then replaced
+before the candidate is judged.
+
+**The fixture that must fail before the fix lands.** Drive the real run endpoint
+on an unbranched project seeded with an authored plan that carries distinctive
+support, interface and deliverable content; the file must survive byte-identical
+and the downstream contract must see the *authored* values, not the template's.
+Presence of the file is the authority boundary — not `authored_by`, which is
+optional and would hand back every plan that happens to omit it. Two further
+rows bound the fix: with no plan on disk the template is still generated, and an
+existing plan that cannot be read or does not validate is refused without being
+overwritten, because a run that repairs an unbuildable plan by substituting its
+own turns the engineer's error into the pipeline's silent decision.

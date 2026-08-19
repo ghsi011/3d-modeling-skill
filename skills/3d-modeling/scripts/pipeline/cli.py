@@ -931,8 +931,42 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     the candidate was measured in another. `project.orientation` is the single
     authority: it reaches the acceptance contract already, it reaches the plan
     from here, and `contract.preflight` refuses the run if the two disagree.
+
+    **Absence is the only state in which this function owns the file.** The
+    argument above holds exactly where nobody has authored a plan, and nowhere
+    else. Where a print engineer has, the generated template used to replace it
+    on every run -- destroying the Edge IDs, the declared interfaces, and every
+    deliverable and export-fidelity obligation the charter requires, and
+    replacing them with a template that has none of them. Two independent reads
+    found it: an external post-mortem of the shipped build recorded three
+    sessions doing nothing but re-authoring the file the run had just deleted,
+    and the same defect reproduces here in one call.
+
+    Presence is the authority boundary, not authorship: `authored_by` is
+    optional, so a detector reading it would hand the file back to the generator
+    for the plans that happened not to carry it -- which is the same bug for a
+    smaller set of jobs.
+
+    An existing plan that cannot be read, or does not validate, is **refused**
+    rather than repaired. A run that answers an unbuildable plan by substituting
+    one it wrote itself turns the engineer's error into the pipeline's silent
+    decision, and a half-written file is exactly what a crashed session leaves.
     """
     from designer_toolkit.plan import direct_template, validate_plan
+
+    accepted_path = work_dir / PLAN_FILE
+    if accepted_path.is_file():
+        try:
+            accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return {}, [f"{PLAN_FILE} is already written and cannot be read: "
+                        f"{exc}. It is the print engineer's deliverable, so this "
+                        f"run will not replace it; repair or remove the file."]
+        if not isinstance(accepted, dict):
+            return {}, [f"{PLAN_FILE} is already written and is not a JSON "
+                        f"object. It is the print engineer's deliverable, so "
+                        f"this run will not replace it."]
+        return accepted, validate_plan(accepted)
 
     envelope = project.envelope_mm
     plan = direct_template(
@@ -1548,9 +1582,11 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
     if plan_problems:
         # `designer_toolkit.validate_plan` still answers in sentences, so the
         # finding carries the file and the position in that answer rather than a
-        # field path inside the plan. The plan is generated here from the printer
-        # and the envelope, so a problem in it is this pipeline's, not a
-        # designer's -- which is why it names the file and not a declaration.
+        # field path inside the plan. It names the file and not a declaration
+        # because the plan is a file either way: generated here from the printer
+        # and the envelope when nobody authored one, and the print engineer's
+        # own deliverable when somebody did. The finding cannot say which of the
+        # two is at fault, and the file is what the reader has to open.
         return _report_problems(project_dir, work_dir, project, [
             F.problem(F.ARTIFACT_REFUSED, f"{PLAN_FILE}[{index}]", text)
             for index, text in enumerate(plan_problems)], stage="plan")
