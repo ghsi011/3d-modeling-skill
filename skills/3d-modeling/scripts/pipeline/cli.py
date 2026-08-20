@@ -931,6 +931,36 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     the candidate was measured in another. `project.orientation` is the single
     authority: it reaches the acceptance contract already, it reaches the plan
     from here, and `contract.preflight` refuses the run if the two disagree.
+
+    **Absence is the only state in which this function owns the file.** The
+    argument above holds exactly where nobody has authored a plan, and nowhere
+    else. Where a print engineer has, the generated template used to replace it
+    on every run -- destroying the Edge IDs, the declared interfaces, and every
+    deliverable and export-fidelity obligation the charter requires, and
+    replacing them with a template that has none of them. Two independent reads
+    found it: an external post-mortem of the shipped build recorded three
+    sessions doing nothing but re-authoring the file the run had just deleted,
+    and the same defect reproduces here in one call.
+
+    Presence is the authority boundary, not authorship: `authored_by` is
+    optional, so a detector reading it would hand the file back to the generator
+    for the plans that happened not to carry it -- which is the same bug for a
+    smaller set of jobs.
+
+    An existing plan that cannot be read, or does not validate, is **refused**
+    rather than repaired. A run that answers an unbuildable plan by substituting
+    one it wrote itself turns the engineer's error into the pipeline's silent
+    decision, and a half-written file is exactly what a crashed session leaves.
+
+    **A generated plan whose commission has moved is refused too, and that costs
+    something.** Regenerating on every run is what kept the generated plan
+    byte-stable; simply not writing left a 60 mm envelope gating a job that has
+    since declared 20 mm, silently. The plan carries the generator's own
+    `owner`, so this run can tell its own earlier output from an authored plan
+    and say so. It still does not overwrite it, because the run drops that
+    template at the engineer's deliverable path and *then* commissions them --
+    editing it in place is a workflow this program invites, and an overwrite
+    would be the same defect again aimed at the people it hurt before.
     """
     from designer_toolkit.plan import direct_template, validate_plan
 
@@ -944,9 +974,43 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         updated_utc=project.updated_utc,
         consequence=project.consequence,
         orientation=project.orientation)
+
+    accepted_path = work_dir / PLAN_FILE
+    if accepted_path.is_file():
+        try:
+            accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return {}, [f"{PLAN_FILE} is already written and cannot be read: "
+                        f"{exc}. It is the print engineer's deliverable, so this "
+                        f"run will not replace it; repair or remove the file."]
+        if not isinstance(accepted, dict):
+            return {}, [f"{PLAN_FILE} is already written and is not a JSON "
+                        f"object. It is the print engineer's deliverable, so "
+                        f"this run will not replace it."]
+        if (accepted.get("owner") == plan.get("owner")
+                and accepted != plan):
+            # This run's own template from a superseded commission. Keeping the
+            # generated plan byte-stable across runs was the point of
+            # regenerating it, and leaving this one in place silently gates the
+            # candidate against a declaration nobody holds any more -- a 60 mm
+            # envelope that has since become 20 mm.
+            #
+            # Refused rather than replaced, even though the pipeline wrote it:
+            # the run drops this template at the engineer's own deliverable
+            # path and then stops to commission them, so editing it in place is
+            # a workflow this program *invites*. An overwrite here would be the
+            # same defect again, aimed at exactly the people it hurt before.
+            return {}, [
+                f"{PLAN_FILE} is a generated plan from an earlier commission "
+                f"and no longer matches this one -- the project has changed "
+                f"since it was written. This run will not replace it, because "
+                f"it may have been edited in place. Delete it to regenerate, "
+                f"or supersede it with an accepted plan."]
+        return accepted, validate_plan(accepted)
+
     problems = validate_plan(plan)
     if not problems:
-        (work_dir / PLAN_FILE).write_text(S.canonical_json(plan), encoding="utf-8")
+        accepted_path.write_text(S.canonical_json(plan), encoding="utf-8")
     return plan, problems
 
 
@@ -1548,9 +1612,11 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
     if plan_problems:
         # `designer_toolkit.validate_plan` still answers in sentences, so the
         # finding carries the file and the position in that answer rather than a
-        # field path inside the plan. The plan is generated here from the printer
-        # and the envelope, so a problem in it is this pipeline's, not a
-        # designer's -- which is why it names the file and not a declaration.
+        # field path inside the plan. It names the file and not a declaration
+        # because the plan is a file either way: generated here from the printer
+        # and the envelope when nobody authored one, and the print engineer's
+        # own deliverable when somebody did. The finding cannot say which of the
+        # two is at fault, and the file is what the reader has to open.
         return _report_problems(project_dir, work_dir, project, [
             F.problem(F.ARTIFACT_REFUSED, f"{PLAN_FILE}[{index}]", text)
             for index, text in enumerate(plan_problems)], stage="plan")
