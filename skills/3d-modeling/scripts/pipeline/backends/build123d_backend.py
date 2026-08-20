@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import bindings
 from . import BuildArtifacts
 import mesh_io
 
@@ -97,7 +98,11 @@ class Build123dBackend:
             step_path = output_dir / "candidate.step"
             export_step(part, str(step_path))
 
-        (output_dir / "model.py").write_text(
+        # `BACKEND_RECORD`, never `model.py` -- see `bindings.BACKEND_RECORD`.
+        # Both certified backends carried this defect in their own copy of these
+        # five lines, so both are repaired and both are proved separately.
+        record_path = output_dir / bindings.BACKEND_RECORD
+        record_path.write_text(
             "# Generated from model_contract.json. The contract is authoritative;\n"
             "# this file records what was built and is not a source of expectations.\n"
             f"TEMPLATE = {contract.template!r}\n"
@@ -107,7 +112,7 @@ class Build123dBackend:
 
         return BuildArtifacts(
             stl_path=stl_path, step_path=step_path,
-            source_path=output_dir / "model.py", backend=self.name,
+            source_path=record_path, backend=self.name,
             backend_version=f"build123d {getattr(build123d, '__version__', 'unknown')}",
             tessellation={"linear_deflection": LINEAR_DEFLECTION,
                           "angular_deflection": ANGULAR_DEFLECTION},

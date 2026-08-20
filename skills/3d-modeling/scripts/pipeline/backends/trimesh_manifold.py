@@ -14,6 +14,7 @@ from typing import Any
 
 import trimesh
 
+from .. import bindings
 from . import BuildArtifacts
 
 ENGINE = "manifold"
@@ -119,7 +120,10 @@ class TrimeshManifoldBackend:
         stl_path = output_dir / "candidate.stl"
         part.export(stl_path)
 
-        source_path = output_dir / "model.py"
+        # `BACKEND_RECORD`, never `model.py`: this is the backend's own account
+        # of what it executed, and a `model.py` in the same directory is a file
+        # a designer was told to write and edit. Writing here destroyed theirs.
+        source_path = output_dir / bindings.BACKEND_RECORD
         source_path.write_text(
             "# Generated from model_contract.json. The contract is authoritative;\n"
             "# this file is a record of what was built, not a source of expectations.\n"

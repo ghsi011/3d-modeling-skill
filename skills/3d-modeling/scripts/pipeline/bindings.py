@@ -73,6 +73,19 @@ WITNESS_DIR = "witness"
 CANDIDATE_STL = "candidate.stl"
 CANDIDATE_STEP = "candidate.step"
 DEFAULT_SOURCE = "model.py"
+# What a certified backend executed, by its own account: the template, the
+# backend and the frozen parameters. **Not `model.py`.** Both certified backends
+# used to write this record straight over that name, which for an unbranched
+# project is the project root -- and the designer charter tells a designer on a
+# certified `DIRECT` job to produce `model.py` there and edit it. So a run
+# destroyed the designer's whole deliverable and reported success.
+#
+# A name of its own rather than an existence check, because the two files are
+# not the same kind of thing. The record is what the backend ran; `model.py` is
+# what a person wrote. Keeping the designer's file while still calling it the
+# source would make `source_sha256` attest that their module produced this STL,
+# which is a worse claim than the one it replaces.
+BACKEND_RECORD = "backend_build_record.py"
 
 # How the shared root spells itself. A review taken at the root carries no
 # `alternative_id` -- the envelope omits the key rather than writing `null`, so
@@ -116,6 +129,34 @@ def _within(base: Path, name: Any) -> Path | None:
         return None
 
 
+def _source_name(work_dir: Path, expected: dict[str, Any],
+                 model_name: str | None) -> str:
+    """Which file the `source` binding is taken from.
+
+    A declaration wins wherever there is one: the frozen acceptance contract's
+    `expected_artifacts["source"]` on the authored lane, then the project's own
+    `model`. Both name a file a person is responsible for, and neither is
+    guessed.
+
+    **The fallback is the certified lane, and its source is the backend's
+    record.** That lane freezes no acceptance contract and declares no model, so
+    nothing here names its source but this function -- and the file the backend
+    actually executed a template into is `BACKEND_RECORD`, not the `model.py`
+    that may be sitting beside it because a designer was told to write one.
+    Reading `model.py` there would bind the receipt to a module the run never
+    ran, which is the same misattribution the record's rename exists to end.
+
+    Presence of the record rather than a lane flag, because this function is
+    handed a directory and not a route, and the record is a name only the
+    pipeline writes. Where no run has built yet the record is absent, both
+    branches digest a missing file, and the answer is `None` either way.
+    """
+    declared = expected.get("source") or model_name
+    if declared:
+        return str(declared)
+    return BACKEND_RECORD if (Path(work_dir) / BACKEND_RECORD).is_file() else DEFAULT_SOURCE
+
+
 def current(work_dir: Path, *, alternative_id: str | None = None,
             model_name: str | None = None) -> dict[str, str | None]:
     """The value each binding has right now, read off this formulation's files.
@@ -144,7 +185,7 @@ def current(work_dir: Path, *, alternative_id: str | None = None,
         "stl": _digest(_within(work_dir, expected.get("stl") or CANDIDATE_STL)),
         "step": _digest(_within(work_dir, expected.get("step") or CANDIDATE_STEP)),
         "source": _digest(_within(
-            work_dir, expected.get("source") or model_name or DEFAULT_SOURCE)),
+            work_dir, _source_name(work_dir, expected, model_name))),
         "alternative": alternative_id or ROOT_ALTERNATIVE,
     }
 
