@@ -15,6 +15,7 @@ from typing import Any
 import trimesh
 
 from .. import bindings
+from .. import schemas as S
 from . import BuildArtifacts
 
 ENGINE = "manifold"
@@ -120,17 +121,21 @@ class TrimeshManifoldBackend:
         stl_path = output_dir / "candidate.stl"
         part.export(stl_path)
 
-        # `BACKEND_RECORD`, never `model.py`: this is the backend's own account
-        # of what it executed, and a `model.py` in the same directory is a file
-        # a designer was told to write and edit. Writing here destroyed theirs.
+        # `BACKEND_RECORD`, never `model.py` and never any `*.py`: the boundary
+        # stages every top-level Python file beside the model as the designer's,
+        # so a `.py` record would destroy a helper that happened to share its
+        # name. Nothing executes this -- it is provenance -- so it is a receipt.
         source_path = output_dir / bindings.BACKEND_RECORD
-        source_path.write_text(
-            "# Generated from model_contract.json. The contract is authoritative;\n"
-            "# this file is a record of what was built, not a source of expectations.\n"
-            f"TEMPLATE = {contract.template!r}\n"
-            f"BACKEND = {self.name!r}\n"
-            f"PARAMETERS = {contract.parameters!r}\n",
-            encoding="utf-8")
+        source_path.write_text(S.canonical_json({
+            "schema_version": bindings.BACKEND_RECORD_SCHEMA,
+            "record": "backend-build",
+            "note": "Generated from model_contract.json. The contract is "
+                    "authoritative; this records what was built and is not a "
+                    "source of expectations.",
+            "template": contract.template,
+            "backend": self.name,
+            "parameters": contract.parameters,
+        }), encoding="utf-8")
 
         if contract.step_required:
             raise ValueError(

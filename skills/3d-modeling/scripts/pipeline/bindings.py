@@ -85,7 +85,18 @@ DEFAULT_SOURCE = "model.py"
 # what a person wrote. Keeping the designer's file while still calling it the
 # source would make `source_sha256` attest that their module produced this STL,
 # which is a worse claim than the one it replaces.
-BACKEND_RECORD = "backend_build_record.py"
+#
+# **JSON, and the extension is the point.** The first repair gave the record its
+# own name and kept `.py`, which moved the collision rather than ending it:
+# `isolation._stage` treats *every* top-level `*.py` beside the model as the
+# designer's, on the stated ground that "the pipeline writes no Python into a
+# project directory". A designer shipping a helper under this exact name would
+# have had it destroyed by the same write. Nothing executes this record -- it is
+# provenance data -- and a `.py` extension claims an ownership this file does not
+# have.
+BACKEND_RECORD = "backend_build_record.json"
+# Bumped when the record's shape changes, so a reader can tell which one it has.
+BACKEND_RECORD_SCHEMA = 1
 
 # How the shared root spells itself. A review taken at the root carries no
 # `alternative_id` -- the envelope omits the key rather than writing `null`, so

@@ -32,12 +32,41 @@ class TheRecordIsNotTheDesignersFileTest(unittest.TestCase):
     def test_the_two_names_are_different(self) -> None:
         self.assertNotEqual(B.DEFAULT_SOURCE, B.BACKEND_RECORD)
 
-    def test_the_record_is_not_a_contract_artifact_name(self) -> None:
-        """It must not collide with anything a role owns either, or D35 simply
-        moves to a different victim."""
-        owned = {B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE, B.PLAN_FILE,
-                 B.CANDIDATE_STL, B.CANDIDATE_STEP, B.DEFAULT_SOURCE}
+    def test_the_record_collides_with_no_role_owned_canonical_name(self) -> None:
+        """Against the **authoritative** set, not a local list.
+
+        The first repair checked a handful of `bindings` constants, which is the
+        weaker question: those are the pipeline's own names. What decides whether
+        D35 has merely moved to a new victim is `team_tools.validators`'
+        `CANONICAL_FILENAMES` -- every spelling of every contract artifact a role
+        is responsible for authoring.
+        """
+        from team_tools import validators as V
+        owned = {name for spellings in V.CANONICAL_FILENAMES.values()
+                 for name in spellings}
+        owned |= {B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE, B.PLAN_FILE,
+                  B.CANDIDATE_STL, B.CANDIDATE_STEP, B.DEFAULT_SOURCE}
+        self.assertTrue(owned, "the canonical set came back empty")
         self.assertNotIn(B.BACKEND_RECORD, owned)
+
+    def test_the_record_is_not_python(self) -> None:
+        """**The extension is the repair, so it gets its own row.**
+
+        `isolation._stage` stages every top-level `*.py` beside the model as the
+        designer's, on the stated ground that "the pipeline writes no Python into
+        a project directory". A record named `backend_build_record.py` broke that
+        invariant and would have destroyed a designer helper of that name -- the
+        same defect, one filename over. Nothing executes this record; it is
+        provenance, and a `.py` extension claims an ownership it does not have.
+        """
+        self.assertFalse(B.BACKEND_RECORD.endswith(".py"), B.BACKEND_RECORD)
+
+    def test_the_pipeline_writes_no_python_into_a_project(self) -> None:
+        """The invariant itself, asserted where it can be read: no name this
+        module hands the pipeline to write is Python."""
+        written = {B.BACKEND_RECORD, B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE,
+                   B.PLAN_FILE}
+        self.assertEqual([], [n for n in written if n.endswith(".py")])
 
 
 class TheSourceBindingFollowsTheRecordTest(unittest.TestCase):
@@ -47,7 +76,7 @@ class TheSourceBindingFollowsTheRecordTest(unittest.TestCase):
         """The certified lane: nothing declared, and a record on disk."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            (work / B.BACKEND_RECORD).write_text("TEMPLATE = 'c_clip'\n",
+            (work / B.BACKEND_RECORD).write_text('{"template": "c_clip"}\n',
                                                  encoding="utf-8")
             (work / B.DEFAULT_SOURCE).write_text("# the designer's\n",
                                                  encoding="utf-8")
@@ -59,7 +88,7 @@ class TheSourceBindingFollowsTheRecordTest(unittest.TestCase):
         record sitting beside it must not displace that declaration."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            (work / B.BACKEND_RECORD).write_text("TEMPLATE = 'c_clip'\n",
+            (work / B.BACKEND_RECORD).write_text('{"template": "c_clip"}\n',
                                                  encoding="utf-8")
             declared = B._source_name(work, {"source": "part.py"}, None)
             by_project = B._source_name(work, {}, "part.py")

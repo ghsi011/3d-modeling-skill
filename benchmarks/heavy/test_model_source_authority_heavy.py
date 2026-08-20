@@ -127,16 +127,51 @@ class _CertifiedBackendCase(unittest.TestCase):
             self.assertNotEqual(_sha(out / B.DEFAULT_SOURCE), _sha(built.source_path))
 
     def test_the_record_says_what_the_backend_actually_executed(self) -> None:
-        """A record that survives while describing nothing is not evidence."""
+        """A record that survives while describing nothing is not evidence.
+
+        Read as JSON rather than searched as text, because the record is a
+        receipt now: a substring check would pass on a file that merely mentions
+        the template somewhere."""
+        import json
         with tempfile.TemporaryDirectory() as raw:
             out = Path(raw)
             built = self._build(out)
-            text = built.source_path.read_text(encoding="utf-8")
-        self.assertIn(repr(self.template), text)
-        self.assertIn(repr(self.backend_name), text)
-        for name, value in self.parameters.items():
-            self.assertIn(name, text, f"{name} missing from the build record")
-            self.assertIn(repr(value), text, f"{name}'s value missing")
+            record = json.loads(built.source_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.template, record["template"])
+        self.assertEqual(self.backend_name, record["backend"])
+        self.assertEqual(self.parameters, record["parameters"])
+        self.assertEqual(B.BACKEND_RECORD_SCHEMA, record["schema_version"])
+
+    def test_a_designer_helper_under_the_records_name_survives(self) -> None:
+        """**The defect the first repair moved rather than ended.**
+
+        `isolation._stage` stages every top-level `*.py` beside the model as the
+        designer's, on the stated ground that "the pipeline writes no Python
+        into a project directory, so every `.py` there is the designer's". A
+        record named `backend_build_record.py` broke exactly that invariant: a
+        designer shipping a helper under that name would have lost it to the
+        same write, for the same reason `model.py` was lost.
+
+        So the record is a `.json` receipt. Nothing executes it, and the
+        extension is what stops it claiming an ownership it does not have.
+        """
+        helper = "backend_build_record.py"
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            (out / helper).write_text(AUTHORED_SOURCE, encoding="utf-8")
+            before = (out / helper).read_bytes()
+            built = self._build(out)
+            after = (out / helper).read_bytes()
+            self.assertTrue(built.source_path.is_file())
+            self.assertNotEqual(out / helper, built.source_path)
+        self.assertEqual(before, after,
+                         "the record destroyed a designer helper of that name")
+
+    def test_the_record_is_not_python(self) -> None:
+        """Stated on its own because the extension IS the repair: a `.py` record
+        under any name re-enters the namespace the boundary treats as the
+        designer's."""
+        self.assertFalse(B.BACKEND_RECORD.endswith(".py"), B.BACKEND_RECORD)
 
     def test_a_job_with_no_designer_source_still_gets_its_record(self) -> None:
         """**The control, and it passes in both builds.** Without it, "stop
