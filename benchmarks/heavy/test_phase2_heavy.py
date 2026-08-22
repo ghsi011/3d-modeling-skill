@@ -376,7 +376,7 @@ class RevisionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), RISER, _project())
             cli.run([str(directory), "--no-render"])
-            for name in ("artifact_manifest.json", "commission_report.json",
+            for name in ("pipeline_artifact_receipt.json", "commission_report.json",
                          "final_status.json"):
                 self.assertTrue((directory / name).is_file(), name)
 
@@ -417,7 +417,15 @@ class CustomLaneTest(unittest.TestCase):
                              "the CUSTOM cap named acceptance criteria read out of "
                              "the model file; there are none left to read")
             for name in ST.FROZEN_ARTIFACTS["CUSTOM"]:
-                self.assertTrue((directory / f"{name}.json").is_file(), name)
+                # `FROZEN_ARTIFACTS` holds *receipt keys*, which production uses
+                # against `result.artifacts` (`selftest.py`). This row wants the
+                # file, and stem-plus-`.json` stopped deriving it once D36 moved
+                # the pipeline's receipt off the designer's contract name -- so
+                # the one receipt whose key and filename no longer coincide is
+                # named here rather than assumed.
+                filename = (B.PIPELINE_RECEIPT if name == "artifact_manifest"
+                            else f"{name}.json")
+                self.assertTrue((directory / filename).is_file(), name)
             # Same frozen reason DIRECT stops here: the broad screen is
             # uncalibrated and this job did not require an independent look.
             self.assertEqual(cli.NEEDS_ACTION, code)
@@ -438,7 +446,7 @@ class CustomLaneTest(unittest.TestCase):
             self.assertEqual("authored-r1", contract["template_version"],
                              "the revision is on the receipt's face, not only in "
                              "the hash")
-            self.assertEqual(_read(directory, "artifact_manifest.json")
+            self.assertEqual(_read(directory, "pipeline_artifact_receipt.json")
                              ["contract_sha256"],
                              _read(directory, "commission_report.json")
                              ["contract_hash"])
@@ -452,7 +460,7 @@ class CustomLaneTest(unittest.TestCase):
             cli.run([str(directory), "--no-render"])
             report = _read(directory, "commission_report.json")
             self.assertEqual("PASS", report["verdict"], report["checks"])
-            artifact = _read(directory, "artifact_manifest.json")
+            artifact = _read(directory, "pipeline_artifact_receipt.json")
             self.assertEqual("authored", artifact["backend"])
             self.assertIn("build123d", artifact["backend_version"])
             self.assertEqual("n/a (B-rep)", artifact["boolean_engine"])
@@ -481,7 +489,7 @@ class CustomLaneTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), RISER, _project())
             cli.run([str(directory), "--no-render"])
-            self.assertIn("unrecorded", _read(directory, "artifact_manifest.json")
+            self.assertIn("unrecorded", _read(directory, "pipeline_artifact_receipt.json")
                           ["boolean_engine"])
 
 class ScreeningPolicyTest(unittest.TestCase):

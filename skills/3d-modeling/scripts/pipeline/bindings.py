@@ -70,6 +70,23 @@ MODEL_CONTRACT_FILE = "model_contract.json"
 PLAN_FILE = "execution_plan.json"
 WITNESS_DIR = "witness"
 
+# The pipeline's own record of a build: backend, engine, cache, and the digests
+# of the contract and the three artifacts. **Not `artifact_manifest.json`.**
+#
+# That name is a team contract -- `team_tools.validators.CANONICAL_FILENAMES`
+# holds it, `designer_toolkit/receipts.py` writes it with
+# `contract: artifact-manifest`, and the charters point readers at it. The
+# pipeline wrote a wholly different object to the same path and then treated
+# that path as one of its own receipts, so a designer's manifest was both
+# overwritten by the runner and *deleted* by `invalidate`, which judged a file
+# the pipeline had never written stale against a dependency the designer had
+# never declared.
+#
+# The pipeline's is the one that moves, because the other is externally
+# specified: renaming that would turn a local collision into a contract
+# migration, while this name has no reader outside this package.
+PIPELINE_RECEIPT = "pipeline_artifact_receipt.json"
+
 CANDIDATE_STL = "candidate.stl"
 CANDIDATE_STEP = "candidate.step"
 DEFAULT_SOURCE = "model.py"
@@ -124,6 +141,56 @@ def _payload(path: Path) -> dict[str, Any] | None:
 
 def _digest(path: Path | None) -> str | None:
     return S.sha256_file(path) if path is not None and path.is_file() else None
+
+
+# What the pipeline's receipt looked like before D36 moved it off the team
+# contract's name. Positive identification, not mere absence: the three digest
+# keys are ones only the pipeline ever wrote, and the `contract` marker is what
+# a real team manifest always carries.
+_LEGACY_PIPELINE_RECEIPT = "artifact_manifest.json"
+_PIPELINE_SHAPE = frozenset({"contract_sha256", "stl_sha256", "backend"})
+
+
+def _is_legacy_pipeline_receipt(payload: dict[str, Any]) -> bool:
+    """Whether a file at the old name is the pipeline's own former receipt.
+
+    **Both halves are required, and the second is the one that matters.** A
+    team-contract manifest sits at this exact path by right, so a fallback that
+    keyed on the filename -- or on the pipeline keys alone -- would let a
+    designer's contract stand in for a receipt the pipeline never wrote. The
+    `contract` marker is how that file says what it is, and its presence is
+    disqualifying whatever else the payload holds.
+    """
+    return "contract" not in payload and _PIPELINE_SHAPE <= set(payload)
+
+
+def _receipt_path(work_dir: Path, name: str) -> Path:
+    """Where to READ a receipt from, allowing for a project older than D36.
+
+    A project completed before the rename has its pipeline receipt under the old
+    name, and its commission report was issued beside a file at that path. With
+    no compatibility the dependency looks unsatisfied and evidence that was valid
+    yesterday reads as stale today -- a claim about the software rather than
+    about the part.
+
+    **Read-only, and current-first.** The new name wins wherever it exists, so
+    compatibility can never override the present authority; and nothing here
+    returns a path the lifecycle is allowed to delete, because `invalidate`
+    resolves through `receipt.name` rather than through this.
+    """
+    current_path = work_dir / name
+    if name != PIPELINE_RECEIPT or current_path.is_file():
+        return current_path
+    legacy = work_dir / _LEGACY_PIPELINE_RECEIPT
+    payload = _payload(legacy)
+    if payload is not None and _is_legacy_pipeline_receipt(payload):
+        return legacy
+    return current_path
+
+
+def _receipt_payload(work_dir: Path, name: str) -> dict[str, Any] | None:
+    """The receipt's contents, from wherever `_receipt_path` resolves it."""
+    return _payload(_receipt_path(Path(work_dir), name))
 
 
 def _within(base: Path, name: Any) -> Path | None:
@@ -387,13 +454,13 @@ RECEIPTS: tuple[Receipt, ...] = (
     # it would turn "issued against a contract that has moved" into "there is no
     # contract", which says less and is no more true.
     Receipt(MODEL_CONTRACT_FILE, _model_contract, removable=False),
-    Receipt("artifact_manifest.json", _artifact_manifest,
+    Receipt(PIPELINE_RECEIPT, _artifact_manifest,
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,)),
     # The commissioning report records the contract it measured against and not
     # the mesh it measured; the manifest is where that digest lives.
     Receipt("commission_report.json", _commission,
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,
-                                        "artifact_manifest.json")),
+                                        PIPELINE_RECEIPT)),
     # The manufacturing report carries the commissioning verdict.
     Receipt("manufacturing_report.json", _manufacturing,
             depends_on=lambda payload: ("commission_report.json",)),
@@ -435,7 +502,7 @@ def broken(work_dir: Path, *, evidence_dir: Path | None = None,
     stale: dict[str, tuple[str, ...]] = {}
 
     for receipt in RECEIPTS:
-        path = work_dir / receipt.name
+        path = _receipt_path(work_dir, receipt.name)
         if not path.is_file():
             continue
         payload = _payload(path)
@@ -470,7 +537,7 @@ def broken(work_dir: Path, *, evidence_dir: Path | None = None,
         for other in receipt.depends_on(payload):
             if other in stale:
                 reasons.append(f"{other}, which it was issued beside, is stale")
-            elif not (work_dir / other).is_file():
+            elif not _receipt_path(work_dir, other).is_file():
                 reasons.append(f"{other}, which it was issued beside, is no "
                                "longer on disk")
         if reasons:

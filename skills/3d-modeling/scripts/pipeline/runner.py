@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, cache as K, commission, contract as C, cost as COST
+from . import analysis, bindings as B, cache as K, commission, contract as C, cost as COST
 from . import execution as EX
 from . import fitted, intent, review as R
 from . import safety
@@ -545,7 +545,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         report["witness"] = witness.as_dict()
         timings["witness"] = time.perf_counter() - mark
     except Exception as exc:                        # noqa: BLE001 - see above
-        written["artifact_manifest"] = _write(out / "artifact_manifest.json", artifact)
+        written["artifact_manifest"] = _write(out / B.PIPELINE_RECEIPT, artifact)
         return JobResult(False, "measurement", f"{type(exc).__name__}: {exc}",
                          written, timings, llm_calls, None)
 
@@ -554,7 +554,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
     # property hashing exists for: `evidence_packet_sha256` and the safety
     # cache identity became functions of elapsed time, so no two runs could ever
     # match and the cache could never hit.
-    written["artifact_manifest"] = _write(out / "artifact_manifest.json", artifact)
+    written["artifact_manifest"] = _write(out / B.PIPELINE_RECEIPT, artifact)
     written["commission_report"] = _write(out / "commission_report.json", report)
 
     # ---- manufacturing evidence -------------------------------------------

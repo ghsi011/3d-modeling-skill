@@ -179,7 +179,7 @@ class _CaseChecks:
             with self.subTest(formulation=formulation.key):
                 final = json.loads((work / "final_status.json")
                                    .read_text(encoding="utf-8"))
-                manifest = json.loads((work / "artifact_manifest.json")
+                manifest = json.loads((work / "pipeline_artifact_receipt.json")
                                       .read_text(encoding="utf-8"))
                 self.assertEqual(manifest["contract_sha256"],
                                  final["artifact_hashes"]["contract"])
@@ -615,8 +615,8 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
         self.assertEqual("STALE", derived["as-drawn"]["derived_status"])
         self.assertEqual("VERIFIED", derived["as-drawn"]["stored_status"])
         self.assertEqual(
-            ["artifact_manifest.json", "commission_report.json",
-             "final_status.json", "verification_report.json"],
+            ["commission_report.json", "final_status.json",
+             "pipeline_artifact_receipt.json", "verification_report.json"],
             derived["as-drawn"]["stale"],
             "the receipts that stopped binding, and only those: the frozen "
             "acceptance contract and the model contract still describe the same "

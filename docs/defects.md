@@ -1080,3 +1080,58 @@ the certified lane — no frozen acceptance contract, no declared `project.model
 the only thing naming that file is the fallback. Rename the record without moving
 that fallback and the binding silently resolves to a file nothing writes any
 more, leaving `source` null on every certified job with no test going red.
+
+## D36 — the pipeline's build receipt squats on the designer's artifact manifest
+
+**Where.** `pipeline/runner.py` (both writes) and `pipeline/bindings.py`
+(`RECEIPTS`, `REMOVABLE`, and the dependency edge from `commission_report.json`).
+
+**What is wrong.** `artifact_manifest.json` is a team contract:
+`team_tools/validators.py::CANONICAL_FILENAMES` names it,
+`designer_toolkit/receipts.py` writes it with `contract: artifact-manifest`, and
+the charters point readers at it. The pipeline wrote an entirely different object
+to the same path — `backend`, `backend_version`, `boolean_engine`, `cache`,
+`contract_sha256`, the artifact digests — overlapping the contract shape on only
+three keys and disagreeing even on the version key (`schema_version` against
+`contract_version`).
+
+**Two mechanisms, and the second is the one a rename of the write alone would
+have missed.** The pipeline also treated that path as one of *its own* receipts:
+the name was in `REMOVABLE` and carried a `depends_on` edge to
+`model_contract.json`, so `bindings.invalidate` deleted the designer's file
+outright — recording the sha of a file the pipeline never wrote, and naming a
+reason about a dependency the designer never declared.
+
+**Evidence.** Both reproduced on `237c36a`. The write: a manifest declaring
+`contract: artifact-manifest`, `owner: 3d-designer`, `revision: 7` comes back
+with none of those keys and a wholly different shape, exit 3, no finding. The
+deletion, proven in isolation because a building run's later write masks it:
+`bindings.invalidate(work_dir)` removes the designer's manifest and records
+`"model_contract.json, which it was issued beside, is no longer on disk"`.
+
+The `invalidate` path is narrower than first reported: it is reached from
+`_finish`, and the commission-stop path returns before that, so a run that never
+builds leaves the manifest intact.
+
+**What it can cause.** Silent loss of a role's contract artifact, and a run that
+reports success while having replaced a validated contract with an object
+`dt.py validate` rejects.
+
+**The fix, and why it is a rename rather than a guard.** Both writers are
+legitimate; only one is entitled to that name. The team contract's is externally
+specified, validator-known and charter-facing, so the *pipeline's* moves — to
+`bindings.PIPELINE_RECEIPT`. Renaming the contract's would turn a local collision
+into a contract migration.
+
+**The fixture that must fail before the fix lands.** Seed a valid team-contract
+manifest; require it to survive both a normal run and `invalidate`; require the
+pipeline's own receipt to still be written and still be invalidated when stale.
+Control: with no team manifest present the pipeline still writes and manages its
+own receipt. Reverting only the receipt filename must fail exactly the three
+replay fixtures that record it, leaving `modify-ball-scope-refused` stable.
+
+**Not in scope, deliberately.** The internal dict key `written["artifact_manifest"]`
+and the verifier packet's `artifact_manifest` key are not filesystem names, and
+nothing collides on them; moving those would change a reviewer-facing packet
+shape for no correctness gain. `verification_report.json` has a related but
+differently-shaped collision and is its own slice.

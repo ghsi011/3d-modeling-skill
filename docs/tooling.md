@@ -292,7 +292,7 @@ otherwise. It also prints what is being reused before the run touches anything.
 
 | discarded | kept |
 | --- | --- |
-| the six removable receipts (`artifact_manifest.json`, `commission_report.json`, `manufacturing_report.json`, both review reports, `final_status.json`) | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
+| the six removable receipts (`pipeline_artifact_receipt.json`, `commission_report.json`, `manufacturing_report.json`, both review reports, `final_status.json`) — **not** the team contract's `artifact_manifest.json`, which D36 established the pipeline does not own and never deletes | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
 | `reviews/<kind>_response.json` — the answers | `reviews/<kind>_packet.json` — the questions, rewritten every run |
 | `next_action.json` | `design_proposal.json`, `model.py`, `model_contract.json`, `execution_plan.json` |
 | | the content cache, and **every sibling formulation** |
@@ -787,7 +787,9 @@ Nothing about acceptance goes in, and neither does the project's path.
 the candidate's own module-level code runs in, so every field of it is
 candidate-authored whatever `build_child` intends — and four of those fields used
 to be copied onto `model_contract.json` and `artifact_manifest.json`, both of
-which the safety and verification packets embed whole. The reviewer's PASS
+which the safety and verification packets embed whole. (D36 later renamed the
+pipeline's receipt to `pipeline_artifact_receipt.json`; the argument below is
+recorded as it was made, and the file it names is that one.) The reviewer's PASS
 decides the run, so that was a candidate writing to its own grader
 ([`docs/defects.md` D10](defects.md), closed). Now:
 
@@ -798,7 +800,7 @@ decides the run, so that was a candidate writing to its own grader
 * `PARAMS` and `PROVENANCE` cross into an `isolation.CandidateDeclaration`.
   `PARAMS` is compared against the frozen proposal and forwarded to nothing;
   `PROVENANCE` is written to `candidate_declaration.json` and read by nothing.
-  Neither `Contract`, `artifact_manifest.json`, the safety packet nor the
+  Neither `Contract`, `pipeline_artifact_receipt.json`, the safety packet nor the
   verification packet has a field or a parameter one could arrive through.
 
 Four consequences a designer will notice:
@@ -1208,7 +1210,7 @@ second opinion.
 
 `model_contract.json`, `intent_manifest.json`, `candidate.stl` (and
 `candidate.step` when the contract asks), `commission_report.json`,
-`manufacturing_report.json`, `witness/`, `artifact_manifest.json`,
+`manufacturing_report.json`, `witness/`, `pipeline_artifact_receipt.json`,
 `timings.json`, `cost.json`, and `final_status.json`. On the `AUTHORED` builder,
 `acceptance_contract.json` and `acceptance_history.json` as well.
 

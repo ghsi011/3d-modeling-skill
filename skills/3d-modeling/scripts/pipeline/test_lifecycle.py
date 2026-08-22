@@ -73,7 +73,7 @@ SCAFFOLD = {
                             "source": {"acceptance_contract_sha256": "a" * 64}},
     "execution_plan.json": {"route": "CUSTOM", "builder": "AUTHORED"},
 }
-CONCLUSIONS = ("artifact_manifest.json", "commission_report.json",
+CONCLUSIONS = (B.PIPELINE_RECEIPT, "commission_report.json",
                "final_status.json")
 
 

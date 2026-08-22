@@ -352,7 +352,7 @@ class NoCandidateProseReachesAReviewerTest(_AttackTest):
 
     This is not a confinement defect and no confinement closes it: the manifest
     is *supposed* to cross. Four strings used to cross with it and land on
-    `model_contract.json` and `artifact_manifest.json`, both of which the safety
+    `model_contract.json` and `pipeline_artifact_receipt.json`, both of which the safety
     packet and the verification packet embed whole. Reading the frozen contract
     -- which the candidate can do, D9 row 3 -- does not create the channel; it
     aims it, because the tolerance bands and the design id are in there.
@@ -398,7 +398,7 @@ class NoCandidateProseReachesAReviewerTest(_AttackTest):
         brief = (directory / "brief.md").read_text(encoding="utf-8")
         intent = _read(directory, "intent_manifest.json")
         contract = _read(directory, "model_contract.json")
-        artifact = _read(directory, "artifact_manifest.json")
+        artifact = _read(directory, "pipeline_artifact_receipt.json")
         report = _read(directory, "commission_report.json")
         witness = report["witness"]
 
@@ -467,7 +467,7 @@ class NoCandidateProseReachesAReviewerTest(_AttackTest):
 
         declaration = _read(directory, isolation.DECLARATION_FILE)
         self.assertIn(MARKER, json.dumps(declaration["provenance"]))
-        artifact = _read(directory, "artifact_manifest.json")
+        artifact = _read(directory, "pipeline_artifact_receipt.json")
         self.assertEqual(isolation.UNRECORDED_KERNEL, artifact["backend_version"],
                          "a kernel token this boundary does not know was passed "
                          "through instead of being reduced")

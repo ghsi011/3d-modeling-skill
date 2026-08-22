@@ -140,7 +140,10 @@ Against rule 3.1's eight parts:
 * **Input representation** — none new. Inputs are `project.json`'s alternative
   rows plus each formulation's own `acceptance_contract.json`,
   `commission_report.json`, `artifact_manifest.json`, `final_status.json` and
-  `cost.json`. Optional `--against` selects formulations; the default is every
+  `cost.json`. (D36 later renamed the pipeline's receipt to
+  `pipeline_artifact_receipt.json`; this scope note is left as it was written,
+  and the file it names here is that one, not the team contract of the same
+  former name.) Optional `--against` selects formulations; the default is every
   runnable one. No new project field, no new schema. Rule 3.1 forbids an
   abstraction one fixture justifies, and this fixture justifies none.
 * **Execution** — deterministic, zero dispatch, zero build, one pass over

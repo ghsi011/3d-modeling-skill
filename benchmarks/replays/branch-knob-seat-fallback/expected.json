@@ -212,7 +212,6 @@
       "receipts": [
         "acceptance_contract.json",
         "acceptance_history.json",
-        "artifact_manifest.json",
         "brief.md",
         "candidate.stl",
         "candidate_declaration.json",
@@ -225,6 +224,7 @@
         "lifecycle.json",
         "model.py",
         "model_contract.json",
+        "pipeline_artifact_receipt.json",
         "print_plan_checks.json",
         "project.json",
         "route_decision.json",
@@ -328,9 +328,9 @@
       "derived": {
         "derived_status": "STALE",
         "stale": [
-          "artifact_manifest.json",
           "commission_report.json",
           "final_status.json",
+          "pipeline_artifact_receipt.json",
           "verification_report.json"
         ],
         "stored_status": "VERIFIED"
@@ -378,7 +378,6 @@
       "receipts": [
         "acceptance_contract.json",
         "acceptance_history.json",
-        "artifact_manifest.json",
         "candidate.stl",
         "candidate_declaration.json",
         "commission_report.json",
@@ -388,6 +387,7 @@
         "intent_manifest.json",
         "model.py",
         "model_contract.json",
+        "pipeline_artifact_receipt.json",
         "print_plan_checks.json",
         "route_decision.json",
         "verification_report.json"
@@ -535,7 +535,6 @@
       "receipts": [
         "acceptance_contract.json",
         "acceptance_history.json",
-        "artifact_manifest.json",
         "candidate.stl",
         "candidate_declaration.json",
         "commission_report.json",
@@ -545,6 +544,7 @@
         "intent_manifest.json",
         "model.py",
         "model_contract.json",
+        "pipeline_artifact_receipt.json",
         "print_plan_checks.json",
         "route_decision.json",
         "verification_report.json"
