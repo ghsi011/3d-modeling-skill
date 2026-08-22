@@ -179,7 +179,7 @@ class TwoSiblingsTest(unittest.TestCase):
             self.assertTrue(screw.is_file())
             self.assertTrue(snap.is_file())
             self.assertNotEqual(S.sha256_file(screw), S.sha256_file(snap))
-            for name in ("candidate_declaration.json", "artifact_manifest.json",
+            for name in ("candidate_declaration.json", "pipeline_artifact_receipt.json",
                          "commission_report.json", "final_status.json",
                          ACC.ACCEPTANCE_FILE, ACC.HISTORY_FILE,
                          cli.EXECUTION_PLAN_FILE, cli.ROUTE_DECISION_FILE,

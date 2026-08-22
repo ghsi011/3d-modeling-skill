@@ -83,7 +83,7 @@ class FrozenRunTest(unittest.TestCase):
         artifact's identity and the runner says so in the file itself.
         """
         hashed = ("intent_manifest.json", "model_contract.json",
-                  "artifact_manifest.json", "commission_report.json",
+                  "pipeline_artifact_receipt.json", "commission_report.json",
                   "final_status.json")
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             first, second = Path(a), Path(b)

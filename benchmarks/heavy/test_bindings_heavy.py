@@ -161,7 +161,7 @@ class ScopedInvalidationTest(unittest.TestCase):
     def test_a_receipt_whose_bindings_still_hold_is_not_deleted(self) -> None:
         """The corrected caliper sheet takes the review and the status, and stops.
 
-        `commission_report.json` and `artifact_manifest.json` are measurements of
+        `commission_report.json` and `pipeline_artifact_receipt.json` are measurements of
         a candidate that has not moved, against a contract that has not moved.
         They are still true, and the old rule deleted them anyway because they
         were in the tuple.
@@ -175,7 +175,7 @@ class ScopedInvalidationTest(unittest.TestCase):
 
             self.assertEqual({"verification_report.json", "final_status.json"},
                              set(removed))
-            for name in ("artifact_manifest.json", "commission_report.json",
+            for name in ("pipeline_artifact_receipt.json", "commission_report.json",
                          "model_contract.json"):
                 with self.subTest(receipt=name):
                     self.assertTrue((directory / name).is_file(),
@@ -227,7 +227,7 @@ class ScopedInvalidationTest(unittest.TestCase):
 
         `commission_report.json` records the contract it measured against and
         not the mesh it measured. It is stale here because it was issued beside
-        `artifact_manifest.json`, which does record it -- the edge is declared
+        `pipeline_artifact_receipt.json`, which does record it -- the edge is declared
         precisely where the receipt does not carry the digest itself.
         """
         with tempfile.TemporaryDirectory() as raw:
@@ -236,10 +236,10 @@ class ScopedInvalidationTest(unittest.TestCase):
             stl.write_bytes(stl.read_bytes() + b"\n")
 
             stale = B.broken(directory, evidence_dir=directory)
-            self.assertIn("artifact_manifest.json", stale)
+            self.assertIn("pipeline_artifact_receipt.json", stale)
             self.assertIn("commission_report.json", stale)
             self.assertTrue(
-                any("artifact_manifest.json" in row
+                any("pipeline_artifact_receipt.json" in row
                     for row in stale["commission_report.json"]),
                 stale["commission_report.json"])
             self.assertNotIn("model_contract.json", stale,
@@ -499,7 +499,7 @@ class NothingHashedGainedAKeyTest(unittest.TestCase):
     """
 
     HASHED = ("acceptance_contract.json", "execution_plan.json",
-              "model_contract.json", "artifact_manifest.json",
+              "model_contract.json", "pipeline_artifact_receipt.json",
               "commission_report.json", "final_status.json")
 
     def test_the_shipped_goldens_are_untouched(self) -> None:
