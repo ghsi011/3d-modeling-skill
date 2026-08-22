@@ -143,6 +143,56 @@ def _digest(path: Path | None) -> str | None:
     return S.sha256_file(path) if path is not None and path.is_file() else None
 
 
+# What the pipeline's receipt looked like before D36 moved it off the team
+# contract's name. Positive identification, not mere absence: the three digest
+# keys are ones only the pipeline ever wrote, and the `contract` marker is what
+# a real team manifest always carries.
+_LEGACY_PIPELINE_RECEIPT = "artifact_manifest.json"
+_PIPELINE_SHAPE = frozenset({"contract_sha256", "stl_sha256", "backend"})
+
+
+def _is_legacy_pipeline_receipt(payload: dict[str, Any]) -> bool:
+    """Whether a file at the old name is the pipeline's own former receipt.
+
+    **Both halves are required, and the second is the one that matters.** A
+    team-contract manifest sits at this exact path by right, so a fallback that
+    keyed on the filename -- or on the pipeline keys alone -- would let a
+    designer's contract stand in for a receipt the pipeline never wrote. The
+    `contract` marker is how that file says what it is, and its presence is
+    disqualifying whatever else the payload holds.
+    """
+    return "contract" not in payload and _PIPELINE_SHAPE <= set(payload)
+
+
+def _receipt_path(work_dir: Path, name: str) -> Path:
+    """Where to READ a receipt from, allowing for a project older than D36.
+
+    A project completed before the rename has its pipeline receipt under the old
+    name, and its commission report was issued beside a file at that path. With
+    no compatibility the dependency looks unsatisfied and evidence that was valid
+    yesterday reads as stale today -- a claim about the software rather than
+    about the part.
+
+    **Read-only, and current-first.** The new name wins wherever it exists, so
+    compatibility can never override the present authority; and nothing here
+    returns a path the lifecycle is allowed to delete, because `invalidate`
+    resolves through `receipt.name` rather than through this.
+    """
+    current_path = work_dir / name
+    if name != PIPELINE_RECEIPT or current_path.is_file():
+        return current_path
+    legacy = work_dir / _LEGACY_PIPELINE_RECEIPT
+    payload = _payload(legacy)
+    if payload is not None and _is_legacy_pipeline_receipt(payload):
+        return legacy
+    return current_path
+
+
+def _receipt_payload(work_dir: Path, name: str) -> dict[str, Any] | None:
+    """The receipt's contents, from wherever `_receipt_path` resolves it."""
+    return _payload(_receipt_path(Path(work_dir), name))
+
+
 def _within(base: Path, name: Any) -> Path | None:
     """A declared filename resolved under `base`, or None if it would leave it.
 
@@ -452,7 +502,7 @@ def broken(work_dir: Path, *, evidence_dir: Path | None = None,
     stale: dict[str, tuple[str, ...]] = {}
 
     for receipt in RECEIPTS:
-        path = work_dir / receipt.name
+        path = _receipt_path(work_dir, receipt.name)
         if not path.is_file():
             continue
         payload = _payload(path)
@@ -487,7 +537,7 @@ def broken(work_dir: Path, *, evidence_dir: Path | None = None,
         for other in receipt.depends_on(payload):
             if other in stale:
                 reasons.append(f"{other}, which it was issued beside, is stale")
-            elif not (work_dir / other).is_file():
+            elif not _receipt_path(work_dir, other).is_file():
                 reasons.append(f"{other}, which it was issued beside, is no "
                                "longer on disk")
         if reasons:

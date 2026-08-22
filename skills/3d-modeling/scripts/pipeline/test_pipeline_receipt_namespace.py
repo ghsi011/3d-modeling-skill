@@ -28,6 +28,7 @@ import unittest
 from pathlib import Path
 
 from . import bindings as B
+from . import schemas as S
 
 # What a designer's commission actually writes: `designer_toolkit.receipts`
 # builds this shape, and `team_tools` validates it. Nothing here overlaps the
@@ -133,6 +134,108 @@ class InvalidationLeavesTheDesignersManifestAloneTest(unittest.TestCase):
             self.assertTrue((work / TEAM_FILE).is_file())
             self.assertEqual(before, (work / TEAM_FILE).read_bytes())
 
+
+
+def _legacy_project(work: Path) -> dict:
+    """A project completed before D36, and genuinely bound rather than merely
+    shaped like it.
+
+    Its digests are computed from the files actually beside it, because a
+    fixture that records digests nothing on disk matches would go stale for a
+    reason that has nothing to do with the rename -- and would pass the row
+    below for the wrong reason if the compatibility path ever regressed.
+
+    The pipeline's receipt is still under the old name, with no `contract`
+    marker and the digest keys only the pipeline ever wrote.
+    """
+    contract = {"job_id": "legacy"}
+    (work / B.MODEL_CONTRACT_FILE).write_text(
+        json.dumps(contract), encoding="utf-8")
+    (work / B.CANDIDATE_STL).write_bytes(b"solid legacy\nendsolid\n")
+    (work / B.BACKEND_RECORD).write_text(
+        json.dumps({"template": "c_clip"}), encoding="utf-8")
+    receipt = {
+        "schema_version": 1,
+        "job_id": "legacy",
+        "contract_sha256": S.payload_hash(contract),
+        "source_sha256": S.sha256_file(work / B.BACKEND_RECORD),
+        "stl_sha256": S.sha256_file(work / B.CANDIDATE_STL),
+        "step_sha256": None,
+        "backend": "trimesh-manifold",
+        "backend_version": "trimesh 4/manifold3d 2",
+        "units": "mm",
+        "updated_utc": "1970-01-01T00:00:00Z",
+    }
+    (work / TEAM_FILE).write_text(json.dumps(receipt), encoding="utf-8")
+    (work / "commission_report.json").write_text(
+        json.dumps({"contract_sha256": receipt["contract_sha256"]}),
+        encoding="utf-8")
+    return receipt
+
+
+class AProjectCompletedBeforeD36StaysBoundTest(unittest.TestCase):
+    """**Upgrading the software may not make stored evidence stale.**
+
+    Before D36 the pipeline's receipt lived under `artifact_manifest.json`. A
+    project that completed then has its commission report issued beside a file
+    at that path, and the rename alone would leave the dependency looking
+    unsatisfied -- so a run that was valid yesterday reads as stale today
+    because the code moved, which is a claim about the software rather than
+    about the part.
+
+    Read-only compatibility, and **schema-discriminated**: the old file is
+    consulted only when it can be positively identified as the pipeline's own
+    shape. A real team manifest at that path is not a missing pipeline receipt,
+    and must never be read as one.
+    """
+
+    def test_a_legacy_project_is_not_stale_merely_because_the_name_moved(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            _legacy_project(work)
+            stale = B.broken(work)
+        self.assertNotIn("commission_report.json", stale,
+                         "upgrading the software made stored evidence stale")
+
+    def test_a_team_manifest_cannot_masquerade_as_the_missing_receipt(self) -> None:
+        """**The negative control, and the one that decides the discriminator.**
+
+        Same position, same filename, different shape. A contract manifest has
+        no business standing in for the pipeline's receipt, and a fallback keyed
+        on the filename alone would let it.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            _legacy_project(work)
+            _seed_team_manifest(work)          # overwrite with the contract shape
+            stale = B.broken(work)
+        self.assertIn("commission_report.json", stale,
+                      "a team manifest was read as the pipeline's receipt")
+
+    def test_the_new_receipt_always_wins_where_both_exist(self) -> None:
+        """Compatibility may not override the new authority."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            legacy = _legacy_project(work)
+            moved = dict(legacy, contract_sha256="d" * 64)
+            (work / B.PIPELINE_RECEIPT).write_text(json.dumps(moved),
+                                                   encoding="utf-8")
+            resolved = B._receipt_payload(work, B.PIPELINE_RECEIPT)
+        self.assertEqual("d" * 64, resolved["contract_sha256"],
+                         "the legacy file outranked the current receipt")
+
+    def test_the_legacy_file_is_read_and_never_deleted(self) -> None:
+        """**Read-only is the whole shape of this compatibility.** The old file
+        may inform a reading; it may not be swept up by the lifecycle, because
+        the pipeline no longer owns that name whatever shape it holds."""
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            _legacy_project(work)
+            before = (work / TEAM_FILE).read_bytes()
+            removed = B.invalidate(work)
+            self.assertNotIn(TEAM_FILE, removed)
+            self.assertTrue((work / TEAM_FILE).is_file())
+            self.assertEqual(before, (work / TEAM_FILE).read_bytes())
 
 if __name__ == "__main__":
     unittest.main()
