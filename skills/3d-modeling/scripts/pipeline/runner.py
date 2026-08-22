@@ -689,8 +689,14 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         except (S.SchemaError, R.ReviewError, ValueError) as exc:
             # See the safety boundary above: a JSON parse failure from the
             # adapter is a malformed review, written down rather than raised.
-            written["verification_report"] = _write(
-                out / "verification_report.json", {
+            #
+            # Written down under its OWN name, and with its own result key. This
+            # object is not a verification report and not a verification
+            # receipt; it records that parsing failed. Sent to the canonical
+            # pathname it replaced a verifier's REJECT with `{error: ...}`,
+            # which does not lose a verdict so much as invert one.
+            written["verification_error"] = _write(
+                out / B.VERIFICATION_ERROR, {
                     "schema_version": S.VERIFICATION_SCHEMA,
                     "error": f"{type(exc).__name__}: {exc}",
                 })
@@ -700,8 +706,13 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         llm_calls += 1
         ledger.dispatched("verification")
         timings["verification"] = time.perf_counter() - mark
+        # The logical key stays `verification_report` while the filename moves,
+        # for the reason `written["artifact_manifest"]` kept its own: callers ask
+        # for the pipeline's review result without being coupled to its spelling
+        # on disk, and the collision was two objects sharing a pathname rather
+        # than two dictionaries sharing a descriptive field name.
         written["verification_report"] = _write(
-            out / "verification_report.json", verification_report)
+            out / B.PIPELINE_VERIFICATION_RECEIPT, verification_report)
 
     final = status.decide(contract=model_contract, commission_report=report,
                           screening=screen, manufacturing=manufacturing,

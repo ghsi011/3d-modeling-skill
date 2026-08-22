@@ -242,8 +242,12 @@ class _CaseChecks:
 
     @staticmethod
     def _report_name(kind: str) -> str:
-        return ("safety_verification_report.json" if kind == "safety"
-                else f"{kind}_report.json")
+        # Named, not derived. `f"{kind}_report.json"` happened to spell the
+        # verification receipt correctly only while that receipt was sitting
+        # on the verifier's contract filename; deriving a path from a review
+        # kind encodes a coincidence, and D37 is what it cost.
+        return {"safety": "safety_verification_report.json",
+                "verification": "pipeline_verification_receipt.json"}[kind]
 
 
 class CustomKnobSleeveTest(_CaseChecks, unittest.TestCase):
@@ -616,7 +620,7 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
         self.assertEqual("VERIFIED", derived["as-drawn"]["stored_status"])
         self.assertEqual(
             ["commission_report.json", "final_status.json",
-             "pipeline_artifact_receipt.json", "verification_report.json"],
+             "pipeline_artifact_receipt.json", "pipeline_verification_receipt.json"],
             derived["as-drawn"]["stale"],
             "the receipts that stopped binding, and only those: the frozen "
             "acceptance contract and the model contract still describe the same "
@@ -955,12 +959,17 @@ class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
                 "stops")
 
             fallback = project / "alternatives" / "as-drawn"
-            report = json.loads((fallback / "verification_report.json")
+            # The refusal is a diagnostic, not a review, and since D37 it
+            # says so in its filename: the receipt name is now reserved for
+            # an object that carries a decision.
+            report = json.loads((fallback / "verification_review_error.json")
                                 .read_text(encoding="utf-8"))
             self.assertIn("ReviewError", report["error"])
             self.assertIn("review envelope mismatch", report["error"])
             self.assertNotIn("decision", report,
                              "a refused answer must not leave a decision behind")
+            self.assertFalse((fallback / "pipeline_verification_receipt.json").is_file(),
+                             "a refused answer must not leave a receipt either")
             self.assertFalse((fallback / "final_status.json").is_file())
             for sibling in (project, project / "alternatives" / "plate-seated"):
                 self.assertTrue((sibling / "final_status.json").is_file(),
@@ -1118,8 +1127,14 @@ class TheBindingStillBitesTest(unittest.TestCase):
                              "a refused answer must not leave a decision behind")
             self.assertFalse((project / "final_status.json").is_file(),
                              "an unbound answer must not produce a final status")
-            self.assertFalse((project / "verification_report.json").is_file(),
+            # Neither name, not just the receipt: since D37 a verification
+            # that was reached and failed to parse leaves a diagnostic
+            # instead, so "never reached" has to exclude both or it
+            # half-checks itself.
+            self.assertFalse((project / "pipeline_verification_receipt.json").is_file(),
                              "the second review must never have been reached")
+            self.assertFalse((project / "verification_review_error.json").is_file(),
+                             "nor left a diagnostic from a review it never ran")
 
             failures = RP.binding(
                 RP.compare(RP.expected(self.CASE_ID),

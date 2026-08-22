@@ -12,8 +12,9 @@ only after this one names a specific unresolved issue.
 **Stage 1 only, and it says so.** The plan's second stage -- show the normal
 verifier's conclusion, purely so disagreement can be reported -- is not built.
 What is built is the part that matters most: this call never sees
-`verification_report.json`, so it cannot anchor on it. A second opinion that read
-the first one is not a second opinion.
+`pipeline_verification_receipt.json`, so it cannot anchor on it. A second opinion
+that read the first one is not a second opinion. (Nor does it see a verifier's
+own `verification_report.json`, for the same reason.)
 
 This module builds the packet and validates the response. It does not call a
 model: the runner hands the packet to whatever the host provides, so the pipeline
@@ -74,7 +75,7 @@ def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any]
                  artifact: dict[str, Any], commission: dict[str, Any],
                  manufacturing: dict[str, Any] | None,
                  witness: dict[str, Any]) -> Packet:
-    """Deliberately omits `verification_report.json` -- see the module docstring."""
+    """Deliberately omits the first review -- see the module docstring."""
     return Packet(stage=1, payload={
         "stage": 1,
         "brief": brief,

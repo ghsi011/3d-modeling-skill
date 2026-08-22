@@ -87,6 +87,19 @@ WITNESS_DIR = "witness"
 # migration, while this name has no reader outside this package.
 PIPELINE_RECEIPT = "pipeline_artifact_receipt.json"
 
+# The same collision, one file over. `verification_report.json` is a team
+# contract owned by the verifier -- `contract: verification-report`, version 4,
+# `_EXPECTED_OWNERS` naming `verifier` alone -- and the pipeline was writing its
+# own normalized review record straight over it. Two schemas sharing one
+# pathname, not two authors of one schema, so the pipeline's is the one that
+# moves.
+PIPELINE_VERIFICATION_RECEIPT = "pipeline_verification_receipt.json"
+# And the malformed-response record gets a third name, because it is neither.
+# `{schema_version, error}` is a note that parsing failed wearing a report's
+# name: written over a verifier's REJECT it does not lose a finding, it INVERTS
+# one, turning "a person found a defect" into "something went wrong".
+VERIFICATION_ERROR = "verification_review_error.json"
+
 CANDIDATE_STL = "candidate.stl"
 CANDIDATE_STEP = "candidate.step"
 DEFAULT_SOURCE = "model.py"
@@ -164,6 +177,42 @@ def _is_legacy_pipeline_receipt(payload: dict[str, Any]) -> bool:
     return "contract" not in payload and _PIPELINE_SHAPE <= set(payload)
 
 
+_LEGACY_VERIFICATION_RECEIPT = "verification_report.json"
+# Keys only `verification.run` ever wrote, frozen off the real schema rather
+# than guessed: `verification.py` returns `schema_version`,
+# `evidence_packet_sha256`, `reviewer`, `review_envelope`, `fresh_context`,
+# `saw_designer_reasoning` and `reviewed_questions` on every review.
+_VERIFICATION_SHAPE = frozenset({
+    "schema_version", "evidence_packet_sha256", "reviewed_questions",
+})
+
+
+def _is_legacy_verification_receipt(payload: dict[str, Any]) -> bool:
+    """Whether a file at the old name is the pipeline's own former receipt.
+
+    Both halves required, for the reason `_is_legacy_pipeline_receipt` gives: a
+    verifier's team report sits at this path by right, and `contract` is how it
+    says so.
+
+    The error stub fails this by construction -- `{schema_version, error}`
+    carries neither `evidence_packet_sha256` nor `reviewed_questions`. That is
+    the point rather than a happy accident: a record that parsing failed must
+    never satisfy a predicate that binds verification evidence, and the shape
+    keys are chosen so it cannot.
+    """
+    return "contract" not in payload and _VERIFICATION_SHAPE <= set(payload)
+
+
+# Which current names have a former name worth reading, and how to recognise the
+# old payload. A table rather than a branch per receipt: the second member of
+# this class arrived one slice after the first, so a third should cost a row.
+_LEGACY_RECEIPTS: dict[str, tuple[str, Any]] = {
+    PIPELINE_RECEIPT: (_LEGACY_PIPELINE_RECEIPT, _is_legacy_pipeline_receipt),
+    PIPELINE_VERIFICATION_RECEIPT: (_LEGACY_VERIFICATION_RECEIPT,
+                                    _is_legacy_verification_receipt),
+}
+
+
 def _receipt_path(work_dir: Path, name: str) -> Path:
     """Where to READ a receipt from, allowing for a project older than D36.
 
@@ -179,11 +228,13 @@ def _receipt_path(work_dir: Path, name: str) -> Path:
     resolves through `receipt.name` rather than through this.
     """
     current_path = work_dir / name
-    if name != PIPELINE_RECEIPT or current_path.is_file():
+    entry = _LEGACY_RECEIPTS.get(name)
+    if entry is None or current_path.is_file():
         return current_path
-    legacy = work_dir / _LEGACY_PIPELINE_RECEIPT
+    legacy_name, is_legacy = entry
+    legacy = work_dir / legacy_name
     payload = _payload(legacy)
-    if payload is not None and _is_legacy_pipeline_receipt(payload):
+    if payload is not None and is_legacy(payload):
         return legacy
     return current_path
 
@@ -421,7 +472,7 @@ def _status_depends(payload: dict[str, Any]) -> tuple[str, ...]:
     """
     owed = ["commission_report.json"]
     if payload.get("verification") is not None:
-        owed.append("verification_report.json")
+        owed.append(PIPELINE_VERIFICATION_RECEIPT)
     if payload.get("safety_verification") is not None:
         owed.append("safety_verification_report.json")
     return tuple(owed)
@@ -467,7 +518,7 @@ RECEIPTS: tuple[Receipt, ...] = (
     # Both reviews were shown the commissioning report inside their packet.
     Receipt("safety_verification_report.json", _review, files=_review_files,
             depends_on=lambda payload: ("commission_report.json",)),
-    Receipt("verification_report.json", _review, files=_review_files,
+    Receipt(PIPELINE_VERIFICATION_RECEIPT, _review, files=_review_files,
             depends_on=lambda payload: ("commission_report.json",)),
     Receipt("final_status.json", _final_status, depends_on=_status_depends),
 )
