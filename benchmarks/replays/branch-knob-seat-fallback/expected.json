@@ -225,10 +225,10 @@
         "model.py",
         "model_contract.json",
         "pipeline_artifact_receipt.json",
+        "pipeline_verification_receipt.json",
         "print_plan_checks.json",
         "project.json",
-        "route_decision.json",
-        "verification_report.json"
+        "route_decision.json"
       ],
       "screening_detail": {
         "calibrated": false,
@@ -331,7 +331,7 @@
           "commission_report.json",
           "final_status.json",
           "pipeline_artifact_receipt.json",
-          "verification_report.json"
+          "pipeline_verification_receipt.json"
         ],
         "stored_status": "VERIFIED"
       },
@@ -388,9 +388,9 @@
         "model.py",
         "model_contract.json",
         "pipeline_artifact_receipt.json",
+        "pipeline_verification_receipt.json",
         "print_plan_checks.json",
-        "route_decision.json",
-        "verification_report.json"
+        "route_decision.json"
       ],
       "screening_detail": {
         "calibrated": false,
@@ -545,9 +545,9 @@
         "model.py",
         "model_contract.json",
         "pipeline_artifact_receipt.json",
+        "pipeline_verification_receipt.json",
         "print_plan_checks.json",
-        "route_decision.json",
-        "verification_report.json"
+        "route_decision.json"
       ],
       "screening_detail": {
         "calibrated": false,
