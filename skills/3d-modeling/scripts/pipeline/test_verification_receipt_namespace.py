@@ -66,6 +66,12 @@ LEGACY_RECEIPT = {
 # The malformed-response diagnostic, exactly as the runner writes it.
 ERROR_STUB = {"schema_version": 3, "error": "SchemaError: unparseable"}
 
+# Named here so the disguised-contract row can assert its own fixture is strong
+# enough, rather than trusting that it happens to carry the right keys.
+_VERIFICATION_SHAPE_KEYS = frozenset({
+    "schema_version", "evidence_packet_sha256", "reviewed_questions",
+})
+
 
 def _seed(work: Path, name: str, payload: dict) -> bytes:
     path = work / name
@@ -134,6 +140,31 @@ class TheLegacyReceiptIsStillReadableTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
             _seed(work, TEAM_FILE, TEAM_REPORT)
+            self.assertEqual(
+                work / B.PIPELINE_VERIFICATION_RECEIPT,
+                B._receipt_path(work, B.PIPELINE_VERIFICATION_RECEIPT))
+
+    def test_the_contract_marker_alone_disqualifies_a_team_report(self) -> None:
+        """Requirement 6, tested so that it can actually fail.
+
+        The obvious negative control -- a plain team report -- is rejected by the
+        *shape* half all on its own, because a verifier's contract carries none
+        of the pipeline's keys. So it never exercises the `contract` marker, and
+        a mutation deleting that half leaves every other row green. This one
+        gives the payload the full pipeline shape **and** the marker, so the
+        marker is the only thing standing between it and the fallback.
+
+        That is the guard that matters if a future contract revision ever grows a
+        `schema_version`: the file says what it is, and what it says wins.
+        """
+        disguised = {**TEAM_REPORT, **LEGACY_RECEIPT, "contract": "verification-report"}
+        self.assertTrue(_VERIFICATION_SHAPE_KEYS <= set(disguised),
+                        "the fixture must carry the pipeline shape, or this row "
+                        "is the weaker one it exists to replace")
+        self.assertFalse(B._is_legacy_verification_receipt(disguised))
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            _seed(work, TEAM_FILE, disguised)
             self.assertEqual(
                 work / B.PIPELINE_VERIFICATION_RECEIPT,
                 B._receipt_path(work, B.PIPELINE_VERIFICATION_RECEIPT))
