@@ -145,7 +145,6 @@
   "receipts": [
     "acceptance_contract.json",
     "acceptance_history.json",
-    "artifact_manifest.json",
     "ball_male_17mm.stl",
     "brief.md",
     "candidate.stl",
@@ -158,6 +157,7 @@
     "model.py",
     "model_contract.json",
     "next_action.json",
+    "pipeline_artifact_receipt.json",
     "print_plan_checks.json",
     "project.json",
     "route_decision.json",

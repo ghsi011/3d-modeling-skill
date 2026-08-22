@@ -6,6 +6,34 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
+
+`artifact_manifest.json` is a team contract - `CANONICAL_FILENAMES` names it,
+`designer_toolkit/receipts.py` writes it with `contract: artifact-manifest`, and the charters
+point readers at it. The pipeline wrote a wholly different object to the same path and, worse,
+treated that path as one of **its own** receipts: the name was in `REMOVABLE` with a
+`depends_on` edge, so `bindings.invalidate` deleted the designer's file outright, recording the
+sha of a file the pipeline had never written.
+
+**A rename, because both writers are legitimate and only one is entitled to that name.** The
+team contract's is externally specified, validator-known and charter-facing; the pipeline's is
+internal. So the pipeline's moves, to `bindings.PIPELINE_RECEIPT` =
+`pipeline_artifact_receipt.json`, and it moves everywhere at once: both runner writes including
+the measurement-exception path, the `RECEIPTS` entry, `REMOVABLE`, the dependency edge from
+`commission_report.json`, `compare`'s read-back, `replay`'s envelope read, and the three replay
+recordings that name it.
+
+**The deletion mechanism is proved in isolation**, because on a run that builds the pipeline's
+later write masks it. `invalidate` is also narrower than first reported: it is reached from
+`_finish`, so a run that stops at the agent commission never reaches it and leaves the manifest
+intact.
+
+The three replay goldens changed by exactly one identity each, in receipt listings and one
+derived stale list, moved to sorted position. `modify-ball-scope-refused` is the unaffected
+control and is untouched, as is the vendored historical delivery manifest under
+`benchmarks/references/`.
+
+
 ### Fixed - a certified backend no longer writes its build record over the designer's `model.py` (D35)
 
 Both certified backends wrote a five-line generated record to `output_dir / "model.py"` with

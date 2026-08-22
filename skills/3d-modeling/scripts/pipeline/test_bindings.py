@@ -43,6 +43,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from . import bindings as B
 from . import acceptance as ACC
 from . import cli
 from . import project as P
@@ -239,7 +240,7 @@ class CertifiedLaneTest(unittest.TestCase):
             report = _status(directory)
             self.assertEqual("NEEDS_MORE_EVIDENCE", report["final_status"])
             self.assertIn("final_status.json", report["stale"])
-            self.assertIn("artifact_manifest.json", report["stale"])
+            self.assertIn(B.PIPELINE_RECEIPT, report["stale"])
 
 
 # ---------------------------------------------------------------------------

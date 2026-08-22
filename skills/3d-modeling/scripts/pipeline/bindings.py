@@ -70,6 +70,23 @@ MODEL_CONTRACT_FILE = "model_contract.json"
 PLAN_FILE = "execution_plan.json"
 WITNESS_DIR = "witness"
 
+# The pipeline's own record of a build: backend, engine, cache, and the digests
+# of the contract and the three artifacts. **Not `artifact_manifest.json`.**
+#
+# That name is a team contract -- `team_tools.validators.CANONICAL_FILENAMES`
+# holds it, `designer_toolkit/receipts.py` writes it with
+# `contract: artifact-manifest`, and the charters point readers at it. The
+# pipeline wrote a wholly different object to the same path and then treated
+# that path as one of its own receipts, so a designer's manifest was both
+# overwritten by the runner and *deleted* by `invalidate`, which judged a file
+# the pipeline had never written stale against a dependency the designer had
+# never declared.
+#
+# The pipeline's is the one that moves, because the other is externally
+# specified: renaming that would turn a local collision into a contract
+# migration, while this name has no reader outside this package.
+PIPELINE_RECEIPT = "pipeline_artifact_receipt.json"
+
 CANDIDATE_STL = "candidate.stl"
 CANDIDATE_STEP = "candidate.step"
 DEFAULT_SOURCE = "model.py"
@@ -387,13 +404,13 @@ RECEIPTS: tuple[Receipt, ...] = (
     # it would turn "issued against a contract that has moved" into "there is no
     # contract", which says less and is no more true.
     Receipt(MODEL_CONTRACT_FILE, _model_contract, removable=False),
-    Receipt("artifact_manifest.json", _artifact_manifest,
+    Receipt(PIPELINE_RECEIPT, _artifact_manifest,
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,)),
     # The commissioning report records the contract it measured against and not
     # the mesh it measured; the manifest is where that digest lives.
     Receipt("commission_report.json", _commission,
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,
-                                        "artifact_manifest.json")),
+                                        PIPELINE_RECEIPT)),
     # The manufacturing report carries the commissioning verdict.
     Receipt("manufacturing_report.json", _manufacturing,
             depends_on=lambda payload: ("commission_report.json",)),

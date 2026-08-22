@@ -151,7 +151,7 @@ def formulation(work_dir: Path, *, features=(GRIP, BORE, CROWN),
                 "backend": "authored", "units": "mm",
                 "bbox_mm": {"x": bbox[0], "y": bbox[1], "z": bbox[2]},
                 "updated_utc": UTC}
-    (work_dir / "artifact_manifest.json").write_text(S.canonical_json(manifest),
+    (work_dir / B.PIPELINE_RECEIPT).write_text(S.canonical_json(manifest),
                                                      encoding="utf-8")
 
     measured = dict(measured or {})

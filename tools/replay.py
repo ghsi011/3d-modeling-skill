@@ -64,7 +64,7 @@ a different reason.
   in a file, so none of them churns:
   1. the plan digest the reviewer's envelope binds equals the plan digest on
      `final_status.json` -- the plan the reviewer was shown is the plan that ran;
-  2. the contract digest on `artifact_manifest.json` equals the one
+  2. the contract digest on `pipeline_artifact_receipt.json` equals the one
      `final_status.json` bound -- the receipt describes the contract it was
      judged against;
   3. the envelope echoed on each review report equals the envelope on the packet
@@ -1503,12 +1503,12 @@ def _observe_dir(directory: Path) -> dict[str, Any]:
         # `measured.envelope`. Recording a value twice does not protect it twice;
         # it makes a reader who finds the two disagreeing unable to say which is
         # the recording. `bbox_mm` stays only because `compare` reads it from
-        # `artifact_manifest.json` and `measured.envelope` comes off the
+        # `pipeline_artifact_receipt.json` and `measured.envelope` comes off the
         # commission report, so the two have different writers and agreeing is
         # a fact worth freezing. The detector result had one writer and is gone.
         "material": {
             "volume_mm3": _volume_row(report).get("measured_mm3"),
-            "bbox_mm": (_read(directory, "artifact_manifest.json")
+            "bbox_mm": (_read(directory, "pipeline_artifact_receipt.json")
                         or {}).get("bbox_mm"),
         },
         "outcome": {

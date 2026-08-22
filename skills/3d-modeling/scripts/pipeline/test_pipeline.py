@@ -23,6 +23,7 @@ from typing import Any
 
 import trimesh
 
+from . import bindings as B
 from . import analysis, commission, contract as C, fitted, intent, runner, safety, screening
 from . import schemas as S, status, templates as T, verification
 from . import witness as W
@@ -1113,10 +1114,12 @@ class DeterminismTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as raw:
                 out = Path(raw)
                 _run(out)
-                runs.append({name: (out / (name + ".json")).read_text(encoding="utf-8")
-                             for name in ("intent_manifest", "model_contract",
-                                          "artifact_manifest", "commission_report",
-                                          "final_status")})
+                runs.append({name: (out / name).read_text(encoding="utf-8")
+                             for name in ("intent_manifest.json",
+                                          "model_contract.json",
+                                          B.PIPELINE_RECEIPT,
+                                          "commission_report.json",
+                                          "final_status.json")})
         for name in runs[0]:
             with self.subTest(artifact=name):
                 self.assertEqual(runs[0][name], runs[1][name])
@@ -1729,7 +1732,7 @@ class CacheTest(unittest.TestCase):
 
     def _status(self, out: Path) -> str:
         return json.loads(
-            (out / "artifact_manifest.json").read_text(encoding="utf-8"))["cache"]["status"]
+            (out / B.PIPELINE_RECEIPT).read_text(encoding="utf-8"))["cache"]["status"]
 
     def test_a_second_identical_run_hits(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
