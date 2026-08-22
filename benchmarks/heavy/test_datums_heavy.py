@@ -236,7 +236,7 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
         contract = json.loads((work / ACC.ACCEPTANCE_FILE)
                               .read_text(encoding="utf-8"))
         assert contract["revision"] == 1, contract["revision"]
-        assert (work / "verification_report.json").is_file(), (
+        assert (work / "pipeline_verification_receipt.json").is_file(), (
             "the stored answer has to have produced a receipt, or there is "
             "nothing for the change below to invalidate")
         status = json.loads((work / "final_status.json").read_text(encoding="utf-8"))
@@ -246,7 +246,7 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
 
         # The bytes of the receipt that the datum correction must remove, taken
         # while it is still the current one. Compared after the rerun below.
-        before_digest = S.sha256_file(work / "verification_report.json")
+        before_digest = S.sha256_file(work / "pipeline_verification_receipt.json")
 
         # ---- the datum's value is corrected, its id kept --------------------
         _project(P, 12.9).save(work)
@@ -273,7 +273,7 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
             entry["changed"][0].startswith("requirement_sha256:"), entry["changed"]
 
         invalidated = entry["supersedes"]["invalidated_receipts"]
-        assert "verification_report.json" in invalidated, (
+        assert "pipeline_verification_receipt.json" in invalidated, (
             "the review receipt issued against revision 1 must be invalidated "
             f"through the existing graph; removed: {sorted(invalidated)}")
         assert "final_status.json" in invalidated, (
@@ -281,9 +281,9 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
 
         # The history must name the bytes it removed, not just the filename. This
         # is the one half of the deletion claim this test can honestly carry.
-        assert invalidated["verification_report.json"]["sha256"] == before_digest, (
+        assert invalidated["pipeline_verification_receipt.json"]["sha256"] == before_digest, (
             "the history must record the digest of the receipt it removed; it "
-            f"recorded {invalidated['verification_report.json']['sha256'][:12]} "
+            f"recorded {invalidated['pipeline_verification_receipt.json']['sha256'][:12]} "
             f"and the receipt was {before_digest[:12]}")
 
         # Whether the file was *unlinked* is deliberately NOT asserted here, and
@@ -293,8 +293,9 @@ def test_changing_a_referenced_datum_refuses_the_stored_review_answer() -> None:
         # history, which `acceptance.freeze` writes from `bindings.invalidate`'s
         # return value -- so deleting `path.unlink()` from `invalidate` would leave
         # them green. Correct. But asserting absence, or a changed digest, here does
-        # not close it: this run *regenerates* `verification_report.json` after the
-        # freeze -- as an error report recording the refusal -- so the revision-1
+        # not close it: this run writes `verification_review_error.json` after the
+        # freeze -- the error report recording the refusal, which since D37 is a
+        # file of its own rather than the receipt's name -- so the revision-1
         # bytes are gone from disk either way and any such assertion passes under
         # the mutation too. Measured, not assumed: the mutation survived that
         # assertion, which is why it is not in this file.

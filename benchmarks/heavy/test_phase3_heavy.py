@@ -708,7 +708,7 @@ class ModifyReviewRoundTripTest(unittest.TestCase):
                              "exists")
 
             report = json.loads(
-                (directory / "verification_report.json").read_text(encoding="utf-8"))
+                (directory / "pipeline_verification_receipt.json").read_text(encoding="utf-8"))
             self.assertNotIn("error", report,
                              "the answer was refused; the round trip did not close")
             self.assertEqual("PASS", report["decision"])
@@ -777,7 +777,7 @@ class ModifyReviewRoundTripTest(unittest.TestCase):
             code = cli.run([str(directory), "--no-render"])
             self.assertNotEqual(0, code)
             report = json.loads(
-                (directory / "verification_report.json").read_text(encoding="utf-8"))
+                (directory / "verification_review_error.json").read_text(encoding="utf-8"))
             self.assertIn("ReviewError", report["error"])
             self.assertNotIn("decision", report,
                              "a refused answer must not leave a decision behind")
@@ -907,7 +907,7 @@ class ModifyRerunRejectionTest(unittest.TestCase):
             self.assertNotEqual(0, code,
                                "a job whose bound input changed under a stored "
                                "answer must not report success")
-            report = directory / "verification_report.json"
+            report = directory / "verification_review_error.json"
             self.assertTrue(report.is_file(),
                             "the refusal has to be written down; a run that "
                             "leaves no report leaves no reason")
@@ -977,7 +977,7 @@ class ModifyRerunRejectionTest(unittest.TestCase):
             self.assertNotEqual(0, code,
                                 "an answer bound to the previous envelope shape "
                                 "was accepted and the job finished")
-            report = json.loads((directory / "verification_report.json")
+            report = json.loads((directory / "verification_review_error.json")
                                 .read_text(encoding="utf-8"))
             self.assertIn("unknown protocol_version 2", report.get("error", ""))
             self.assertIn(f"this build speaks {R.REVIEW_PROTOCOL_VERSION}",
@@ -1130,7 +1130,7 @@ class TwoScopeModifyTest(unittest.TestCase):
                                  "sampled must not move a sample plan digest")
 
             self.assertNotEqual(0, code)
-            report = json.loads((directory / "verification_report.json")
+            report = json.loads((directory / "verification_review_error.json")
                                 .read_text(encoding="utf-8"))
             self.assertIn("ReviewError", report.get("error", ""))
             self.assertFalse((directory / "final_status.json").is_file())

@@ -67,10 +67,10 @@ class DerivedStatusTest(unittest.TestCase):
             self.assertEqual("STALE", report["final_status"])
             self.assertEqual("VERIFIED", report["stored_status"])
             self.assertIn("final_status.json", report["stale"])
-            self.assertIn("verification_report.json", report["stale"])
+            self.assertIn("pipeline_verification_receipt.json", report["stale"])
             self.assertTrue(
                 any(EVIDENCE_FILE in row
-                    for row in report["stale"]["verification_report.json"]),
+                    for row in report["stale"]["pipeline_verification_receipt.json"]),
                 report["stale"])
 
     def test_the_derived_status_never_outruns_the_stored_one(self) -> None:
@@ -119,7 +119,7 @@ class DerivedStatusTest(unittest.TestCase):
             before = _digests(directory)
 
             self.assertEqual(cli.NEEDS_ACTION, cli.status([str(directory)]))
-            self.assertTrue((directory / "verification_report.json").is_file())
+            self.assertTrue((directory / "pipeline_verification_receipt.json").is_file())
             self.assertTrue((directory / "final_status.json").is_file())
             self.assertEqual(before, _digests(directory),
                              "status wrote to the directory it was describing")
@@ -134,13 +134,13 @@ class DerivedStatusTest(unittest.TestCase):
             printed = captured.getvalue()
             self.assertIn("STALE", printed)
             self.assertIn("none is current", printed)
-            self.assertIn("stale        verification_report.json", printed)
+            self.assertIn("stale        pipeline_verification_receipt.json", printed)
 
     def test_without_the_envelope_s_evidence_digests_the_change_is_invisible(self) -> None:
         """The mutation: stop reading what the review bound and the claim survives.
 
-        `verification_report.json` records the digest of every file the reviewer
-        was shown. Reading it is the whole of the protection above -- with that
+        `pipeline_verification_receipt.json` records the digest of every file the
+        reviewer was shown. Reading it is the whole of the protection above -- with that
         one reader neutered, a corrected caliper sheet moves nothing anybody
         checks and the stored VERIFIED reads as current.
         """
@@ -173,7 +173,7 @@ class ScopedInvalidationTest(unittest.TestCase):
             removed = B.invalidate(directory, evidence_dir=directory,
                                    model_name="model.py")
 
-            self.assertEqual({"verification_report.json", "final_status.json"},
+            self.assertEqual({"pipeline_verification_receipt.json", "final_status.json"},
                              set(removed))
             for name in ("pipeline_artifact_receipt.json", "commission_report.json",
                          "model_contract.json"):
@@ -214,10 +214,19 @@ class ScopedInvalidationTest(unittest.TestCase):
             self.assertNotEqual(0, cli.run([str(directory), "--no-render"]))
             self.assertFalse((directory / "final_status.json").is_file())
             self.assertEqual("NOT_RUN", _status(directory)["final_status"])
-            self.assertNotEqual(
-                "PASS",
-                _read(directory / "verification_report.json").get("decision"),
+            # Since D37 the refusal and the receipt are different files, and the
+            # stale receipt is invalidated rather than overwritten -- so the
+            # original assertion's intent ("no PASS survives the corrected
+            # evidence") is now that no receipt is left at all, with the reason
+            # recorded next to it.
+            self.assertFalse(
+                (directory / "pipeline_verification_receipt.json").is_file(),
                 "the answer written against the old caliper sheet was promoted")
+            self.assertIn(
+                "ReviewError",
+                _read(directory / "verification_review_error.json").get("error", ""),
+                "a refusal has to be written down; a run that leaves no "
+                "diagnostic leaves no reason")
             self.assertTrue((directory / "commission_report.json").is_file(),
                             "the measurements of an unchanged candidate went "
                             "with the review that was shown a changed file")
