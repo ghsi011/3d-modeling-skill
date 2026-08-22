@@ -1030,3 +1030,53 @@ rows bound the fix: with no plan on disk the template is still generated, and an
 existing plan that cannot be read or does not validate is refused without being
 overwritten, because a run that repairs an unbuildable plan by substituting its
 own turns the engineer's error into the pipeline's silent decision.
+
+## D35 — a certified backend writes its build record over the designer's `model.py`
+
+**Where.** `pipeline/backends/trimesh_manifold.py` and
+`pipeline/backends/build123d_backend.py`, in each backend's `build()`.
+
+**What is wrong.** Both write a five-line generated record to
+`output_dir / "model.py"` with no existence check, and `output_dir` is the work
+directory, which for an unbranched project is the project root. `model.py` there
+is the designer's file — the designer charter tells a designer on a certified
+`INCONSEQUENTIAL` `DIRECT` job to produce it with `dt.py build --out model.py`
+and then "read it, and edit it" — and the builder is chosen from the project and
+the route rather than from what is on disk, so a project can hold an authored
+`model.py` and still route `CERTIFIED_TEMPLATE`.
+
+Worse than D34 on two counts. `model.py` is the designer's entire deliverable
+rather than one contract file among several, and the run **exits reporting
+success** with no finding, so the only symptom is that the designer's next read
+of their own file returns a summary of a part a template built.
+
+Two docstrings in the same package state the rule this breaks
+(`backends/authored.py`, `isolation.py`).
+
+**Evidence.** Reproduced on `237c36a`: a distinctive authored `model.py` in a
+certified c_clip job comes back as `# Generated from model_contract.json …
+TEMPLATE = 'c_clip'`, exit 3, no finding. Both backends carry their own copy of
+the same five lines and both destroy the file.
+
+**What it can cause.** Silent loss of authored work, and — if repaired the
+obvious way — a receipt that lies. `BuildArtifacts.source_path` feeds
+`artifact_manifest.json`'s `source_sha256`, which travels into both review
+envelopes, `final_status.json`'s `artifact_hashes.source`, and the `source`
+binding every receipt is checked on. Preserving the designer's file while still
+naming it the source would make all of those attest that their module produced a
+part a certified template produced.
+
+**The fixture that must fail before the fix lands.** Seed a distinctive authored
+`model.py`, execute the certified build path on **each** backend, and require:
+the authored file byte-identical afterwards; the generated record still present
+and still naming the template, backend and parameters actually executed; and
+`source_sha256` equal to the record's digest and not the authored file's.
+Control: with no authored `model.py`, the backend still produces its record and
+every receipt that depends on it.
+
+**One coupling the repair must carry with it.** `bindings.current()` does not
+read `BuildArtifacts`; it re-derives the `source` binding from a filename, and on
+the certified lane — no frozen acceptance contract, no declared `project.model` —
+the only thing naming that file is the fallback. Rename the record without moving
+that fallback and the binding silently resolves to a file nothing writes any
+more, leaving `source` null on every certified job with no test going red.

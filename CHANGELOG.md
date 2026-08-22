@@ -6,6 +6,35 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed - a certified backend no longer writes its build record over the designer's `model.py` (D35)
+
+Both certified backends wrote a five-line generated record to `output_dir / "model.py"` with
+no existence check, and for an unbranched project that directory is the project root. The
+designer charter tells a designer on a certified `DIRECT` job to produce `model.py` there and
+edit it, and the builder is chosen from the project and the route rather than from what is on
+disk - so a run destroyed the designer's entire deliverable and **exited reporting success**.
+
+**A name of its own, not an existence check.** The generated file is not a source; it is the
+backend's account of what it executed. Refusing to write where a designer file already sits
+would preserve the file and leave `BuildArtifacts.source_path` pointing at code the backend
+did not run - so `artifact_manifest.json`'s `source_sha256`, both review envelopes,
+`final_status.json`'s `artifact_hashes.source` and the `source` binding would all attest that
+the designer's module produced a part a certified template produced. That is a worse claim
+than the one it replaces. The record is now `backend_build_record.py` and `source_path`
+follows it there.
+
+**The coupling that would have broken silently.** `bindings.current()` re-derives the `source`
+binding from a *filename*, not from `BuildArtifacts`. On the certified lane there is no frozen
+acceptance contract and no declared `project.model`, so the fallback is the only thing naming
+that file; moving the record without moving the fallback would have left `source` null on
+every certified job with nothing going red. `_source_name` now resolves the record where one
+is present, and still answers `model.py` where none is - which is the authored lane's
+pre-contract case and is asserted as a control.
+
+The authored lane is untouched: `backends/authored.py` **adopts** an existing module and never
+writes one, so there `source_path` is genuinely the designer's file.
+
+
 ### Fixed — a run no longer overwrites the print engineer's accepted plan (D34)
 
 `cli._print_plan` generated a plan template from the printer and the declared envelope

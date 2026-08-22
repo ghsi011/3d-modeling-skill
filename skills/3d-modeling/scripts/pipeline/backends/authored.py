@@ -10,9 +10,11 @@ is left is the part of a backend that was always a receipt -- which kernel made
 this, which engine resolved the booleans, how long it took -- and the checks that
 the files it names are on disk.
 
-The model module is never rewritten. The certified backends drop a `model.py`
-beside the STL as a record of what was built; doing that here would overwrite the
-authored source with a summary of itself.
+The model module is never rewritten. The certified backends write a record of
+what they built beside the STL -- `bindings.BACKEND_RECORD`, since D35; it used
+to be `model.py`, and that is what destroyed a designer's source on the certified
+lane. Doing it here would overwrite the authored source with a summary of itself,
+which is why this backend adopts an existing module and writes none.
 """
 from __future__ import annotations
 

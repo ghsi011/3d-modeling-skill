@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import bindings
+from .. import schemas as S
 from . import BuildArtifacts
 import mesh_io
 
@@ -97,17 +99,25 @@ class Build123dBackend:
             step_path = output_dir / "candidate.step"
             export_step(part, str(step_path))
 
-        (output_dir / "model.py").write_text(
-            "# Generated from model_contract.json. The contract is authoritative;\n"
-            "# this file records what was built and is not a source of expectations.\n"
-            f"TEMPLATE = {contract.template!r}\n"
-            f"BACKEND = {self.name!r}\n"
-            f"PARAMETERS = {contract.parameters!r}\n",
-            encoding="utf-8")
+        # `BACKEND_RECORD`, never `model.py` and never any `*.py`: the boundary
+        # stages every top-level Python file beside the model as the designer's,
+        # so a `.py` record would destroy a helper that happened to share its
+        # name. Nothing executes this -- it is provenance -- so it is a receipt.
+        record_path = output_dir / bindings.BACKEND_RECORD
+        record_path.write_text(S.canonical_json({
+            "schema_version": bindings.BACKEND_RECORD_SCHEMA,
+            "record": "backend-build",
+            "note": "Generated from model_contract.json. The contract is "
+                    "authoritative; this records what was built and is not a "
+                    "source of expectations.",
+            "template": contract.template,
+            "backend": self.name,
+            "parameters": contract.parameters,
+        }), encoding="utf-8")
 
         return BuildArtifacts(
             stl_path=stl_path, step_path=step_path,
-            source_path=output_dir / "model.py", backend=self.name,
+            source_path=record_path, backend=self.name,
             backend_version=f"build123d {getattr(build123d, '__version__', 'unknown')}",
             tessellation={"linear_deflection": LINEAR_DEFLECTION,
                           "angular_deflection": ANGULAR_DEFLECTION},
