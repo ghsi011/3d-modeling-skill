@@ -6,6 +6,35 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed - a malformed review can no longer invert a verifier's REJECT (D37)
+
+`verification_report.json` is a team contract owned by the verifier alone - `CANONICAL_FILENAMES`
+names it, `CONTRACT_KIND_BY_KEY` gives it `contract: verification-report`, and `_EXPECTED_OWNERS`
+lists `{verifier}` and nothing else. The pipeline wrote **two** different objects over it.
+
+The success path wrote its own normalized review receipt. The exception path wrote
+`{schema_version, error}` when the adapter's answer would not parse - and that is the worst
+member of this class. The others lose work; this one turns "a person found a defect" into
+"something went wrong". A reader looking for a verifier's REJECT found a note that parsing had
+failed: a verdict not lost but **inverted**.
+
+**Two renames, not one.** The receipt moves to `bindings.PIPELINE_VERIFICATION_RECEIPT` =
+`pipeline_verification_receipt.json`, because two schemas were sharing a filename rather than two
+authors sharing a schema. The diagnostic gets `bindings.VERIFICATION_ERROR` =
+`verification_review_error.json` and its own result key, because it is neither a report nor a
+receipt. Declaring the pipeline a co-owner would have formalised the collision instead of
+repairing it, so `_EXPECTED_OWNERS["verification_report"]` is unchanged.
+
+Legacy compatibility ships with the rename rather than after a second project goes stale:
+read-only, current-first, and positively schema-discriminated on the keys only the pipeline ever
+wrote **plus** the absence of the `contract` marker. The error stub fails that predicate by
+construction, so a record of parsing failure can never satisfy a check that binds verification
+evidence. `written["verification_report"]` stays as the success path's API key, for the reason
+`written["artifact_manifest"]` kept its own.
+
+With D34, D35 and D36 this closes the class: every other canonical team filename is absent from
+`pipeline/*.py` entirely.
+
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 
 `artifact_manifest.json` is a team contract - `CANONICAL_FILENAMES` names it,

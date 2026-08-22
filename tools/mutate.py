@@ -430,7 +430,7 @@ def pytest_runner(root: Path) -> Callable[[Sequence[str]], bool]:
                               check=False, env=env)
         if done.returncode == 0:
             return True
-        if done.returncode != 0:
+        if done.returncode == 1:
             return False
         raise RunnerAmbiguous(
             f"pytest exited {done.returncode} for {list(tests)}, which is not "

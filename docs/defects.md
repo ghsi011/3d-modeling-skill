@@ -1135,3 +1135,77 @@ and the verifier packet's `artifact_manifest` key are not filesystem names, and
 nothing collides on them; moving those would change a reviewer-facing packet
 shape for no correctness gain. `verification_report.json` has a related but
 differently-shaped collision and is its own slice.
+
+## D37 — the pipeline's review record squats on the verifier's report, and its error stub inverts a verdict
+
+**Status.** Fixed.
+
+**Where.** `runner.py` verification block, both exits; `bindings.RECEIPTS`,
+`REMOVABLE` and `_status_depends`.
+
+**What it is.** `verification_report.json` is a team contract owned by the
+verifier alone: `CANONICAL_FILENAMES` names it, `CONTRACT_KIND_BY_KEY` gives it
+`contract: verification-report`, `_EXPECTED_OWNERS` lists `{verifier}` and
+nothing else. The pipeline wrote two different objects over that path.
+
+The success path wrote its own normalized review receipt — `schema_version`,
+`evidence_packet_sha256`, `reviewer`, `review_envelope`, `reviewed_questions`,
+`decision`. A genuine review record wearing someone else's name.
+
+The exception path wrote `{schema_version, error}` when the adapter's answer
+would not parse. **That one is the worst member of this class.** The others lose
+work; this one converts "a person found a defect" into "something went wrong".
+A reader who went looking for a verifier's `REJECT` found a note that parsing had
+failed — a verdict not lost but *inverted*.
+
+**What it can cause.** Silent loss of a verifier's report, and — on the exception
+path — a rejection reading as an infrastructure problem, which is the failure
+mode most likely to get a defective part shipped.
+
+**The fix, and why (b) rather than co-ownership.** The `print_plan` precedent
+does not transfer: `builtin-direct-template` genuinely authors the same print-plan
+*contract*, so it is a second legitimate author of one schema. Here there are two
+different schemas sharing one filename, so adding `pipeline` to
+`_EXPECTED_OWNERS["verification_report"]` would have formalised the collision
+rather than repaired it. The pipeline's receipt moves to
+`bindings.PIPELINE_VERIFICATION_RECEIPT`, and the diagnostic — which is neither a
+report nor a receipt — gets `bindings.VERIFICATION_ERROR` and its own result key
+`written["verification_error"]`. `_EXPECTED_OWNERS` is unchanged.
+
+The predicate is frozen off the two real schemas rather than guessed:
+`"contract" not in payload and {schema_version, evidence_packet_sha256,
+reviewed_questions} <= keys`. The error stub fails it **by construction**,
+carrying neither of the last two — which is the design, so that a record of
+parsing failure can never satisfy a predicate that binds verification evidence.
+
+**Compatibility, built in from the first version.** A project completed before
+this rename keeps its receipt under the old name and must not read as stale
+merely because the software was upgraded. Read-only, current-first,
+schema-discriminated; `invalidate` still resolves through `receipt.name`, so the
+compatibility reader acquires no deletion authority over a file the verifier
+owns. `_receipt_path`'s single hardcoded legacy name became a table, since the
+second member of this class arrived one slice after the first.
+
+**The fixtures that must fail before the fix lands.** Seed a verifier's
+`REJECT`; require it byte-identical after a successful verification *and* after a
+malformed one; require the receipt and the diagnostic each written under their
+own name; require `invalidate` unable to touch the team report but still able to
+remove the pipeline's receipt; require a legacy project still bound, a genuine
+team report unable to masquerade, and the new receipt to win where both exist.
+
+**One control had to be replaced, and the reason is worth recording.** The
+obvious negative control — a plain team report at the legacy pathname — is
+rejected by the *shape* half of the predicate on its own, because a verifier's
+contract carries none of the pipeline's keys. So deleting the `contract`-marker
+half left every row green: the control passed for the wrong reason and could not
+have failed. The replacement carries the full pipeline shape **and** the marker,
+making the marker independently load-bearing, and that mutation now fails exactly
+that row.
+
+**Not in scope, deliberately.** `written["verification_report"]` stays as the
+success path's result key, for the reason `written["artifact_manifest"]` kept
+its own: it is an API key, not a filesystem ownership declaration.
+`safety_verification_report.json` is not a canonical team filename — the pipeline
+owns it outright — so it does not collide and does not move. With D34, D35 and
+D36 this closes the class: every other canonical team filename is absent from
+`pipeline/*.py` entirely.
