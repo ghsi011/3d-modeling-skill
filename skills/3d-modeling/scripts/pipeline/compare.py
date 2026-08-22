@@ -117,7 +117,7 @@ READS: tuple[str, ...] = (
     "model_contract.json",
     "acceptance_contract.json",
     "commission_report.json",
-    "artifact_manifest.json",
+    B.PIPELINE_RECEIPT,
     "final_status.json",
 )
 
@@ -479,7 +479,7 @@ def _measured(reading: dict[str, Any]) -> dict[str, Any]:
     D27.
     """
     report = reading["receipts"]["commission_report.json"] or {}
-    manifest = reading["receipts"]["artifact_manifest.json"] or {}
+    manifest = reading["receipts"][B.PIPELINE_RECEIPT] or {}
     volume = SCR.detector(report, "volume") or {}
     return {
         "bbox_mm": manifest.get("bbox_mm"),

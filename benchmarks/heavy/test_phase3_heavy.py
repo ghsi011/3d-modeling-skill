@@ -1036,7 +1036,7 @@ class ModifyCleanCloneTest(unittest.TestCase):
                             "a MODIFY job with an edit scope owes evidence digests; "
                             "comparing two empty dicts proves nothing")
 
-            manifests = [json.loads((d / "artifact_manifest.json").read_text(encoding="utf-8"))
+            manifests = [json.loads((d / "pipeline_artifact_receipt.json").read_text(encoding="utf-8"))
                          for d in (first, second)]
             self.assertEqual(manifests[0]["stl_sha256"], manifests[1]["stl_sha256"])
 

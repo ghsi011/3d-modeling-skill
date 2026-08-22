@@ -216,7 +216,7 @@ class TheManifestBindsTheRecordAndNotTheDesignersFileTest(unittest.TestCase):
     """**The claim the whole namespace correction exists to make honest.**
 
     The rows above prove the backend writes elsewhere. This proves the receipt
-    followed it. `artifact_manifest.json`'s `source_sha256` is what says "this is
+    followed it. `pipeline_artifact_receipt.json`'s `source_sha256` is what says "this is
     the source that produced this STL", and it travels into both review
     envelopes, `final_status.json`'s `artifact_hashes.source`, and the `source`
     binding every receipt is checked on.
@@ -240,7 +240,7 @@ class TheManifestBindsTheRecordAndNotTheDesignersFileTest(unittest.TestCase):
                 model.write_text(AUTHORED_SOURCE, encoding="utf-8")
             cli.run([str(directory), "--no-render"])
             manifest = json.loads(
-                (directory / "artifact_manifest.json").read_text(encoding="utf-8"))
+                (directory / "pipeline_artifact_receipt.json").read_text(encoding="utf-8"))
             record = directory / B.BACKEND_RECORD
             return {
                 "bound": manifest["source_sha256"],

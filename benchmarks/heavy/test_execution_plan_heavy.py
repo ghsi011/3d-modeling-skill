@@ -157,7 +157,7 @@ class TheCustomLaneMayNowClaimTest(unittest.TestCase):
             self.assertEqual("PASS", report["verdict"], report["checks"])
             self.assertEqual("AVAILABLE", _final(directory)["lane_status"])
             for receipt in ("acceptance_contract.json", "model_contract.json",
-                            "artifact_manifest.json", "final_status.json"):
+                            "pipeline_artifact_receipt.json", "final_status.json"):
                 self.assertTrue((directory / receipt).is_file(), receipt)
 
     def test_a_verified_custom_part_reaches_verified(self) -> None:
@@ -263,7 +263,7 @@ class ADeclaredModelIsNeverDiscardedTest(unittest.TestCase):
             self.assertEqual(0, cli.run([str(directory), "--no-render"]))
 
             artifact = json.loads(
-                (directory / "artifact_manifest.json").read_text(encoding="utf-8"))
+                (directory / "pipeline_artifact_receipt.json").read_text(encoding="utf-8"))
             self.assertEqual({"x": 40.0, "y": 30.0, "z": 10.0}, artifact["bbox_mm"],
                              "the certified template was built instead of the "
                              "model the project declared")
