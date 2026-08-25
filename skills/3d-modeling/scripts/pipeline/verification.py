@@ -65,11 +65,30 @@ def build_packet(*, brief: str, intent: dict[str, Any], contract: dict[str, Any]
     verifier reading it starts checking whether the code does what the code says
     -- which is the designer's own question, asked again by someone with less
     context.
+
+    **The numbers here are the claim under audit, not settled fact.** This packet
+    used to say "do not recompute them", which is the opposite of what
+    `roles/verifier.md` requires of the reader it is handed to: *audit upstream
+    measurements*, *independently compare*, *an independent recomputation
+    compared check-by-check*, and -- the reason -- *independently of the
+    toolkit's, so a silent disagreement between them is the cheapest bug*.
+
+    Two authorities reaching one role with opposite instructions about the single
+    thing that role exists to do. The charter is the one that is right: a verdict
+    that trusts the numbers it is auditing is not a second opinion, and a
+    verifier that had obeyed this packet would have returned a decision fast and
+    hollow, having checked nothing the pipeline had not already checked. Nothing
+    downstream would have noticed -- the report parses, carries a decision, and
+    binds.
+
+    They are still *given*, because a re-derivation nobody can compare against is
+    not an audit either. The instruction is to check them, not to work blind.
     """
     return Packet({
-        "task": ("Decide whether the delivered part is the one the brief asked for. "
-                 "The numbers below were measured deterministically and are not in "
-                 "dispute -- do not recompute them."),
+        "task": ("Decide whether the delivered part is the one the brief asked "
+                 "for. The numbers below are what the pipeline measured and are "
+                 "the claim under audit: re-derive them independently and report "
+                 "any disagreement, which is a finding in itself."),
         "brief": brief,
         "intent_manifest": intent,
         "model_contract": contract,
