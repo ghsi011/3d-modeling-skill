@@ -130,6 +130,17 @@ from your geometric verdict. Your `PASS` remains valid for either consequence cl
    compared against the designer's receipts, and writing over them destroys what you came to
    check. `audit` refuses that outright, because a run once did it.
 
+   **Ask `dt.py doctor` before this call, not after something fails.** It names the
+   interpreter, prints the exact invocation above, and lists what this installation
+   can actually do. Rendering and photo overlay are optional extras — `render` and
+   `visual` in `pyproject.toml`, kept out of the default on purpose so a plain install
+   pulls in no GL context — so whether you have them is a property of the environment
+   you were dispatched into rather than of the skill, and **step 8 is where you need
+   them**. A measured verification inferred from one failed import that the renderer
+   was absent and built an ephemeral `uv` overlay before doing any visual work;
+   `doctor` answers that in one call, and reports the renderer *present* on the
+   reference installation.
+
    Two things about the numbers. The raw parse is reported, not judged: an STL stores no
    vertex sharing, so a sound part reads as many components and `watertight=False`, and the
    one number that means anything there — degenerate faces — is the same number the
