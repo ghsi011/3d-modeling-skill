@@ -145,6 +145,10 @@ one, so reading its patterns is a page bought and unused:
    patterns first: a measured run spent its single largest block of time deriving the
    trimesh conventions from template source because the charter pointed only at backends its
    interpreter did not have. Everything else about the commission is identical either way.
+
+   Either way, settle the print orientation before the first solid — step 5. A part
+   authored first and oriented afterwards meets the support rule by distortion or by
+   rebuild; a part authored into its orientation usually meets it for free.
 4. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
    If an imported/off-template solid is supplied as the starting artifact and there is no
@@ -156,6 +160,25 @@ one, so reading its patterns is a page bought and unused:
    per-interface fit strategy geometrically: derive candidate mating geometry from the print
    plan's interface declarations and the metrologist's as-observed geometry in
    `dimensions.md`. The designer implements the declared fit intent; it does not choose it.
+
+   **Read the support rule before you author geometry, not after the gate refuses.**
+   The plan fixes which way is down — `model_to_printer_matrix` — but which of *your*
+   faces lands there is yours, and you decide it by how you author the part, not by a
+   transform bolted on afterwards. Take the rule's `disposition` and
+   `downward_normal_z_max` as constraints on the shape itself; the ordinary answer is a
+   large flat functional face on the bed, so the rest falls out self-supporting.
+
+   Three measured dispatches, every one under a `SELF_SUPPORT_REQUIRED` rule whose
+   ceiling is `0.0 mm2`. One read the rule first, seated the part's flat wall face on
+   the bed, and passed the support check on its first build — **zero iterations spent
+   on that gate**, 22.3 minutes for the whole dispatch. Two authored geometry first and
+   met the rule afterwards: one spent three of its four iterations there (44.1 min),
+   the other rebuilt the entire model in a second CAD kernel to clear a tessellation
+   sliver (38.7 min). **This is not a controlled comparison** — they were different
+   parts, and both slow runs carried a gridfinity foot profile whose inter-foot gable
+   is a genuinely harder case. What it does settle is that the ceiling is not
+   inherently expensive: a part that picks its orientation from the rule can meet it at
+   literal zero on the first try.
 6. Organize boolean operations robustly; preserve editable source; label bodies and exports.
 7. The commission exports, hashes and renders for you — a section and an eight-view exterior
    sheet, both listed in the manifest it writes. Produce an extra view only when one of those
