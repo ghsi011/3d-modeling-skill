@@ -145,6 +145,41 @@ def _write(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+# The measurement block's four steps, in the order it runs them. Each records its
+# own timing on success, so the step that raised is the first one with no timing
+# -- read off state rather than guessed, and still right when a step is added.
+_MEASUREMENT_STEPS = ("mesh_load", "commission", "screening", "witness")
+# Exceptions about the *shape* of what a step was handed, as opposed to anything
+# it measured. These are the ones that used to reach a designer as bare
+# `KeyError: 0`, with nothing to say where to look.
+_SHAPE_ERRORS = (TypeError, KeyError, IndexError, AttributeError)
+
+
+def _measurement_failure(exc: BaseException, timings: dict[str, float]) -> str:
+    """Say which step failed, because `KeyError: 0` on its own says nothing.
+
+    The whole measurement block is wrapped, deliberately -- a part that cannot be
+    measured is a finding and findings get written down. But the message was
+    `f"{type(exc).__name__}: {exc}"`, so a malformed declaration came back as
+    `measurement: KeyError: 0`: no step, no file, no shape. One designer run
+    spent six invocations against messages of that kind.
+
+    Naming the step is most of the fix. The extra sentence for shape errors says
+    where such a thing usually comes from without asserting whose fault it is --
+    a `TypeError` in a measurement step can be a bad declaration or a bug here,
+    and the message must not pretend to know which.
+    """
+    step = next((name for name in _MEASUREMENT_STEPS if name not in timings),
+                _MEASUREMENT_STEPS[-1])
+    said = f"{step} raised {type(exc).__name__}: {exc}"
+    if isinstance(exc, _SHAPE_ERRORS):
+        return (f"{said}. A shape error inside a measurement step is usually a "
+                f"declaration the step could not read rather than a measurement "
+                f"of the part; the checks it was measuring are declared in "
+                f"{B.MODEL_CONTRACT_FILE}.")
+    return said
+
+
 def run(request: JobRequest) -> JobResult:
     """One invocation, and the ledger of what it spent.
 
@@ -546,7 +581,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         timings["witness"] = time.perf_counter() - mark
     except Exception as exc:                        # noqa: BLE001 - see above
         written["artifact_manifest"] = _write(out / B.PIPELINE_RECEIPT, artifact)
-        return JobResult(False, "measurement", f"{type(exc).__name__}: {exc}",
+        return JobResult(False, "measurement", _measurement_failure(exc, timings),
                          written, timings, llm_calls, None)
 
     # Durations live in their own file, deliberately unhashed. Serializing them

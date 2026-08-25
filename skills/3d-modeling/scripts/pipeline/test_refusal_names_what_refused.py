@@ -67,24 +67,23 @@ class TheHeadlineNamesWhatRefusedTest(unittest.TestCase):
                 self.assertEqual(
                     "the project does not describe a job that can be routed", reason)
 
-    def test_a_proposal_refusal_names_the_proposal(self) -> None:
-        headline, _ = cli._refusal_wording(
-            "proposal", [F.problem(F.ARTIFACT_REFUSED, "design_proposal.json",
-                                   "revision 2 is not a superset")])
-        self.assertIn("design_proposal.json", headline)
-
-    def test_every_subject_is_named_when_several_files_refuse(self) -> None:
-        headline, _ = cli._refusal_wording("plan", [
-            F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[0]", "a"),
-            F.problem(F.ARTIFACT_REFUSED, "model.py", "b")])
-        self.assertIn("print_plan_checks.json", headline)
-        self.assertIn("model.py", headline)
-
-    def test_a_subject_is_named_once_however_many_findings_it_carries(self) -> None:
-        headline, _ = cli._refusal_wording("plan", [
-            F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[0]", "a"),
-            F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[1]", "b")])
-        self.assertEqual(1, headline.count("print_plan_checks.json"))
+    def test_the_headline_names_every_subject_exactly_once(self) -> None:
+        with self.subTest("a proposal refusal names the proposal"):
+            headline, _ = cli._refusal_wording(
+                "proposal", [F.problem(F.ARTIFACT_REFUSED, "design_proposal.json",
+                                       "revision 2 is not a superset")])
+            self.assertIn("design_proposal.json", headline)
+        with self.subTest("two files that refuse are both named"):
+            headline, _ = cli._refusal_wording("plan", [
+                F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[0]", "a"),
+                F.problem(F.ARTIFACT_REFUSED, "model.py", "b")])
+            self.assertIn("print_plan_checks.json", headline)
+            self.assertIn("model.py", headline)
+        with self.subTest("one file with several findings is named once"):
+            headline, _ = cli._refusal_wording("plan", [
+                F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[0]", "a"),
+                F.problem(F.ARTIFACT_REFUSED, "print_plan_checks.json[1]", "b")])
+            self.assertEqual(1, headline.count("print_plan_checks.json"))
 
     def test_it_falls_back_to_the_project_when_a_finding_names_nothing(self) -> None:
         """A finding with no `where` must not produce a headline naming the empty
@@ -97,23 +96,19 @@ class TheHeadlineNamesWhatRefusedTest(unittest.TestCase):
 class TheSubjectIsAFileAndNotAFieldTest(unittest.TestCase):
     """`_subject_of` -- the headline wants the file, the finding keeps the path."""
 
-    def test_a_field_path_is_trimmed_to_its_file(self) -> None:
-        self.assertEqual("design_proposal.json",
-                         cli._subject_of("design_proposal.json.params"))
-
-    def test_an_index_is_trimmed_to_its_file(self) -> None:
-        self.assertEqual("print_plan_checks.json",
-                         cli._subject_of("print_plan_checks.json[3]"))
-
-    def test_an_extension_is_not_mistaken_for_a_field(self) -> None:
-        """The trap this predicate exists for: splitting on the first dot turns
-        `model.py` into `model`, which names nothing on disk."""
-        self.assertEqual("model.py", cli._subject_of("model.py"))
-        self.assertEqual("model.py", cli._subject_of("model.py.PARAMS"))
-
-    def test_a_bare_field_name_survives_unchanged(self) -> None:
-        """`envelope_mm` is not a file and must not be mangled into one."""
-        self.assertEqual("envelope_mm", cli._subject_of("envelope_mm"))
+    def test_a_where_is_trimmed_to_the_file_it_names(self) -> None:
+        """The third case is the trap this predicate exists for: splitting on the
+        first dot turns `model.py` into `model`, which names nothing on disk. The
+        last is the other direction -- `envelope_mm` is not a file and must not be
+        mangled into one."""
+        for where, expected in (
+                ("design_proposal.json.params", "design_proposal.json"),
+                ("print_plan_checks.json[3]", "print_plan_checks.json"),
+                ("model.py", "model.py"),
+                ("model.py.PARAMS", "model.py"),
+                ("envelope_mm", "envelope_mm")):
+            with self.subTest(where=where):
+                self.assertEqual(expected, cli._subject_of(where))
 
 
 if __name__ == "__main__":
