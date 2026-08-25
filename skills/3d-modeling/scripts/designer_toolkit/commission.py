@@ -40,6 +40,7 @@ from ._bootstrap import as_mesh  # noqa: F401  (also puts scripts/ on sys.path)
 from . import edges, fit, orient, static  # noqa: E402
 from pipeline import schemas as pipeline_schemas  # noqa: E402
 from .metrics import measure  # noqa: E402
+from .metrics import overhang_locations  # noqa: E402
 from .verdict import FAIL as _FAIL  # noqa: E402
 from .verdict import PASS as _PASS  # noqa: E402
 from .verdict import SKIP as _SKIP  # noqa: E402
@@ -604,8 +605,26 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
         # measured run spent three full build/export/measure cycles arriving at
         # two of these -- a vertical-walled slot and a teardrop bore roof --
         # both of which fdm-design.md already documents.
+        # Where, not just how much. A measured run was told
+        # `0.008 mm2 past normal_z <= -0.73` three separate times and each time
+        # loaded the STL in trimesh itself to print the offending centroids,
+        # because a real unsupported face and a lofted surface tessellating
+        # steeper than its nominal angle report the same number and need
+        # opposite responses.
+        where = ""
+        if not ok and area > ceiling + TESSELLATION_NOISE_MM2:
+            worst = overhang_locations(
+                mesh, threshold=threshold, bed_z=bed_z,
+                bed_tolerance=bed_tolerance,
+                transform=rule.get("model_to_printer_matrix"))
+            if worst:
+                where = "The largest offending facets are at " + "; ".join(
+                    f"({f['centroid_mm']['x']}, {f['centroid_mm']['y']}, "
+                    f"{f['centroid_mm']['z']}) {f['area_mm2']:g} mm2 "
+                    f"normal_z {f['normal_z']}" for f in worst) + ". "
         advice = (
-            f"The best of {len(orient._CANDIDATES)} screened placements is "
+            where
+            + f"The best of {len(orient._CANDIDATES)} screened placements is "
             f"'{best.name}' at {best.overhang_mm2:.2f} mm2"
             + (" -- no orientation clears this, so the fix is geometric. "
                if best.overhang_mm2 > ceiling else ", so reorienting may be enough. ")

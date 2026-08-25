@@ -190,3 +190,45 @@ def overhang_area(mesh_or_path: Any, *, threshold: float = DEFAULT_DOWNWARD_NORM
     downward = normals[:, 2] <= threshold
     bed_contact = np.max(np.abs(triangles[:, :, 2] - bed_z), axis=1) <= bed_tolerance
     return float(m.area_faces[downward & ~bed_contact].sum())
+
+
+def overhang_locations(mesh_or_path: Any, *, threshold: float = DEFAULT_DOWNWARD_NORMAL_Z_MAX,
+                       bed_z: float = DEFAULT_BED_Z_MM,
+                       bed_tolerance: float = DEFAULT_BED_TOLERANCE_MM,
+                       transform=None, limit: int = 3) -> list[dict[str, Any]]:
+    """*Where* the out-of-limit area is, largest facet first.
+
+    `overhang_area` sums exactly this set and then throws the positions away, so
+    the finding could say how much and never where. A measured run shows what
+    that costs: the designer was told `0.008 mm2 past normal_z <= -0.73` three
+    separate times and each time had to load the STL in trimesh and print the
+    offending triangles' centroids itself to find out whether it was a real
+    unsupported face or a lofted surface tessellating steeper than its nominal
+    angle. Those two need opposite responses, and the number alone cannot tell
+    them apart.
+
+    Returns the biggest contributors rather than every facet: an overhang is
+    usually one feature, and a list of nine hundred triangles is the same
+    non-answer in a longer form.
+    """
+    m = as_mesh(mesh_or_path)
+    normals = m.face_normals
+    triangles = m.vertices[m.faces]
+    if transform is not None:
+        transform = np.asarray(transform, dtype=float)
+        normals = normals @ transform[:3, :3].T
+        triangles = trimesh.transformations.transform_points(
+            triangles.reshape(-1, 3), transform).reshape(triangles.shape)
+    downward = normals[:, 2] <= threshold
+    bed_contact = np.max(np.abs(triangles[:, :, 2] - bed_z), axis=1) <= bed_tolerance
+    offending = np.flatnonzero(downward & ~bed_contact)
+    if offending.size == 0:
+        return []
+    areas = m.area_faces[offending]
+    order = offending[np.argsort(areas)[::-1][:limit]]
+    return [{
+        "area_mm2": round(float(m.area_faces[i]), 6),
+        "centroid_mm": {k: round(float(v), 3)
+                        for k, v in zip("xyz", triangles[i].mean(axis=0))},
+        "normal_z": round(float(normals[i][2]), 4),
+    } for i in order]

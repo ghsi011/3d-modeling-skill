@@ -113,5 +113,54 @@ class TheComparisonUsesTheFloorTest(unittest.TestCase):
             10.1, ceiling=10.0, disposition="SUPPORT_ALLOWED"))
 
 
+class TheFindingSaysWhereTest(unittest.TestCase):
+    """How much, without where, is a number the reader cannot act on.
+
+    A measured run was told `0.008 mm2 past normal_z <= -0.73` three separate
+    times, and each time loaded the STL in trimesh itself to print the offending
+    triangles' centroids -- because a real unsupported face and a lofted surface
+    tessellating steeper than its nominal angle report the same number and need
+    opposite responses.
+    """
+
+    @staticmethod
+    def _part():
+        import trimesh
+        box = trimesh.creation.box(extents=(20, 20, 10))
+        box.apply_translation((10, 10, 5))
+        shelf = trimesh.creation.box(extents=(10, 20, 2))
+        shelf.apply_translation((25, 10, 9))
+        return trimesh.boolean.union([box, shelf], engine="manifold")
+
+    def test_it_points_at_the_overhanging_face(self) -> None:
+        """The shelf's underside is at z=8, x from 20 to 30. That is the answer."""
+        from .metrics import overhang_locations
+        found = overhang_locations(self._part(), bed_z=0.0)
+        self.assertTrue(found)
+        for facet in found:
+            with self.subTest(facet=facet):
+                self.assertAlmostEqual(8.0, facet["centroid_mm"]["z"], places=2)
+                self.assertGreater(facet["centroid_mm"]["x"], 20.0)
+
+    def test_a_clean_part_reports_no_locations(self) -> None:
+        """**Control.** No overhang, nothing to point at -- an empty list, not a
+        misleading nearest-facet."""
+        import trimesh
+        box = trimesh.creation.box(extents=(20, 20, 10))
+        box.apply_translation((10, 10, 5))
+        self.assertEqual([], overhang_locations_of(box))
+
+    def test_the_biggest_contributor_comes_first(self) -> None:
+        from .metrics import overhang_locations
+        found = overhang_locations(self._part(), bed_z=0.0, limit=3)
+        areas = [f["area_mm2"] for f in found]
+        self.assertEqual(sorted(areas, reverse=True), areas)
+
+
+def overhang_locations_of(mesh):
+    from .metrics import overhang_locations
+    return overhang_locations(mesh, bed_z=0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
