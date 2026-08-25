@@ -45,6 +45,28 @@ from .verdict import PASS as _PASS  # noqa: E402
 from .verdict import SKIP as _SKIP  # noqa: E402
 from .verdict import Check  # noqa: E402
 
+#: Below this, a measured out-of-limit area is tessellation noise rather than
+#: geometry, and the support gate must not treat it as a finding.
+#:
+#: `SELF_SUPPORT_REQUIRED` forces the declared ceiling to exactly 0.0, and that
+#: is right: it is a *disposition*, not a budget, and two archived runs declared
+#: it with ceilings of 1850 and 2150 mm2 and passed. But the measured side is a
+#: sum of triangle areas off a tessellated mesh, and comparing a float sum
+#: against exact zero asks a mesh to be perfect rather than to be right.
+#:
+#: A real run paid for that. A correct bin measured 5.5e-2 mm2, then 8e-6 mm2
+#: after refining to 1.1M triangles -- slivers thrown by an arc tangent to a face
+#: at a single point -- and neither refining further, nor reformulating the
+#: boolean, nor `clean()`, nor steepening the flare removed them. The designer
+#: rebuilt the entire model in a second CAD kernel to reach a literal 0.0.
+#:
+#: 1e-3 mm2 is a millionth of a square centimetre. A 0.4 mm nozzle at 0.2 mm
+#: layers lays a bead of roughly 8e-2 mm2, so this is about one eightieth of the
+#: smallest thing the process can deposit, and roughly 125x the sliver that
+#: caused the rebuild. Nothing a printer can express fits under it, which is what
+#: makes it a noise floor rather than a budget by another name.
+TESSELLATION_NOISE_MM2 = 1e-3
+
 
 ASSEMBLY_OVERLAP_EPSILON_MM3 = 1e-3
 
@@ -576,7 +598,7 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
         seated = _check_seated(commission, mesh, plan, rule, placement)
         area = placement.overhang_mm2
         has_bed_contact = placement.bed_contact_mm2 > 1e-9
-        ok = seated and has_bed_contact and area <= ceiling
+        ok = seated and has_bed_contact and area <= ceiling + TESSELLATION_NOISE_MM2
         best = orient.best(mesh, threshold=threshold)
         # Name the remedies rather than leaving them to be rediscovered. One
         # measured run spent three full build/export/measure cycles arriving at
