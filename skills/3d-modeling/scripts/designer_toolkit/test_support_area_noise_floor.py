@@ -157,6 +157,40 @@ class TheFindingSaysWhereTest(unittest.TestCase):
         self.assertEqual(sorted(areas, reverse=True), areas)
 
 
+class ItSaysWhenThereIsNobodyToHandOffToTest(unittest.TestCase):
+    """The advice recommends escalating to a print engineer. On a generated plan
+    there is not one -- that is *why* the plan was generated -- so the reader is
+    being pointed at a route that does not exist.
+
+    Not a change to the bar: whether a CUSTOM job should be held to a DIRECT
+    part's support standard is a contract decision. This only stops the reader
+    hunting for a handoff that is not there, and makes the compromise visible
+    instead of silent. Two measured runs took it silently: one rebuilt in a
+    second CAD kernel, one roofed at 55 degrees instead of 45.
+    """
+
+    def test_a_generated_plan_says_the_escalation_is_unavailable(self) -> None:
+        from .commission import _no_engineer_note
+        note = _no_engineer_note({"owner": "builtin-direct-template"})
+        self.assertIn("no print engineer", note)
+        self.assertIn("not available", note)
+
+    def test_an_authored_plan_says_nothing_extra(self) -> None:
+        """**Control.** Where a print engineer *did* author the plan, the
+        escalation is real and the note would be false."""
+        from .commission import _no_engineer_note
+        self.assertEqual("", _no_engineer_note({"owner": "print-engineer"}))
+
+    def test_it_does_not_invite_a_silent_compromise(self) -> None:
+        """Saying 'you have no escalation' without saying 'record it' would read
+        as permission to distort the part quietly, which is worse than the
+        confusion it replaces."""
+        from .commission import _no_engineer_note
+        note = _no_engineer_note({"owner": "builtin-direct-template"})
+        self.assertIn("do not quietly distort", note)
+        self.assertIn("visible", note)
+
+
 def overhang_locations_of(mesh):
     from .metrics import overhang_locations
     return overhang_locations(mesh, bed_z=0.0)

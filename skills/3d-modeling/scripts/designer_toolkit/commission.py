@@ -524,6 +524,37 @@ def _check_assembly_interference(commission: Commission, mesh,
     commission.evidence["assembly_interference_mm3"] = measured
 
 
+def _no_engineer_note(plan: dict[str, Any]) -> str:
+    """Say when the handoff the advice just recommended does not exist.
+
+    The zero ceiling is a `DIRECT`-part policy and `plan.py` states its escape
+    hatch: a part that cannot clear the bar "needs a print engineer to declare
+    where support may touch". But a *generated* plan exists precisely because no
+    print engineer authored one, so on that lane the advice above recommends a
+    handoff to nobody.
+
+    Two measured runs of the same job did the thing the advice tells them not to,
+    because it was the only move available: one rebuilt the model in a second CAD
+    kernel to drive a tangency sliver to literal zero, and one roofed a gap at 55
+    degrees rather than the standard 45 to keep its facets clear of the screen --
+    a part further from the brief's intent, chosen to satisfy a gate.
+
+    This does not change the bar, which is a contract decision and not this
+    file's. It stops the reader spending time looking for a route that is not
+    there, and it makes the compromise a visible choice rather than a silent one.
+    """
+    if plan.get("owner") != "builtin-direct-template":
+        return ""
+    return (
+        " NOTE: this plan was generated, not authored, so there is no print "
+        "engineer on this job to hand off to -- the escalation above is not "
+        "available to you. If zero is only reachable by distorting a surface the "
+        "brief cares about, do not quietly distort it: record what you would have "
+        "asked for and why in your handoff notes, so the compromise is visible to "
+        "whoever reads this part."
+    )
+
+
 def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[Any]:
     """Screen every support rule, each in the orientation it declares."""
     rules = _plan_support_rules(plan)
@@ -637,6 +668,7 @@ def _check_support(commission: Commission, mesh, plan: dict[str, Any]) -> list[A
               "geometry: say so in your handoff and let the print engineer plan a bounded "
               "SUPPORT_ALLOWED on a nonfunctional region. Support-free is the default, not "
               "a hard constraint."
+            + _no_engineer_note(plan)
         )
         commission.add(Check(
             f"support-{rule_id}", f"{rule_id} downward-facing area within its limit",
