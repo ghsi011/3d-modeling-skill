@@ -564,6 +564,26 @@ def broken(work_dir: Path, *, evidence_dir: Path | None = None,
             continue
 
         reasons: list[str] = []
+        # A failed verification attempt shadows the receipt it could not replace.
+        #
+        # Separating the diagnostic from the receipt fixed one hole and opened
+        # another: the old code overwrote the receipt, so a malformed answer at
+        # least destroyed the stale PASS. Writing the diagnostic elsewhere left
+        # an unchanged PASS whose bindings still hold -- nothing had moved, so
+        # nothing was stale -- and `final_status.json` went on claiming it.
+        # `VERIFIED` survived an answer that could not be read: a fail-open.
+        #
+        # Shadowing rather than deleting, for two reasons. The receipt may
+        # resolve to the legacy pathname, which compatibility may read and must
+        # never remove; and staleness already cascades through `depends_on`, so
+        # the status that rests on this receipt stops being current without a
+        # second mechanism being invented to make it.
+        if (receipt.name == PIPELINE_VERIFICATION_RECEIPT
+                and (work_dir / VERIFICATION_ERROR).is_file()):
+            reasons.append(
+                f"a later verification answer could not be read, and its "
+                f"failure is recorded in {VERIFICATION_ERROR}: this receipt is "
+                f"no longer the last word on whether the part was verified")
         for name, was in sorted(receipt.binds(payload).items()):
             if was is None:
                 # Recorded as absent means it was never bound: no STEP was

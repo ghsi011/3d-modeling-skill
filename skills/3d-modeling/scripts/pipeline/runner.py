@@ -145,6 +145,25 @@ def _write(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def _superseded_by_failure(out: Path) -> dict[str, str]:
+    """The digests a malformed verification answer takes out of currency.
+
+    Both the receipt it failed to replace and the status resting on it. Recorded
+    rather than erased: the pass was real when it was issued, and a reader asking
+    what the job used to claim should not have to reconstruct it from nothing.
+
+    The receipt is resolved through `bindings` rather than by name, so a project
+    whose evidence is still under the pre-D37 pathname records the file it
+    actually has.
+    """
+    superseded: dict[str, str] = {}
+    receipt = B._receipt_path(out, B.PIPELINE_VERIFICATION_RECEIPT)
+    for path in (receipt, out / "final_status.json"):
+        if path.is_file():
+            superseded[path.name] = S.sha256_file(path)
+    return superseded
+
+
 def run(request: JobRequest) -> JobResult:
     """One invocation, and the ledger of what it spent.
 
@@ -695,10 +714,17 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
             # receipt; it records that parsing failed. Sent to the canonical
             # pathname it replaced a verifier's REJECT with `{error: ...}`,
             # which does not lose a verdict so much as invert one.
+            #
+            # It also records what it supersedes. The receipt this answer failed
+            # to replace stops supporting a claim the moment this file exists --
+            # `bindings.broken` shadows it -- and a superseded pass must be
+            # neither current nor silently erased, so its digest is kept here
+            # where a reader looking for the lost verdict will find it.
             written["verification_error"] = _write(
                 out / B.VERIFICATION_ERROR, {
                     "schema_version": S.VERIFICATION_SCHEMA,
                     "error": f"{type(exc).__name__}: {exc}",
+                    "superseded": _superseded_by_failure(out),
                 })
             return JobResult(False, "verification",
                              f"{type(exc).__name__}: {exc}",
@@ -713,6 +739,14 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         # than two dictionaries sharing a descriptive field name.
         written["verification_report"] = _write(
             out / B.PIPELINE_VERIFICATION_RECEIPT, verification_report)
+        # A review that parsed answers the question the last failure left open,
+        # so the diagnostic stops shadowing this receipt. Removed rather than
+        # left beside it: while it exists `bindings.broken` holds the receipt
+        # stale, and a verification that just succeeded would report as
+        # superseded by the failure it replaced.
+        stale_diagnostic = out / B.VERIFICATION_ERROR
+        if stale_diagnostic.is_file():
+            stale_diagnostic.unlink()
 
     final = status.decide(contract=model_contract, commission_report=report,
                           screening=screen, manufacturing=manufacturing,
