@@ -49,6 +49,7 @@ import argparse
 import dataclasses
 import json
 import math
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -625,6 +626,54 @@ def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
     return project
 
 
+# Which stages are refusing the *project* itself, and which are refusing
+# something the project merely points at. `FIX_PROJECT` covers all of them by
+# design -- `docs/tooling.md` says so, and `stage` is what tells them apart --
+# but the sentence a reader is handed was written for the first group and was
+# being spoken over the second.
+_PROJECT_STAGES = frozenset({"route", "run"})
+
+# A finding's `where` is a filename, or a path into one -- `design_proposal.json`
+# and `design_proposal.json.params` both occur, as does `print_plan_checks.json[0]`.
+# The headline wants the file and not the field, and the extension is part of the
+# file: trimming at the first dot turns `model.py` into `model`, which names
+# nothing on disk.
+_SUBJECT = re.compile(r"^(.+?\.(?:json|py|md|stl|step|3mf))(?:\.|$)")
+
+
+def _subject_of(where: str) -> str:
+    """The file a finding is about, without the field path inside it."""
+    head = where.split("[", 1)[0]
+    match = _SUBJECT.match(head)
+    return match.group(1) if match else head
+
+
+def _refusal_wording(stage: str, problems: list[F.Issue]) -> tuple[str, str]:
+    """What refused, in the reader's words and in the record's.
+
+    `project.json is not complete enough to build` is false twice over when the
+    build is what raised: the file named is not the file at fault, and a valid
+    `project.json` cannot be made "more complete", so the instruction cannot be
+    followed. The finding already carries the right `where`; it was only the
+    prose and the reason that still assumed the route-time case.
+
+    Derived from the findings rather than from a table keyed on the stage, so a
+    new refusal site gets an honest sentence without having to remember to add
+    one here.
+    """
+    if stage in _PROJECT_STAGES or not problems:
+        return (f"{P.PROJECT_FILE} is not complete enough to {stage}",
+                "the project does not describe a job that can be routed")
+    subjects: list[str] = []
+    for issue in problems:
+        where = _subject_of(issue.where or "")
+        if where and where not in subjects:
+            subjects.append(where)
+    named = ", ".join(subjects) if subjects else P.PROJECT_FILE
+    return (f"the {stage} was refused: {named}",
+            f"the {stage} stage refused {named}")
+
+
 def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
                      problems: list[F.Issue], *, stage: str) -> int:
     """Refuse the run, and say what is wrong in both registers at once.
@@ -638,19 +687,19 @@ def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
     and a stable `id` -- and a caller asking "why is this alternative not
     COMMISSIONED" matches on those rather than on a substring of a sentence.
     """
+    headline, reason = _refusal_wording(stage, problems)
     _write_next_action(work_dir, project, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "FIX_PROJECT",
         "stage": stage,
-        "reason": "the project does not describe a job that can be routed",
+        "reason": reason,
         "unresolved": F.messages(problems),
         "findings": [issue.to_dict() for issue in problems],
         "completion_command": f"design-tool run {project_dir.as_posix()}",
         "updated_utc": project.updated_utc,
     })
-    sys.stderr.write(f"design-tool: {P.PROJECT_FILE} is not complete enough to "
-                     f"{stage}:\n")
+    sys.stderr.write(f"design-tool: {headline}:\n")
     for problem in problems:
         sys.stderr.write(f"  - {problem.message}\n")
     return 2

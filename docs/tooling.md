@@ -121,7 +121,7 @@ the job finishes:
 
 | kind | meaning |
 | --- | --- |
-| `FIX_PROJECT` | something has to be corrected before the run can continue; `unresolved` names every problem and `findings` carries the same list as structure. `stage` says what refused: `route`/`run` for an incomplete `project.json`, or `plan`, `proposal` or `build` |
+| `FIX_PROJECT` | something has to be corrected before the run can continue; `unresolved` names every problem and `findings` carries the same list as structure. `stage` says what refused: `route`/`run` for an incomplete `project.json`, or `plan`, `proposal` or `build`. On the last three the headline and `reason` name the **file** that refused — read off the findings' own `where` — because on those stages `project.json` is not what is at fault and telling a reader to complete a complete file names a task with no end |
 | `RUN` | the route is decided and the plan is compiled, and nothing has been executed against it |
 | `AGENT_COMMISSION` | a specialist has to produce something — `role`, `authorized_inputs`, `required_outputs`, `bound` hashes, `completion_command` |
 | `REVIEW` | a bounded review is needed — `evidence` is the packet, `respond_with` is where the answer goes |
