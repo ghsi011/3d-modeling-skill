@@ -367,15 +367,49 @@ def _check_envelope(commission: Commission, report, plan: dict[str, Any]) -> Non
         ))
         return
     tolerance = float(plan.get("bbox_tolerance_mm", 1.0))
+    # Which kind of expectation is this -- a size to hit, or a volume to fit in?
+    #
+    # A print engineer's plan states the size the part is meant to be, and being
+    # under it is as wrong as being over. A *generated* plan cannot state that:
+    # `cli._print_plan` builds it from the printer and the declared envelope and
+    # from nothing about the geometry, deliberately, because a plan that took its
+    # expectation from the part it gates would not be a gate. So its
+    # `expected_bbox_mm` is the build volume, and comparing it two-sidedly failed
+    # every part that fitted -- a 83.5 x 41.5 x 24.4 bin reported
+    # `worst axis z off by -231.60 mm` against a 256 mm envelope and its
+    # `candidate_readiness.md` read NOT_READY while the frozen acceptance contract
+    # passed the same part. That fired on every job with a generated plan, and a
+    # gate that fails on every correct part is one its readers learn to discount.
+    #
+    # The plan already says which it is: `owner`, one of the two in
+    # `_EXPECTED_OWNERS["print_plan"]`. No new field, and the declaration that
+    # decides it is the one the contract already validates.
+    bound_only = plan.get("owner") == "builtin-direct-template"
     # `None` rather than 0.0: a zero start is indistinguishable from "no
     # comparison ran", so an expected_bbox_mm with unreadable keys used to
     # report `worst axis n/a off by +0.00 mm` and PASS whatever the part's size.
     worst_axis, worst = "", None
+    # Counted separately from `worst`, because under a bound an axis that fits
+    # contributes no delta -- and "every axis fitted" must stay distinguishable
+    # from "no axis could be read", which is the trap the comment below names.
+    readable = 0
     for axis in ("x", "y", "z"):
         if axis in expected:
+            readable += 1
             delta = report.bbox_mm[axis] - float(expected[axis])
+            # Under a bound, only overflow is a finding. Undershoot is the part
+            # being smaller than the printer, which is what parts are.
+            if bound_only and delta <= 0:
+                continue
             if worst is None or abs(delta) > abs(worst):
                 worst_axis, worst = axis, delta
+    if bound_only and readable and worst is None:
+        commission.add(Check(
+            "envelope", "Overall size vs plan", _PASS,
+            f"fits the declared envelope on every axis (bound {expected}, "
+            f"tolerance {tolerance} mm)", "",
+        ))
+        return
     if worst is None:
         commission.add(Check(
             "envelope", "Overall size vs plan", _FAIL,
