@@ -49,6 +49,7 @@ import argparse
 import dataclasses
 import json
 import math
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -625,6 +626,110 @@ def _load_project(project_dir: Path, *, adapt: bool = True) -> P.Project:
     return project
 
 
+# Which stages refuse the *project*, and which refuse something it points at.
+# `FIX_PROJECT` covers all of them by design -- `docs/tooling.md` says so and
+# `stage` tells them apart -- but the sentence was written for the first group
+# and was being spoken over the second.
+_PROJECT_STAGES = frozenset({"route", "run"})
+# A finding's `where` is a filename or a path into one. The headline wants the
+# file, and the extension is part of it: trimming at the first dot turns
+# `model.py` into `model`, which names nothing on disk.
+_SUBJECT = re.compile(r"^(.+?\.(?:json|py|md|stl|step|3mf))(?:\.|$)")
+
+
+def _subject_of(where: str) -> str:
+    """The file a finding is about, without the field path inside it."""
+    head = where.split("[", 1)[0]
+    match = _SUBJECT.match(head)
+    return match.group(1) if match else head
+
+
+def _refusal_wording(stage: str, problems: list[F.Issue]) -> tuple[str, str]:
+    """What refused, in the reader's words and in the record's.
+
+    `project.json is not complete enough to build` is false twice over when the
+    build is what raised: the file named is not the file at fault, and a valid
+    `project.json` cannot be made "more complete", so the instruction names a
+    task with no end.
+
+    Derived from the findings rather than a table keyed on the stage, so a new
+    refusal site gets an honest sentence without anyone remembering to add one.
+    """
+    if stage in _PROJECT_STAGES or not problems:
+        return (f"{P.PROJECT_FILE} is not complete enough to {stage}",
+                "the project does not describe a job that can be routed")
+    subjects: list[str] = []
+    for issue in problems:
+        where = _subject_of(issue.where or "")
+        if where and where not in subjects:
+            subjects.append(where)
+    named = ", ".join(subjects) if subjects else P.PROJECT_FILE
+    return (f"the {stage} was refused: {named}",
+            f"the {stage} stage refused {named}")
+
+
+def _report_build_refusal(project_dir: Path, work_dir: Path, project: P.Project,
+                          exc: "ISO.BuildRefused", model_path: Path) -> int:
+    """Route a build refusal to whoever can act on it.
+
+    `BuildRefused` covers three situations that need three different readers, and
+    sending all of them down the project-completeness channel told a designer to
+    complete a `project.json` that was already complete. A kernel exception in
+    `model.py` is the designer's; a sandbox that would not start is nobody's
+    geometry.
+
+    Classification, not relabelling: the cause is decided where the refusal is
+    raised, in `isolation.py`, and mapped here onto the four `next_action` kinds
+    that already exist. No fifth kind -- `docs/tooling.md` names four and a
+    consumer routing on them should not have to learn a new one to be told the
+    geometry raised.
+    """
+    cause = getattr(exc, "cause", ISO.CAUSE_MODEL)
+    if cause == ISO.CAUSE_SYSTEM:
+        # Not a finding about the job at all. `BLOCKED` is the existing kind for
+        # "the run stopped and nothing an agent writes lifts it".
+        _write_next_action(work_dir, project, {
+            "schema_version": NEXT_ACTION_SCHEMA,
+            "job_id": project.job_id,
+            "kind": "BLOCKED",
+            "stage": "build",
+            "reason": "the confined build boundary did not hold, or would not "
+                      "start. This is not a finding about the geometry and no "
+                      "edit to the project will lift it.",
+            "unresolved": [str(exc)],
+            "findings": [F.problem(F.ARTIFACT_REFUSED, "the build boundary",
+                                   str(exc)).to_dict()],
+            "updated_utc": project.updated_utc,
+        })
+        sys.stderr.write(f"design-tool: the build boundary failed:\n  - {exc}\n")
+        return 2
+    if cause == ISO.CAUSE_PROJECT:
+        return _report_problems(project_dir, work_dir, project, [F.problem(
+            F.ARTIFACT_REFUSED, P.PROJECT_FILE, str(exc))], stage="build")
+
+    # MODEL: the designer wrote this geometry and the designer can fix it, so the
+    # instruction is the one that asks a designer for something -- the same
+    # `AGENT_COMMISSION` the candidate build already uses -- rather than the one
+    # that says the project is incomplete. `model.py` is named, and the reason is
+    # what the build actually said.
+    _write_next_action(work_dir, project, {
+        "schema_version": NEXT_ACTION_SCHEMA,
+        "job_id": project.job_id,
+        "kind": "AGENT_COMMISSION",
+        "role": "designer",
+        "stage": "candidate_build",
+        "reason": f"{model_path.name} did not build: {exc}",
+        "required_outputs": [_relative(work_dir, project_dir, model_path.name)],
+        "unresolved": [str(exc)],
+        "findings": [F.problem(F.ARTIFACT_REFUSED, model_path.name,
+                               str(exc)).to_dict()],
+        "completion_command": f"design-tool run {project_dir.as_posix()}",
+        "updated_utc": project.updated_utc,
+    })
+    sys.stderr.write(f"design-tool: {model_path.name} did not build:\n  - {exc}\n")
+    return 2
+
+
 def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
                      problems: list[F.Issue], *, stage: str) -> int:
     """Refuse the run, and say what is wrong in both registers at once.
@@ -638,19 +743,19 @@ def _report_problems(project_dir: Path, work_dir: Path, project: P.Project,
     and a stable `id` -- and a caller asking "why is this alternative not
     COMMISSIONED" matches on those rather than on a substring of a sentence.
     """
+    headline, reason = _refusal_wording(stage, problems)
     _write_next_action(work_dir, project, {
         "schema_version": NEXT_ACTION_SCHEMA,
         "job_id": project.job_id,
         "kind": "FIX_PROJECT",
         "stage": stage,
-        "reason": "the project does not describe a job that can be routed",
+        "reason": reason,
         "unresolved": F.messages(problems),
         "findings": [issue.to_dict() for issue in problems],
         "completion_command": f"design-tool run {project_dir.as_posix()}",
         "updated_utc": project.updated_utc,
     })
-    sys.stderr.write(f"design-tool: {P.PROJECT_FILE} is not complete enough to "
-                     f"{stage}:\n")
+    sys.stderr.write(f"design-tool: {headline}:\n")
     for problem in problems:
         sys.stderr.write(f"  - {problem.message}\n")
     return 2
@@ -1716,8 +1821,7 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
         # formulation's own.
         built = ISO.build(model_path, dest_dir=work_dir, step=project.step)
     except ISO.BuildRefused as exc:
-        return _report_problems(project_dir, work_dir, project, [F.problem(
-            F.ARTIFACT_REFUSED, model_path.name, str(exc))], stage="build")
+        return _report_build_refusal(project_dir, work_dir, project, exc, model_path)
 
     # After the build rather than before it, and unavoidably so: the parameters a
     # model declares are read by importing it, and importing it is the thing that

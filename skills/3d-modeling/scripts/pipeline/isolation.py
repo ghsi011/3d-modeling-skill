@@ -131,8 +131,37 @@ BUILD_TIMEOUT_S = 600.0
 CANARY_FILE = "acceptance_contract.json"
 
 
+#: Who can act on a refusal. Internal, and deliberately not a `next_action.kind`:
+#: the public vocabulary stays at four, and this only decides which of the
+#: existing four a refusal is routed to.
+#:
+#: `MODEL`   the geometry is wrong and the designer can fix it -- a kernel
+#:           exception, a build that raised, a candidate that never appeared.
+#: `PROJECT` the job as declared is wrong; the project owner fixes it.
+#: `SYSTEM`  the boundary or the host failed. Nobody's geometry is at fault and
+#:           no amount of editing the project will help.
+CAUSE_MODEL = "MODEL"
+CAUSE_PROJECT = "PROJECT"
+CAUSE_SYSTEM = "SYSTEM"
+
+
 class BuildRefused(S.SchemaError):
-    """The candidate could not be built, or was not allowed to have been."""
+    """The candidate could not be built, or was not allowed to have been.
+
+    Carries `cause`, because this one exception covers three situations a reader
+    must act on differently and the caller could not previously tell them apart.
+    A degenerate direction vector in `model.py` and a sandbox that refused to
+    start are both `BuildRefused`, and routing them to the same instruction sent
+    designers to re-read a `project.json` that was never the problem.
+
+    `MODEL` is the default: it is the common case, and a refusal that has not
+    been classified is more safely handed to the person who wrote the geometry
+    than declared an infrastructure fault nobody will look at.
+    """
+
+    def __init__(self, *args: object, cause: str = CAUSE_MODEL) -> None:
+        super().__init__(*args)
+        self.cause = cause
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +693,8 @@ def build(model_path: Path, *, dest_dir: Path, step: bool,
                                  env=child_environment(build_dir), timeout=timeout)
         except confine.ConfinementUnavailable as exc:
             raise BuildRefused(
-                f"the candidate was not executed: {exc}") from exc
+                f"the candidate was not executed: {exc}",
+                cause=CAUSE_SYSTEM) from exc
 
         # The canary, before a single byte the child produced is looked at. The
         # confinement is what stops the write; this is what says so if it ever
@@ -676,7 +706,8 @@ def build(model_path: Path, *, dest_dir: Path, step: bool,
                 f"{CANARY_FILE} changed while the candidate was building. The "
                 "confinement grants the candidate no write access to the project "
                 "directory, so this is a failure of the boundary itself and not a "
-                "finding about the model. The run is refused.")
+                "finding about the model. The run is refused.",
+                cause=CAUSE_SYSTEM)
 
         if result.timed_out:
             raise BuildRefused(
