@@ -107,8 +107,8 @@ from your geometric verdict. Your `PASS` remains valid for either consequence cl
    check. `audit` refuses that outright, because a run once did it.
 
    **Ask `dt.py doctor` before this call, not after something fails.** It names the
-   interpreter, prints the exact invocation above, and lists what this installation
-   can actually do. Rendering and photo overlay are optional extras — `render` and
+   interpreter, prints the exact invocation above, and lists which declared packages
+   and capabilities are present. Rendering and photo overlay are optional extras — `render` and
    `visual` in `pyproject.toml`, kept out of the default on purpose so a plain install
    pulls in no GL context — so whether you have them is a property of the environment
    you were dispatched into rather than of the skill, and **step 8 is where you need
@@ -116,6 +116,11 @@ from your geometric verdict. Your `PASS` remains valid for either consequence cl
    was absent and built an ephemeral `uv` overlay before doing any visual work;
    `doctor` answers that in one call, and reports the renderer *present* on the
    reference installation.
+
+   **It reports package presence, not a working renderer.** A present `pyrender`
+   does not prove a usable GL context — a headless or driverless host can import it
+   and still fail to render — so read a `[yes]` as "the dependency is installed"
+   and learn the rest by rendering something.
 
    Two things about the numbers. The raw parse is reported, not judged: an STL stores no
    vertex sharing, so a sound part reads as many components and `watertight=False`, and the
