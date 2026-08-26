@@ -146,9 +146,9 @@ one, so reading its patterns is a page bought and unused:
    trimesh conventions from template source because the charter pointed only at backends its
    interpreter did not have. Everything else about the commission is identical either way.
 
-   Either way, settle the print orientation before the first solid — step 5. A part
-   authored first and oriented afterwards meets the support rule by distortion or by
-   rebuild; a part authored into its orientation usually meets it for free.
+   Either way, settle the print orientation before the first solid — step 5.
+   Treating orientation as an input can avoid an entire class of support-driven
+   redesign; authoring without considering it can force a later rebuild.
 4. Reference commission: use no photos or hidden dimensions. Model all specified mating
    features so ambiguity becomes visible during the metrologist round trip.
    If an imported/off-template solid is supplied as the starting artifact and there is no
