@@ -1,0 +1,40 @@
+{
+  "target": "D34, D35 and D36 -- the role-authored artifacts are registered to their owners, and the registry is what refuses the pipeline",
+  "note": "Three separate runs, one per artifact, because the criterion is that EACH defect's protection fails when ITS OWN owner is removed: a single mutation standing in for three would prove that the registry has some entries, not that these three do. Y is the same shape every time -- one `register(...)` call replaced by the bare string it returns, which is the state all four of these filenames were in before the registry existed. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/d47-role-artifact-owners.json",
+  "mutations": [
+    {
+      "name": "the-designers-model-source-is-held-by-nobody",
+      "file": "skills/3d-modeling/scripts/pipeline/artifact_names.py",
+      "anchor": "MODEL_SOURCE = register(\"model.py\", owner=DESIGNER)",
+      "replacement": "MODEL_SOURCE = \"model.py\"",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_each_artifact_is_held_by_its_role_and_closed_to_the_pipeline",
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_a_role_artifact_on_disk_refuses_the_pipelines_default"
+      ],
+      "why": "D35's name goes back to being a string literal nothing holds, so the registry stops refusing `model.py` to the pipeline and stops refusing it even with the designer's file sitting there. What this reproduces is the *condition* D35 came out of, not the write: both certified backends moved to `bindings.BACKEND_RECORD`, so there is no longer a pipeline write in the tree aimed at `model.py` for the removal to re-enable. The claim is narrowed to what the run actually observes -- the barrier is gone -- rather than stated as the overwrite returning"
+    },
+    {
+      "name": "the-designers-artifact-manifest-is-held-by-nobody",
+      "file": "skills/3d-modeling/scripts/pipeline/artifact_names.py",
+      "anchor": "ARTIFACT_MANIFEST = register(\"artifact_manifest.json\", owner=DESIGNER)",
+      "replacement": "ARTIFACT_MANIFEST = \"artifact_manifest.json\"",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_each_artifact_is_held_by_its_role_and_closed_to_the_pipeline",
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_a_role_artifact_on_disk_refuses_the_pipelines_default"
+      ],
+      "why": "D36's name, same shape as the row above and narrowed the same way. Worth its own run rather than folding into one mutation: the two entries are separate lines and a sweep that mutated only one would report the pair as held. It also matters that this name is still *read* by `bindings._receipt_payload` for a project completed before D36's rename -- reading is not a claim, and removing the owner is observed to change the write barrier and nothing about that read"
+    },
+    {
+      "name": "the-print-engineers-plan-is-held-by-nobody",
+      "file": "skills/3d-modeling/scripts/pipeline/artifact_names.py",
+      "anchor": "PRINT_PLAN_CHECKS = register(\"print_plan_checks.json\", owner=PRINT_ENGINEER)",
+      "replacement": "PRINT_PLAN_CHECKS = \"print_plan_checks.json\"",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_plan_authority.py::AnAcceptedPlanSurvivesTheRunTest::test_an_accepted_plan_on_disk_is_not_replaced",
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_each_artifact_is_held_by_its_role_and_closed_to_the_pipeline",
+        "skills/3d-modeling/scripts/pipeline/test_role_artifact_owners.py::TheRoleAuthoredArtifactsAreRegisteredToTheirOwnersTest::test_a_role_artifact_on_disk_refuses_the_pipelines_default"
+      ],
+      "why": "**The one where the defect itself comes back.** `cli._print_plan` writes through `artifact_names.default_path`, and with the name held by nobody that call returns the path instead of refusing -- so the generated template lands on the print engineer's accepted plan again and D34's own unmodified fixture goes red. That is the discriminating observation for the mechanism swap: the existence check is gone from the generator and the behaviour it held is now the registry's, provably, because removing the registry entry restores the defect"
+    }
+  ]
+}

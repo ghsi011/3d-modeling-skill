@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from . import acceptance as ACC
+from . import artifact_names as N
 from . import bindings as B
 from . import compare as CMP
 from . import cost as COST
@@ -865,7 +866,7 @@ def _json_object(path: Path) -> dict[str, Any] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
-PLAN_FILE = "print_plan_checks.json"
+PLAN_FILE = N.PRINT_PLAN_CHECKS
 
 def _review_calls(work_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
     """Only the reviews the plan actually named.
@@ -947,6 +948,14 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     for the plans that happened not to carry it -- which is the same bug for a
     smaller set of jobs.
 
+    **That boundary is `artifact_names` now, not a check kept here.** The name
+    is registered to `print-engineer`, and `default_path` is what refuses it
+    once their file exists -- one mechanism holding this plan, the designer's
+    `model.py` and the designer's manifest, rather than a bespoke guard here and
+    a rename apiece for the other two. The rule is unchanged; only the thing
+    enforcing it moved. What is left below is what this run *reports* about a
+    file the registry has already closed to it.
+
     An existing plan that cannot be read, or does not validate, is **refused**
     rather than repaired. A run that answers an unbuildable plan by substituting
     one it wrote itself turns the engineer's error into the pipeline's silent
@@ -976,7 +985,13 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         orientation=project.orientation)
 
     accepted_path = work_dir / PLAN_FILE
-    if accepted_path.is_file():
+    try:
+        target = N.default_path(work_dir, PLAN_FILE, owner=N.PIPELINE)
+    except N.NameConflict:
+        # The registry closed the name: the print engineer holds it and their
+        # file is there. Everything below decides what this run *reports* about
+        # a file it may not touch -- the decision not to touch it was made by
+        # the registry, and this function no longer holds a copy of it.
         try:
             accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -1010,7 +1025,7 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
 
     problems = validate_plan(plan)
     if not problems:
-        accepted_path.write_text(S.canonical_json(plan), encoding="utf-8")
+        target.write_text(S.canonical_json(plan), encoding="utf-8")
     return plan, problems
 
 
