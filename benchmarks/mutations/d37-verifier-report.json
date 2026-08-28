@@ -1,0 +1,36 @@
+{
+  "target": "D37 -- the verifier's contract survives the pipeline, and the name registry that makes it survive",
+  "note": "Three protections, and the first is the discriminating observation the issue named: the verifier's contract is safe BECAUSE the survival row fails when the pipeline's write is pointed back at the shared name. The other two are the registry itself -- a claim refused, and a write refused -- because a registry that never refuses reads exactly like one that holds. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/d37-verifier-report.json",
+  "mutations": [
+    {
+      "name": "the-pipeline-write-is-pointed-back-at-the-shared-name",
+      "file": "skills/3d-modeling/scripts/pipeline/runner.py",
+      "anchor": "            N.path(out, N.PIPELINE_VERIFICATION_REPORT, owner=N.PIPELINE),\n            verification_report)",
+      "replacement": "            out / \"verification_report.json\",\n            verification_report)",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_verifier_report_namespace.py::TheVerifiersContractSurvivesTest::test_a_seeded_contract_survives_a_full_run"
+      ],
+      "why": "the pre-D37 implementation, restored exactly: the runner writes its review report to the team contract's name, so a verifier-authored contract sitting in the work directory comes back as the pipeline's object. This is the mechanism the row exists to observe, and a survival test that still passed here would be asserting that a file exists rather than that it is the one the verifier wrote"
+    },
+    {
+      "name": "a-second-owner-may-claim-a-registered-name",
+      "file": "skills/3d-modeling/scripts/pipeline/artifact_names.py",
+      "anchor": "    held = _OWNERS.setdefault(name, owner)\n    if held != owner:\n        raise NameConflict(\n            f\"{name!r} is registered to {held!r}; {owner!r} may not claim it too\")",
+      "replacement": "    _OWNERS[name] = owner",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_verifier_report_namespace.py::TheRegistryRefusesASecondOwnerTest::test_a_second_owner_claiming_a_registered_name_is_refused"
+      ],
+      "why": "the last writer wins instead of the first owner holding, which is the state the work directory was already in -- four collisions found by their damage rather than by anything refusing them. A registry that records without refusing is a comment"
+    },
+    {
+      "name": "a-writer-need-not-own-the-name-it-resolves",
+      "file": "skills/3d-modeling/scripts/pipeline/artifact_names.py",
+      "anchor": "    held = _OWNERS.get(name)\n    if held != owner:\n        raise NameConflict(\n            f\"{owner!r} may not write {name!r}: it is registered to {held!r}\")\n    return Path(work_dir) / name",
+      "replacement": "    return Path(work_dir) / name",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_verifier_report_namespace.py::TheRegistryRefusesASecondOwnerTest::test_a_writer_that_does_not_own_the_name_is_refused"
+      ],
+      "why": "`path` degenerates into a join, so the runner's write is registered in appearance only: pointing it at any name, owned by anyone or by nobody, would succeed. The register-time refusal above cannot catch that, because a caller that never registers never reaches it"
+    }
+  ]
+}

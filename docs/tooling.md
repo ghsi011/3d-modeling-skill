@@ -292,7 +292,7 @@ otherwise. It also prints what is being reused before the run touches anything.
 
 | discarded | kept |
 | --- | --- |
-| the six removable receipts (`pipeline_artifact_receipt.json`, `commission_report.json`, `manufacturing_report.json`, both review reports, `final_status.json`) — **not** the team contract's `artifact_manifest.json`, which D36 established the pipeline does not own and never deletes | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
+| the six removable receipts (`pipeline_artifact_receipt.json`, `commission_report.json`, `manufacturing_report.json`, `safety_verification_report.json`, `pipeline_verification_report.json`, `final_status.json`) — **not** the team contracts at `artifact_manifest.json` (D36) or `verification_report.json` (D37), which the pipeline does not own and never deletes | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
 | `reviews/<kind>_response.json` — the answers | `reviews/<kind>_packet.json` — the questions, rewritten every run |
 | `next_action.json` | `design_proposal.json`, `model.py`, `model_contract.json`, `execution_plan.json` |
 | | the content cache, and **every sibling formulation** |
@@ -1203,8 +1203,8 @@ design-tool: this job needs a safety review before it can finish.
 Write the response file and re-run the same command. Responses are validated
 against the same schema an in-process caller is held to — a malformed one is a
 `SchemaError`, not a shrug. The safety packet deliberately omits
-`verification_report.json`: a second opinion that read the first one is not a
-second opinion.
+`pipeline_verification_report.json`: a second opinion that read the first one is
+not a second opinion.
 
 ### What it writes
 

@@ -499,7 +499,7 @@ class CanonicalPipelineTest(unittest.TestCase):
             self.assertEqual(0, result.llm_calls)
             self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
             self.assertFalse((out / "safety_verification_report.json").exists())
-            self.assertFalse((out / "verification_report.json").exists())
+            self.assertFalse((out / "pipeline_verification_report.json").exists())
 
     def test_clean_consequential_direct_dispatches_exactly_one_safety_review(self) -> None:
         calls = []
@@ -526,7 +526,7 @@ class CanonicalPipelineTest(unittest.TestCase):
             self.assertEqual(1, result.llm_calls)
             self.assertEqual("NEEDS_MORE_EVIDENCE", result.final_status["final_status"])
             self.assertTrue((out / "safety_verification_report.json").exists())
-            self.assertFalse((out / "verification_report.json").exists())
+            self.assertFalse((out / "pipeline_verification_report.json").exists())
 
     def test_full_retains_specification_and_independent_review_dispatches(self) -> None:
         calls = []
@@ -1607,7 +1607,7 @@ class IndependentVerificationTest(unittest.TestCase):
             result, seen = self._verify(out, self._reply("PASS"))
             self.assertEqual("VERIFIED", result.final_status["final_status"])
             self.assertEqual(1, len(seen))
-            self.assertTrue((out / "verification_report.json").is_file())
+            self.assertTrue((out / "pipeline_verification_report.json").is_file())
 
     def test_without_a_verifier_no_job_reaches_verified(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -2050,7 +2050,7 @@ class CliReviewTest(unittest.TestCase):
             self.assertFalse((job / "reviews").exists())
             code = self._run(job)
             self.assertEqual(1, code)
-            self.assertFalse((job / "verification_report.json").exists(),
+            self.assertFalse((job / "pipeline_verification_report.json").exists(),
                              "DIRECT does not read or dispatch a normal verification response")
 
 
@@ -2135,7 +2135,7 @@ class ReviewEnvelopeTest(unittest.TestCase):
                 Path(raw), verify_call=self._verify_call(self._good_verification()),
                 reviewer={"model_snapshot": "test"}))
             self.assertEqual("VERIFIED", result.final_status["final_status"])
-            report = json.loads((Path(raw) / "verification_report.json").read_text(
+            report = json.loads((Path(raw) / "pipeline_verification_report.json").read_text(
                 encoding="utf-8"))
             self.assertEqual("verification", report["review_envelope"]["kind"])
 

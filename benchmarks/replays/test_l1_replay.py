@@ -243,7 +243,7 @@ class _CaseChecks:
     @staticmethod
     def _report_name(kind: str) -> str:
         return ("safety_verification_report.json" if kind == "safety"
-                else f"{kind}_report.json")
+                else "pipeline_verification_report.json")
 
 
 class CustomKnobSleeveTest(_CaseChecks, unittest.TestCase):
@@ -616,7 +616,8 @@ class BranchKnobSeatFallbackTest(_CaseChecks, unittest.TestCase):
         self.assertEqual("VERIFIED", derived["as-drawn"]["stored_status"])
         self.assertEqual(
             ["commission_report.json", "final_status.json",
-             "pipeline_artifact_receipt.json", "verification_report.json"],
+             "pipeline_artifact_receipt.json",
+             "pipeline_verification_report.json"],
             derived["as-drawn"]["stale"],
             "the receipts that stopped binding, and only those: the frozen "
             "acceptance contract and the model contract still describe the same "
@@ -955,7 +956,7 @@ class TheSiblingRefusesTheAnswerWrittenNextDoorTest(unittest.TestCase):
                 "stops")
 
             fallback = project / "alternatives" / "as-drawn"
-            report = json.loads((fallback / "verification_report.json")
+            report = json.loads((fallback / "pipeline_verification_report.json")
                                 .read_text(encoding="utf-8"))
             self.assertIn("ReviewError", report["error"])
             self.assertIn("review envelope mismatch", report["error"])
@@ -1118,8 +1119,9 @@ class TheBindingStillBitesTest(unittest.TestCase):
                              "a refused answer must not leave a decision behind")
             self.assertFalse((project / "final_status.json").is_file(),
                              "an unbound answer must not produce a final status")
-            self.assertFalse((project / "verification_report.json").is_file(),
-                             "the second review must never have been reached")
+            self.assertFalse(
+                (project / "pipeline_verification_report.json").is_file(),
+                "the second review must never have been reached")
 
             failures = RP.binding(
                 RP.compare(RP.expected(self.CASE_ID),
