@@ -1032,6 +1032,19 @@ existing plan that cannot be read or does not validate is refused without being
 overwritten, because a run that repairs an unbuildable plan by substituting its
 own turns the engineer's error into the pipeline's silent decision.
 
+**Closed, and the shape is now one mechanism rather than three repairs.**
+`print_plan_checks.json` is registered to `print-engineer` in
+[`pipeline/artifact_names.py`](../skills/3d-modeling/scripts/pipeline/artifact_names.py),
+beside D35's `model.py` and D36's `artifact_manifest.json`, and `cli._print_plan`
+resolves its write through that registry's `default_path` instead of holding an
+existence-and-owner check of its own. **The authority rule is unchanged** —
+presence of the file is the boundary and not the optional `authored_by`; an
+unreadable or invalid plan is refused rather than repaired; a generated plan
+whose commission has moved is refused rather than overwritten. Only what enforces
+it moved, and the move is proven rather than asserted: removing this one registry
+entry puts the overwrite back and fails the fixture above with no edit to it
+([`benchmarks/mutations/d47-role-artifact-owners.json`](../benchmarks/mutations/d47-role-artifact-owners.json)).
+
 ## D35 — a certified backend writes its build record over the designer's `model.py`
 
 **Where.** `pipeline/backends/trimesh_manifold.py` and
@@ -1081,6 +1094,19 @@ the certified lane — no frozen acceptance contract, no declared `project.model
 the only thing naming that file is the fallback. Rename the record without moving
 that fallback and the binding silently resolves to a file nothing writes any
 more, leaving `source` null on every certified job with no test going red.
+
+**Closed, and the name it moved off is now held rather than merely vacated.**
+The rename is what closed the defect; it did not stop the next writer reaching
+for `model.py`, because nothing anywhere could say the name was taken. It is
+registered to `cad-designer` in
+[`pipeline/artifact_names.py`](../skills/3d-modeling/scripts/pipeline/artifact_names.py)
+since #47, so the pipeline claiming or writing it is refused by the same
+mechanism that holds D34's plan and D36's manifest. What removing that entry is
+observed to expose is the barrier and not the overwrite — the backends write
+`bindings.BACKEND_RECORD` and there is no write left in the tree aimed at
+`model.py` for a removal to re-enable
+([`benchmarks/mutations/d47-role-artifact-owners.json`](../benchmarks/mutations/d47-role-artifact-owners.json)
+records that narrowing rather than claiming the defect itself returns).
 
 ## D36 — the pipeline's build receipt squats on the designer's artifact manifest
 
@@ -1140,6 +1166,17 @@ It was called "differently-shaped" here, and that was wrong in the direction
 that matters: the two write mechanisms are identical, and the verifier's
 contract has a *reverse* mechanism the manifest does not — the team lane reads
 that name back and cross-checks four bindings against whatever is there.
+
+**Closed, and the name it moved off is now held rather than merely vacated.**
+`artifact_manifest.json` is registered to `cad-designer` in
+[`pipeline/artifact_names.py`](../skills/3d-modeling/scripts/pipeline/artifact_names.py)
+since #47, so the pipeline claiming or writing it is refused by the same
+mechanism that holds D34's plan and D35's model source — one registry rather than
+two renames and a bespoke guard. The read-only compatibility path above is
+untouched: `bindings._receipt_payload` still consults this name for a project
+completed before the rename, and reading a file is not claiming it. As with D35,
+what removing the entry exposes is the barrier and not the overwrite
+([`benchmarks/mutations/d47-role-artifact-owners.json`](../benchmarks/mutations/d47-role-artifact-owners.json)).
 
 ## D37 — the pipeline's review report squats on the verifier's contract
 
