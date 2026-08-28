@@ -148,7 +148,7 @@ def _write(out: Path, name: str, payload: dict[str, Any]) -> Path:
     so a receipt this process is not the owner of is refused at the write rather
     than discovered afterwards by whoever lost their file. Taking the directory
     and the name instead of a finished path is what makes that unavoidable: the
-    thirteen call sites below cannot compose a path that skips the check.
+    fifteen call sites below cannot compose a path that skips the check.
     """
     path = N.path(out, name, owner=N.PIPELINE)
     path.write_text(S.canonical_json(payload), encoding="utf-8")

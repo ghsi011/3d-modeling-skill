@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """D46: the pipeline's own receipts get their names from the registry.
 
-The runner wrote ten artifacts into the work directory by bare string literal
-while `bindings` separately named four of the same files, and neither consulted
-the other. Two consequences were visible in the source before anything went
-wrong:
+The runner wrote ten artifacts into the work directory, eight of them by bare
+string literal, while `bindings` separately named five of those eight -- and
+neither consulted the other. Two consequences were visible in the source before
+anything went wrong:
 
 * **one artifact, three names.** The execution plan was spelled by
   `execution.EXECUTION_PLAN_FILE`, re-exported as `cli.EXECUTION_PLAN_FILE`, and
@@ -18,9 +18,9 @@ what `TODAYS_NAMES` pins: a test that asked the registry what it holds would
 agree with any rename, so the spellings are written out instead.
 
 **Two methods, densely subtested, and that is deliberate.** `conftest.py` caps
-L0 collection at `L0_COLLECTED_CEILING`, the gate is within a handful of it, and
-a ceiling is a conversation rather than a number to route around. Each subtest
-below names the claim it carries.
+L0 collection at `L0_COLLECTED_CEILING` and the gate is at it, so a fixture here
+costs a ruling rather than a line -- and a ceiling is a conversation rather than
+a number to route around. Each subtest below names the claim it carries.
 """
 from __future__ import annotations
 
@@ -74,8 +74,8 @@ def _spells(path: Path, name: str) -> bool:
     """Whether `path` writes `name` out as a quoted literal.
 
     Quoted, so that the prose naming these files in docstrings and comments --
-    which is most of the mentions in this package, and is how a reader learns
-    what a receipt is -- is not read as a second declaration of the name.
+    which is how a reader of this package learns what each receipt is -- is not
+    read as a second declaration of the name.
     """
     text = path.read_text(encoding="utf-8")
     return f'"{name}"' in text or f"'{name}'" in text

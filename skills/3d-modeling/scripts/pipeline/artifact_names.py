@@ -29,13 +29,14 @@ from pathlib import Path
 # registry and the contract validator name the same role.
 VERIFIER = "verifier"
 PIPELINE = "pipeline"
-# The confined build boundary's writer, and it is deliberately not `pipeline`.
-# A certified backend is handed the work directory and writes its own record
-# there beside the pipeline's receipts, so "the pipeline owns everything it can
-# reach" would make the two indistinguishable -- and a backend that reached for
-# a receipt's name would be resolving its own. `AGENTS.md` reduces a build's
-# authority rather than lending it the runner's; this is that boundary spelled
-# where the registry can refuse a crossing.
+# Whatever built the geometry, and deliberately not `pipeline`. A certified
+# backend is handed the work directory itself -- `runner` calls
+# `backend.build(model_contract, out)` -- and writes its build record there
+# beside the receipts. Under one owner the registry could not tell the builder
+# from the process that judges what it built, so no claim by one on the other's
+# name would be refusable. On the certified lane this record is also what
+# `bindings._source_name` binds as `source`, which on the authored lane is the
+# designer's own module -- a third party again, and not this one.
 BACKEND = "backend"
 
 
@@ -90,7 +91,7 @@ PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
 # Declared here rather than beside each writer, because a name declared beside
 # its writer is a name no other module can see -- which is the condition D34 to
 # D37 kept reproducing. `runner.py` spelled eight of these as bare literals
-# while `bindings.py` separately spelled four of the same files, and neither
+# while `bindings.py` separately spelled five of the same eight, and neither
 # consulted the other.
 #
 # Every name below is the name the file already had. This registers what the
@@ -98,8 +99,9 @@ PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
 
 INTENT_MANIFEST = register("intent_manifest.json", owner=PIPELINE)
 SPECIFICATION = register("specification.json", owner=PIPELINE)
-# The compiled plan: the route authority, produced by `cli._compile` and read
-# verbatim by the runner. **One name, and this is it.** It used to be spelled
+# The compiled plan: the route authority. Nobody authors it -- `route` and
+# `run` compile it from `project.json` in the same invocation, and the runner
+# consumes it verbatim. **One name, and this is it.** It used to be spelled
 # by `execution.EXECUTION_PLAN_FILE`, re-exported as `cli.EXECUTION_PLAN_FILE`,
 # and named a third time as `bindings.PLAN_FILE` -- and that third spelling
 # collided with `cli.PLAN_FILE`, which meant the print engineer's
@@ -133,9 +135,10 @@ MANUFACTURING_REPORT = register("manufacturing_report.json", owner=PIPELINE)
 SAFETY_VERIFICATION_REPORT = register("safety_verification_report.json",
                                       owner=PIPELINE)
 # What a run concluded, and the one file `design-tool status` and a reader treat
-# as the job's answer. Nobody but the pipeline may issue it: a status written by
-# something that built the geometry would be the candidate grading itself, which
-# is why `BACKEND` is a separate owner and why the refusal is worth a test.
+# as the job's answer -- `invalidate` says as much where it explains why a stale
+# one is removed. Nobody but the pipeline may issue it, least of all whatever
+# built the part, which is why `BACKEND` is a separate owner and why the
+# refusal is worth a test of its own.
 FINAL_STATUS = register("final_status.json", owner=PIPELINE)
 # Durations, deliberately unhashed and bound by nothing. Registered anyway: an
 # unregistered name is a name the next writer may take, which is the whole

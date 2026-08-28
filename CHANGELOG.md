@@ -8,8 +8,8 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ### Changed - the pipeline's own receipts get their names from the registry (#46)
 
-The runner wrote ten artifacts into the work directory by bare string literal while `bindings`
-separately named four of the same files, and neither consulted the other. Two consequences were
+The runner wrote ten artifacts into the work directory, eight of them by bare string literal,
+while `bindings` separately named five of those eight - and neither consulted the other. Two consequences were
 already visible in the source, and both are closed here.
 
 **One artifact, three names.** The execution plan was spelled by `execution.EXECUTION_PLAN_FILE`,
@@ -26,7 +26,7 @@ namespace. The survivor is `cli.PRINT_PLAN_CHECKS_FILE`, named for what it is.
 specification, the execution plan, the model contract, the pipeline receipt, the commission,
 manufacturing and safety reports, the verification report, the final status and the timings.
 `runner._write` takes a directory and a name and resolves it through
-`artifact_names.path`, so the thirteen call sites cannot compose a path that skips the ownership
+`artifact_names.path`, so the fifteen call sites cannot compose a path that skips the ownership
 check, and the `RECEIPTS` table imports its names instead of restating them.
 
 **A certified backend is a separate owner.** `build123d` and `trimesh-manifold` write their build

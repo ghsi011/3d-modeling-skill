@@ -59,7 +59,7 @@ from typing import Any, Callable
 from . import schemas as S
 # Every name in this module's receipt table, from the one place that holds it.
 # Imported rather than restated: a table that spelled its own filenames is what
-# let `runner.py` and this module name the same four files independently, and
+# let `runner.py` and this module name the same five files independently, and
 # `artifact_names` is where a second owner reaching for one of them is refused.
 from .artifact_names import (
     BACKEND_RECORD,

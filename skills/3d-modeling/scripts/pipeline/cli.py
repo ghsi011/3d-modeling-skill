@@ -83,13 +83,9 @@ NEEDS_ACTION = NEEDS_REVIEW
 NEXT_ACTION_FILE = "next_action.json"
 NEXT_ACTION_SCHEMA = 1
 ROUTE_DECISION_FILE = "route_decision.json"
-# The compiled plan is `artifact_names.EXECUTION_PLAN` and is not re-exported
-# here. Nobody authors that file: `route` and `run` produce it from
-# `project.json` in the same invocation, deterministically and without a
-# dispatch. It is there to be read -- by the next run, by a reviewer, and by
-# anyone checking that the receipt names the plan that was actually executed.
-# It had three constants and one of them collided with the print engineer's
-# plan checks below, which is why it now has exactly one, in the registry.
+# The compiled plan is `artifact_names.EXECUTION_PLAN`, and is deliberately not
+# re-exported here: this module's re-export was one of its three constants,
+# and a third of them collided with the print engineer's plan checks below.
 
 
 ReviewNeeded = runner.ReviewNeeded

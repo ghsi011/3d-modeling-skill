@@ -105,9 +105,9 @@ class Build123dBackend:
         # so a `.py` record would destroy a helper that happened to share its
         # name. Nothing executes this -- it is provenance -- so it is a receipt.
         #
-        # Resolved through the registry under the build boundary's own owner and
-        # not the pipeline's, so a record pointed at one of the runner's receipts
-        # is refused here rather than written over it.
+        # Resolved through the registry under the backend's own owner and not the
+        # pipeline's, so a record pointed at one of the runner's receipts is
+        # refused here rather than written over it.
         record_path = N.path(output_dir, N.BACKEND_RECORD, owner=N.BACKEND)
         record_path.write_text(S.canonical_json({
             "schema_version": bindings.BACKEND_RECORD_SCHEMA,
