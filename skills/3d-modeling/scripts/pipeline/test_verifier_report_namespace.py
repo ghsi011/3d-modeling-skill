@@ -272,8 +272,8 @@ class TheRegistryRefusesASecondOwnerTest(unittest.TestCase):
                          "the refused claim moved the owner anyway")
 
     def test_re_registering_the_same_pair_is_not_a_conflict(self) -> None:
-        """This checkout imports some modules twice under two names; an import
-        that raised the second time would be reporting the packaging."""
+        """The check is on the owner, not on the name: one name asked about
+        twice with one answer is not two claims."""
         self.assertEqual(TEAM_FILE, N.register(TEAM_FILE, owner=N.VERIFIER))
 
     def test_an_owner_resolves_its_own_artifact_to_a_path(self) -> None:

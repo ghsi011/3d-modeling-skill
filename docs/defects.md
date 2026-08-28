@@ -1196,6 +1196,18 @@ and the file is gone — a contract carrying `contract: verification-report`,
 `owner: verifier`, `revision: 1`, deleted for failing a dependency the verifier
 never declared.
 
+**What that digest is of, because it is not the committed file's identity.**
+The reproduction seeded the work directory with
+`json.dumps(<the example contract>, indent=2)` through `Path.write_text`, so
+`c577692b…` is the sha256 of *those* 1986 bytes on a Windows text-mode write.
+The committed `team_tools/examples/project_ok/verification_report.json` is
+`6ce94da7…` at 1988 B on a CRLF checkout and `33a2f301…` at 1913 B on an LF one,
+and the same reproduction on POSIX records `44c6778f…`. Every one of the four is
+reproducible and none of them is *the* digest of that contract, because line
+endings are not part of what the file says. The load-bearing fact here is not
+the value: it is that `invalidate` recorded a digest for a file it had never
+written and then removed it.
+
 The read-back, `team_tools.status.compute_status` over the same project with the
 pipeline's object at that path instead of the contract:
 
@@ -1245,3 +1257,13 @@ the next run. Nothing authored is destroyed, because after this change the
 pipeline never touches `verification_report.json` again in any direction. A
 legacy pipeline object left at that name is a file this change cannot reach and
 does not create.
+
+**The consequence that ruling carries, stated rather than left to be found.**
+In a team-lane project that already holds a pre-D37 pipeline object at that
+name, the object is now permanent litter: `dt.py status` still exits 1 on it for
+the read-back reason above, and neither `invalidate` nor `--restart` will
+remove it any more, because the pipeline no longer claims the name. Before this
+change either of those would have swept it away. Deleting somebody else's file
+is exactly what this defect is about, so the pipeline may not do it — clearing
+that one file is a person's decision, and `dt.py status` naming the row is how
+they find out it is owed.

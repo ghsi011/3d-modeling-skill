@@ -38,10 +38,19 @@ _OWNERS: dict[str, str] = {}
 def register(name: str, *, owner: str) -> str:
     """Record that `owner` holds `name`, refusing it if somebody else does.
 
-    Registering the same pair twice is a no-op rather than a conflict: this
-    source checkout imports some modules both package-relatively and by bare
-    name, and an import that raised the second time would be reporting the
-    packaging, not a collision.
+    Re-registering the same pair is not a conflict: the question is *who holds
+    this name*, and asking it twice with one answer changes nothing. A different
+    owner is the collision, and that is what raises.
+
+    **The guarantee is per module instance, which is worth stating because a
+    reader will assume it is per process.** `_OWNERS` is this module's dict, so
+    what it binds is every registration reaching it through this import -- which
+    is all of them, since Python imports `pipeline.artifact_names` once and
+    nothing here puts `pipeline/` on `sys.path`. A second *copy* of the module,
+    were one ever arranged, would carry its own empty table and enforce nothing
+    across the two; sibling modules cannot be loaded that way at all
+    (`import bindings` raises `attempted relative import with no known parent
+    package`). Anything that later widens this registry inherits that scoping.
     """
     held = _OWNERS.setdefault(name, owner)
     if held != owner:
