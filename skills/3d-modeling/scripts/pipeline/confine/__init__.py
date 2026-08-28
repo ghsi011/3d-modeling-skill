@@ -46,12 +46,11 @@ from __future__ import annotations
 import dataclasses
 import os
 
-# Raised by `run` immediately before the call that creates a process, because
-# `subprocess.Popen` raises an audit event and neither adapter goes through
-# `subprocess`. `DIRECT` creating zero processes is a release gate, and a gate
-# proven by monkeypatching two module attributes only covers process creation
-# reached through those two names. `test_isolation.DirectIsExemptTest` listens
-# for this.
+# Raised by the Windows adapter's `run` before `CreateProcessAsUserW`, which
+# raises no audit event of its own. The POSIX adapter does not raise it: its
+# `os.fork` and `os.execve` are audited by the interpreter already. `DIRECT`
+# creating zero processes is a release gate, and
+# `test_isolation.DirectIsExemptTest` watches this name beside those.
 AUDIT_SPAWN = "pipeline.confine.spawn"
 
 

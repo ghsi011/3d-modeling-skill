@@ -28,9 +28,10 @@ unchanged because the package took the module's name.
 
 Two guards had silently stopped covering the boundary the moment it became a directory, which is
 the failure a semantic inventory exists to catch, and both were widened rather than left:
-`test_import_cost`'s reachability walk resolves subpackages (so `confine`, its two adapters and
-`backends` are back on the graph `cli` pulls in), and `test_findings`' team_tools direction rule
-globs recursively.
+`test_import_cost`'s reachability walk resolves subpackages, so `confine` and its two adapters are
+back on the graph `cli` pulls in and `backends` is on it for the first time - the flat walk never
+resolved it either, measured on both layouts. `test_findings`' team_tools direction rule globs
+recursively.
 
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 

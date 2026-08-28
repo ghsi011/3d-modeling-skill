@@ -971,6 +971,7 @@ class TheChildContractTest(unittest.TestCase):
                 Path(command[0]).is_relative_to(Path(sys.prefix)),
                 "the boundary launches the virtual environment's launcher, which "
                 "spawns a child the child-process policy refuses")
+
     @requires_windows_confinement
     def test_a_path_with_spaces_survives_the_windows_command_line(self) -> None:
         """Split from the test above when `confine` became a package.
