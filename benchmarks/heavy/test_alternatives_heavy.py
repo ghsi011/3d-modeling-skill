@@ -17,6 +17,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from pipeline import acceptance as ACC
+from pipeline import artifact_names as N
 from pipeline import cli
 from pipeline import execution as EX
 from pipeline import project as P
@@ -101,7 +102,7 @@ class NoAlternativesCostsNothingTest(unittest.TestCase):
             self.assertFalse((directory / P.ALTERNATIVES_DIR).exists())
             self.assertTrue((directory / "candidate.stl").is_file())
             self.assertTrue((directory / ACC.ACCEPTANCE_FILE).is_file())
-            self.assertTrue((directory / cli.EXECUTION_PLAN_FILE).is_file())
+            self.assertTrue((directory / N.EXECUTION_PLAN).is_file())
 
     def test_the_shipped_goldens_are_untouched(self) -> None:
         """The five pinned certified contracts, from the one copy of the golden.
@@ -182,8 +183,8 @@ class TwoSiblingsTest(unittest.TestCase):
             for name in ("candidate_declaration.json", "pipeline_artifact_receipt.json",
                          "commission_report.json", "final_status.json",
                          ACC.ACCEPTANCE_FILE, ACC.HISTORY_FILE,
-                         cli.EXECUTION_PLAN_FILE, cli.ROUTE_DECISION_FILE,
-                         cli.PLAN_FILE):
+                         N.EXECUTION_PLAN, cli.ROUTE_DECISION_FILE,
+                         cli.PRINT_PLAN_CHECKS_FILE):
                 with self.subTest(artifact=name):
                     left = _alt(directory, "screw-fastened") / name
                     right = _alt(directory, "snap-fit") / name

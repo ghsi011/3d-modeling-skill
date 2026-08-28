@@ -16,8 +16,9 @@ bindings still hold is not stale, and deleting it throws away evidence that is
 still true.
 
 **How a binding is read.** Off the receipt itself, not out of a table of what we
-believe each receipt depends on. `artifact_manifest.json` carries the digests of
-the contract and the three artifacts; a review report carries a whole envelope;
+believe each receipt depends on. `pipeline_artifact_receipt.json` carries the
+digests of the contract and the three artifacts; a review report carries an
+envelope;
 `final_status.json` carries the artifact hashes and the plan digest. Each entry
 in `RECEIPTS` says how to read that receipt's own record of what it was issued
 against, and `broken()` compares it against what is on disk now.
@@ -27,10 +28,10 @@ than a list:
 
 * **a receipt may depend on another receipt.** `commission_report.json` records
   the contract it measured against and not the mesh it measured, so on its own it
-  cannot tell that the candidate moved. It is issued beside `artifact_manifest.json`,
-  which does record it, and it is stale when that one is. Declaring the edge is
-  honest about where the digest lives; inventing a digest the file does not carry
-  would not be;
+  cannot tell that the candidate moved. It is issued beside the pipeline's own
+  build receipt, which does record it, and it is stale when that one is.
+  Declaring the edge is honest about where the digest lives; inventing a digest
+  the file does not carry would not be;
 * **the acceptance contract reaches the receipts through the model contract.**
   Nothing downstream binds `acceptance_contract.json` directly -- every receipt
   binds `model_contract.json`'s hash, and the model contract carries the
@@ -56,63 +57,32 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import schemas as S
-from .artifact_names import PIPELINE_VERIFICATION_REPORT
+# Every name in this module's receipt table, from the one place that holds it.
+# Imported rather than restated: a table that spelled its own filenames is what
+# let `runner.py` and this module name the same four files independently, and
+# `artifact_names` is where a second owner reaching for one of them is refused.
+from .artifact_names import (
+    BACKEND_RECORD,
+    COMMISSION_REPORT,
+    EXECUTION_PLAN,
+    FINAL_STATUS,
+    MANUFACTURING_REPORT,
+    MODEL_CONTRACT_FILE,
+    PIPELINE_RECEIPT,
+    PIPELINE_VERIFICATION_REPORT,
+    SAFETY_VERIFICATION_REPORT,
+)
 
 # The frozen acceptance contract. Defined here rather than in `acceptance.py`
 # because this module is what reads it to find the current value of the
 # `acceptance` binding, and `acceptance.py` imports it back -- one definition,
 # and the import runs one way.
 CONTRACT_FILE = "acceptance_contract.json"
-# The contract the receipts actually bind: derived from the acceptance contract
-# on the authored lane and from the certified template on the other, and hashed
-# by `contract.Contract.contract_hash`, which is `payload_hash(as_payload())` --
-# so the file on disk re-hashes to the value every receipt carries.
-MODEL_CONTRACT_FILE = "model_contract.json"
-PLAN_FILE = "execution_plan.json"
 WITNESS_DIR = "witness"
-
-# The pipeline's own record of a build: backend, engine, cache, and the digests
-# of the contract and the three artifacts. **Not `artifact_manifest.json`.**
-#
-# That name is a team contract -- `team_tools.validators.CANONICAL_FILENAMES`
-# holds it, `designer_toolkit/receipts.py` writes it with
-# `contract: artifact-manifest`, and the charters point readers at it. The
-# pipeline wrote a wholly different object to the same path and then treated
-# that path as one of its own receipts, so a designer's manifest was both
-# overwritten by the runner and *deleted* by `invalidate`, which judged a file
-# the pipeline had never written stale against a dependency the designer had
-# never declared.
-#
-# The pipeline's is the one that moves, because the other is externally
-# specified: renaming that would turn a local collision into a contract
-# migration, while this name has no reader outside this package.
-PIPELINE_RECEIPT = "pipeline_artifact_receipt.json"
 
 CANDIDATE_STL = "candidate.stl"
 CANDIDATE_STEP = "candidate.step"
 DEFAULT_SOURCE = "model.py"
-# What a certified backend executed, by its own account: the template, the
-# backend and the frozen parameters. **Not `model.py`.** Both certified backends
-# used to write this record straight over that name, which for an unbranched
-# project is the project root -- and the designer charter tells a designer on a
-# certified `DIRECT` job to produce `model.py` there and edit it. So a run
-# destroyed the designer's whole deliverable and reported success.
-#
-# A name of its own rather than an existence check, because the two files are
-# not the same kind of thing. The record is what the backend ran; `model.py` is
-# what a person wrote. Keeping the designer's file while still calling it the
-# source would make `source_sha256` attest that their module produced this STL,
-# which is a worse claim than the one it replaces.
-#
-# **JSON, and the extension is the point.** The first repair gave the record its
-# own name and kept `.py`, which moved the collision rather than ending it:
-# `isolation._stage` treats *every* top-level `*.py` beside the model as the
-# designer's, on the stated ground that "the pipeline writes no Python into a
-# project directory". A designer shipping a helper under this exact name would
-# have had it destroyed by the same write. Nothing executes this record -- it is
-# provenance data -- and a `.py` extension claims an ownership this file does not
-# have.
-BACKEND_RECORD = "backend_build_record.json"
 # Bumped when the record's shape changes, so a reader can tell which one it has.
 BACKEND_RECORD_SCHEMA = 1
 
@@ -278,7 +248,7 @@ def current(work_dir: Path, *, alternative_id: str | None = None,
     expected = frozen.get("expected_artifacts")
     expected = expected if isinstance(expected, dict) else {}
     model_contract = _payload(work_dir / MODEL_CONTRACT_FILE)
-    plan = _payload(work_dir / PLAN_FILE)
+    plan = _payload(work_dir / EXECUTION_PLAN)
     return {
         "acceptance": frozen.get("contract_sha256"),
         "contract": None if model_contract is None else S.payload_hash(model_contract),
@@ -420,11 +390,11 @@ def _status_depends(payload: dict[str, Any]) -> tuple[str, ...]:
     verification decision did not rest on one, and making every status depend on
     a file most jobs never write would report a missing review as staleness.
     """
-    owed = ["commission_report.json"]
+    owed = [COMMISSION_REPORT]
     if payload.get("verification") is not None:
         owed.append(PIPELINE_VERIFICATION_REPORT)
     if payload.get("safety_verification") is not None:
-        owed.append("safety_verification_report.json")
+        owed.append(SAFETY_VERIFICATION_REPORT)
     return tuple(owed)
 
 
@@ -459,22 +429,22 @@ RECEIPTS: tuple[Receipt, ...] = (
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,)),
     # The commissioning report records the contract it measured against and not
     # the mesh it measured; the manifest is where that digest lives.
-    Receipt("commission_report.json", _commission,
+    Receipt(COMMISSION_REPORT, _commission,
             depends_on=lambda payload: (MODEL_CONTRACT_FILE,
                                         PIPELINE_RECEIPT)),
     # The manufacturing report carries the commissioning verdict.
-    Receipt("manufacturing_report.json", _manufacturing,
-            depends_on=lambda payload: ("commission_report.json",)),
+    Receipt(MANUFACTURING_REPORT, _manufacturing,
+            depends_on=lambda payload: (COMMISSION_REPORT,)),
     # Both reviews were shown the commissioning report inside their packet.
-    Receipt("safety_verification_report.json", _review, files=_review_files,
-            depends_on=lambda payload: ("commission_report.json",)),
+    Receipt(SAFETY_VERIFICATION_REPORT, _review, files=_review_files,
+            depends_on=lambda payload: (COMMISSION_REPORT,)),
     # **Not `verification_report.json`.** That is the verifier's team contract
     # (D37): the pipeline's review report was written over it and then listed
     # here, so `invalidate` deleted a role's contract as one of its own stale
     # receipts. `artifact_names` is what keeps the two apart now.
     Receipt(PIPELINE_VERIFICATION_REPORT, _review, files=_review_files,
-            depends_on=lambda payload: ("commission_report.json",)),
-    Receipt("final_status.json", _final_status, depends_on=_status_depends),
+            depends_on=lambda payload: (COMMISSION_REPORT,)),
+    Receipt(FINAL_STATUS, _final_status, depends_on=_status_depends),
 )
 
 # What an invalidation may remove. Derived from the table rather than restated,

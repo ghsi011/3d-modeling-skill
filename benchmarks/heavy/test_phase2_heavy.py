@@ -585,7 +585,7 @@ class PrintPlanTest(unittest.TestCase):
             code = cli.run([str(directory), "--no-render"])
             self.assertEqual(cli.NEEDS_ACTION, code)
             self.assertFalse((directory / "model.py").is_file())
-            plan = _read(directory, cli.PLAN_FILE)
+            plan = _read(directory, cli.PRINT_PLAN_CHECKS_FILE)
             self.assertEqual("builtin-direct-template", plan["owner"])
 
             action = _read(directory, cli.NEXT_ACTION_FILE)
@@ -593,7 +593,7 @@ class PrintPlanTest(unittest.TestCase):
             self.assertEqual("AGENT_COMMISSION", action["kind"])
             self.assertEqual([ACC.PROPOSAL_FILE, "model.py"],
                              action["required_outputs"])
-            self.assertIn(cli.PLAN_FILE, action["authorized_inputs"])
+            self.assertIn(cli.PRINT_PLAN_CHECKS_FILE, action["authorized_inputs"])
             self.assertIn("features", action["proposal_api"])
             self.assertIn("PARAMS", action["source_api"])
             self.assertTrue(action["bound"]["print_plan_sha256"])

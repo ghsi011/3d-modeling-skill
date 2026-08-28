@@ -13,19 +13,30 @@ repaired. A registered name has exactly one owner; a second owner claiming it is
 refused; and a writer resolves its path *through* the owner that holds the name,
 so pointing a write back at somebody else's file raises instead of succeeding.
 
-**It holds the one artifact D37 is about and nothing else.** The rest of the
-work directory is brought under it by later work, and guessing at that shape now
-would be scaffolding for a change nobody has made yet.
+**What it holds.** The verifier's team contract, and every artifact the pipeline
+itself writes into a work directory. The role-authored files -- the designer's
+module and manifest, the print engineer's plan checks -- are still named by the
+modules that write them, and the team-contract validators still declare their
+own filename table; bringing those under this is later work, and guessing at
+that shape now would be scaffolding for a change nobody has made yet.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-# The two owners that write into a work directory at the same time. `verifier`
-# is spelled as `team_tools.validators._EXPECTED_OWNERS` already spells it, so
-# the registry and the contract validator name the same role.
+# The owners that write into a work directory at the same time. `verifier` is
+# spelled as `team_tools.validators._EXPECTED_OWNERS` already spells it, so the
+# registry and the contract validator name the same role.
 VERIFIER = "verifier"
 PIPELINE = "pipeline"
+# The confined build boundary's writer, and it is deliberately not `pipeline`.
+# A certified backend is handed the work directory and writes its own record
+# there beside the pipeline's receipts, so "the pipeline owns everything it can
+# reach" would make the two indistinguishable -- and a backend that reached for
+# a receipt's name would be resolving its own. `AGENTS.md` reduces a build's
+# authority rather than lending it the runner's; this is that boundary spelled
+# where the registry can refuse a crossing.
+BACKEND = "backend"
 
 
 class NameConflict(Exception):
@@ -72,3 +83,84 @@ VERIFICATION_REPORT = register("verification_report.json", owner=VERIFIER)
 # charter-facing; this one has no reader outside this package.
 PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
                                         owner=PIPELINE)
+
+# ---------------------------------------------------------------------------
+# The rest of what the pipeline writes into a work directory
+# ---------------------------------------------------------------------------
+# Declared here rather than beside each writer, because a name declared beside
+# its writer is a name no other module can see -- which is the condition D34 to
+# D37 kept reproducing. `runner.py` spelled eight of these as bare literals
+# while `bindings.py` separately spelled four of the same files, and neither
+# consulted the other.
+#
+# Every name below is the name the file already had. This registers what the
+# work directory holds; it renames nothing.
+
+INTENT_MANIFEST = register("intent_manifest.json", owner=PIPELINE)
+SPECIFICATION = register("specification.json", owner=PIPELINE)
+# The compiled plan: the route authority, produced by `cli._compile` and read
+# verbatim by the runner. **One name, and this is it.** It used to be spelled
+# by `execution.EXECUTION_PLAN_FILE`, re-exported as `cli.EXECUTION_PLAN_FILE`,
+# and named a third time as `bindings.PLAN_FILE` -- and that third spelling
+# collided with `cli.PLAN_FILE`, which meant the print engineer's
+# `print_plan_checks.json`. Both were live in one namespace, because `cli`
+# imports `bindings`.
+EXECUTION_PLAN = register("execution_plan.json", owner=PIPELINE)
+# The contract the receipts actually bind: derived from the acceptance contract
+# on the authored lane and from the certified template on the other, and hashed
+# by `contract.Contract.contract_hash`, which is `payload_hash(as_payload())` --
+# so the file on disk re-hashes to the value every receipt carries.
+MODEL_CONTRACT_FILE = register("model_contract.json", owner=PIPELINE)
+
+# The pipeline's own record of a build: backend, engine, cache, and the digests
+# of the contract and the three artifacts. **Not `artifact_manifest.json`.**
+#
+# That name is a team contract -- `team_tools.validators.CANONICAL_FILENAMES`
+# holds it, `designer_toolkit/receipts.py` writes it with
+# `contract: artifact-manifest`, and the charters point readers at it. The
+# pipeline wrote a wholly different object to the same path and then treated
+# that path as one of its own receipts, so a designer's manifest was both
+# overwritten by the runner and *deleted* by `invalidate`, which judged a file
+# the pipeline had never written stale against a dependency the designer had
+# never declared.
+#
+# The pipeline's is the one that moves, because the other is externally
+# specified: renaming that would turn a local collision into a contract
+# migration, while this name has no reader outside this package.
+PIPELINE_RECEIPT = register("pipeline_artifact_receipt.json", owner=PIPELINE)
+COMMISSION_REPORT = register("commission_report.json", owner=PIPELINE)
+MANUFACTURING_REPORT = register("manufacturing_report.json", owner=PIPELINE)
+SAFETY_VERIFICATION_REPORT = register("safety_verification_report.json",
+                                      owner=PIPELINE)
+# What a run concluded, and the one file `design-tool status` and a reader treat
+# as the job's answer. Nobody but the pipeline may issue it: a status written by
+# something that built the geometry would be the candidate grading itself, which
+# is why `BACKEND` is a separate owner and why the refusal is worth a test.
+FINAL_STATUS = register("final_status.json", owner=PIPELINE)
+# Durations, deliberately unhashed and bound by nothing. Registered anyway: an
+# unregistered name is a name the next writer may take, which is the whole
+# condition this module exists to end.
+TIMINGS = register("timings.json", owner=PIPELINE)
+
+# What a certified backend executed, by its own account: the template, the
+# backend and the frozen parameters. **Not `model.py`.** Both certified backends
+# used to write this record straight over that name, which for an unbranched
+# project is the project root -- and the designer charter tells a designer on a
+# certified `DIRECT` job to produce `model.py` there and edit it. So a run
+# destroyed the designer's whole deliverable and reported success.
+#
+# A name of its own rather than an existence check, because the two files are
+# not the same kind of thing. The record is what the backend ran; `model.py` is
+# what a person wrote. Keeping the designer's file while still calling it the
+# source would make `source_sha256` attest that their module produced this STL,
+# which is a worse claim than the one it replaces.
+#
+# **JSON, and the extension is the point.** The first repair gave the record its
+# own name and kept `.py`, which moved the collision rather than ending it:
+# `isolation._stage` treats *every* top-level `*.py` beside the model as the
+# designer's, on the stated ground that "the pipeline writes no Python into a
+# project directory". A designer shipping a helper under this exact name would
+# have had it destroyed by the same write. Nothing executes this record -- it is
+# provenance data -- and a `.py` extension claims an ownership this file does not
+# have.
+BACKEND_RECORD = register("backend_build_record.json", owner=BACKEND)

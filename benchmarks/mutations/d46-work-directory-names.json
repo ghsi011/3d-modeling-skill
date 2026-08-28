@@ -1,0 +1,56 @@
+{
+  "target": "#46 -- the pipeline's own receipts get their names from the registry",
+  "note": "Five mutations over two protections. The first two are the discriminating observation the issue named, and they are a pair on purpose: a certified backend claiming the final-status name THROUGH the registry is refused, and the same claim written as a bare join is not -- so the second is what separates 'the registry refused it' from 'nothing was watching the name'. The other three attack the single-declaration protection: a write that joins instead of resolving, a literal put back in the runner, and a literal put back in the receipt table. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/d46-work-directory-names.json",
+  "mutations": [
+    {
+      "name": "a-certified-backend-claims-the-final-status-name",
+      "file": "skills/3d-modeling/scripts/pipeline/backends/trimesh_manifold.py",
+      "anchor": "        source_path = N.path(output_dir, N.BACKEND_RECORD, owner=N.BACKEND)",
+      "replacement": "        source_path = N.path(output_dir, N.FINAL_STATUS, owner=N.BACKEND)",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_work_directory_names.py::ACertifiedBackendMayNotClaimAReceiptsNameTest::test_a_certified_backend_may_not_write_the_pipelines_final_status"
+      ],
+      "why": "the observation the issue named, run in the failing direction: the backend writes its build record to the file that says what the run concluded. `artifact_names.path` refuses it -- `backend` does not hold `final_status.json` -- so the build raises, the run stops at the build stage and never reaches VERIFIED. A registry whose ownership is decorative would let this write land"
+    },
+    {
+      "name": "the-same-claim-as-a-bare-join",
+      "file": "skills/3d-modeling/scripts/pipeline/backends/trimesh_manifold.py",
+      "anchor": "        source_path = N.path(output_dir, N.BACKEND_RECORD, owner=N.BACKEND)",
+      "replacement": "        source_path = output_dir / N.FINAL_STATUS",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_work_directory_names.py::ACertifiedBackendMayNotClaimAReceiptsNameTest::test_a_certified_backend_may_not_write_the_pipelines_final_status"
+      ],
+      "why": "the pre-registry shape of the same claim, and it is NOT refused: the record lands on the status file, the runner overwrites it at the end of the run, and the job still reports VERIFIED with no build record left on disk. Without this entry the one above would only establish that some exception was raised somewhere; with it, the two answers differ and the difference is the registry"
+    },
+    {
+      "name": "the-runners-write-joins-instead-of-resolving",
+      "file": "skills/3d-modeling/scripts/pipeline/runner.py",
+      "anchor": "    path = N.path(out, name, owner=N.PIPELINE)",
+      "replacement": "    path = Path(out) / name",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_work_directory_names.py::TheReceiptNamesComeFromTheRegistryTest::test_the_pipeline_names_its_receipts_only_through_the_registry"
+      ],
+      "why": "`_write` degenerates into a join, so every receipt is registered in appearance only and the runner could be pointed at the verifier's team contract. Nothing behavioural notices, because every name the runner passes is one the pipeline owns -- which is exactly why the subtest observes the refusal directly rather than watching a run succeed"
+    },
+    {
+      "name": "a-bare-literal-returns-to-the-runner",
+      "file": "skills/3d-modeling/scripts/pipeline/runner.py",
+      "anchor": "    written[\"final_status\"] = _write(out, N.FINAL_STATUS, final)",
+      "replacement": "    written[\"final_status\"] = _write(out, \"final_status.json\", final)",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_work_directory_names.py::TheReceiptNamesComeFromTheRegistryTest::test_the_pipeline_names_its_receipts_only_through_the_registry"
+      ],
+      "why": "the state the whole ticket is about, one line of it: the runner spelling a receipt's name itself. It still runs and still writes the same file, so no behavioural test can see it -- the literal scan is the only instrument that can, and a scan that passed here would be asserting that the file parses"
+    },
+    {
+      "name": "the-receipt-table-restates-a-name",
+      "file": "skills/3d-modeling/scripts/pipeline/bindings.py",
+      "anchor": "    Receipt(FINAL_STATUS, _final_status, depends_on=_status_depends),",
+      "replacement": "    Receipt(\"final_status.json\", _final_status, depends_on=_status_depends),",
+      "tests": [
+        "skills/3d-modeling/scripts/pipeline/test_work_directory_names.py::TheReceiptNamesComeFromTheRegistryTest::test_the_pipeline_names_its_receipts_only_through_the_registry"
+      ],
+      "why": "the other half of the same condition, and the one a membership check cannot catch: a restated literal is still a registered name, so 'every entry in the table is registered' stays green while the table has gone back to being a second declaration of the name set"
+    }
+  ]
+}
