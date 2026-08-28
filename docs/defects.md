@@ -567,7 +567,7 @@ iterates three. The two disagree about what the job is.
 A second, quieter half: the loop calls `status.derived_at` per sibling, which returns
 `derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons`, and
 keeps two of the five. `tools/replay.py:958-987` is the proof it is missed —
-to read per-formulation staleness the harness has to issue `branch --activate`
+to read per-formulation staleness the harness had to issue `branch --activate`
 and `status` once per formulation.
 
 **Evidence.** Found while building `design-tool compare`, by asking where a

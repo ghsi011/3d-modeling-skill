@@ -398,7 +398,8 @@ uv run python tools/replay.py --record modify-ball-flange-flat   # re-freeze
 ```
 
 One of the four is branched: `branch-knob-seat-fallback` plays three formulations
-of one job through `design-tool branch`, `route`, `run` and `status`, with the
+of one job through `design-tool branch`, `route` and `run` -- then reads what
+each one's receipts currently support by calling `status.report` -- with the
 brief and the requirements shared at the project root and every receipt under the
 formulation that produced it.
 
