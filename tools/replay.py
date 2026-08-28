@@ -959,7 +959,7 @@ def play(case: ReplayCase, project_dir: Path,
             f"{case.case_id}: the review answers on disk are {on_disk} and this "
             f"harness wrote {sorted(written)}. An answer nobody recorded reached "
             "the run.")
-    derived = _derive_all(case, project_dir, step, invoke_surface, transcript)
+    derived = _derive_all(case, project_dir, step)
     comparison = _compare_all(case, project_dir, invoke_surface, transcript)
     exit_codes += _apply_dispositions(case, project_dir, step)
     return Play(project_dir=project_dir, exit_codes=exit_codes,
@@ -1088,15 +1088,17 @@ def _apply_revisions(case: ReplayCase, project_dir: Path,
 
 
 def _derive_all(case: ReplayCase, project_dir: Path,
-                step: Callable[[list[str]], int],
-                invoke_surface: Callable[[list[str]], int],
-                transcript: io.StringIO) -> dict[str, dict[str, Any]]:
+                step: Callable[[list[str]], int]) -> dict[str, dict[str, Any]]:
     """What `design-tool status` currently derives for each formulation.
 
-    Read through the command surface, one formulation at a time, because that is
-    the only place derived status exists: it is computed from the bindings on
-    disk and no receipt carries it. See the module docstring for why a computed
-    value is nonetheless binding.
+    One formulation at a time, because derived status is computed from the
+    bindings on disk and no receipt carries it. See the module docstring for why
+    a computed value is nonetheless binding.
+
+    The formulation is *selected* through the command surface, because that is
+    the verb a user has and a branch that started failing has to show up in this
+    loop. The report is then read as a document, by calling the function the
+    command renders -- see `_status_report`.
 
     Only for a branched case. An unbranched one would gain a key in every
     recording for a value that is `stored_status` by construction the moment the
@@ -1108,7 +1110,7 @@ def _derive_all(case: ReplayCase, project_dir: Path,
     out: dict[str, dict[str, Any]] = {}
     for formulation in case.formulations:
         _select(case, project_dir, formulation, step)
-        report = _status_report(project_dir, invoke_surface, transcript)
+        report = _status_report(project_dir)
         out[formulation.key] = {
             "derived_status": report.get("final_status"),
             "stored_status": report.get("stored_status"),
@@ -1312,27 +1314,26 @@ def _comparison_marks(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _status_report(project_dir: Path,
-                   invoke_surface: Callable[[list[str]], int],
-                   transcript: io.StringIO) -> dict[str, Any]:
-    """`design-tool status --json`, parsed.
+def _status_report(project_dir: Path) -> dict[str, Any]:
+    """The report `design-tool status` renders, obtained as data.
 
-    Its own stdout buffer: the transcript is a human record of the whole play and
-    this is a document the harness reads, and interleaving the two would make the
-    parse depend on what every earlier command happened to print. Through the
-    same injected surface as everything else, so the seam stays one seam.
+    The harness consumes the status as a *document*, and `status.report` is that
+    document. It used to be reached by redirecting stdout, invoking the command
+    surface with `--json` and parsing what was caught -- a hop that bought this
+    reader nothing and made the parse depend on what every earlier command
+    happened to print. The command now renders the same value, so the two
+    consumers read one report instead of one reading the other's output.
+
+    That does not reach the run loop. `play` still drives `design-tool` through
+    argv, because there the exit codes and the dispatch are the behaviour under
+    test; here they are not, and nothing in the recording is derived from either.
+
+    Late import for the reason `command_surface` is late: reading a case or
+    comparing two recordings must not pay for the pipeline's import time.
     """
-    captured = io.StringIO()
-    with contextlib.redirect_stdout(captured), \
-            contextlib.redirect_stderr(transcript):
-        code = invoke_surface(["status", str(project_dir), "--json"])
-    transcript.write(captured.getvalue())
-    try:
-        return json.loads(captured.getvalue())
-    except json.JSONDecodeError as exc:
-        raise ReplayError(
-            f"`design-tool status --json` exited {code} and did not print a JSON "
-            f"report: {exc}") from exc
+    from pipeline import project as PROJ
+    from pipeline import status as STATUS
+    return STATUS.report(PROJ.load(project_dir), project_dir)
 
 
 # --------------------------------------------------------------------------

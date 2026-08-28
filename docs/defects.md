@@ -613,8 +613,11 @@ three derived fields dropped again -- and both were caught.
 
 **What the fix did *not* move, which is worth recording.** The L1 recordings did
 not change. `tools/replay.py`'s `_derive_all` never read the broken block: it
-issues `branch --activate` and `status` once per formulation and reads
-`final_status`/`stored_status`/`stale` from each. So the harness's workaround is
+issues `branch --activate` once per formulation and reads
+`final_status`/`stored_status`/`stale` from the report for each. (At the time
+it recovered that report by invoking `design-tool status --json` and parsing
+the stdout it had captured; issue #44 replaced that hop with a call to
+`status.report`. The per-formulation loop described here is unchanged.) So the harness's workaround is
 also the reason the goldens were never exposed to the defect. That workaround
 can now be one call, which would also stop a replay leaving the project parked
 on whichever formulation it activated last -- separate work, because it changes

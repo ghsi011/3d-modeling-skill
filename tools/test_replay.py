@@ -24,6 +24,17 @@ from tools import replay as RP
 
 UNCHANGED = "0" * 64
 
+# The smallest `project.json` `pipeline.project.load` accepts, and what
+# `_FakeSurface` starts a project from. `play` reads the real file now that the
+# derived status is obtained by calling `status.report` rather than by parsing
+# what a `--json` invocation printed, so a fake that wrote a project no loader
+# accepts would fail there instead of at the guard each test is about -- which
+# is also what the real `branch` avoids by writing a whole project file.
+MINIMAL_PROJECT = json.dumps({"schema_version": 1, "job_id": "synthetic",
+                              "updated_utc": "1970-01-01T00:00:00Z",
+                              "source_mode": "NEW",
+                              "consequence": "INCONSEQUENTIAL"})
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +111,41 @@ class TheSeamPointsAtTheRealCommandSurfaceTest(unittest.TestCase):
     def test_the_pause_code_the_loop_branches_on_is_the_clis_own(self) -> None:
         from pipeline import cli
         self.assertEqual(cli.NEEDS_ACTION, RP.NEEDS_ACTION)
+
+
+class TheStatusReadIsADocumentAndNotATranscriptTest(unittest.TestCase):
+    """`_status_report` calls `status.report` instead of parsing stdout.
+
+    **This proves the report is reachable as data, because it fails if the
+    function returns anything the renderer could not have printed.** The command
+    renders the same value with `json.dumps(..., indent=2, sort_keys=True)`, so
+    anything that does not survive that call round trip -- a `Path`, a set, a
+    dataclass, a tuple, an integer dict key -- is a value that never reached a
+    user through `--json` and must not reach this harness either. Deleting the
+    hop is only safe while that stays true, and nothing else here would notice:
+    the recording keeps three scalar fields per formulation, so a report that
+    grew an unprintable value everywhere else would still replay green.
+
+    Run in the failing direction by returning `work_dir` -- a `Path`, the one
+    local `report` already holds -- under a key of its own: `json.dumps` raises
+    `TypeError: Object of type WindowsPath is not JSON serializable` and this
+    test is the only thing in the repository that fails.
+    """
+
+    def test_the_report_is_exactly_what_the_command_could_have_printed(self) -> None:
+        from pipeline import project as PROJ
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            PROJ.Project(job_id="synthetic", updated_utc="1970-01-01T00:00:00Z",
+                         source_mode="NEW",
+                         consequence="INCONSEQUENTIAL").save(directory)
+            report = RP._status_report(directory)
+        # It is the status document, not an empty dict that would round trip
+        # for a reason unrelated to the code.
+        self.assertEqual("synthetic", report["job_id"])
+        self.assertEqual("NOT_RUN", report["final_status"])
+        rendered = json.dumps(report, indent=2, sort_keys=True)
+        self.assertEqual(report, json.loads(rendered))
 
 
 class TheRecordedInputsAreVerifiedTest(_Sandboxed):
@@ -215,7 +261,8 @@ class _FakeSurface:
 
     def _project(self) -> dict:
         path = self.project_dir / "project.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        return json.loads(path.read_text(encoding="utf-8") if path.is_file()
+                          else MINIMAL_PROJECT)
 
     def _save(self, payload: dict) -> None:
         (self.project_dir / "project.json").write_text(json.dumps(payload),
@@ -254,10 +301,9 @@ class _FakeSurface:
             self._save(payload)
             RP.work_dir(self.project_dir).mkdir(parents=True, exist_ok=True)
             return 0
-        if argv[0] == "status":
-            print(json.dumps({"final_status": "NOT_RUN", "stored_status": None,
-                              "stale": {}}))
-            return 0
+        # No `status` branch: the harness reads the report by calling
+        # `status.report`, so a fake that still answered that verb would be
+        # answering a question nothing asks.
         if argv[0] == "compare":
             # The smallest report `_comparison_marks` can read. Everything it
             # does not name is absent on purpose: a fake that filled in the
@@ -395,7 +441,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
-        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        (project / "project.json").write_text(MINIMAL_PROJECT, encoding="utf-8")
         surface = _FakeSurface(project, [(0, None),
                                          (RP.NEEDS_ACTION, self.REVIEW),
                                          (0, None)])
@@ -432,7 +478,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
-        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        (project / "project.json").write_text(MINIMAL_PROJECT, encoding="utf-8")
         surface = _FakeSurface(project, [(0, None),
                                          (RP.NEEDS_ACTION, self.REVIEW),
                                          (0, None)])
@@ -490,7 +536,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
-        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        (project / "project.json").write_text(MINIMAL_PROJECT, encoding="utf-8")
         surface = _FakeSurface(project, script or [(0, None), (0, None)])
         return case, project, surface
 
@@ -735,7 +781,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
-        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        (project / "project.json").write_text(MINIMAL_PROJECT, encoding="utf-8")
 
         class _Broken(_FakeSurface):
             def __call__(self, argv):
@@ -761,7 +807,7 @@ class ThePlayLoopFailsClosedTest(_Sandboxed):
         case = self._seal()
         project = self.root / "project"
         project.mkdir()
-        (project / "project.json").write_text(json.dumps({}), encoding="utf-8")
+        (project / "project.json").write_text(MINIMAL_PROJECT, encoding="utf-8")
 
         class _RefusesToBranch(_FakeSurface):
             def __call__(self, argv):
