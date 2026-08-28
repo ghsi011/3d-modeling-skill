@@ -122,14 +122,17 @@ class TheStatusReadIsADocumentAndNotATranscriptTest(unittest.TestCase):
     anything that does not survive that call round trip -- a `Path`, a set, a
     dataclass, a tuple, an integer dict key -- is a value that never reached a
     user through `--json` and must not reach this harness either. Deleting the
-    hop is only safe while that stays true, and nothing else here would notice:
-    the recording keeps three scalar fields per formulation, so a report that
-    grew an unprintable value everywhere else would still replay green.
+    hop is only safe while that stays true, and the L1 recording would not
+    notice: it keeps three scalar fields per formulation, so a report that grew
+    an unprintable value everywhere else would still replay green.
 
     Run in the failing direction by returning `work_dir` -- a `Path`, the one
     local `report` already holds -- under a key of its own: `json.dumps` raises
-    `TypeError: Object of type WindowsPath is not JSON serializable` and this
-    test is the only thing in the repository that fails.
+    `TypeError: Object of type WindowsPath is not JSON serializable` and L0 goes
+    21 failed, 1393 passed. Not the only guard, and it does not claim to be:
+    twenty of those twenty-one reach the report through
+    `cli.status([..., "--json"])`, so they watch the same property through the
+    command. This one watches it on the path the harness itself takes.
     """
 
     def test_the_report_is_exactly_what_the_command_could_have_printed(self) -> None:

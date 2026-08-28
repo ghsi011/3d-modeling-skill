@@ -2749,8 +2749,9 @@ the reviewer's judgement with no envelope on it, so the harness stamps the
 envelope of the packet the current run issued and a recorded answer survives a
 protocol bump instead of being refused by one. A case may declare several
 formulations, in which case the harness reaches each through `design-tool branch`
-and reads what each one's receipts currently support through `design-tool
-status`. Four of the list below are covered today — original design, modification,
+and reads what each one's receipts currently support by calling `status.report` --
+the same assembly `design-tool status` renders, called directly rather than read
+back out of what that command printed. Four of the list below are covered today — original design, modification,
 alternative *formulation* (siblings isolated on disk and in the review
 bindings), and, since Release 4 slice 2, alternative *comparison*: the branched
 case runs `design-tool compare` after every formulation settles and freezes what
