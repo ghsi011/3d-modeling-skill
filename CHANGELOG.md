@@ -6,6 +6,32 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed - `confine` is a package with two peer adapters (#45)
+
+`confine.py` was both the Windows implementation and the dispatcher: nine names delegated to
+`confine_posix` behind a platform test inside the Windows file, so reaching the POSIX adapter on
+Linux meant importing the whole Windows one first, and the interface the two share was written
+down nowhere - it could only be recovered by reading the delegation guards.
+
+`confine/__init__.py` now states that interface once, as the package's own surface, and selects
+an implementation; `confine/windows.py` and `confine/posix.py` are peers that neither import nor
+test for each other. The Windows adapter loses `WINDOWS` and its nine `if not WINDOWS: return
+_posix....` guards outright, the POSIX adapter loses its `TYPE_CHECKING` import of the Windows
+module and the runtime one inside `run`, and the shared `Confined`, `ConfinementUnavailable` and
+`pipeline.confine.spawn` move to the entry module. `posix.py` keeps one platform question of its
+own - `os.name` is `posix` on more than Linux, and `unavailable_reason` is where this adapter
+refuses to pretend.
+
+**A move: no confinement mechanism, threshold or measurement changed.** Both callers -
+`isolation.py` and `build_child.py` - reach the package interface, and their import lines are
+unchanged because the package took the module's name.
+
+Two guards had silently stopped covering the boundary the moment it became a directory, which is
+the failure a semantic inventory exists to catch, and both were widened rather than left:
+`test_import_cost`'s reachability walk resolves subpackages (so `confine`, its two adapters and
+`backends` are back on the graph `cli` pulls in), and `test_findings`' team_tools direction rule
+globs recursively.
+
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 
 `artifact_manifest.json` is a team contract - `CANONICAL_FILENAMES` names it,

@@ -55,9 +55,10 @@ to execute a candidate at all — correctly, but it meant a Linux checkout could
 not run a single replay, could not record one, and could not touch the cache
 slice or anything else on the build path.
 
-`pipeline/confine_posix.py` is the second implementation. Four properties, each
-re-measured by `benchmarks/heavy/test_confine_posix_heavy.py` rather than
-asserted:
+`pipeline/confine/posix.py` is the second implementation, a peer of
+`pipeline/confine/windows.py` under an entry module that states the interface
+and selects one. Four properties, each re-measured by
+`benchmarks/heavy/test_confine_posix_heavy.py` rather than asserted:
 
 | property | Windows | Linux |
 |---|---|---|
@@ -1237,7 +1238,8 @@ of the protections were attempted and 15 were caught. The gate is 894 passing at
 `5c6ef9e` + this slice, up from 872, against a ceiling of 1050.
 
 **Still owed by slice 1, and blocked rather than skipped.** Both needed a
-Windows host, for the reason in §2. `pipeline/confine_posix.py` removed that
+Windows host, for the reason in §2. The POSIX adapter (then
+`pipeline/confine_posix.py`, now `pipeline/confine/posix.py`) removed that
 constraint; the first is done, the second is not:
 
 * ~~the `compare` step appended to `benchmarks/replays/branch-knob-seat-fallback`
@@ -1553,7 +1555,7 @@ Everything else the old list named goes in `not_compared` with its owner.
 Select one as preferred while retaining the other as fallback. **Still owed:**
 the two `design-tool branch --disposition` calls that do it, and the `compare`
 step in the replay recording. Both were blocked on a Windows host when this was
-written; `pipeline/confine_posix.py` unblocked them, and §2 now records that the
+written; the POSIX confinement adapter unblocked them, and §2 now records that the
 L1 suite runs on Linux and reproduces its goldens. What is left is the work
 itself.
 
