@@ -150,7 +150,7 @@ Reusing their numbers would make every reference to them ambiguous. D5 and D6 �
 the edit-intent fields that were declared, validated, and read by nothing — left
 this file the same way and are in `CHANGELOG.md`.
 
-**Where.** [`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py),
+**Where.** [`pipeline/confine/windows.py`](../skills/3d-modeling/scripts/pipeline/confine/windows.py),
 `RESTRICTING_SIDS` and `LOW_INTEGRITY_SID`, and the mechanism they add up to.
 
 **What is wrong.** Three of the confinement's ruled properties are unmet — two in
@@ -586,7 +586,7 @@ and stop discarding the three derived fields. Deliberately **not** done in the
 commit that found it, for a reason that has since expired: at the time the L1
 replay suite could not execute on Linux at all, and changing a golden-feeding
 command on a platform that cannot run the goldens is how a recording breaks.
-`pipeline/confine_posix.py` removed that constraint — the suite now runs here and
+the POSIX confinement adapter removed that constraint — the suite now runs here and
 reproduces its digests — so this is ordinary work on any platform, and what
 remains is only that nobody has done it.
 

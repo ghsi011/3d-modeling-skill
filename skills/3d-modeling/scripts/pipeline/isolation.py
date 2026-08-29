@@ -17,9 +17,10 @@ attacks walked through, none of which needed an import to do it:
 * a `DETACHED_PROCESS` grandchild that outlived `subprocess.run`'s timeout and
   rewrote `final_status.json` 25 s after the run had reported `FAILED`.
 
-So the candidate does not run as a peer. `confine.py` builds a restricted,
-low-integrity, privilege-stripped token and a job object it cannot leave, and
-this module builds the workspace that token can reach:
+So the candidate does not run as a peer. The `confine` package builds the
+boundary -- on Windows a restricted, low-integrity, privilege-stripped token and
+a job object it cannot leave -- and this module builds the workspace it can
+reach:
 
 1. the parent validates and freezes the proposal and keeps it in memory;
 2. **every input is hashed here, before anything is launched** -- the model and

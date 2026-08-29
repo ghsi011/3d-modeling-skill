@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """OS-enforced confinement for the build boundary. Linux primitives only.
 
-`isolation.py` decides *what* crosses the boundary. `confine.py` decides which
-implementation enforces it. This module is the Linux one, and it enforces the
-boundary with the kernel rather than with the Python interpreter -- the same rule
-`confine.py` states for Windows, kept with different primitives.
+One of the package's two adapters. `__init__.py` states the interface this file
+keeps and is the only module that chooses between the implementations; nothing
+here knows what the other one is or that there is another one. It enforces the
+boundary with the kernel rather than with the Python interpreter.
 
 **The four properties, and what enforces each here.** Every row is re-measured
 by `benchmarks/heavy/test_confine_posix_heavy.py`, which runs a real confined
@@ -27,10 +27,11 @@ its measurement claimed the network was closed when it was open.
    -- not even loopback is brought up. Measured: `connect()` to a routable
    address fails `ENETUNREACH` and DNS fails to resolve.
 
-   Worth naming because the Windows boundary cannot say this. `docs/defects.md`
-   D11 records that a restricted token does not refuse `socket.connect`, and
-   that the original claim it did rested on a probe against a port a local
-   filter happened to block. Here the network is genuinely absent.
+   Worth measuring rather than asserting, because this is the property
+   `docs/defects.md` D11 is about: a boundary claimed to refuse
+   `socket.connect` on the strength of a probe against a port a local filter
+   happened to block. Here the network is genuinely absent, and the test says so
+   by trying it.
 
 3. **Lifetime is bounded, and nothing can break out of it.** A PID namespace
    whose init process is this module's supervisor. When init exits the kernel
@@ -41,8 +42,8 @@ its measurement claimed the network was closed when it was open.
    single output byte.
 
    The supervisor counts what is still alive *before* it exits, so `survivors`
-   means the same thing it means on Windows: a candidate that tried to outlive
-   its own run, reported as a finding rather than silently reaped.
+   means what the interface says it means: a candidate that tried to outlive its
+   own run, reported as a finding rather than silently reaped.
 
 4. **No child processes.** A seccomp-BPF filter returning `EPERM` for `execve`
    and `execveat`, installed with `PR_SET_NO_NEW_PRIVS` so it cannot be dropped.
@@ -67,9 +68,7 @@ artifact out of the project directory, which the parent owns; becoming a
 different user does not confine that read -- the read-only mount already did --
 it only breaks it, and the breakage surfaces as `trimesh` reporting the source
 file does not exist, which reads like a broken fixture rather than like a
-boundary that took away something the job needs. Keeping the identity is also
-the shape the Windows implementation has, where the child runs as the same user
-under a restricted token.
+boundary that took away something the job needs.
 
 What the empty capability set buys is the one thing a root candidate could
 otherwise do: without `CAP_SYS_ADMIN` it cannot call `mount`, so it cannot
@@ -103,30 +102,22 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside `run`
-    # Imported inside `run` at runtime, because importing the Windows module at
-    # module scope would make this file's importability depend on it. The
-    # annotation still has to resolve for a checker, and an unresolvable one is
-    # a name a reader cannot follow.
-    from .confine import Confined
+from . import Confined, ConfinementUnavailable
 
 LINUX = sys.platform.startswith("linux")
 
 # Long enough for a transient the kernel is already tearing down, short enough
-# that a real survivor is still alive to be counted. The Windows boundary needs
-# the same grace for `conhost.exe`; here it is for the reaping of a process that
-# has already been killed.
+# that a real survivor is still alive to be counted. Here that transient is a
+# process which has already been killed and not yet reaped.
 SURVIVOR_GRACE_S = 0.25
 
 _libc = ctypes.CDLL("libc.so.6", use_errno=True) if LINUX else None
 
 # ---------------------------------------------------------------------------
-# Kernel constants. Declared here rather than pulled from a package for the
-# reason `confine.py` gives for its ctypes bindings: adding a dependency to a
-# security boundary to save fifty lines of declarations is the wrong trade, and
-# this way the boundary's whole surface is visible in one file.
+# Kernel constants. Declared here rather than pulled from a package: adding a
+# dependency to a security boundary to save fifty lines of declarations is the
+# wrong trade, and this way the boundary's whole surface is visible in one file.
 # ---------------------------------------------------------------------------
 CLONE_NEWNS = 0x00020000
 CLONE_NEWPID = 0x20000000
@@ -267,6 +258,11 @@ def unavailable_reason() -> str | None:
     Every mechanism the boundary rests on is probed rather than assumed. The
     order is the order in which a missing one would be discovered anyway; what
     this buys is that it is discovered *before* a candidate is staged, and named.
+
+    The first probe is the kernel itself, and it is a mechanism question like the
+    rest: `os.name` is `posix` on a good deal more than Linux, and none of what
+    follows exists on the others. It is not a dispatch -- there is nowhere for it
+    to dispatch to -- it is this adapter refusing to pretend.
     """
     if not LINUX:
         return (f"this module implements the boundary with Linux namespaces, "
@@ -367,17 +363,16 @@ def describe_confinement() -> dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
-# Sealing. On Windows this writes ACLs; here the mount namespace does the
-# enforcing at run time, so these carry the *discretionary* half only.
+# Sealing. The mount namespace does the enforcing at run time, so these carry
+# the *discretionary* half only.
 # ---------------------------------------------------------------------------
 
 def seal_read_only(path: Path) -> None:
     """The candidate's inputs, after they have been staged.
 
-    Read and traverse for the candidate, write for nobody -- the same two
-    sentences the Windows `D:P(A;;FA;;;SY)(A;OICI;FRFX;;;<restricted>)` says,
-    in the vocabulary this platform has. The parent keeps ownership so it can
-    restore write access to clean up.
+    Read and traverse for the candidate, write for nobody, in the vocabulary
+    this platform has. The parent keeps ownership so it can restore write access
+    to clean up.
 
     Discretionary, and the second mechanism rather than the first: the read-only
     mount is what actually refuses a write, with `EROFS`, before any permission
@@ -438,10 +433,9 @@ def is_reparse_point(path: Path) -> bool:
 def data_streams(path: Path) -> list[str]:
     """Extended attributes: data attached to a file and not in its contents.
 
-    The Windows implementation lists NTFS alternate data streams and excludes
-    the unnamed one. There is no ADS here, and the honest analogue is xattrs --
-    the way to hang bytes off a file that a reader of its contents will not see.
-    An artifact carrying them is refused for the same reason.
+    The interface asks for bytes attached to a file that reading the file does
+    not reveal. Here that is xattrs -- the way to hang bytes off a file that a
+    reader of its contents will not see. An artifact carrying them is refused.
     """
     try:
         return sorted(os.listxattr(str(path)))
@@ -561,15 +555,14 @@ def _drop_privilege() -> None:
     file does not exist, which reads like a broken fixture rather than a boundary
     that took away something the job needs.
 
-    So the identity stays and the *authority* goes, which is also the shape the
-    Windows implementation has: there the child runs as the same user under a
-    restricted token, not as another user. An empty capability set is what makes
-    that safe. Without `CAP_SYS_ADMIN` the candidate cannot call `mount`, so it
-    cannot remount its own namespace read-write and undo property 1 from the
-    inside -- which is the one thing a root candidate could otherwise do. Without
-    `CAP_DAC_OVERRIDE`, uid 0 is subject to ordinary permission bits like anyone
-    else; it keeps only what the parent's own ownership already grants, which is
-    exactly the read the job needs and no write the mount would have allowed.
+    So the identity stays and the *authority* goes. An empty capability set is
+    what makes that safe. Without `CAP_SYS_ADMIN` the candidate cannot call
+    `mount`, so it cannot remount its own namespace read-write and undo property
+    1 from the inside -- which is the one thing a root candidate could otherwise
+    do. Without `CAP_DAC_OVERRIDE`, uid 0 is subject to ordinary permission bits
+    like anyone else; it keeps only what the parent's own ownership already
+    grants, which is exactly the read the job needs and no write the mount would
+    have allowed.
 
     The bounding set is cleared as well as the effective one. A capability
     missing from the bounding set cannot be reacquired by any means, including a
@@ -749,19 +742,16 @@ def _supervise(argv: list[str], cwd: Path, env: dict[str, str], timeout: float,
 
 
 def run(argv: list[str], *, cwd: Path, env: dict[str, str],
-        timeout: float) -> "Confined":
+        timeout: float) -> Confined:
     """Run `argv` confined, and return only once the namespace is gone.
 
-    The order of the last steps is the point of the function, and it is the same
-    order the Windows implementation keeps for the same reason: the supervisor is
+    The order of the last steps is the point of the function: the supervisor is
     waited for, and a supervisor that has exited is a namespace the kernel has
     already emptied. So when this returns there is no process anywhere that could
     still be writing into the build directory -- not a detached grandchild, not
     something that called `setsid`, not anything. The parent does not have to
     poll for that, because the kernel does not offer a way to opt out of it.
     """
-    from .confine import Confined, ConfinementUnavailable
-
     reason = unavailable_reason()
     if reason:
         raise ConfinementUnavailable(reason)

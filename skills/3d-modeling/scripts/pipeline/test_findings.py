@@ -325,7 +325,9 @@ class TheMoveDidNotChangeTeamToolsTest(unittest.TestCase):
         is a one-line change nobody would notice in review.
         """
         offenders = []
-        for path in sorted(Path(__file__).resolve().parent.glob("*.py")):
+        # Recursive: `confine` and `backends` are subpackages, and a flat glob
+        # answers this question about the modules it happens to see.
+        for path in sorted(Path(__file__).resolve().parent.rglob("*.py")):
             if path.name.startswith("test_"):
                 # A test may import either package; what must not happen is a
                 # production module of `pipeline` acquiring the dependency.
