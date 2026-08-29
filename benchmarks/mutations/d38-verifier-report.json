@@ -1,6 +1,6 @@
 {
-  "target": "D37 -- the verifier's contract survives the pipeline, and the name registry that makes it survive",
-  "note": "Three protections, and the first is the discriminating observation the issue named: the verifier's contract is safe BECAUSE the survival row fails when the pipeline's write is pointed back at the shared name. The other two are the registry itself -- a claim refused, and a write refused -- because a registry that never refuses reads exactly like one that holds. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/d37-verifier-report.json",
+  "target": "D38 -- the verifier's contract survives the pipeline, and the name registry that makes it survive",
+  "note": "Three protections, and the first is the discriminating observation the issue named: the verifier's contract is safe BECAUSE the survival row fails when the pipeline's write is pointed back at the shared name. The other two are the registry itself -- a claim refused, and a write refused -- because a registry that never refuses reads exactly like one that holds. Every entry was run against the real code and observed to fail the named tests. Run with: uv run python tools/mutate.py benchmarks/mutations/d38-verifier-report.json",
   "mutations": [
     {
       "name": "the-pipeline-write-is-pointed-back-at-the-shared-name",
@@ -10,7 +10,7 @@
       "tests": [
         "skills/3d-modeling/scripts/pipeline/test_verifier_report_namespace.py::TheVerifiersContractSurvivesTest::test_a_seeded_contract_survives_a_full_run"
       ],
-      "why": "the pre-D37 implementation, restored exactly: the runner writes its review report to the team contract's name, so a verifier-authored contract sitting in the work directory comes back as the pipeline's object. This is the mechanism the row exists to observe, and a survival test that still passed here would be asserting that a file exists rather than that it is the one the verifier wrote"
+      "why": "the pre-D38 implementation, restored exactly: the runner writes its review report to the team contract's name, so a verifier-authored contract sitting in the work directory comes back as the pipeline's object. This is the mechanism the row exists to observe, and a survival test that still passed here would be asserting that a file exists rather than that it is the one the verifier wrote"
     },
     {
       "name": "a-second-owner-may-claim-a-registered-name",

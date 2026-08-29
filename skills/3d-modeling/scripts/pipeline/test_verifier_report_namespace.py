@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""D37: the pipeline's review report was squatting on the verifier's contract.
+"""D38: the pipeline's review report was squatting on the verifier's contract.
 
 `verification_report.json` is a team contract:
 `team_tools.validators.CANONICAL_FILENAMES` names it, `_EXPECTED_OWNERS`
@@ -128,12 +128,12 @@ class TheVerifiersContractSurvivesTest(unittest.TestCase):
     """**This proves the verifier's contract is safe from the pipeline, because
     it fails when the pipeline's write is pointed back at the shared name.**
 
-    `Y` is the pre-D37 implementation: `runner` writing its review report to
+    `Y` is the pre-D38 implementation: `runner` writing its review report to
     `out / "verification_report.json"` instead of resolving
     `N.PIPELINE_VERIFICATION_REPORT` through `artifact_names.path`. Run that way,
     `test_a_seeded_contract_survives_a_full_run` fails on the byte comparison --
     the contract comes back as the pipeline's object. Driven by
-    `benchmarks/mutations/d37-verifier-report.json`.
+    `benchmarks/mutations/d38-verifier-report.json`.
     """
 
     def test_a_seeded_contract_survives_a_full_run(self) -> None:
@@ -260,7 +260,7 @@ class TheRegistryRefusesASecondOwnerTest(unittest.TestCase):
 
     `Y` for the first row is a `register` that overwrites the holder instead of
     refusing; for the second, a `path` that returns the join without checking.
-    Both are in `benchmarks/mutations/d37-verifier-report.json` and both were
+    Both are in `benchmarks/mutations/d38-verifier-report.json` and both were
     run.
     """
 
@@ -272,8 +272,8 @@ class TheRegistryRefusesASecondOwnerTest(unittest.TestCase):
                          "the refused claim moved the owner anyway")
 
     def test_re_registering_the_same_pair_is_not_a_conflict(self) -> None:
-        """This checkout imports some modules twice under two names; an import
-        that raised the second time would be reporting the packaging."""
+        """The check is on the owner, not on the name: one name asked about
+        twice with one answer is not two claims."""
         self.assertEqual(TEAM_FILE, N.register(TEAM_FILE, owner=N.VERIFIER))
 
     def test_an_owner_resolves_its_own_artifact_to_a_path(self) -> None:

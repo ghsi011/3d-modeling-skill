@@ -8,7 +8,7 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ### Fixed - the role-authored artifacts are registered to their owners (D34, D35, D36)
 
-The registry D37 introduced now holds the other three names the same shape landed on: the
+The registry D38 introduced now holds the other three names the same shape landed on: the
 designer's `model.py` and `artifact_manifest.json` are registered to `cad-designer` and the print
 engineer's `print_plan_checks.json` to `print-engineer`, spelled as
 `team_tools.validators._EXPECTED_OWNERS` spells them. Two of those defects had been closed by
@@ -36,7 +36,7 @@ D35's and D36's - pass unmodified. No golden moved.
 The registry still holds only the artifacts a role authors and the pipeline shares a directory
 with. The rest of the work directory is the pipeline's own scratch, unregistered and nobody's.
 
-### Fixed - the verifier's report survives the pipeline, and names get an owner (D37)
+### Fixed - the verifier's report survives the pipeline, and names get an owner (D38)
 
 `verification_report.json` is a team contract - `CANONICAL_FILENAMES` names it, `_EXPECTED_OWNERS`
 requires `verifier` to have authored it, and `team_tools.status` cross-checks four bindings against
@@ -54,7 +54,7 @@ the contract stale against something it never claimed, the fourth stopped compar
 reason: both writers are legitimate and only one is entitled to a name the validators, the charters
 and `dt.py` already know. What is new is `pipeline/artifact_names.py` - one owner per filename, a
 second owner refused, and a write resolved *through* the owner that holds the name. This is the
-fourth time this shape has been found (D34, D35, D36, D37) and the first time the collision is
+fourth time this shape has been found (D34, D35, D36, D38) and the first time the collision is
 refused rather than repaired afterwards.
 
 The registry holds the one artifact this defect is about. Bringing the rest of the work directory
@@ -72,6 +72,25 @@ lists and one derived stale list, in `branch-knob-seat-fallback` and
 `modify-ball-scope-refused` are the untouched controls, and `safety_verification_report.json` is
 not affected - it was never a canonical contract name.
 
+### Changed - the status report is an interface, not a transcript (#44)
+
+`design-tool status` assembled a report and then rendered it two ways, all inside one command
+handler. `tools/replay.py` reached that assembly by redirecting stdout, invoking the command
+surface with `--json` and re-parsing what it caught - two adapters over one document, separated
+by a hop that bought neither of them anything.
+
+The assembly is now `status.report(project, project_dir)`, beside `derive` and `decide`. It
+prints nothing and chooses no exit code: the command renders the value it returns in both
+registers and derives the exit code from it, and the replay harness calls it directly. The
+readers underneath it - the stored verdict, the binding state, whether an instruction has been
+superseded, a formulation's own directory and the status it supports - moved with it, because
+`report` needs them and `cli` already imports this module. `cli` keeps its own names as aliases,
+so no call site there and no test moved.
+
+**The run loop is untouched.** `replay.play` still drives `design-tool` through argv, because
+there the exit codes and the dispatch are the behaviour under test; the status is a document,
+and it is now read as one. Both renderings are byte-identical to the previous commit's for all
+four committed replay fixtures, and no golden moved.
 
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 
