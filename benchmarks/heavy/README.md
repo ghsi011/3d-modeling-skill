@@ -75,6 +75,15 @@ here. So this paragraph is the only record, and the consequence it records is
 that six rows no longer run on every commit -- they still run before merge, so
 coverage is unchanged and the commit gate is what got smaller.
 
+**And two more, by the same ruling one slice later.**
+[`test_role_artifact_owners_heavy.py`](test_role_artifact_owners_heavy.py) holds
+the D34, D35 and D36 registry fixtures. They meet the rule below no better: no
+child process, no corpus, no B-rep read, two cases and six subtest arms that
+would be at home in the gate. The gate stood at 1438 of 1440 and the user made
+the same call. It is also the only file here that is **not** one half of a file
+still under `testpaths` -- the whole module moved, so the "reading a file here"
+note below does not apply to it.
+
 ## The rule a new test follows
 
 > Write the test beside the module it tests. Move it here when it starts a child

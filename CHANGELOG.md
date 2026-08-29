@@ -6,6 +6,36 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Fixed - the role-authored artifacts are registered to their owners (D34, D35, D36)
+
+The registry D38 introduced now holds the other three names the same shape landed on: the
+designer's `model.py` and `artifact_manifest.json` are registered to `cad-designer` and the print
+engineer's `print_plan_checks.json` to `print-engineer`, spelled as
+`team_tools.validators._EXPECTED_OWNERS` spells them. Two of those defects had been closed by
+moving the pipeline's file and one by an existence check with an owner comparison inside
+`cli._print_plan` - repairs that each removed one collision and left the condition that produced
+it, a shared directory whose names are string literals in whichever module happens to write them.
+Ownership is a property the registry enforces now, and the bespoke guard is gone.
+
+**`artifact_names.default_path` is the second half, and it exists for exactly one case:** a name
+whose role accepts a generated default while it has not authored one.
+`_EXPECTED_OWNERS["print_plan"]` already lets `builtin-direct-template` author that file, and
+`cli._print_plan` resolves its write through `default_path` rather than testing for the file
+itself. **The authority rule is carried over unchanged** - `docs/defects.md` D34 states it and is
+the one copy. Only what enforces the rule moved.
+
+Proven by removing each owner in turn, three separate runs, in
+`benchmarks/mutations/d47-role-artifact-owners.json`. Removing the print engineer's entry puts D34
+itself back: the generated template lands on the accepted plan again and
+`test_plan_authority.py::AnAcceptedPlanSurvivesTheRunTest::test_an_accepted_plan_on_disk_is_not_replaced`
+goes red with no edit to it. The other two removals expose the barrier rather than the overwrite,
+because those two writes moved to names of their own and are no longer in the tree to reproduce -
+the manifest narrows that claim rather than stating it whole. All three regression fixtures - D34's,
+D35's and D36's - pass unmodified. No golden moved.
+
+The registry still holds only the artifacts a role authors and the pipeline shares a directory
+with. The rest of the work directory is the pipeline's own scratch, unregistered and nobody's.
+
 ### Fixed - the verifier's report survives the pipeline, and names get an owner (D38)
 
 `verification_report.json` is a team contract - `CANONICAL_FILENAMES` names it, `_EXPECTED_OWNERS`
