@@ -79,7 +79,10 @@ NEEDS_REVIEW = 3
 # continue", whether that something is a review response or a whole commission.
 # A caller scripting the loop needs one condition to test, not two.
 NEEDS_ACTION = NEEDS_REVIEW
-NEXT_ACTION_FILE = "next_action.json"
+# One spelling, in the module that reads the file to say whether the
+# instruction is still current. Two would be two places as far as a reader is
+# concerned.
+NEXT_ACTION_FILE = STATUS.NEXT_ACTION_FILE
 NEXT_ACTION_SCHEMA = 1
 ROUTE_DECISION_FILE = "route_decision.json"
 # The compiled plan, written beside the decision it was compiled from. Nobody
@@ -368,7 +371,7 @@ def run_job(argv: list[str]) -> int:
 # The canonical project surface
 # ---------------------------------------------------------------------------
 
-def _work_dir(project_dir: Path, project: P.Project, *, create: bool = True) -> Path:
+def _work_dir(project_dir: Path, project: P.Project) -> Path:
     """Where this run writes, created before anything tries to write into it.
 
     One call, at the top of every verb that produces files, so that no code path
@@ -376,28 +379,21 @@ def _work_dir(project_dir: Path, project: P.Project, *, create: bool = True) -> 
     project this is the project root and the `mkdir` is a no-op on a directory
     that already exists, so nothing new appears.
 
-    `create=False` for the verbs that only read. `status` reporting on a job it
-    had to create a directory for would be a command that changes what it is
+    The verbs that only read do not come through here at all: `status.report`
+    resolves the same directory without creating it, because a command that had
+    to create a directory to report on a job would be changing what it is
     describing.
     """
-    try:
-        work = project.work_dir(project_dir)
-    except S.PathEscape:
-        # A hand-written `active_alternative` that would leave the project.
-        # `validate` names it -- the regex refuses the id and the cross-check
-        # refuses one nothing declares -- and falling back to the project root is
-        # what lets that problem be written down instead of tracebacking on the
-        # way to reporting it.
-        work = Path(project_dir)
-    if create:
-        work.mkdir(parents=True, exist_ok=True)
+    work = STATUS.active_work_dir(project_dir, project)
+    work.mkdir(parents=True, exist_ok=True)
     return work
 
 
-def _state(work_dir: Path, project: P.Project) -> dict[str, Any]:
-    """What this formulation's files say right now -- the instruction's own state."""
-    return B.current(work_dir, alternative_id=project.active_alternative or None,
-                     model_name=project.model)
+# What this formulation's files say right now, and whether an instruction
+# written against them still describes the project. Both live in `status.py`,
+# beside the report that reads them; the names here are the ones every call
+# site in this module and its tests already use.
+_state = STATUS.binding_state
 
 
 def _write_next_action(work_dir: Path, project: P.Project,
@@ -429,16 +425,7 @@ def _write_next_action(work_dir: Path, project: P.Project,
     return path
 
 
-def _superseded(next_action: Any, state: dict[str, Any]) -> bool:
-    """Whether an instruction on disk still describes the project it sits in.
-
-    An instruction written before this field existed carries no digest and cannot
-    vouch for itself, which is the condition it was added for; it is reported
-    superseded rather than believed.
-    """
-    if not isinstance(next_action, dict):
-        return False
-    return next_action.get("state_sha256") != S.payload_hash(state)
+_superseded = STATUS.is_superseded
 
 
 def _clear_next_action(work_dir: Path) -> None:
@@ -809,60 +796,11 @@ def _route_next_action(project_dir: Path, work_dir: Path, project: P.Project,
     })
 
 
-def _pending_action(work_dir: Path) -> dict[str, Any] | None:
-    """The instruction on disk, or None where there is not a readable one."""
-    return _json_object(work_dir / NEXT_ACTION_FILE)
+_pending_action = STATUS.pending_action
 
 
-def _alternative_dir(project_dir: Path, alternative_id: str | None) -> Path | None:
-    """Where one formulation's own files live, or None if the id would escape.
-
-    The same join `Project.work_dir` makes, through the same resolver, for an
-    alternative that is not the active one. `status` needs it because a status is
-    derived *per alternative* -- a report that could only answer for whichever
-    branch happens to be checked out is a report that cannot compare two.
-    """
-    if alternative_id is None:
-        return Path(project_dir)
-    try:
-        return S.resolve_within(Path(project_dir),
-                                f"{P.ALTERNATIVES_DIR}/{alternative_id}",
-                                what="alternative directory")
-    except S.PathEscape:
-        return None
-
-
-def _derived_at(project_dir: Path, project: P.Project,
-                alternative_id: str | None) -> dict[str, Any]:
-    """The status one formulation's own receipts currently support."""
-    where = _alternative_dir(project_dir, alternative_id)
-    if where is None or not where.is_dir():
-        return STATUS.derive(None, {})
-    return STATUS.derive(
-        _final_status(where),
-        B.broken(where, evidence_dir=project_dir,
-                 alternative_id=alternative_id, model_name=project.model))
-
-
-def _final_status(work_dir: Path) -> dict[str, Any] | None:
-    """The stored verdict, or None where there is not one to read.
-
-    Tolerant of a file that will not parse, deliberately: `status` has to be able
-    to report on a directory whose receipt somebody has broken, and a command
-    that raises instead is a command that cannot describe the one state a reader
-    most needs described.
-    """
-    return _json_object(work_dir / "final_status.json")
-
-
-def _json_object(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return loaded if isinstance(loaded, dict) else None
+_alternative_dir = STATUS.alternative_dir
+_final_status = STATUS.stored
 
 
 PLAN_FILE = "print_plan_checks.json"
@@ -1978,6 +1916,13 @@ def status(argv: list[str]) -> int:
     one is still reported, under its own name, because it remains the record of
     what that run concluded -- what changes is that a reader no longer trusts it
     without checking. Nothing is re-adjudicated: see `status.derive`.
+
+    The report itself is assembled by `status.report`, which prints nothing and
+    returns no exit code. This command is one of its two renderings -- the lines
+    a person reads and the JSON `--json` emits -- and the exit code below is
+    derived from the same value. `tools/replay.py` is the other consumer and
+    calls that function directly, so neither reading of the report goes through
+    the other's output.
     """
     parser = argparse.ArgumentParser(
         prog="design-tool status",
@@ -1989,150 +1934,12 @@ def status(argv: list[str]) -> int:
 
     project_dir = args.project_dir.resolve()
     project = _load_project(project_dir, adapt=False)
-    # The active formulation's own state, not the root's. Reading the root while
-    # a branch is active would report the sibling's answer as this one's, which
-    # is the whole class of failure the work directory exists to remove.
-    work_dir = _work_dir(project_dir, project, create=False)
-    pending = work_dir / NEXT_ACTION_FILE
-    next_action = None
-    if pending.is_file():
-        try:
-            next_action = json.loads(pending.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise SystemExit(f"design-tool: {NEXT_ACTION_FILE} is not valid JSON: {exc}")
-
-    # Read, never written. `status` reporting on a job it had invalidated on the
-    # way past would be a command that changes what it is describing, and the
-    # honest report of a broken binding is that it is broken -- not that the
-    # receipt carrying it has been tidied away.
-    state = _state(work_dir, project)
-    stale = B.broken(work_dir, evidence_dir=project_dir,
-                     alternative_id=project.active_alternative or None,
-                     model_name=project.model)
-    final_payload = _final_status(work_dir)
-    derived = STATUS.derive(final_payload, stale)
-    superseded = _superseded(next_action, state)
-    # Per alternative, and not only for whichever one is active. Each
-    # formulation's receipts sit in its own directory and are checked against
-    # that directory's own bindings, so switching branches is not the price of
-    # finding out where the other one stands.
-    alternatives = []
-    # The union: the shared root plus every declared alternative. `branch` writes
-    # no row for the root -- it is a formulation by having a directory, a
-    # proposal, a contract and its own receipts, not by being declared -- and
-    # iterating `project.alternatives` alone reported two formulations of the
-    # recorded knob while the `cost` block below reported three. One report, two
-    # answers to "what is this job". `docs/defects.md` D26.
-    #
-    # Synthesised here and not in `project.json`: a declared row for the root
-    # would make it a thing a user could reject or supersede, and would move
-    # what every existing project deserialises to.
-    root_row = P.Alternative(alternative_id=ROOT_ALTERNATIVE,
-                             reason="what the alternatives were branched from")
-    for row in (root_row, *project.alternatives):
-        at = None if row.alternative_id == ROOT_ALTERNATIVE else row.alternative_id
-        other = (derived if at == project.active_alternative
-                 else _derived_at(project_dir, project, at))
-        # All five, not two. `_derived_at` computes `allowed_claim`, `stale` and
-        # `reasons` as well, and dropping them made per-formulation staleness
-        # unreadable from the report -- `tools/replay.py` had to issue `branch
-        # --activate` and `status` once per formulation to recover what one call
-        # already knew.
-        alternatives.append({**row.as_dict(),
-                             "status": other["derived_status"],
-                             "stored_status": other["stored_status"],
-                             "allowed_claim": other.get("allowed_claim"),
-                             "stale": sorted(other.get("stale") or {}),
-                             "reasons": list(other.get("reasons") or ())})
-    # What FALLBACK means to a reader, which is the only thing that separates it
-    # from ACTIVE. A retained formulation is the answer to "and if this one does
-    # not work out", so it is named exactly when that question is live: the
-    # current formulation has no claim it may make. Naming it is not comparison
-    # and not selection -- Release 4 owns both -- it is reading a status this
-    # command already derives and honouring a disposition the user declared.
-    fallbacks = [{"alternative_id": row["alternative_id"], "status": row["status"],
-                  "reason": row["reason"]}
-                 for row in alternatives if row["disposition"] == "FALLBACK"]
-    # What each formulation has spent, and what each one beyond the root added.
-    # Per alternative for the same reason the status is: a cost read only for
-    # whichever branch happens to be active is a number that cannot answer "what
-    # did exploring the second concept cost", which is the question
-    # ARCHITECTURE.md 15.2 asks and the one the vent-ball exercise had to answer
-    # with a stopwatch.
-    events = LC.read(project_dir)
-    costs = {}
-    for key in [ROOT_ALTERNATIVE] + [row.alternative_id
-                                     for row in project.alternatives]:
-        where = _alternative_dir(project_dir,
-                                 None if key == ROOT_ALTERNATIVE else key)
-        if where is not None and where.is_dir():
-            costs[key] = COST.totals_at(where)
-    cost_report = COST.compare(costs,
-                               restarts=COST.restarts_by_alternative(events))
-    # One validate() call, read in two registers: `problems` keeps its shape as
-    # the sentences a person reads, `findings` carries the code, field path and
-    # severity a caller matches on. Calling validate twice would be two answers
-    # to one question and the cheaper of the two ways to make them disagree.
-    problems = project.validate(project_dir, require_buildable=False)
-    report = {
-        "job_id": project.job_id,
-        "source_mode": project.source_mode,
-        "consequence": project.consequence,
-        "alternative": project.active_alternative,
-        "alternatives": alternatives,
-        "fallbacks": fallbacks,
-        # Which run this formulation currently *is*, content-derived, so that a
-        # caller can carry one value instead of re-deriving the binding map --
-        # and so that two byte-identical siblings are still two runs. See
-        # `bindings.identity` for why it is not an invocation counter.
-        "run_id": B.identity(state),
-        # What was deliberately done to this job's formulations, oldest first.
-        # Bound by nothing: appending to it cannot make a receipt stale, which
-        # is what lets it record the one thing scoped invalidation cannot.
-        "lifecycle": events,
-        # What the job spent, per formulation and in total, and what each
-        # formulation beyond the root added. Bound by nothing, for the same
-        # reason `lifecycle` is: see `pipeline/cost.py`.
-        "cost": cost_report,
-        "route": project.route,
-        "route_rationale": project.route_rationale,
-        "required_reviews": list(project.required_reviews),
-        # ADR 0003 decision 1: an assumption is permitted and is *findable*.
-        # A datum somebody chose is not a defect, so `validate` says nothing
-        # about it -- every caller of it here refuses the run on a non-empty
-        # list, warning severity included, and the ADR says plainly that a job
-        # whose datum has no provenance is not refused. It belongs where a
-        # person asks what the job is resting on instead. Release 6 is where an
-        # assessment has to name the ones its conclusion rested on.
-        # Each row carries who settles it and what settling it means, because a
-        # list of bare ids is the `note` this replaced -- and its provenance,
-        # because the two kinds of assumption are not the same thing. A `CHOSEN`
-        # number was picked deliberately; a blank one was never recorded at all,
-        # and ADR 0003 decision 1 is about telling those apart. A row without it
-        # left no consumer able to.
-        "assumptions": [{"datum_id": row.datum_id,
-                         "provenance": row.provenance,
-                         "owner": row.owner, "settled_by": row.settled_by}
-                        for row in project.datums if row.is_assumption],
-        "problems": F.messages(problems),
-        "findings": [issue.to_dict() for issue in problems],
-        "waiting_for": next_action,
-        # Whether that instruction still describes this project. An instruction
-        # is as stale-able as a receipt and used to be the only one of the two
-        # that could not say so.
-        "waiting_for_superseded": superseded,
-        "final_status": derived["derived_status"],
-        "stored_status": derived["stored_status"],
-        "stale": derived["stale"],
-        "allowed_claim": derived["allowed_claim"],
-        "lane_status": (final_payload or {}).get("lane_status"),
-        "execution_plan_sha256": (final_payload or {}).get("execution_plan_sha256"),
-        # This formulation's own, from its own final status. The shared project
-        # file no longer carries a copy for the root to be read out of.
-        "bindings": (final_payload or {}).get("artifact_hashes") or {},
-        # And what those hashes are being checked against right now.
-        "state": state,
-    }
+    try:
+        report = STATUS.report(project, project_dir)
+    except STATUS.Unreadable as exc:
+        raise SystemExit(f"design-tool: {exc}")
+    next_action = report["waiting_for"]
+    superseded = report["waiting_for_superseded"]
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
