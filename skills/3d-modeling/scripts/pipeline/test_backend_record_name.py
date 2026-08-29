@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from . import artifact_names as N
 from . import bindings as B
 
 
@@ -45,7 +46,7 @@ class TheRecordIsNotTheDesignersFileTest(unittest.TestCase):
         from team_tools import validators as V
         owned = {name for spellings in V.CANONICAL_FILENAMES.values()
                  for name in spellings}
-        owned |= {B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE, B.PLAN_FILE,
+        owned |= {B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE, N.EXECUTION_PLAN,
                   B.CANDIDATE_STL, B.CANDIDATE_STEP, B.DEFAULT_SOURCE}
         self.assertTrue(owned, "the canonical set came back empty")
         self.assertNotIn(B.BACKEND_RECORD, owned)
@@ -66,7 +67,7 @@ class TheRecordIsNotTheDesignersFileTest(unittest.TestCase):
         """The invariant itself, asserted where it can be read: no name this
         module hands the pipeline to write is Python."""
         written = {B.BACKEND_RECORD, B.CONTRACT_FILE, B.MODEL_CONTRACT_FILE,
-                   B.PLAN_FILE}
+                   N.EXECUTION_PLAN}
         self.assertEqual([], [n for n in written if n.endswith(".py")])
 
 

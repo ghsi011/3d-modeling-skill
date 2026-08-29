@@ -43,7 +43,8 @@ from . import schemas as S
 from . import templates as T
 
 EXECUTION_PLAN_SCHEMA = 1
-EXECUTION_PLAN_FILE = "execution_plan.json"
+# The plan's filename is `artifact_names.EXECUTION_PLAN`; this module compiles
+# the plan and does not write it.
 
 # Where the geometry comes from, which is not what the route decides. Two
 # providers, not the four axes ADR 0002 names: imported geometry and

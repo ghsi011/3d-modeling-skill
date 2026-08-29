@@ -6,6 +6,41 @@ This project loosely follows [Keep a Changelog](https://keepachangelog.com/) and
 
 ## [Unreleased]
 
+### Changed - the pipeline's own receipts get their names from the registry (#46)
+
+The runner wrote ten artifacts into the work directory, eight of them by bare string literal,
+while `bindings` separately named five of those eight - and neither consulted the other. Two consequences were
+already visible in the source, and both are closed here.
+
+**One artifact, three names.** The execution plan was spelled by `execution.EXECUTION_PLAN_FILE`,
+re-exported as `cli.EXECUTION_PLAN_FILE`, and named a third time as `bindings.PLAN_FILE`. All
+three constants are **gone** rather than aliased; the plan is `artifact_names.EXECUTION_PLAN` and
+`pipeline/artifact_names.py` is the only module in the package that writes `execution_plan.json`
+out.
+
+**One name, two artifacts.** That third spelling collided with `cli.PLAN_FILE`, which meant the
+print engineer's `print_plan_checks.json` - and since `cli` imports `bindings`, `PLAN_FILE` and
+`B.PLAN_FILE` sat a few lines apart in one module meaning two different files. The survivor is
+`cli.PRINT_PLAN_CHECKS_FILE`, named for what it is.
+
+`artifact_names` now holds every artifact the pipeline writes: the intent manifest, the
+specification, the execution plan, the model contract, the pipeline receipt, the commission,
+manufacturing and safety reports, the verification report, the final status and the timings.
+`runner._write` takes a directory and a name and resolves it through
+`artifact_names.path`, so the fifteen call sites cannot compose a path that skips the ownership
+check, and the `RECEIPTS` table imports its names instead of restating them.
+
+**A certified backend is a separate owner.** `build123d` and `trimesh-manifold` write their build
+record into the same work directory, so `BACKEND` holds `backend_build_record.json` and resolves
+it through the registry. That is what makes the discriminating observation real: a backend that
+claims `final_status.json` is *refused*, where the same claim written as a bare join is not.
+Both shapes are in `benchmarks/mutations/d46-work-directory-names.json` and both were run.
+
+**No name moved.** Every artifact keeps the spelling it had; `TODAYS_NAMES` in
+`benchmarks/heavy/test_work_directory_names_heavy.py` pins each one, and no replay golden and no pinned certified
+contract changed. Still literals, deliberately: the names read back by `cli`, `compare` and the
+team-contract validators, and the role-authored artifacts - those are separate work.
+
 ### Fixed - the verifier's report survives the pipeline, and names get an owner (D38)
 
 `verification_report.json` is a team contract - `CANONICAL_FILENAMES` names it, `_EXPECTED_OWNERS`
@@ -99,7 +134,7 @@ sha of a file the pipeline had never written.
 
 **A rename, because both writers are legitimate and only one is entitled to that name.** The
 team contract's is externally specified, validator-known and charter-facing; the pipeline's is
-internal. So the pipeline's moves, to `bindings.PIPELINE_RECEIPT` =
+internal. So the pipeline's moves, to `artifact_names.PIPELINE_RECEIPT` =
 `pipeline_artifact_receipt.json`, and it moves everywhere at once: both runner writes including
 the measurement-exception path, the `RECEIPTS` entry, `REMOVABLE`, the dependency edge from
 `commission_report.json`, `compare`'s read-back, `replay`'s envelope read, and the three replay

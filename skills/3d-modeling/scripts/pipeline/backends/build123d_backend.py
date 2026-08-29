@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import artifact_names as N
 from .. import bindings
 from .. import schemas as S
 from . import BuildArtifacts
@@ -103,7 +104,11 @@ class Build123dBackend:
         # stages every top-level Python file beside the model as the designer's,
         # so a `.py` record would destroy a helper that happened to share its
         # name. Nothing executes this -- it is provenance -- so it is a receipt.
-        record_path = output_dir / bindings.BACKEND_RECORD
+        #
+        # Resolved through the registry under the backend's own owner and not the
+        # pipeline's, so a record pointed at one of the runner's receipts is
+        # refused here rather than written over it.
+        record_path = N.path(output_dir, N.BACKEND_RECORD, owner=N.BACKEND)
         record_path.write_text(S.canonical_json({
             "schema_version": bindings.BACKEND_RECORD_SCHEMA,
             "record": "backend-build",

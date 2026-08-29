@@ -149,7 +149,7 @@ class AnAcceptedPlanSurvivesTheRunTest(unittest.TestCase):
         accepted = _accepted_plan()
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            path = work / cli.PLAN_FILE
+            path = work / cli.PRINT_PLAN_CHECKS_FILE
             path.write_text(json.dumps(accepted), encoding="utf-8")
             cli._print_plan(work, _project())
             after = json.loads(path.read_text(encoding="utf-8"))
@@ -163,7 +163,7 @@ class AnAcceptedPlanSurvivesTheRunTest(unittest.TestCase):
         accepted = _accepted_plan()
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            (work / cli.PLAN_FILE).write_text(json.dumps(accepted),
+            (work / cli.PRINT_PLAN_CHECKS_FILE).write_text(json.dumps(accepted),
                                               encoding="utf-8")
             plan, problems = cli._print_plan(work, _project())
         self.assertEqual([], problems, problems)
@@ -182,7 +182,7 @@ class AnAcceptedPlanSurvivesTheRunTest(unittest.TestCase):
         del broken["support_rules"]
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            path = work / cli.PLAN_FILE
+            path = work / cli.PRINT_PLAN_CHECKS_FILE
             path.write_text(json.dumps(broken), encoding="utf-8")
             _plan, problems = cli._print_plan(work, _project())
             after = json.loads(path.read_text(encoding="utf-8"))
@@ -195,7 +195,7 @@ class AnAcceptedPlanSurvivesTheRunTest(unittest.TestCase):
         crashed session leaves behind."""
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            path = work / cli.PLAN_FILE
+            path = work / cli.PRINT_PLAN_CHECKS_FILE
             path.write_text("{ not json", encoding="utf-8")
             _plan, problems = cli._print_plan(work, _project())
             after = path.read_text(encoding="utf-8")
@@ -215,7 +215,7 @@ class TheTemplateStillCoversAJobWithNoPlanTest(unittest.TestCase):
             work = Path(raw)
             plan, problems = cli._print_plan(work, _project())
             self.assertEqual([], problems, problems)
-            self.assertTrue((work / cli.PLAN_FILE).is_file(),
+            self.assertTrue((work / cli.PRINT_PLAN_CHECKS_FILE).is_file(),
                             "a job with no authored plan was left without one")
         self.assertEqual("print-plan", plan.get("contract"))
         self.assertTrue(plan.get("support_rules"),
@@ -227,7 +227,7 @@ def _seeded(directory: Path, plan: dict | None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "project.json").write_text(json.dumps(_PROJECT), encoding="utf-8")
     if plan is not None:
-        (directory / cli.PLAN_FILE).write_text(json.dumps(plan), encoding="utf-8")
+        (directory / cli.PRINT_PLAN_CHECKS_FILE).write_text(json.dumps(plan), encoding="utf-8")
     return directory
 
 
@@ -259,7 +259,7 @@ class TheRealRunEndpointLeavesTheAcceptedPlanAloneTest(unittest.TestCase):
         accepted = _accepted_plan()
         with tempfile.TemporaryDirectory() as raw:
             directory = _seeded(Path(raw) / "job", accepted)
-            path = directory / cli.PLAN_FILE
+            path = directory / cli.PRINT_PLAN_CHECKS_FILE
             before = path.read_bytes()
             code = cli.run([str(directory), "--no-render"])
             after = path.read_bytes()
@@ -296,7 +296,7 @@ class TheRealRunEndpointLeavesTheAcceptedPlanAloneTest(unittest.TestCase):
             directory = _seeded(Path(raw) / "job", accepted)
             cli.run([str(directory), "--no-render"])
             after = json.loads(
-                (directory / cli.PLAN_FILE).read_text(encoding="utf-8"))
+                (directory / cli.PRINT_PLAN_CHECKS_FILE).read_text(encoding="utf-8"))
             packet = json.loads(
                 (directory / "next_action.json").read_text(encoding="utf-8"))
         self.assertEqual(_AUTHORED_NORMAL_Z_MAX,
@@ -317,7 +317,7 @@ class TheRealRunEndpointLeavesTheAcceptedPlanAloneTest(unittest.TestCase):
             directory = _seeded(Path(raw) / "job", accepted)
             cli.run([str(directory), "--no-render"])
             after = json.loads(
-                (directory / cli.PLAN_FILE).read_text(encoding="utf-8"))
+                (directory / cli.PRINT_PLAN_CHECKS_FILE).read_text(encoding="utf-8"))
         self.assertEqual(accepted["deliverables"], after.get("deliverables"))
         self.assertEqual(accepted["export_fidelity"], after.get("export_fidelity"))
 
@@ -328,7 +328,7 @@ class TheRealRunEndpointLeavesTheAcceptedPlanAloneTest(unittest.TestCase):
         accepted = _accepted_plan()
         with tempfile.TemporaryDirectory() as raw:
             directory = _seeded(Path(raw) / "job", accepted)
-            path = directory / cli.PLAN_FILE
+            path = directory / cli.PRINT_PLAN_CHECKS_FILE
             before = path.read_bytes()
             cli.main(["run", str(directory), "--no-render"])
             self.assertEqual(before, path.read_bytes())
@@ -355,7 +355,7 @@ class AGeneratedPlanDoesNotOutliveItsCommissionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = _seeded(Path(raw) / "job", None)
             cli.run([str(directory), "--no-render"])
-            path = directory / cli.PLAN_FILE
+            path = directory / cli.PRINT_PLAN_CHECKS_FILE
             before = path.read_bytes()
             (directory / "project.json").write_text(
                 json.dumps(dict(_PROJECT, **second)), encoding="utf-8")
@@ -409,7 +409,7 @@ class TheRunStillWritesAPlanForAJobThatHasNoneTest(unittest.TestCase):
             code = cli.run([str(directory), "--no-render"])
             self.assertEqual(3, code)
             written = json.loads(
-                (directory / cli.PLAN_FILE).read_text(encoding="utf-8"))
+                (directory / cli.PRINT_PLAN_CHECKS_FILE).read_text(encoding="utf-8"))
             packet = json.loads(
                 (directory / "next_action.json").read_text(encoding="utf-8"))
         self.assertEqual(_TEMPLATE_NORMAL_Z_MAX,

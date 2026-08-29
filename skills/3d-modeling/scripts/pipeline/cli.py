@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any
 
 from . import acceptance as ACC
+from . import artifact_names as N
 from . import bindings as B
 from . import compare as CMP
 from . import cost as COST
@@ -85,12 +86,8 @@ NEEDS_ACTION = NEEDS_REVIEW
 NEXT_ACTION_FILE = STATUS.NEXT_ACTION_FILE
 NEXT_ACTION_SCHEMA = 1
 ROUTE_DECISION_FILE = "route_decision.json"
-# The compiled plan, written beside the decision it was compiled from. Nobody
-# authors this file: `route` and `run` produce it from `project.json` in the same
-# invocation, deterministically and without a dispatch. It is here to be read --
-# by the next run, by a reviewer, and by anyone checking that the receipt names
-# the plan that was actually executed.
-EXECUTION_PLAN_FILE = EX.EXECUTION_PLAN_FILE
+# The compiled plan's name is `artifact_names.EXECUTION_PLAN`, deliberately not
+# re-exported here.
 
 
 ReviewNeeded = runner.ReviewNeeded
@@ -708,7 +705,7 @@ def _compile(work_dir: Path, project: P.Project,
     plan = EX.compile_plan(project, decision)
     (work_dir / ROUTE_DECISION_FILE).write_text(
         S.canonical_json(decision.as_dict()), encoding="utf-8")
-    (work_dir / EXECUTION_PLAN_FILE).write_text(
+    N.path(work_dir, N.EXECUTION_PLAN, owner=N.PIPELINE).write_text(
         S.canonical_json(plan.as_payload()), encoding="utf-8")
     return plan
 
@@ -803,7 +800,12 @@ _alternative_dir = STATUS.alternative_dir
 _final_status = STATUS.stored
 
 
-PLAN_FILE = "print_plan_checks.json"
+# The print engineer's plan checks: the machine-readable projection of the print
+# plan, and a `team_tools.validators` canonical filename. It was `PLAN_FILE`,
+# which is what `bindings` called `execution_plan.json` -- so this module read
+# `PLAN_FILE` and `B.PLAN_FILE` and meant two different files. Named for what it
+# is now.
+PRINT_PLAN_CHECKS_FILE = "print_plan_checks.json"
 
 def _review_calls(work_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:
     """Only the reviews the plan actually named.
@@ -913,16 +915,16 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         consequence=project.consequence,
         orientation=project.orientation)
 
-    accepted_path = work_dir / PLAN_FILE
+    accepted_path = work_dir / PRINT_PLAN_CHECKS_FILE
     if accepted_path.is_file():
         try:
             accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            return {}, [f"{PLAN_FILE} is already written and cannot be read: "
+            return {}, [f"{PRINT_PLAN_CHECKS_FILE} is already written and cannot be read: "
                         f"{exc}. It is the print engineer's deliverable, so this "
                         f"run will not replace it; repair or remove the file."]
         if not isinstance(accepted, dict):
-            return {}, [f"{PLAN_FILE} is already written and is not a JSON "
+            return {}, [f"{PRINT_PLAN_CHECKS_FILE} is already written and is not a JSON "
                         f"object. It is the print engineer's deliverable, so "
                         f"this run will not replace it."]
         if (accepted.get("owner") == plan.get("owner")
@@ -939,7 +941,7 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
             # a workflow this program *invites*. An overwrite here would be the
             # same defect again, aimed at exactly the people it hurt before.
             return {}, [
-                f"{PLAN_FILE} is a generated plan from an earlier commission "
+                f"{PRINT_PLAN_CHECKS_FILE} is a generated plan from an earlier commission "
                 f"and no longer matches this one -- the project has changed "
                 f"since it was written. This run will not replace it, because "
                 f"it may have been edited in place. Delete it to regenerate, "
@@ -1430,8 +1432,8 @@ def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
     """
     authorized = ([project.brief, P.PROJECT_FILE]
                   + [_relative(work_dir, project_dir, name)
-                     for name in (ROUTE_DECISION_FILE, EXECUTION_PLAN_FILE,
-                                  PLAN_FILE)]
+                     for name in (ROUTE_DECISION_FILE, N.EXECUTION_PLAN,
+                                  PRINT_PLAN_CHECKS_FILE)]
                   + [a.path for a in project.source_artifacts])
     instruction = _write_next_action(work_dir, project, {
         "schema_version": NEXT_ACTION_SCHEMA,
@@ -1495,7 +1497,7 @@ def _commission_authored(project_dir: Path, work_dir: Path, project: P.Project,
         f"  the commission is written to  "
         f"{_relative(work_dir, project_dir, NEXT_ACTION_FILE)}\n"
         f"  the print plan it builds against is  "
-        f"{_relative(work_dir, project_dir, PLAN_FILE)}\n"
+        f"{_relative(work_dir, project_dir, PRINT_PLAN_CHECKS_FILE)}\n"
         f"  write both files, in one pass, then run the same command again.\n\n"
         f"  {ACC.PROPOSAL_FILE} is what the part must measure; the model is how it\n"
         "  is built. They are separated so that the second cannot restate the\n"
@@ -1556,7 +1558,7 @@ def _run_authored(project_dir: Path, work_dir: Path, project: P.Project,
         # own deliverable when somebody did. The finding cannot say which of the
         # two is at fault, and the file is what the reader has to open.
         return _report_problems(project_dir, work_dir, project, [
-            F.problem(F.ARTIFACT_REFUSED, f"{PLAN_FILE}[{index}]", text)
+            F.problem(F.ARTIFACT_REFUSED, f"{PRINT_PLAN_CHECKS_FILE}[{index}]", text)
             for index, text in enumerate(plan_problems)], stage="plan")
 
     brief_path = project_dir / project.brief

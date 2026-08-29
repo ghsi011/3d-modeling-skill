@@ -57,7 +57,7 @@ class TheContractIsFrozenAgainstTheAuthoredCeilingTest(unittest.TestCase):
 
     def _accepted_for(self, directory: Path) -> dict:
         plan = _accepted_plan()
-        (directory / cli.PLAN_FILE).write_text(json.dumps(plan), encoding="utf-8")
+        (directory / cli.PRINT_PLAN_CHECKS_FILE).write_text(json.dumps(plan), encoding="utf-8")
         return plan
 
     def test_the_frozen_contract_carries_the_authors_ceiling(self) -> None:
@@ -77,9 +77,9 @@ class TheContractIsFrozenAgainstTheAuthoredCeilingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), _authored(), model=BLOCK)
             self._accepted_for(directory)
-            before = (directory / cli.PLAN_FILE).read_bytes()
+            before = (directory / cli.PRINT_PLAN_CHECKS_FILE).read_bytes()
             cli.run([str(directory), "--no-render"])
-            after = (directory / cli.PLAN_FILE).read_bytes()
+            after = (directory / cli.PRINT_PLAN_CHECKS_FILE).read_bytes()
         self.assertEqual(before, after, "the build rewrote the accepted plan")
 
 

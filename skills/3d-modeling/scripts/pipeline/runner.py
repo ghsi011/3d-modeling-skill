@@ -141,7 +141,16 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _write(path: Path, payload: dict[str, Any]) -> Path:
+def _write(out: Path, name: str, payload: dict[str, Any]) -> Path:
+    """Write one of the pipeline's own receipts, resolved through the registry.
+
+    The name goes through `artifact_names.path` rather than being joined here,
+    so a receipt this process is not the owner of is refused at the write rather
+    than discovered afterwards by whoever lost their file. Taking the directory
+    and the name instead of a finished path is what makes that unavoidable: the
+    fifteen call sites below cannot compose a path that skips the check.
+    """
+    path = N.path(out, name, owner=N.PIPELINE)
     path.write_text(S.canonical_json(payload), encoding="utf-8")
     return path
 
@@ -256,7 +265,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         consequence=request.consequence, modifiers=request.modifiers,
         ambiguities=request.ambiguities,
         decision=decision, updated_utc=request.updated_utc)
-    written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
+    written["intent_manifest"] = _write(out, N.INTENT_MANIFEST, manifest)
     timings["intent"] = time.perf_counter() - mark
 
     if plan.requires_verification and request.verify_call is None:
@@ -335,7 +344,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         except ReviewNeeded:
             raise
         except (S.SchemaError, R.ReviewError, ValueError) as exc:
-            written["specification"] = _write(out / "specification.json", {
+            written["specification"] = _write(out, N.SPECIFICATION, {
                 "schema_version": S.SPECIFICATION_SCHEMA,
                 "route": "FITTED",
                 "error": f"{type(exc).__name__}: {exc}",
@@ -349,7 +358,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         ledger.dispatched("spec")
         timings["specification"] = time.perf_counter() - mark
         specification = spec
-        written["specification"] = _write(out / "specification.json", spec)
+        written["specification"] = _write(out, N.SPECIFICATION, spec)
 
         if spec["unresolved"]:
             unresolved = "\n  - ".join(spec["unresolved"])
@@ -407,7 +416,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
             for name, value in sorted(request.parameters.items())]
         manifest["specification"] = {
             "measurements": spec["measurements"], "interfaces": spec["interfaces"]}
-        written["intent_manifest"] = _write(out / "intent_manifest.json", manifest)
+        written["intent_manifest"] = _write(out, N.INTENT_MANIFEST, manifest)
 
     if plan.builder == "AUTHORED":
         template = request.acceptance
@@ -426,7 +435,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         template, request,
         fit_acceptance=fit_rows,
     )
-    written["model_contract"] = _write(out / "model_contract.json", model_contract.as_payload())
+    written["model_contract"] = _write(out, N.MODEL_CONTRACT_FILE, model_contract.as_payload())
     problems = C.preflight(model_contract, known_checks=commission.KNOWN_CHECKS)
     # The obligation the plan carries, checked against the contract that will
     # actually be gated. The preservation row reached the contract from one CLI
@@ -542,11 +551,11 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         timings["screening"] = time.perf_counter() - mark
 
         mark = time.perf_counter()
-        witness = W.generate(ctx, model_contract, out / "witness", render=request.render)
+        witness = W.generate(ctx, model_contract, out / B.WITNESS_DIR, render=request.render)
         report["witness"] = witness.as_dict()
         timings["witness"] = time.perf_counter() - mark
     except Exception as exc:                        # noqa: BLE001 - see above
-        written["artifact_manifest"] = _write(out / B.PIPELINE_RECEIPT, artifact)
+        written["artifact_manifest"] = _write(out, N.PIPELINE_RECEIPT, artifact)
         return JobResult(False, "measurement", f"{type(exc).__name__}: {exc}",
                          written, timings, llm_calls, None)
 
@@ -555,13 +564,13 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
     # property hashing exists for: `evidence_packet_sha256` and the safety
     # cache identity became functions of elapsed time, so no two runs could ever
     # match and the cache could never hit.
-    written["artifact_manifest"] = _write(out / B.PIPELINE_RECEIPT, artifact)
-    written["commission_report"] = _write(out / "commission_report.json", report)
+    written["artifact_manifest"] = _write(out, N.PIPELINE_RECEIPT, artifact)
+    written["commission_report"] = _write(out, N.COMMISSION_REPORT, report)
 
     # ---- manufacturing evidence -------------------------------------------
     manufacturing = status.manufacturing(model_contract, report)
     if manufacturing is not None:
-        written["manufacturing_report"] = _write(out / "manufacturing_report.json", manufacturing)
+        written["manufacturing_report"] = _write(out, N.MANUFACTURING_REPORT, manufacturing)
 
     # ---- the one bounded safety call, when required ------------------------
     # Keyed off the immutable contract rather than off the plan, and deliberately
@@ -600,7 +609,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
                     "source": artifact["source_sha256"],
                     "step": artifact.get("step_sha256"),
                 },
-                witness=witness.as_dict(), witness_dir=out / "witness",
+                witness=witness.as_dict(), witness_dir=out / B.WITNESS_DIR,
                 evidence=request.evidence, evidence_dir=evidence_root,
                 # The deterministic measurement plans behind the packet's
                 # evidence, named rather than only hashed into it. A MODIFY job's
@@ -629,7 +638,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
             # parse JSON, and a parse failure is a malformed review -- a receipt,
             # not a traceback.
             written["safety_verification_report"] = _write(
-                out / "safety_verification_report.json", {
+                out, N.SAFETY_VERIFICATION_REPORT, {
                     "schema_version": S.SAFETY_SCHEMA,
                     "error": f"{type(exc).__name__}: {exc}",
                 })
@@ -640,7 +649,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         ledger.dispatched("safety")
         timings["safety"] = time.perf_counter() - mark
         written["safety_verification_report"] = _write(
-            out / "safety_verification_report.json", safety_report)
+            out, N.SAFETY_VERIFICATION_REPORT, safety_report)
 
     verification_report = None
     # Whether an independent look happens at all is the plan's answer: NEVER on
@@ -676,7 +685,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
                     "source": artifact["source_sha256"],
                     "step": artifact.get("step_sha256"),
                 },
-                witness=witness.as_dict(), witness_dir=out / "witness",
+                witness=witness.as_dict(), witness_dir=out / B.WITNESS_DIR,
                 evidence=request.evidence, evidence_dir=evidence_root,
                 evidence_digests=report.get("evidence_digests"),
                 execution_plan_sha256=plan.plan_hash(),
@@ -691,7 +700,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
             # See the safety boundary above: a JSON parse failure from the
             # adapter is a malformed review, written down rather than raised.
             written["verification_report"] = _write(
-                N.path(out, N.PIPELINE_VERIFICATION_REPORT, owner=N.PIPELINE), {
+                out, N.PIPELINE_VERIFICATION_REPORT, {
                     "schema_version": S.VERIFICATION_SCHEMA,
                     "error": f"{type(exc).__name__}: {exc}",
                 })
@@ -702,8 +711,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         ledger.dispatched("verification")
         timings["verification"] = time.perf_counter() - mark
         written["verification_report"] = _write(
-            N.path(out, N.PIPELINE_VERIFICATION_REPORT, owner=N.PIPELINE),
-            verification_report)
+            out, N.PIPELINE_VERIFICATION_REPORT, verification_report)
 
     final = status.decide(contract=model_contract, commission_report=report,
                           screening=screen, manufacturing=manufacturing,
@@ -716,7 +724,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
                           safety_envelope=safety_envelope if model_contract.consequence == "CONSEQUENTIAL" else None,
                           verification_envelope=verification_envelope if request.verify_call is not None else None,
                           datum_conflicts=request.datum_conflicts)
-    written["final_status"] = _write(out / "final_status.json", final)
+    written["final_status"] = _write(out, N.FINAL_STATUS, final)
 
     timings["build"] = round(built.build_seconds, 4)
     timings["total"] = time.perf_counter() - started
@@ -728,10 +736,11 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         boundary = float(request.authored_build.boundary_seconds)
         timings["build_boundary"] = round(boundary, 4)
         timings["total"] += boundary
-    _write(out / "timings.json", {"job_id": request.job_id,
-                                  "seconds": {k: round(v, 4) for k, v in timings.items()},
-                                  "note": "not hashed: durations are not part of any "
-                                          "artifact's identity"})
+    _write(out, N.TIMINGS,
+           {"job_id": request.job_id,
+            "seconds": {k: round(v, 4) for k, v in timings.items()},
+            "note": "not hashed: durations are not part of any "
+                    "artifact's identity"})
     ok = final["final_status"] in ("COMMISSIONED", "VERIFIED")
     return JobResult(ok, "complete", final["allowed_claim"], written, timings,
                      llm_calls, final)

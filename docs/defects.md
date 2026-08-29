@@ -1124,7 +1124,7 @@ reports success while having replaced a validated contract with an object
 **The fix, and why it is a rename rather than a guard.** Both writers are
 legitimate; only one is entitled to that name. The team contract's is externally
 specified, validator-known and charter-facing, so the *pipeline's* moves — to
-`bindings.PIPELINE_RECEIPT`. Renaming the contract's would turn a local collision
+`artifact_names.PIPELINE_RECEIPT`. Renaming the contract's would turn a local collision
 into a contract migration.
 
 **The fixture that must fail before the fix lands.** Seed a valid team-contract

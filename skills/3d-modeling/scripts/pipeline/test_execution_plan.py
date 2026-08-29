@@ -41,6 +41,7 @@ import unittest
 from pathlib import Path
 
 from . import acceptance as ACC
+from . import artifact_names as N
 from . import cli
 from . import execution as EX
 from . import project as P
@@ -193,7 +194,7 @@ def _final(directory: Path) -> dict:
 
 def _plan_file(directory: Path) -> dict:
     return json.loads(
-        (directory / cli.EXECUTION_PLAN_FILE).read_text(encoding="utf-8"))
+        (directory / N.EXECUTION_PLAN).read_text(encoding="utf-8"))
 
 
 def _next_action(directory: Path) -> dict:
@@ -234,11 +235,11 @@ class RouteIsNotABuilderTest(unittest.TestCase):
         """No hand-written file, no extra command, and byte-stable per run."""
         with tempfile.TemporaryDirectory() as raw:
             directory = _laid_out(Path(raw), _project())
-            self.assertFalse((directory / cli.EXECUTION_PLAN_FILE).is_file())
+            self.assertFalse((directory / N.EXECUTION_PLAN).is_file())
             cli.run([str(directory), "--no-render"])
-            first = (directory / cli.EXECUTION_PLAN_FILE).read_text(encoding="utf-8")
+            first = (directory / N.EXECUTION_PLAN).read_text(encoding="utf-8")
             cli.run([str(directory), "--no-render"])
-            self.assertEqual(first, (directory / cli.EXECUTION_PLAN_FILE)
+            self.assertEqual(first, (directory / N.EXECUTION_PLAN)
                              .read_text(encoding="utf-8"))
             self.assertEqual("DIRECT", json.loads(first)["route"])
 
