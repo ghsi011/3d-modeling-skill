@@ -675,7 +675,7 @@ class WhatTheConfinementEnforcesTest(_AttackTest):
     def test_the_boundary_denies_outbound_tcp(self) -> None:
         """The property this boundary is supposed to have and does not. D9/D11.
 
-        Deliberately failing, and deliberately kept. `confine.py` claimed an
+        Deliberately failing, and deliberately kept. The Windows adapter claimed an
         outbound `connect` came back `WSAEACCES`; the evidence was a probe against
         `1.1.1.1:53`, which NordVPN Threat Protection filters on this machine with
         no confinement at all. Re-measured under the real restricted low-integrity
@@ -768,11 +768,12 @@ class WhatTheConfinementEnforcesTest(_AttackTest):
         be asserting that a tuple equals itself. This is what the kernel says the
         process that just built the part was running as.
         """
+        from pipeline.confine import windows      # noqa: PLC0415 - platform
         token = self._probe()["token"]
-        self.assertEqual(confine.LOW_INTEGRITY_SID, token["integrity"],
+        self.assertEqual(windows.LOW_INTEGRITY_SID, token["integrity"],
                          "the child did not run at low integrity, which is what "
                          "refuses the project directory and the parent's process")
-        self.assertEqual([confine.KEPT_PRIVILEGE], token["privileges"],
+        self.assertEqual([windows.KEPT_PRIVILEGE], token["privileges"],
                          "the child holds a privilege the boundary did not intend "
                          "it to; bypass-traverse-checking is the only one kept")
         self.assertTrue(token["restricting_sids"],
@@ -785,7 +786,7 @@ class WhatTheConfinementEnforcesTest(_AttackTest):
         self.assertIn("S-1-5-11", token["deny_only"],
                       "Authenticated Users must also be deny-only, so the ordinary "
                       "check loses it as well as the restricted one")
-        self.assertNotIn(confine.user_sid(), token["deny_only"],
+        self.assertNotIn(windows.user_sid(), token["deny_only"],
                          "the token's own user SID cannot be deny-only and the "
                          "process could not start if it were")
 
@@ -970,7 +971,21 @@ class TheChildContractTest(unittest.TestCase):
                 Path(command[0]).is_relative_to(Path(sys.prefix)),
                 "the boundary launches the virtual environment's launcher, which "
                 "spawns a child the child-process policy refuses")
-        line = confine.command_line(command)
+
+    @requires_windows_confinement
+    def test_a_path_with_spaces_survives_the_windows_command_line(self) -> None:
+        """Split from the test above when `confine` became a package.
+
+        Joining an argv into one string is a Windows mechanism -- the POSIX
+        adapter hands `execve` a list and never renders a command line -- so it
+        lives in `confine/windows.py` and is asserted where that adapter is the
+        one selected. It ran on Linux before the split only because
+        `subprocess.list2cmdline` is pure Python and happens to exist there,
+        which asserted the stdlib rather than the boundary.
+        """
+        from pipeline.confine import windows      # noqa: PLC0415 - platform
+        command = isolation.child_command(Path("C:/a project/in/build_input.json"))
+        line = windows.command_line(command)
         self.assertIn(f'"{Path("C:/a project/in/build_input.json")}"', line,
                       "a project path with a space in it did not survive as one "
                       "argument")

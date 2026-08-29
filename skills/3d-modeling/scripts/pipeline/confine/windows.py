@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """OS-enforced confinement for the build boundary. Windows primitives only.
 
-`isolation.py` decides *what* crosses the boundary. This module is *how the
-boundary is enforced*, and it enforces it with the operating system rather than
-with the Python interpreter.
+One of the package's two adapters. `__init__.py` states the interface this file
+keeps and is the only module that chooses between the implementations; nothing
+here knows what the other one is or that there is another one, and nothing here
+is reached on a platform this file is not for.
 
 The previous boundary spawned a peer: same user, same filesystem, same
 privileges, no lifetime bound. Separation was implemented as a different
@@ -19,8 +20,8 @@ None of those are import-graph problems. All three are *authority* problems, so
 the answer is an authority the candidate does not hold.
 
 **Three mechanisms, and what each one actually buys**, measured on this box
-rather than assumed (`test_isolation.WhatTheConfinementEnforcesTest` re-measures
-every row):
+rather than assumed (`benchmarks/heavy/test_isolation_heavy.py`'s
+`WhatTheConfinementEnforcesTest` re-measures every row):
 
 1. **A restricted token.** `CreateRestrictedToken` with a restricting-SID list
    that omits `NT AUTHORITY\\Authenticated Users`. Every access is then checked
@@ -90,16 +91,14 @@ Untrusted integrity closes the second and does not start: a process created with
 an Untrusted primary token dies at `STATUS_DLL_INIT_FAILED`, measured, as does
 one whose restricting SIDs omit the user's own.
 
-`test_isolation.WhatTheConfinementEnforcesTest` carries the open network as an
-`expectedFailure` rather than as a comment: the expectation that this boundary
-denies outbound TCP is written down and *fails*, so the day it starts passing is
-a reported event and not a line nobody updated.
+`benchmarks/heavy/test_isolation_heavy.py`'s `WhatTheConfinementEnforcesTest`
+carries the open network as an `expectedFailure` rather than as a comment: the
+expectation that this boundary denies outbound TCP is written down and *fails*,
+so the day it starts passing is a reported event and not a line nobody updated.
 """
 from __future__ import annotations
 
 import ctypes
-import dataclasses
-import os
 import subprocess                                 # for list2cmdline, and nothing
 import sys                                        # else: see `command_line`
 import threading
@@ -107,53 +106,15 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-WINDOWS = os.name == "nt"
-
-# Raised immediately before the one call in this package that creates a process.
-AUDIT_SPAWN = "pipeline.confine.spawn"
-
-
-class ConfinementUnavailable(RuntimeError):
-    """The confinement cannot be built here, so no candidate may be run here.
-
-    Raised rather than degraded. A boundary that silently becomes an ordinary
-    subprocess on a platform it was not written for is worse than no boundary,
-    because the receipts do not say which one ran.
-    """
-
-
-@dataclasses.dataclass(frozen=True)
-class Confined:
-    """What the parent knows after the job object is dead."""
-
-    returncode: int | None      # None when the job was killed rather than exited
-    output: str                 # the child's merged stdout/stderr, untrusted text
-    timed_out: bool
-    seconds: float
-    pid: int                    # the direct child, so `survivors` can exclude it
-    # Processes still alive in the job when the direct child exited. Zero on an
-    # honest build; anything else is a candidate that tried to outlive its own
-    # run, and the number is a finding worth writing down.
-    survivors: int
-
+from . import AUDIT_SPAWN, Confined, ConfinementUnavailable
 
 # --------------------------------------------------------------------------
 # ctypes bindings. `pywin32` is not in the frozen runtime and adding a
 # dependency to a security boundary to save fifty lines of declarations is the
 # wrong trade: this way the boundary's surface is visible in this file.
 # --------------------------------------------------------------------------
-if WINDOWS:                                       # pragma: no branch - platform
-    _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _posix = None
-else:                                             # pragma: no cover - platform
-    _advapi32 = _kernel32 = None
-    # The other implementation of the same boundary. Imported rather than
-    # inlined because the two share no primitive: one is restricted tokens,
-    # integrity levels and job objects, the other is namespaces, mount
-    # attributes and seccomp. What they share is this module's surface and the
-    # rule that neither may degrade into an ordinary subprocess.
-    from . import confine_posix as _posix
+_advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 TOKEN_ALL_ACCESS = 0xF01FF
 TOKEN_INTEGRITY_LEVEL = 25
@@ -451,8 +412,7 @@ def _bind() -> None:
     _advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
 
 
-if WINDOWS:                                       # pragma: no branch - platform
-    _bind()
+_bind()
 
 
 def _fail(what: str) -> None:
@@ -466,9 +426,11 @@ def unavailable_reason() -> str | None:
 
     Called before the parent has committed to anything. A boundary that cannot
     be established is a refusal and never a downgrade.
+
+    Nothing to probe. Every mechanism this file uses is in the kernel of any
+    Windows this package runs on, and the calls that build them are checked
+    where they are made.
     """
-    if not WINDOWS:
-        return _posix.unavailable_reason()
     return None
 
 
@@ -707,8 +669,6 @@ def seal_read_only(path: Path) -> None:
     is not granted here, because a boundary whose inputs are writable by the
     process that also promotes the outputs is one edit away from not being one.
     """
-    if not WINDOWS:                               # pragma: no cover - platform
-        return _posix.seal_read_only(path)
     _apply_sddl(path,
                 f"D:P(A;;FA;;;SY)(A;OICI;FRFX;;;{user_sid()})"
                 f"(A;OICI;FRFX;;;{SDDL_RESTRICTED_CODE})",
@@ -722,8 +682,6 @@ def seal_writable(path: Path) -> None:
     the system is implicitly Medium and therefore cannot be. Nobody is granted
     `WRITE_DAC` or `WRITE_OWNER` by ACE; the parent holds both as owner.
     """
-    if not WINDOWS:                               # pragma: no cover - platform
-        return _posix.seal_writable(path)
     _apply_sddl(path,
                 f"D:P(A;;FA;;;SY)(A;OICI;FRFWFXSD;;;{user_sid()})"
                 f"(A;OICI;FRFWFXSD;;;{SDDL_RESTRICTED_CODE})"
@@ -733,8 +691,6 @@ def seal_writable(path: Path) -> None:
 
 def unseal(path: Path) -> None:
     """Give the parent write access back, so the sandbox can be deleted."""
-    if not WINDOWS:                               # pragma: no cover - platform
-        return _posix.unseal(path)
     _apply_sddl(path, f"D:P(A;;FA;;;SY)(A;OICI;FA;;;{user_sid()})", with_label=False)
 
 
@@ -753,10 +709,6 @@ def data_streams(path: Path) -> list[str]:
     so the boundary refuses any that does rather than promoting a file whose
     receipt describes part of it.
     """
-    if not WINDOWS:                               # pragma: no cover - platform
-        return _posix.data_streams(path)
-    if not WINDOWS:                               # pragma: no cover - platform
-        return []
     data = _FIND_STREAM_DATA()
     handle = _kernel32.FindFirstStreamW(str(path), 0, ctypes.byref(data), 0)
     if handle == INVALID_HANDLE_VALUE:
@@ -778,8 +730,6 @@ def is_reparse_point(path: Path) -> bool:
     `os.path.islink` answers for symlinks; a directory junction is not a symlink
     and is the one a candidate can create with no privilege at all.
     """
-    if not WINDOWS:                               # pragma: no cover - platform
-        return _posix.is_reparse_point(path)
     try:
         return bool(path.lstat().st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT)
     except (OSError, AttributeError):
@@ -912,8 +862,6 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
     `final_status.json` 25 s after the run reported `FAILED` did so because
     `subprocess.run`'s timeout bounds one process and this bounds all of them.
     """
-    if not WINDOWS:                                   # pragma: no cover - platform
-        return _posix.run(argv, cwd=cwd, env=env, timeout=timeout)
     reason = unavailable_reason()
     if reason:
         raise ConfinementUnavailable(reason)
@@ -985,11 +933,8 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
 
     information = _PROCESS_INFORMATION()
     block = _environment_block(env)
-    # An audit event, because `subprocess.Popen` raises one and
-    # `CreateProcessAsUserW` through ctypes raises nothing. `DIRECT` creating
-    # zero processes is a release gate, and a gate proven by monkeypatching two
-    # module attributes only covers process creation reached through those two
-    # names. `test_isolation.DirectIsExemptTest` listens for this.
+    # An audit event, because `CreateProcessAsUserW` through ctypes raises
+    # nothing. Why the boundary owes one is in `__init__.py` beside the name.
     sys.audit(AUDIT_SPAWN, argv[0], len(argv))
     # `lpApplicationName` is the executable, named separately, so the command
     # line is never parsed to decide which program runs.
@@ -1093,19 +1038,14 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> C
 
 
 def seal_syscalls() -> None:
-    """Refuse `execve` for the rest of this process's life, where that is a
-    separate act from building the boundary.
+    """Nothing to do here, and the reason is the point.
 
-    On Windows it is not: `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` is set on
-    the process before it starts, so by the time any candidate byte runs the
-    process already cannot spawn. On Linux the parent's last act is itself an
-    `execve`, so the filter cannot be installed until after it -- which means the
-    child installs it, immediately before the first candidate import.
+    The interface calls this the separate act of refusing process creation for
+    the rest of the child's life. Here it is not a separate act:
+    `PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY` is set on the process before it
+    starts, so by the time any candidate byte runs the process already cannot
+    spawn.
 
-    Called by `build_child.py`. A no-op on Windows rather than absent, so that
-    the child has one thing to call and neither platform's child has a branch in
-    it about which boundary it is inside.
+    Called by `build_child.py`. A no-op rather than absent, so that the child has
+    one thing to call and carries no branch about which boundary it is inside.
     """
-    if WINDOWS:                                   # pragma: no cover - platform
-        return
-    _posix.seal_syscalls()

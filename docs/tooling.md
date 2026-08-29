@@ -703,20 +703,23 @@ either. Two things had to be true and only the first was:
   `.py` byte-identical; and left a detached grandchild that rewrote
   `final_status.json` 25 s after the run reported `FAILED`.
 
-[`pipeline/confine.py`](../skills/3d-modeling/scripts/pipeline/confine.py) builds
-the confinement,
+[`pipeline/confine/`](../skills/3d-modeling/scripts/pipeline/confine/__init__.py)
+builds the confinement,
 [`pipeline/isolation.py`](../skills/3d-modeling/scripts/pipeline/isolation.py) is
 the parent half of the protocol, and
 [`pipeline/build_child.py`](../skills/3d-modeling/scripts/pipeline/build_child.py)
 is the child.
 
 **There are two implementations, chosen by platform, and neither degrades.**
-`confine.py` is the Windows one and dispatches to
-[`pipeline/confine_posix.py`](../skills/3d-modeling/scripts/pipeline/confine_posix.py)
-everywhere else. A platform with neither refuses to execute the candidate at
-all; there is no unconfined path, and a boundary that quietly became an ordinary
-subprocess would be worse than none because the receipts would not say which one
-ran.
+`confine` is a package: `confine/__init__.py` states the nine-name interface both
+adapters keep and selects one, and
+[`confine/windows.py`](../skills/3d-modeling/scripts/pipeline/confine/windows.py)
+and
+[`confine/posix.py`](../skills/3d-modeling/scripts/pipeline/confine/posix.py)
+are peers that neither import nor test for each other. A platform with neither
+refuses to execute the candidate at all; there is no unconfined path, and a
+boundary that quietly became an ordinary subprocess would be worse than none
+because the receipts would not say which one ran.
 
 **The confinement**, on Windows, with no new dependency (`ctypes` against
 `advapi32`/`kernel32`):
@@ -734,8 +737,9 @@ ran.
 The restricted token does **not** deny sockets. This table said it did; the
 evidence was a probe against a port a third-party firewall filters. The network
 is open — [`docs/defects.md` D9](defects.md) row 1, and
-`test_isolation.test_the_boundary_denies_outbound_tcp` is the expectation, kept
-failing on purpose.
+`benchmarks/heavy/test_isolation_heavy.py`'s
+`WhatTheConfinementEnforcesTest.test_the_boundary_denies_outbound_tcp` is the
+expectation, kept failing on purpose.
 
 Every privilege is deleted except `SeChangeNotifyPrivilege`, which is
 bypass-traverse-checking: `Everyone` holds it by default and it grants access to
