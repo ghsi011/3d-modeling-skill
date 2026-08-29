@@ -694,7 +694,7 @@ The nine proofs the release names, each against the fixture that observes it:
 | # | Proof | Where it is observed | Result |
 | --- | --- | --- | --- |
 | 1 | repeated unchanged evidence | `DeterministicEvidenceTest::test_identical_inputs_produce_byte_identical_evidence`, with `test_a_changed_input_changes_the_evidence_hash` as its converse | PASS |
-| 2 | response accepted on unchanged rerun | `ModifyReviewRoundTripTest::test_a_modify_job_completes_the_review_round_trip` — packet answered, rerun accepts it, `verification_report.json` carries the same envelope | PASS |
+| 2 | response accepted on unchanged rerun | `ModifyReviewRoundTripTest::test_a_modify_job_completes_the_review_round_trip` — packet answered, rerun accepts it, `pipeline_verification_report.json` carries the same envelope | PASS |
 | 3 | changed source rejection | `ModifyRerunRejectionTest`, subtest `changed source` — the supplied plate 0.2 mm taller | PASS |
 | 4 | changed candidate rejection | same test, subtest `changed candidate` — a 16 mm seat with the declared parameters left alone, which a hash of the parameter dict would miss | PASS |
 | 5 | changed edit intent rejection | same test, seven subtests: `region_box`, `preserve`, `may_remove`, `add`, `expected_body_delta`, `preserve_metadata`, `interface_ids`. Edit intent is not one field, and the set is closed | PASS |

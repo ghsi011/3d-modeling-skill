@@ -158,11 +158,11 @@
     "model_contract.json",
     "next_action.json",
     "pipeline_artifact_receipt.json",
+    "pipeline_verification_report.json",
     "print_plan_checks.json",
     "project.json",
     "route_decision.json",
-    "safety_verification_report.json",
-    "verification_report.json"
+    "safety_verification_report.json"
   ],
   "recorded_at": "863be18d25f48c50b960a44e913ce9d2af970959",
   "reviews_answered": [

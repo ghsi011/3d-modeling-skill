@@ -932,8 +932,9 @@ a declaration `Project.validate` owns and collapsing it here would hide it.
 driven end to end by `benchmarks/heavy/test_datums_heavy.py`: the acceptance
 contract moves to revision 2, the history's `changed` list holds exactly one entry
 and it is the `requirement_sha256` move, four receipts bound to revision 1 are
-invalidated and removed — `artifact_manifest.json`, `commission_report.json`,
-`verification_report.json`, `final_status.json` — and the stored review answer is
+invalidated and removed — `pipeline_artifact_receipt.json`,
+`commission_report.json`, `pipeline_verification_report.json`,
+`final_status.json` — and the stored review answer is
 refused outright: *"review envelope mismatch: response bound to … but current
 request is …"*. That is the fixture this entry asked for, and it fails against the
 pre-fix implementation.
@@ -1136,8 +1137,12 @@ replay fixtures that record it, leaving `modify-ball-scope-refused` stable.
 **Not in scope, deliberately.** The internal dict key `written["artifact_manifest"]`
 and the verifier packet's `artifact_manifest` key are not filesystem names, and
 nothing collides on them; moving those would change a reviewer-facing packet
-shape for no correctness gain. `verification_report.json` has a related but
-differently-shaped collision and is its own slice.
+shape for no correctness gain. `verification_report.json` carries the same
+collision in both directions; that slice is **D38 below**, and it is closed.
+It was called "differently-shaped" here, and that was wrong in the direction
+that matters: the two write mechanisms are identical, and the verifier's
+contract has a *reverse* mechanism the manifest does not — the team lane reads
+that name back and cross-checks four bindings against whatever is there.
 
 ## D37 — `design-tool status` crashes in its default register on a branched job
 
@@ -1200,3 +1205,129 @@ that merely stopped raising.
 deliberately.** That slice moved the assembly behind `status.report` and was
 required to be behaviour-preserving; its before/after capture records this
 identical `KeyError` on both sides. No hunk in it touches `cli.py`:2005-2014.
+## D38 — the pipeline's review report squats on the verifier's contract
+
+**Where.** `pipeline/runner.py` (both writes) and `pipeline/bindings.py`
+(`RECEIPTS`, `REMOVABLE`, and `_status_depends`'s edge from
+`final_status.json`). `pipeline/cli.py` reaches it twice through `REMOVABLE`,
+from `_finish` and from `_restart`, and needs no change once the table is right.
+
+**What is wrong.** `verification_report.json` is a team contract:
+`team_tools/validators.py::CANONICAL_FILENAMES` names it as the JSON spelling of
+the `verification_report` contract, `_EXPECTED_OWNERS` requires `verifier` to
+have authored it, `CONTRACT_KIND_BY_KEY` requires `contract:
+verification-report`, and `team_tools/status.py` cross-checks
+`dimensions_revision`, `print_plan_revision`, `reference_sha256` and
+`candidate_stl_sha256` against it. The pipeline wrote a wholly different object
+to the same path — `schema_version`, `evidence_packet_sha256`, `reviewer`,
+`review_envelope`, `decision`, `unmet_requirements` — overlapping the contract on
+`defects` and `fresh_context` and on nothing else.
+
+**Three mechanisms. The first two are D36's, one of them with a second consumer
+D36 never had to consider; the third runs the other way.**
+
+1. **The write.** Both `runner` writes — the normal one and the malformed-answer
+   receipt — took the contract's name with no test for what was there.
+2. **The deletion, and `REMOVABLE` has two consumers rather than one.** The name
+   was a `Receipt` and `removable` defaults true, so it was in `REMOVABLE` with
+   a `depends_on` edge to `commission_report.json`. `bindings.invalidate`
+   removed the verifier's contract when it judged it stale — reached from
+   `cli._finish`, the same narrow path as D36, not from a commission stop. And
+   `cli._concluded_files` is `[work_dir / name for name in B.REMOVABLE]`, which
+   `cli._restart` unlinks one by one — so `design-tool run --restart` deleted
+   the verifier's contract **unconditionally**, with no staleness required, and
+   recorded its digest in `lifecycle.json` as one of the pipeline's own
+   discarded conclusions.
+3. **The read-back, which D36 has no counterpart for.** The team lane reads that
+   name and cross-checks four bindings against it. The pipeline's object carries
+   none of them, so three of the four report the *contract* stale or invalidated
+   against bindings it never claimed, and the fourth stops comparing entirely:
+   `candidate_stl_sha256` is only checked once `candidate_id` resolves to a
+   manifest row, and the pipeline's object has no `candidate_id`.
+
+**Evidence.** All reproduced on `4bdefe7`, against the committed verifier
+contract in `team_tools/examples/project_ok/`.
+
+The deletion, in isolation because a building run's later write masks it:
+`bindings.invalidate(work)` on a directory holding that contract returns
+
+```
+{"verification_report.json": {"sha256": "c577692b1f0b19ba...",
+  "broke": ["commission_report.json, which it was issued beside, is no longer on disk"]}}
+```
+
+and the file is gone — a contract carrying `contract: verification-report`,
+`owner: verifier`, `revision: 1`, deleted for failing a dependency the verifier
+never declared.
+
+**What that digest is of, because it is not the committed file's identity.**
+The reproduction seeded the work directory with
+`json.dumps(<the example contract>, indent=2)` through `Path.write_text`, so
+`c577692b…` is the sha256 of *those* 1986 bytes on a Windows text-mode write.
+The committed `team_tools/examples/project_ok/verification_report.json` is
+`6ce94da7…` at 1988 B on a CRLF checkout and `33a2f301…` at 1913 B on an LF one,
+and the same reproduction on POSIX records `44c6778f…`. Every one of the four is
+reproducible and none of them is *the* digest of that contract, because line
+endings are not part of what the file says. The load-bearing fact here is not
+the value: it is that `invalidate` recorded a digest for a file it had never
+written and then removed it.
+
+The read-back, `team_tools.status.compute_status` over the same project with the
+pipeline's object at that path instead of the contract:
+
+```
+VERIFICATION_REPORT  STALE        bound to dimensions rNone, current r1
+VERIFICATION_REPORT  STALE        bound to print_plan rNone, current r1
+VERIFICATION_REPORT  INVALIDATED  reference_sha256 bound <missing>, current 90c52df21b20
+```
+
+— and no row at all for `candidate_stl_sha256`. `exit_code` goes 0 → 1, so
+`dt.py status` blocks a project whose only fault is that a run wrote its own
+report. `validate_contract_header` on the same object returns
+`BAD_CONTRACT_KIND` plus three `MISSING_FIELD`s.
+
+**What it can cause.** Silent loss of the verifier's contract — the one artifact
+in the pipeline whose whole worth is that the pipeline did not write it — and,
+in the other direction, a blocked project and a `VERIFICATION_REPORT STALE`
+verdict about a document the verifier never authored.
+
+**The fix, and why it is a rename plus a registry.** Both writers are
+legitimate; only one is entitled to the name, and it is the externally
+specified, validator-known, charter-facing one. So the pipeline's moves, to
+`artifact_names.PIPELINE_VERIFICATION_REPORT` =
+`pipeline_verification_report.json`. What is new against D34/D35/D36 is that it
+moves *through a registry*: `pipeline/artifact_names.py` records one owner per
+filename, refuses a second owner, and resolves a write through the owner that
+holds the name — so the next writer to reach for a role's artifact is refused
+rather than repaired afterwards.
+
+**The fixture that must fail before the fix lands.** Seed the committed verifier
+contract in the work directory; require it byte-identical after a full run and
+after `invalidate`, and require the pipeline's own report to be written
+separately and still invalidated when stale. Each of the four team-lane bindings
+must be moved on its own and produce its row, because a clean status is also
+what a check that never ran produces. Control: with no verifier contract
+present, the run still writes its own report and still invalidates it.
+Discriminating: pointing the pipeline's write back at the shared name must fail
+the survival row, and a second owner claiming a registered name must be refused.
+
+**Not in scope, deliberately.** There is **no read-only compatibility path for a
+project completed before this rename**, and D36 has one. The two cases are not
+alike: D36's fallback exists because `commission_report.json` binds the pipeline
+receipt by name, so the rename alone would have made a valid stored commission
+read as stale. Here the only edge is `final_status.json` → the report, and a
+legacy project's `final_status.json` therefore reads stale and is regenerated by
+the next run. Nothing authored is destroyed, because after this change the
+pipeline never touches `verification_report.json` again in any direction. A
+legacy pipeline object left at that name is a file this change cannot reach and
+does not create.
+
+**The consequence that ruling carries, stated rather than left to be found.**
+In a team-lane project that already holds a pre-D38 pipeline object at that
+name, the object is now permanent litter: `dt.py status` still exits 1 on it for
+the read-back reason above, and neither `invalidate` nor `--restart` will
+remove it any more, because the pipeline no longer claims the name. Before this
+change either of those would have swept it away. Deleting somebody else's file
+is exactly what this defect is about, so the pipeline may not do it — clearing
+that one file is a person's decision, and `dt.py status` naming the row is how
+they find out it is owed.

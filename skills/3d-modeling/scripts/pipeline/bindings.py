@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import schemas as S
+from .artifact_names import PIPELINE_VERIFICATION_REPORT
 
 # The frozen acceptance contract. Defined here rather than in `acceptance.py`
 # because this module is what reads it to find the current value of the
@@ -421,7 +422,7 @@ def _status_depends(payload: dict[str, Any]) -> tuple[str, ...]:
     """
     owed = ["commission_report.json"]
     if payload.get("verification") is not None:
-        owed.append("verification_report.json")
+        owed.append(PIPELINE_VERIFICATION_REPORT)
     if payload.get("safety_verification") is not None:
         owed.append("safety_verification_report.json")
     return tuple(owed)
@@ -467,7 +468,11 @@ RECEIPTS: tuple[Receipt, ...] = (
     # Both reviews were shown the commissioning report inside their packet.
     Receipt("safety_verification_report.json", _review, files=_review_files,
             depends_on=lambda payload: ("commission_report.json",)),
-    Receipt("verification_report.json", _review, files=_review_files,
+    # **Not `verification_report.json`.** That is the verifier's team contract
+    # (D38): the pipeline's review report was written over it and then listed
+    # here, so `invalidate` deleted a role's contract as one of its own stale
+    # receipts. `artifact_names` is what keeps the two apart now.
+    Receipt(PIPELINE_VERIFICATION_REPORT, _review, files=_review_files,
             depends_on=lambda payload: ("commission_report.json",)),
     Receipt("final_status.json", _final_status, depends_on=_status_depends),
 )

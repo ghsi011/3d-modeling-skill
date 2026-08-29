@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import analysis, bindings as B, cache as K, commission, contract as C, cost as COST
+from . import analysis, artifact_names as N, bindings as B, cache as K, commission
+from . import contract as C, cost as COST
 from . import execution as EX
 from . import fitted, intent, review as R
 from . import safety
@@ -690,7 +691,7 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
             # See the safety boundary above: a JSON parse failure from the
             # adapter is a malformed review, written down rather than raised.
             written["verification_report"] = _write(
-                out / "verification_report.json", {
+                N.path(out, N.PIPELINE_VERIFICATION_REPORT, owner=N.PIPELINE), {
                     "schema_version": S.VERIFICATION_SCHEMA,
                     "error": f"{type(exc).__name__}: {exc}",
                 })
@@ -701,7 +702,8 @@ def _run(request: JobRequest, ledger: COST.Ledger) -> JobResult:
         ledger.dispatched("verification")
         timings["verification"] = time.perf_counter() - mark
         written["verification_report"] = _write(
-            out / "verification_report.json", verification_report)
+            N.path(out, N.PIPELINE_VERIFICATION_REPORT, owner=N.PIPELINE),
+            verification_report)
 
     final = status.decide(contract=model_contract, commission_report=report,
                           screening=screen, manufacturing=manufacturing,
