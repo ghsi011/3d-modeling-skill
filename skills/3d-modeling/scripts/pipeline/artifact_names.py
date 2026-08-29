@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which owner holds which filename in the work directory.
 
-D34, D35, D36 and D37 are one shape found four times: two legitimate writers,
+D34, D35, D36 and D38 are one shape found four times: two legitimate writers,
 one filename, and nothing anywhere that could say the name was taken. D34 was
 closed by an existence check inside the writer and D35 and D36 by moving the
 pipeline's file -- repairs that remove the collision they were written for and
@@ -13,7 +13,7 @@ repaired. A registered name has exactly one owner; a second owner claiming it is
 refused; and a writer resolves its path *through* the owner that holds the name,
 so pointing a write back at somebody else's file raises instead of succeeding.
 
-**It holds the one artifact D37 is about and nothing else.** The rest of the
+**It holds the one artifact D38 is about and nothing else.** The rest of the
 work directory is brought under it by later work, and guessing at that shape now
 would be scaffolding for a change nobody has made yet.
 """
@@ -47,7 +47,8 @@ def register(name: str, *, owner: str) -> str:
     what it binds is every registration reaching it through this import -- which
     is all of them, since Python imports `pipeline.artifact_names` once and
     nothing here puts `pipeline/` on `sys.path`. A second *copy* of the module,
-    were one ever arranged, would carry its own empty table and enforce nothing
+    were one ever arranged, would carry its own separate table -- populated by its
+    own two registrations, and enforcing nothing
     across the two; sibling modules cannot be loaded that way at all
     (`import bindings` raises `attempted relative import with no known parent
     package`). Anything that later widens this registry inherits that scoping.

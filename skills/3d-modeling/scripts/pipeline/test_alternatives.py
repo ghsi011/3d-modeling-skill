@@ -436,7 +436,7 @@ class OneJobHasOneFormulationCountTest(unittest.TestCase):
     the `cost` block in the same report iterated the union and saw three. One
     report, two answers to "what is this job".
 
-    The quieter half is here too. `_derived_at` returns five fields --
+    The quieter half is here too. `status.derived_at` returns five fields --
     `derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons` --
     and the loop kept two, so per-formulation staleness was unreadable from the
     report. `tools/replay.py` is the proof it was missed: to record what each

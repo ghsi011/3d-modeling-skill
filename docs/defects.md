@@ -564,10 +564,10 @@ So the `alternatives` block in one `status --json` report iterates two
 formulations on the recorded knob while the `cost` block in the same report
 iterates three. The two disagree about what the job is.
 
-A second, quieter half: the loop calls `_derived_at` per sibling, which returns
+A second, quieter half: the loop calls `status.derived_at` per sibling, which returns
 `derived_status`, `stored_status`, `allowed_claim`, `stale` and `reasons`, and
 keeps two of the five. `tools/replay.py:958-987` is the proof it is missed —
-to read per-formulation staleness the harness has to issue `branch --activate`
+to read per-formulation staleness the harness had to issue `branch --activate`
 and `status` once per formulation.
 
 **Evidence.** Found while building `design-tool compare`, by asking where a
@@ -603,7 +603,7 @@ through the same `Alternative.as_dict()` as any other row, so a basis nobody set
 is absent rather than empty, and the root is a formulation rather than a special
 case.
 
-The quieter half is closed too: all five fields `_derived_at` computes reach the
+The quieter half is closed too: all five fields `status.derived_at` computes reach the
 report, so per-formulation staleness is readable from one call.
 
 **Fixture:** `pipeline/test_alternatives.py::OneJobHasOneFormulationCountTest`,
@@ -613,8 +613,11 @@ three derived fields dropped again -- and both were caught.
 
 **What the fix did *not* move, which is worth recording.** The L1 recordings did
 not change. `tools/replay.py`'s `_derive_all` never read the broken block: it
-issues `branch --activate` and `status` once per formulation and reads
-`final_status`/`stored_status`/`stale` from each. So the harness's workaround is
+issues `branch --activate` once per formulation and reads
+`final_status`/`stored_status`/`stale` from the report for each. (At the time
+it recovered that report by invoking `design-tool status --json` and parsing
+the stdout it had captured; issue #44 replaced that hop with a call to
+`status.report`. The per-formulation loop described here is unchanged.) So the harness's workaround is
 also the reason the goldens were never exposed to the defect. That workaround
 can now be one call, which would also stop a replay leaving the project parked
 on whichever formulation it activated last -- separate work, because it changes
@@ -1135,13 +1138,74 @@ replay fixtures that record it, leaving `modify-ball-scope-refused` stable.
 and the verifier packet's `artifact_manifest` key are not filesystem names, and
 nothing collides on them; moving those would change a reviewer-facing packet
 shape for no correctness gain. `verification_report.json` carries the same
-collision in both directions; that slice is **D37 below**, and it is closed.
+collision in both directions; that slice is **D38 below**, and it is closed.
 It was called "differently-shaped" here, and that was wrong in the direction
 that matters: the two write mechanisms are identical, and the verifier's
 contract has a *reverse* mechanism the manifest does not — the team lane reads
 that name back and cross-checks four bindings against whatever is there.
 
-## D37 — the pipeline's review report squats on the verifier's contract
+## D37 — `design-tool status` crashes in its default register on a branched job
+
+**Where.** [`pipeline/cli.py`](../skills/3d-modeling/scripts/pipeline/cli.py):2014,
+in the human rendering of the `status` command's cost block, read against
+[`pipeline/cost.py`](../skills/3d-modeling/scripts/pipeline/cost.py):546-547,
+which builds the dict it subscripts.
+
+**What is wrong.** The renderer prints
+`row['shared']['reviews_reused']`. `cost.compare` builds every `shared` block as
+`{"builds_avoided": ..., "reviews_from_a_sibling": 0}`. There is no
+`reviews_reused` key inside `shared`; that name exists one level up, on the row
+itself, where `_INCREMENTAL_KEYS` puts it — and the two are different
+quantities, which `cost.compare`'s own docstring is at pains to separate:
+`reviews_from_a_sibling` is zero *by construction*, while `reviews_reused` is
+"this formulation re-reading its own stored answer on a resumed run". So the
+lookup is not a typo for a value sitting next to it, and fixing it means
+deciding which of the two the line was meant to report.
+
+**Evidence.** Reproduced on `74cfd95` by playing the committed
+`branch-knob-seat-fallback` replay case and running `design-tool status` on the
+result with no `--json`:
+
+```
+KeyError: 'reviews_reused'
+  cli.py:2014, in status
+```
+
+The three unbranched fixtures print normally. The gate is
+`report["cost"]["project"]["invocations"]` plus a non-empty `incremental` map, so
+what reaches it is a branched job whose siblings have actually run.
+
+**Why nothing caught it, which is the near miss worth recording.** The L1
+replay suite only ever invoked `design-tool status --json`, and the `--json`
+path never reaches this line. Two L0 tests *do* render the human register —
+`test_phase1.py:690` and `test_lifecycle.py:557` — and the second of them is
+even on a branched job. It passes because its formulations are `NOT_RUN`, so
+`report["cost"]["project"]["invocations"]` is zero and the whole cost block is
+skipped. Nothing anywhere renders the human register of a branched job that
+has *run*, which is the one state that reaches line 2014.
+
+**What it can cause.** The default register of `status` is unusable on every
+branched job that has run: a user who omits `--json` gets a bare Python
+traceback instead of the one `design-tool: ...` line the surface owes them.
+`ROADMAP.md` 4.1 requires that `branch`, `run` and `status` "refuse actionably";
+a stack trace is neither a refusal nor actionable, and it takes the whole report
+down rather than the one line that cannot be computed.
+
+**The fixture that must fail before the fix lands.** Render `status` *without*
+`--json` on a project with at least two formulations that have each recorded an
+invocation, and assert on the printed `+ <formulation>` line. It must fail with
+the `KeyError` today. The fix has to say which quantity the line reports —
+`shared.reviews_from_a_sibling`, which is what "shared" claims and is currently
+hard-coded to zero, or the row's own `reviews_reused`, which counts stored
+answers this formulation re-read — and the fixture has to pin that choice with a
+job where the two numbers differ, or it cannot tell a correct fix from a lookup
+that merely stopped raising.
+
+**Not fixed by [#44](https://github.com/ghsi011/3d-modeling-skill/pull/50),
+deliberately.** That slice moved the assembly behind `status.report` and was
+required to be behaviour-preserving; its before/after capture records this
+identical `KeyError` on both sides. No hunk in it touches `cli.py`:2005-2014.
+## D38 — the pipeline's review report squats on the verifier's contract
 
 **Where.** `pipeline/runner.py` (both writes) and `pipeline/bindings.py`
 (`RECEIPTS`, `REMOVABLE`, and `_status_depends`'s edge from
@@ -1259,7 +1323,7 @@ legacy pipeline object left at that name is a file this change cannot reach and
 does not create.
 
 **The consequence that ruling carries, stated rather than left to be found.**
-In a team-lane project that already holds a pre-D37 pipeline object at that
+In a team-lane project that already holds a pre-D38 pipeline object at that
 name, the object is now permanent litter: `dt.py status` still exits 1 on it for
 the read-back reason above, and neither `invalidate` nor `--restart` will
 remove it any more, because the pipeline no longer claims the name. Before this

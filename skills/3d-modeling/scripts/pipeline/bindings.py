@@ -469,7 +469,7 @@ RECEIPTS: tuple[Receipt, ...] = (
     Receipt("safety_verification_report.json", _review, files=_review_files,
             depends_on=lambda payload: ("commission_report.json",)),
     # **Not `verification_report.json`.** That is the verifier's team contract
-    # (D37): the pipeline's review report was written over it and then listed
+    # (D38): the pipeline's review report was written over it and then listed
     # here, so `invalidate` deleted a role's contract as one of its own stale
     # receipts. `artifact_names` is what keeps the two apart now.
     Receipt(PIPELINE_VERIFICATION_REPORT, _review, files=_review_files,

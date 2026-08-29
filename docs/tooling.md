@@ -292,7 +292,7 @@ otherwise. It also prints what is being reused before the run touches anything.
 
 | discarded | kept |
 | --- | --- |
-| the six removable receipts (`pipeline_artifact_receipt.json`, `commission_report.json`, `manufacturing_report.json`, `safety_verification_report.json`, `pipeline_verification_report.json`, `final_status.json`) — **not** the team contracts at `artifact_manifest.json` (D36) or `verification_report.json` (D37), which the pipeline does not own and never deletes | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
+| the six removable receipts (`pipeline_artifact_receipt.json`, `commission_report.json`, `manufacturing_report.json`, `safety_verification_report.json`, `pipeline_verification_report.json`, `final_status.json`) — **not** the team contracts at `artifact_manifest.json` (D36) or `verification_report.json` (D38), which the pipeline does not own and never deletes | `acceptance_contract.json` and its history — deleting it would cut a spurious revision on the next run |
 | `reviews/<kind>_response.json` — the answers | `reviews/<kind>_packet.json` — the questions, rewritten every run |
 | `next_action.json` | `design_proposal.json`, `model.py`, `model_contract.json`, `execution_plan.json` |
 | | the content cache, and **every sibling formulation** |

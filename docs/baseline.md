@@ -276,7 +276,9 @@ resumption costs on this design and nothing measured it before.
 
 Measured on the recorded `branch-knob-seat-fallback` replay: three formulations
 of one job on the real `berlingo-knob` request, driven through `design-tool
-branch`, `route`, `run` and `status`.
+branch`, `route` and `run`. (The harness also reads each formulation's derived
+status, by calling `status.report` -- these figures come from `cost.json` and do
+not depend on that read.)
 
 | formulation | dispatches | ctx | deterministic | builds | shared |
 |---|---|---|---|---|---|
