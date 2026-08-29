@@ -93,6 +93,21 @@ def _module_level_imports(path: Path) -> set[str]:
     return found
 
 
+def _path_of(name: str) -> Path | None:
+    """A dotted module name to its file, package or plain module.
+
+    Both shapes, because the walk stops dead at whichever one it does not know:
+    `confine` is a subpackage whose two platform adapters would otherwise be
+    off the graph entirely, which is a module nobody is watching -- the exact
+    way the cost came back the first time.
+    """
+    base = PACKAGE.joinpath(*name.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _reachable_from(entry: str) -> dict[str, set[str]]:
     """Every package module `entry` pulls in at import time, and what each imports."""
     graph: dict[str, set[str]] = {}
@@ -101,15 +116,18 @@ def _reachable_from(entry: str) -> dict[str, set[str]]:
         name = pending.pop()
         if name in graph:
             continue
-        path = PACKAGE / f"{name}.py"
-        if not path.is_file():
+        path = _path_of(name)
+        if path is None:
             continue
         imports = _module_level_imports(path)
         graph[name] = imports
+        # What a relative import is relative *to*: the package itself inside an
+        # `__init__.py`, and the containing package anywhere else.
+        inside = name if path.name == "__init__.py" else name.rpartition(".")[0]
         for imported in imports:
             if imported.startswith("."):
-                pending.append(imported[1:])
-            elif (PACKAGE / f"{imported}.py").is_file():
+                pending.append(f"{inside}.{imported[1:]}".lstrip("."))
+            elif _path_of(imported) is not None:
                 pending.append(imported)
     return graph
 

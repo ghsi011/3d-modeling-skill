@@ -1,7 +1,7 @@
 # L0-heavy — the component fixtures that cost a child interpreter
 
 ```bash
-uv run pytest benchmarks/heavy -q     # ~15 min, 353 tests, before merge
+uv run pytest benchmarks/heavy -q     # ~19 min, 487 tests, before merge
 uv run pytest                         # the commit gate this half was cut out of
 ```
 
@@ -52,23 +52,37 @@ and the envelope binds either — so the case still refuses the stale answer for
 the reason it names. That was checked by mutation, not by watching it pass:
 leaving the second run's render flag unchanged makes the stale answer accepted.
 
-A second file is here for a reason that is not the seam either, and unlike the
-one above it is not a property of the test at all.
-[`test_role_artifact_owners_heavy.py`](test_role_artifact_owners_heavy.py)
-starts no child interpreter, needs no corpus, reads no B-rep and runs no job
-twice. By the rule below it belongs in the gate. What put it here is
-`conftest.py`'s `L0_COLLECTED_CEILING`: the gate stood at 1438 of 1440, and when
-the choice between raising the ceiling again and moving these two cases was put
-to the user, the user chose moving. That is a **structural** placement and not a
-behavioural one, recorded as such because a plausible-sounding behavioural
-justification for it would be false — and a false reason for a real decision is
-the failure this repository keeps finding. The consequence is that those two
-cases no longer run on every commit; they run here, before merge, so coverage is
-preserved and the commit gate is what lost them.
+Six moved for a reason that is not a seam at all, and it is recorded here for
+the same purpose. [`test_verifier_report_namespace_heavy.py`](test_verifier_report_namespace_heavy.py)
+holds the D38 fixtures that left the commit gate because the gate was **full**:
+`L0_COLLECTED_CEILING` is 1440, `main` collected 1427, and the slice added 14 --
+1441, and `uv run pytest -q` refused to collect at all. The user ruled that a
+slice moves its new fixtures here rather than raising the ceiling, because
+widening a gate to make work fit is what [`AGENTS.md`](../../AGENTS.md) forbids.
 
-It is also the only file here that is not one half of a file still under
-`testpaths` — the whole module moved, so the "reading a file here" note below
-does not apply to it.
+**None of the six meets the rule below**, and that is the point of the entry.
+They start no child process, need no corpus and no B-rep read. Two run a whole
+job once; the other four are a `copytree` of one small example project and a
+single `bindings.invalidate` call over a temporary directory, which would be at
+home in the gate. Structure rather than behaviour put them here, which is the
+opposite of what [`docs/agents/review-workflow.md`](../../docs/agents/review-workflow.md)
+section 5 asks for, and saying so is cheaper than letting the next reader infer
+a seam that is not there.
+
+**Nothing automated catches this.** `conftest.py` refuses an L0 test that spawns
+or runs long; nothing anywhere asks whether a *heavy* test is too cheap to be
+here. So this paragraph is the only record, and the consequence it records is
+that six rows no longer run on every commit -- they still run before merge, so
+coverage is unchanged and the commit gate is what got smaller.
+
+**And two more, by the same ruling one slice later.**
+[`test_role_artifact_owners_heavy.py`](test_role_artifact_owners_heavy.py) holds
+the D34, D35 and D36 registry fixtures. They meet the rule below no better: no
+child process, no corpus, no B-rep read, two cases and six subtest arms that
+would be at home in the gate. The gate stood at 1438 of 1440 and the user made
+the same call. It is also the only file here that is **not** one half of a file
+still under `testpaths` -- the whole module moved, so the "reading a file here"
+note below does not apply to it.
 
 ## The rule a new test follows
 
