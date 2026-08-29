@@ -1,7 +1,7 @@
 # L0-heavy — the component fixtures that cost a child interpreter
 
 ```bash
-uv run pytest benchmarks/heavy -q     # ~20 min, 449 tests, before merge
+uv run pytest benchmarks/heavy -q     # HEAVY_HDR, before merge
 uv run pytest                         # the commit gate this half was cut out of
 ```
 
@@ -52,18 +52,34 @@ and the envelope binds either — so the case still refuses the stale answer for
 the reason it names. That was checked by mutation, not by watching it pass:
 leaving the second run's render flag unchanged makes the stale answer accepted.
 
-Two moved for a reason that is not about cost at all, and it is recorded here
-because the rule below does not describe them and a reader applying that rule
-would find two files contradicting it.
+Eight moved for a reason that is not a seam at all, in two slices, and it is
+recorded here for the same purpose.
+[`test_verifier_report_namespace_heavy.py`](test_verifier_report_namespace_heavy.py)
+holds the six D38 fixtures that left the commit gate because the gate was
+**full**: `L0_COLLECTED_CEILING` is 1440, `main` collected 1427, and the slice
+added 14 -- 1441, and `uv run pytest -q` refused to collect at all.
 [`test_work_directory_names_heavy.py`](test_work_directory_names_heavy.py) holds
-the fixtures for the artifact-name registry (#46). They start no child process
-and the two together cost a fraction of a second of call time, so by the seam
-above they belong in the gating tier. They are here because
-`L0_COLLECTED_CEILING` was full when that slice landed and **the user ruled that
-the fixtures move rather than that the ceiling rise**. The consequence is the one
-this tier always carries and is worth naming for a case that did not have to
-carry it: they no longer run on every commit, they run before merge, so the
-coverage is preserved and the moment it is observed is later.
+the two artifact-name registry fixtures (#46), which took a base still carrying
+the D38 fixtures to exactly 1440 of 1440 and left nothing for the tickets behind
+them. The user ruled both times that a slice moves its new fixtures here rather
+than raising the ceiling, because widening a gate to make work fit is what
+[`AGENTS.md`](../../AGENTS.md) forbids.
+
+**None of the eight meets the rule below**, and that is the point of the entry.
+They start no child process, need no corpus and no B-rep read. Three run a whole
+job once; four are a `copytree` of one small example project and a single
+`bindings.invalidate` call over a temporary directory; one is a source scan.
+Every one of them would be at home in the gate. Structure rather than behaviour
+put them here, which is the opposite of what
+[`docs/agents/review-workflow.md`](../../docs/agents/review-workflow.md)
+section 5 asks for, and saying so is cheaper than letting the next reader infer
+a seam that is not there.
+
+**Nothing automated catches this.** `conftest.py` refuses an L0 test that spawns
+or runs long; nothing anywhere asks whether a *heavy* test is too cheap to be
+here. So this paragraph is the only record, and the consequence it records is
+that eight rows no longer run on every commit -- they still run before merge, so
+coverage is unchanged and the commit gate is what got smaller.
 
 ## The rule a new test follows
 

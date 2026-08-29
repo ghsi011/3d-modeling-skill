@@ -37,11 +37,11 @@ claims `final_status.json` is *refused*, where the same claim written as a bare 
 Both shapes are in `benchmarks/mutations/d46-work-directory-names.json` and both were run.
 
 **No name moved.** Every artifact keeps the spelling it had; `TODAYS_NAMES` in
-`test_work_directory_names.py` pins each one, and no replay golden and no pinned certified
+`benchmarks/heavy/test_work_directory_names_heavy.py` pins each one, and no replay golden and no pinned certified
 contract changed. Still literals, deliberately: the names read back by `cli`, `compare` and the
 team-contract validators, and the role-authored artifacts - those are separate work.
 
-### Fixed - the verifier's report survives the pipeline, and names get an owner (D37)
+### Fixed - the verifier's report survives the pipeline, and names get an owner (D38)
 
 `verification_report.json` is a team contract - `CANONICAL_FILENAMES` names it, `_EXPECTED_OWNERS`
 requires `verifier` to have authored it, and `team_tools.status` cross-checks four bindings against
@@ -59,7 +59,7 @@ the contract stale against something it never claimed, the fourth stopped compar
 reason: both writers are legitimate and only one is entitled to a name the validators, the charters
 and `dt.py` already know. What is new is `pipeline/artifact_names.py` - one owner per filename, a
 second owner refused, and a write resolved *through* the owner that holds the name. This is the
-fourth time this shape has been found (D34, D35, D36, D37) and the first time the collision is
+fourth time this shape has been found (D34, D35, D36, D38) and the first time the collision is
 refused rather than repaired afterwards.
 
 The registry holds the one artifact this defect is about. Bringing the rest of the work directory
@@ -76,7 +76,52 @@ lists and one derived stale list, in `branch-knob-seat-fallback` and
 `modify-ball-flange-flat`. `custom-knob-sleeve` and
 `modify-ball-scope-refused` are the untouched controls, and `safety_verification_report.json` is
 not affected - it was never a canonical contract name.
+### Changed - `confine` is a package with two peer adapters (#45)
 
+`confine.py` was both the Windows implementation and the dispatcher: nine names delegated to
+`confine_posix` behind a platform test inside the Windows file, so reaching the POSIX adapter on
+Linux meant importing the whole Windows one first, and the interface the two share was written
+down nowhere - it could only be recovered by reading the delegation guards.
+
+`confine/__init__.py` now states that interface once, as the package's own surface, and selects
+an implementation; `confine/windows.py` and `confine/posix.py` are peers that neither import nor
+test for each other. The Windows adapter loses `WINDOWS` and its nine `if not WINDOWS: return
+_posix....` guards outright, the POSIX adapter loses its `TYPE_CHECKING` import of the Windows
+module and the runtime one inside `run`, and the shared `Confined`, `ConfinementUnavailable` and
+`pipeline.confine.spawn` move to the entry module. `posix.py` keeps one platform question of its
+own - `os.name` is `posix` on more than Linux, and `unavailable_reason` is where this adapter
+refuses to pretend.
+
+**A move: no confinement mechanism, threshold or measurement changed.** Both callers -
+`isolation.py` and `build_child.py` - reach the package interface, and their import lines are
+unchanged because the package took the module's name.
+
+Two guards had silently stopped covering the boundary the moment it became a directory, which is
+the failure a semantic inventory exists to catch, and both were widened rather than left:
+`test_import_cost`'s reachability walk resolves subpackages, so `confine` and its two adapters are
+back on the graph `cli` pulls in and `backends` is on it for the first time - the flat walk never
+resolved it either, measured on both layouts. `test_findings`' team_tools direction rule globs
+recursively.
+
+### Changed - the status report is an interface, not a transcript (#44)
+
+`design-tool status` assembled a report and then rendered it two ways, all inside one command
+handler. `tools/replay.py` reached that assembly by redirecting stdout, invoking the command
+surface with `--json` and re-parsing what it caught - two adapters over one document, separated
+by a hop that bought neither of them anything.
+
+The assembly is now `status.report(project, project_dir)`, beside `derive` and `decide`. It
+prints nothing and chooses no exit code: the command renders the value it returns in both
+registers and derives the exit code from it, and the replay harness calls it directly. The
+readers underneath it - the stored verdict, the binding state, whether an instruction has been
+superseded, a formulation's own directory and the status it supports - moved with it, because
+`report` needs them and `cli` already imports this module. `cli` keeps its own names as aliases,
+so no call site there and no test moved.
+
+**The run loop is untouched.** `replay.play` still drives `design-tool` through argv, because
+there the exit codes and the dispatch are the behaviour under test; the status is a document,
+and it is now read as one. Both renderings are byte-identical to the previous commit's for all
+four committed replay fixtures, and no golden moved.
 
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 

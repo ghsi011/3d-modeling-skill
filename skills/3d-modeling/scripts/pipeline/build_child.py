@@ -6,9 +6,10 @@ is *not* imported by the parent. It is reached through `sys.executable` and by n
 other route, so nothing here can be called from the process that freezes the
 acceptance contract, commissions the artifact and decides the final status.
 
-It runs under a restricted, low-integrity token inside a job object it cannot
-leave (`confine.py`), so the authority it holds is: read the sealed input
-directory, write the one output directory, and nothing else on the machine.
+It runs with the authority the `confine` package's boundary left it -- on
+Windows a restricted, low-integrity token inside a job object it cannot leave --
+so what it holds is: read the sealed input directory, write the one output
+directory, and nothing else on the machine.
 
 What it does, in one shot and then exits:
 

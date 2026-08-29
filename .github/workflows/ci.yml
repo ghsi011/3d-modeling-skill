@@ -177,7 +177,7 @@ jobs:
 
           sys.path.insert(0, "skills/3d-modeling/scripts")
           from pipeline import confine
-          from pipeline import confine_posix as CP
+          from pipeline.confine import posix as CP
 
           effective, permitted = CP._capability_sets()
           print(f"uid={os.getuid()} euid={os.geteuid()}")

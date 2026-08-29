@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which owner holds which filename in the work directory.
 
-D34, D35, D36 and D37 are one shape found four times: two legitimate writers,
+D34, D35, D36 and D38 are one shape found four times: two legitimate writers,
 one filename, and nothing anywhere that could say the name was taken. D34 was
 closed by an existence check inside the writer and D35 and D36 by moving the
 pipeline's file -- repairs that remove the collision they were written for and
@@ -53,10 +53,20 @@ _OWNERS: dict[str, str] = {}
 def register(name: str, *, owner: str) -> str:
     """Record that `owner` holds `name`, refusing it if somebody else does.
 
-    Registering the same pair twice is a no-op rather than a conflict: this
-    source checkout imports some modules both package-relatively and by bare
-    name, and an import that raised the second time would be reporting the
-    packaging, not a collision.
+    Re-registering the same pair is not a conflict: the question is *who holds
+    this name*, and asking it twice with one answer changes nothing. A different
+    owner is the collision, and that is what raises.
+
+    **The guarantee is per module instance, which is worth stating because a
+    reader will assume it is per process.** `_OWNERS` is this module's dict, so
+    what it binds is every registration reaching it through this import -- which
+    is all of them, since Python imports `pipeline.artifact_names` once and
+    nothing here puts `pipeline/` on `sys.path`. A second *copy* of the module,
+    were one ever arranged, would carry its own separate table -- populated by its
+    own two registrations, and enforcing nothing
+    across the two; sibling modules cannot be loaded that way at all
+    (`import bindings` raises `attempted relative import with no known parent
+    package`). Anything that later widens this registry inherits that scoping.
     """
     held = _OWNERS.setdefault(name, owner)
     if held != owner:
@@ -93,7 +103,7 @@ PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
 # ---------------------------------------------------------------------------
 # Declared here rather than beside each writer, because a name declared beside
 # its writer is a name no other module can see -- which is the condition D34 to
-# D37 kept reproducing. `runner.py` spelled eight of these as bare literals
+# D38 kept reproducing. `runner.py` spelled eight of these as bare literals
 # while `bindings.py` separately spelled five of the same eight, and neither
 # consulted the other.
 #

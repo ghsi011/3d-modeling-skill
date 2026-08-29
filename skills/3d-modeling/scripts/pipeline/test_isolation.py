@@ -18,10 +18,10 @@ walked through it three ways that no import graph can see:
 * a `DETACHED_PROCESS` grandchild that outlived `subprocess.run`'s timeout and
   rewrote `final_status.json` 25 s after the run reported `FAILED`.
 
-The repair is `confine.py`: a restricted, low-integrity, privilege-stripped
-token; a workspace whose only writable object is one directory; and a job object
-with `KILL_ON_JOB_CLOSE` and no breakaway, which the parent drains to zero before
-it reads a byte.
+The repair is the `confine` package -- here, `confine/windows.py`: a restricted,
+low-integrity, privilege-stripped token; a workspace whose only writable object
+is one directory; and a job object with `KILL_ON_JOB_CLOSE` and no breakaway,
+which the parent drains to zero before it reads a byte.
 
 **This file is the half of the boundary's tests that answers in this process.**
 Attacking a confinement means running a candidate through it, and running a
@@ -72,6 +72,10 @@ from .test_phase2 import _laid_out, _project, _read
 SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_ROOT.parents[2]
+# The guards below read the boundary as syntax, so they need the file and not
+# the import: `confine` is a package and the Windows mechanisms are one adapter
+# inside it, which is not importable on the platform the other adapter is for.
+WINDOWS_ADAPTER = PACKAGE_ROOT / "confine" / "windows.py"
 
 # The pad the proposal froze, and the pad the attacking models actually build.
 # 432 mm2 promised, 80 mm2 delivered: the demonstrated 352 mm2 miss.
@@ -93,11 +97,13 @@ requires_confinement = unittest.skipIf(
 # "is this the Windows boundary", which is the right question for a test that
 # probes a restricted token, an integrity label or an NTFS stream: those measure
 # one implementation's mechanism, and on Linux they were skipping only because
-# no boundary existed at all. The moment one did they ran and failed against
-# `advapi32` being None. The Linux mechanisms have their own measurements in
+# no boundary existed at all. The moment one did they ran and failed inside the
+# Windows primitives. It asks the package which adapter was selected rather than
+# reading a platform flag, because the flag is exactly what a wrong selection
+# would leave right. The Linux mechanisms have their own measurements in
 # `benchmarks/heavy/test_confine_posix_heavy.py`.
 requires_windows_confinement = unittest.skipUnless(
-    confine.WINDOWS and confine.available(),
+    confine.adapter_name() == "windows" and confine.available(),
     "this measures a Windows confinement mechanism (restricted tokens, "
     "integrity labels, NTFS streams); the Linux boundary's own mechanisms are "
     "measured in benchmarks/heavy/test_confine_posix_heavy.py")
@@ -597,10 +603,10 @@ _try("open_parent_for_write", _open_parent)
 # What this process's token actually is, read out of the kernel by the boundary's
 # own accessors. The parent describing what it intends to build is not evidence;
 # the child reading back what it got is.
-from pipeline import confine as _confine
+from pipeline.confine import windows as _windows
 
 PROVENANCE = {"confinement_probe": _report,
-              "child_token": _confine.describe_token()}
+              "child_token": _windows.describe_token()}
 ''' + RISER
 
 
@@ -932,6 +938,56 @@ class TheParentNeverImportsTheExecutorTest(unittest.TestCase):
             "which runs the candidate's module-level code in this interpreter")
 
 
+class TheBoundarySelectsOneAdapterTest(unittest.TestCase):
+    """`confine` is a package with two peer adapters and one module that chooses.
+
+    **This proves the entry module binds the interface to the adapter for the
+    platform it is running on, because it fails when the entry module is made to
+    select the other one.** Run that way -- the two branches in
+    `confine/__init__.py` swapped, on Windows -- the second test below fails on
+    all nine names, `'pipeline.confine.windows' != 'pipeline.confine.posix'`.
+
+    The swap has to be caught by name, because at run time it is nearly silent:
+    `pipeline.confine.posix` imports perfectly well on Windows, its
+    `unavailable_reason()` answers "this is win32", and the boundary tests then
+    report a *skip* rather than a failure. Measured in the same run: this file
+    goes from 17 passed and 0 skipped to 13 passed and 4 skipped, and every one
+    of those four is a test of what the confinement enforces. A green suite that
+    has stopped exercising the boundary is the failure CI's own preflight names:
+    "`unittest.skipIf` on an unavailable boundary turns a runner that cannot
+    confine into a green tick".
+
+    The other direction is loud rather than silent -- `confine/windows.py` is not
+    importable off Windows at all, since `ctypes.WinDLL` exists only there -- and
+    that asymmetry is why the selection is asserted from the side that can be
+    wrong quietly.
+    """
+
+    # The interface, as `confine/__init__.py` states it. Written out here rather
+    # than read off the package: a list compared against itself would pass while
+    # a name was being dropped from both.
+    INTERFACE = ("unavailable_reason", "available", "seal_read_only",
+                 "seal_writable", "unseal", "is_reparse_point", "data_streams",
+                 "run", "seal_syscalls")
+
+    def test_the_platform_alone_decides_which_adapter(self) -> None:
+        """Both answers, from whichever platform this is, with nothing patched."""
+        self.assertEqual(
+            ("windows", "posix"),
+            (confine.adapter_name("nt"), confine.adapter_name("posix")),
+            "the boundary would be built out of the other platform's primitives")
+
+    def test_every_interface_name_comes_from_the_selected_adapter(self) -> None:
+        expected = f"pipeline.confine.{confine.adapter_name()}"
+        for name in self.INTERFACE:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    expected, getattr(confine, name).__module__,
+                    f"`confine.{name}` is not the one this platform's adapter "
+                    "implements, so the package's surface and its selection "
+                    "disagree about which boundary is being built")
+
+
 class TheCallSitesAreAssertedTest(unittest.TestCase):
     """Guards over how a value is used, not over what a helper returns.
 
@@ -953,12 +1009,12 @@ class TheCallSitesAreAssertedTest(unittest.TestCase):
 
         The shipped version of this test read the argv `child_command()` returned
         and never looked at how it was used, so it could not fail for the thing
-        it was named after. This reads `confine.py`'s syntax tree: the one call
+        it was named after. This reads the Windows adapter's syntax tree: the one call
         that creates a process must be `CreateProcessAsUserW`, it must be given a
         non-`None` `lpApplicationName`, and `subprocess` may appear in this
         package's boundary only as `list2cmdline`.
         """
-        tree = ast.parse((PACKAGE_ROOT / "confine.py").read_text(encoding="utf-8"))
+        tree = ast.parse(WINDOWS_ADAPTER.read_text(encoding="utf-8"))
         creations = [node for node in ast.walk(tree)
                      if isinstance(node, ast.Call)
                      and isinstance(node.func, ast.Attribute)
@@ -983,12 +1039,15 @@ class TheCallSitesAreAssertedTest(unittest.TestCase):
         # exists: `confine.command_line`'s docstring says the words `shell=True`
         # while explaining that nothing here ever passes them, and a grep guard
         # fails on the comment that documents it and then gets deleted.
-        for module in ("confine.py", "isolation.py"):
-            other = ast.parse((PACKAGE_ROOT / module).read_text(encoding="utf-8"))
+        for module in (WINDOWS_ADAPTER, PACKAGE_ROOT / "confine" / "__init__.py",
+                       PACKAGE_ROOT / "isolation.py"):
+            other = ast.parse(module.read_text(encoding="utf-8"))
             shells = [node for node in ast.walk(other)
                       if isinstance(node, ast.Call)
                       for keyword in node.keywords if keyword.arg == "shell"]
-            self.assertEqual([], shells, f"{module} passes a shell keyword")
+            self.assertEqual([], shells,
+                             f"{module.relative_to(PACKAGE_ROOT)} passes a shell "
+                             "keyword")
 
     def test_the_parent_waits_for_the_job_to_empty_before_it_returns(self) -> None:
         """The ordering that the grandchild attack turned on.
@@ -999,7 +1058,7 @@ class TheCallSitesAreAssertedTest(unittest.TestCase):
         kernel: there must be a loop on the job's live-process count, and it must
         come after the terminate.
         """
-        tree = ast.parse((PACKAGE_ROOT / "confine.py").read_text(encoding="utf-8"))
+        tree = ast.parse(WINDOWS_ADAPTER.read_text(encoding="utf-8"))
         run = next(node for node in ast.walk(tree)
                    if isinstance(node, ast.FunctionDef) and node.name == "run")
         loops = [node for node in ast.walk(run) if isinstance(node, ast.While)
@@ -1070,7 +1129,7 @@ class TheCallSitesAreAssertedTest(unittest.TestCase):
         dropped -- an attribute nobody applied looks exactly like one nobody
         wrote.
         """
-        source = (PACKAGE_ROOT / "confine.py").read_text(encoding="utf-8")
+        source = WINDOWS_ADAPTER.read_text(encoding="utf-8")
         tree = ast.parse(source)
         updates = [node for node in ast.walk(tree)
                    if isinstance(node, ast.Call)

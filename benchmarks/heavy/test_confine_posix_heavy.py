@@ -1,6 +1,6 @@
 """What the Linux confinement actually enforces, re-measured rather than asserted.
 
-`pipeline/confine_posix.py` makes four claims. Every one of them is a claim
+`pipeline/confine/posix.py` makes four claims. Every one of them is a claim
 about the kernel, and a comment saying the kernel does something is worth
 nothing -- `docs/defects.md` D11 is the record of what happens when a boundary's
 documentation outruns its measurement: the Windows implementation claimed a
@@ -29,7 +29,7 @@ import unittest
 from pathlib import Path
 
 from pipeline import confine
-from pipeline import confine_posix as CP
+from pipeline.confine import posix as CP
 
 REASON = CP.unavailable_reason()
 
@@ -321,10 +321,10 @@ class BytesAttachedToAnArtifactAreRefusedTest(unittest.TestCase):
     because a stream is bytes that travel with the file and that no digest of
     its *contents* can see. Windows has `candidate.stl:payload`; here the way to
     hang bytes off a file invisibly is an extended attribute, and
-    `confine_posix.data_streams` reports them for the same reason.
+    `confine/posix.py`'s `data_streams` reports them for the same reason.
 
     Worth its own test rather than assumed from the Windows one: the claim in
-    `confine_posix`'s docstring is that xattrs are the honest analogue, and an
+    `confine/posix.py`'s docstring is that xattrs are the honest analogue, and an
     analogue nobody measured is exactly what D11 was.
     """
 
@@ -362,7 +362,7 @@ class BytesAttachedToAnArtifactAreRefusedTest(unittest.TestCase):
 _CAP_PROBE_PRELUDE = """
 import ctypes, json, os, sys
 sys.path.insert(0, %r)
-from pipeline import confine_posix as C
+from pipeline.confine import posix as C
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 PR_SET_KEEPCAPS = 8
