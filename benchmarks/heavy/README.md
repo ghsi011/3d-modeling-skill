@@ -1,7 +1,7 @@
 # L0-heavy — the component fixtures that cost a child interpreter
 
 ```bash
-uv run pytest benchmarks/heavy -q     # HEAVY_HDR, before merge
+uv run pytest benchmarks/heavy -q     # ~18 min, 489 tests, before merge
 uv run pytest                         # the commit gate this half was cut out of
 ```
 
