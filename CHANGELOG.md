@@ -33,6 +33,26 @@ back on the graph `cli` pulls in and `backends` is on it for the first time - th
 resolved it either, measured on both layouts. `test_findings`' team_tools direction rule globs
 recursively.
 
+### Changed - the status report is an interface, not a transcript (#44)
+
+`design-tool status` assembled a report and then rendered it two ways, all inside one command
+handler. `tools/replay.py` reached that assembly by redirecting stdout, invoking the command
+surface with `--json` and re-parsing what it caught - two adapters over one document, separated
+by a hop that bought neither of them anything.
+
+The assembly is now `status.report(project, project_dir)`, beside `derive` and `decide`. It
+prints nothing and chooses no exit code: the command renders the value it returns in both
+registers and derives the exit code from it, and the replay harness calls it directly. The
+readers underneath it - the stored verdict, the binding state, whether an instruction has been
+superseded, a formulation's own directory and the status it supports - moved with it, because
+`report` needs them and `cli` already imports this module. `cli` keeps its own names as aliases,
+so no call site there and no test moved.
+
+**The run loop is untouched.** `replay.play` still drives `design-tool` through argv, because
+there the exit codes and the dispatch are the behaviour under test; the status is a document,
+and it is now read as one. Both renderings are byte-identical to the previous commit's for all
+four committed replay fixtures, and no golden moved.
+
 ### Fixed - the pipeline's build receipt no longer squats on the designer's artifact manifest (D36)
 
 `artifact_manifest.json` is a team contract - `CANONICAL_FILENAMES` names it,

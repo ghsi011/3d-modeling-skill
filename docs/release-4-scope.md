@@ -111,7 +111,7 @@ execution cost" are answerable from `design-tool status --json` today.
 
 **A three-formulation job is recorded and replayed.**
 `benchmarks/replays/branch-knob-seat-fallback/` drives the real `berlingo-knob`
-request through `branch`, `route`, `run` and `status` with no live call, and
+request through `branch`, `route` and `run` with no live call, reading each formulation's derived status from `status.report`, and
 `tools/replay.py:1074` already writes a per-formulation block holding checks,
 measured values, tolerances, coverage, screening detail, derived status and
 receipts. That block **is** a comparison table; nothing reads it as one.
