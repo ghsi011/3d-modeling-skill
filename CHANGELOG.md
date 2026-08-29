@@ -19,8 +19,9 @@ three constants are **gone** rather than aliased; the plan is `artifact_names.EX
 out.
 
 **One name, two artifacts.** That third spelling collided with `cli.PLAN_FILE`, which meant the
-print engineer's `print_plan_checks.json` - and `cli` imports `bindings`, so both were live in one
-namespace. The survivor is `cli.PRINT_PLAN_CHECKS_FILE`, named for what it is.
+print engineer's `print_plan_checks.json` - and since `cli` imports `bindings`, `PLAN_FILE` and
+`B.PLAN_FILE` sat a few lines apart in one module meaning two different files. The survivor is
+`cli.PRINT_PLAN_CHECKS_FILE`, named for what it is.
 
 `artifact_names` now holds every artifact the pipeline writes: the intent manifest, the
 specification, the execution plan, the model contract, the pipeline receipt, the commission,
@@ -88,7 +89,7 @@ sha of a file the pipeline had never written.
 
 **A rename, because both writers are legitimate and only one is entitled to that name.** The
 team contract's is externally specified, validator-known and charter-facing; the pipeline's is
-internal. So the pipeline's moves, to `bindings.PIPELINE_RECEIPT` =
+internal. So the pipeline's moves, to `artifact_names.PIPELINE_RECEIPT` =
 `pipeline_artifact_receipt.json`, and it moves everywhere at once: both runner writes including
 the measurement-exception path, the `RECEIPTS` entry, `REMOVABLE`, the dependency edge from
 `commission_report.json`, `compare`'s read-back, `replay`'s envelope read, and the three replay

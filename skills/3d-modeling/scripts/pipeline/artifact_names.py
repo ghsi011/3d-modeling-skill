@@ -13,12 +13,15 @@ repaired. A registered name has exactly one owner; a second owner claiming it is
 refused; and a writer resolves its path *through* the owner that holds the name,
 so pointing a write back at somebody else's file raises instead of succeeding.
 
-**What it holds.** The verifier's team contract, and every artifact the pipeline
-itself writes into a work directory. The role-authored files -- the designer's
-module and manifest, the print engineer's plan checks -- are still named by the
-modules that write them, and the team-contract validators still declare their
-own filename table; bringing those under this is later work, and guessing at
-that shape now would be scaffolding for a change nobody has made yet.
+**What it holds.** The verifier's team contract, every artifact the runner
+writes, and the execution plan compiled for it. It is *not* yet everything
+written into a work directory: `cli` also writes `route_decision.json` and
+`next_action.json` there and neither is registered, the role-authored files --
+the designer's module and manifest, the print engineer's plan checks -- are
+still named by the modules that write them, and the team-contract validators
+still declare their own filename table. Bringing those under this is later
+work, and guessing at that shape now would be scaffolding for a change nobody
+has made yet.
 """
 from __future__ import annotations
 
@@ -86,7 +89,7 @@ PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
                                         owner=PIPELINE)
 
 # ---------------------------------------------------------------------------
-# The rest of what the pipeline writes into a work directory
+# Everything the runner writes, and the plan compiled for it
 # ---------------------------------------------------------------------------
 # Declared here rather than beside each writer, because a name declared beside
 # its writer is a name no other module can see -- which is the condition D34 to
@@ -94,8 +97,8 @@ PIPELINE_VERIFICATION_REPORT = register("pipeline_verification_report.json",
 # while `bindings.py` separately spelled five of the same eight, and neither
 # consulted the other.
 #
-# Every name below is the name the file already had. This registers what the
-# work directory holds; it renames nothing.
+# Every name below is the name the file already had: this registers, it does
+# not rename.
 
 INTENT_MANIFEST = register("intent_manifest.json", owner=PIPELINE)
 SPECIFICATION = register("specification.json", owner=PIPELINE)
@@ -105,8 +108,8 @@ SPECIFICATION = register("specification.json", owner=PIPELINE)
 # by `execution.EXECUTION_PLAN_FILE`, re-exported as `cli.EXECUTION_PLAN_FILE`,
 # and named a third time as `bindings.PLAN_FILE` -- and that third spelling
 # collided with `cli.PLAN_FILE`, which meant the print engineer's
-# `print_plan_checks.json`. Both were live in one namespace, because `cli`
-# imports `bindings`.
+# `print_plan_checks.json`. Since `cli` imports `bindings`, `PLAN_FILE` and
+# `B.PLAN_FILE` sat a few lines apart in one module meaning two different files.
 EXECUTION_PLAN = register("execution_plan.json", owner=PIPELINE)
 # The contract the receipts actually bind: derived from the acceptance contract
 # on the authored lane and from the certified template on the other, and hashed

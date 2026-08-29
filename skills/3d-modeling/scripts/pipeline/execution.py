@@ -43,9 +43,8 @@ from . import schemas as S
 from . import templates as T
 
 EXECUTION_PLAN_SCHEMA = 1
-# The plan's *filename* is not here. It is `artifact_names.EXECUTION_PLAN`, and
-# this module compiles the plan rather than writing it -- a constant here was
-# the first of the three spellings one file had.
+# The plan's filename is `artifact_names.EXECUTION_PLAN`; this module compiles
+# the plan and does not write it.
 
 # Where the geometry comes from, which is not what the route decides. Two
 # providers, not the four axes ADR 0002 names: imported geometry and

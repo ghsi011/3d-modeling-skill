@@ -83,9 +83,8 @@ NEEDS_ACTION = NEEDS_REVIEW
 NEXT_ACTION_FILE = "next_action.json"
 NEXT_ACTION_SCHEMA = 1
 ROUTE_DECISION_FILE = "route_decision.json"
-# The compiled plan is `artifact_names.EXECUTION_PLAN`, and is deliberately not
-# re-exported here: this module's re-export was one of its three constants,
-# and a third of them collided with the print engineer's plan checks below.
+# The compiled plan's name is `artifact_names.EXECUTION_PLAN`, deliberately not
+# re-exported here.
 
 
 ReviewNeeded = runner.ReviewNeeded
@@ -865,9 +864,9 @@ def _json_object(path: Path) -> dict[str, Any] | None:
 
 # The print engineer's plan checks: the machine-readable projection of the print
 # plan, and a `team_tools.validators` canonical filename. It was `PLAN_FILE`,
-# which is also what `bindings` called `execution_plan.json` -- two artifacts
-# under one spelling, both live in this namespace because this module imports
-# `bindings`. Named for what it is now.
+# which is what `bindings` called `execution_plan.json` -- so this module read
+# `PLAN_FILE` and `B.PLAN_FILE` and meant two different files. Named for what it
+# is now.
 PRINT_PLAN_CHECKS_FILE = "print_plan_checks.json"
 
 def _review_calls(work_dir: Path, plan: EX.ExecutionPlan) -> dict[str, Any]:

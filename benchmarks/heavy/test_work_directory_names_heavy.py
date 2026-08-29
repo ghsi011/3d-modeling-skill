@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""D46: the pipeline's own receipts get their names from the registry.
+"""#46: the pipeline's own receipts get their names from the registry.
 
 The runner wrote ten artifacts into the work directory, eight of them by bare
 string literal, while `bindings` separately named five of those eight -- and
-neither consulted the other. Two consequences were visible in the source before
-anything went wrong:
+neither consulted the other. `pipeline/artifact_names.py` holds the story of the
+three constants that spelled one file and the one spelling that meant two;
+these are the fixtures that hold it closed.
 
-* **one artifact, three names.** The execution plan was spelled by
-  `execution.EXECUTION_PLAN_FILE`, re-exported as `cli.EXECUTION_PLAN_FILE`, and
-  named a third time as `bindings.PLAN_FILE`;
-* **one name, two artifacts.** That third spelling collided with
-  `cli.PLAN_FILE`, which meant the print engineer's `print_plan_checks.json`.
-  `cli` imports `bindings`, so both were live in one namespace.
+Nothing is renamed. Every artifact keeps the name it has today, which is what
+`TODAYS_NAMES` pins: a test that asked the registry what it holds would agree
+with any rename, so the spellings are written out instead.
 
-Nothing is renamed here. Every artifact keeps the name it has today, which is
-what `TODAYS_NAMES` pins: a test that asked the registry what it holds would
-agree with any rename, so the spellings are written out instead.
+**Why these are in `benchmarks/heavy/`, stated plainly rather than justified.**
+They do not belong here by behaviour. They start no child process and the two
+together cost a fraction of a second of call time, which is the profile
+`benchmarks/heavy/README.md` describes as belonging in the commit gate.
 
-**Two methods, densely subtested, and that is deliberate.** `conftest.py` caps
-L0 collection at `L0_COLLECTED_CEILING` and the gate is at it, so a fixture here
-costs a ruling rather than a line -- and a ceiling is a conversation rather than
-a number to route around. Each subtest below names the claim it carries.
+They are here because `conftest.py`'s `L0_COLLECTED_CEILING` was full when this
+slice landed and **the user ruled that the fixtures move rather than that the
+ceiling rise.** That is structure, not behaviour, and the consequence is worth
+saying out loud: these two no longer run on every commit. They run before merge,
+in the pre-merge job, so the coverage is preserved and the moment it is observed
+is later. A regression they would have caught at commit time is now caught at
+merge time.
+
+**Two methods, densely subtested.** Each subtest below names the claim it
+carries.
 """
 from __future__ import annotations
 
@@ -29,14 +34,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from . import artifact_names as N
-from . import bindings as B
-from . import cli
-from . import execution as EX
-from . import runner
-from .test_pipeline import _run_full_looked
+from pipeline import artifact_names as N
+from pipeline import bindings as B
+from pipeline import cli
+from pipeline import execution as EX
+from pipeline import runner
 
-PACKAGE = Path(__file__).resolve().parent
+# The full-run fixture this shares with the L0 suite, imported rather than
+# copied: two spellings of one fixture is how two tiers stop testing the same
+# thing.
+from pipeline.test_pipeline import _run_full_looked  # noqa: E402
+
+# The package under test, taken off an imported module rather than off this
+# file's own location -- these fixtures have already moved tier once.
+PACKAGE = Path(N.__file__).resolve().parent
 
 #: The name every registered artifact has today, written out rather than read
 #: back off the registry. This is the preservation row: a rename that moved a
@@ -130,9 +141,10 @@ class TheReceiptNamesComeFromTheRegistryTest(unittest.TestCase):
                                  f"{module.__name__}.{attribute} is still bound")
 
         with self.subTest("PLAN_FILE no longer names two artifacts"):
-            # The survivor is named for what it is. `cli` imports `bindings`, so
-            # `hasattr` here is asking about the shared namespace and not only
-            # about this module's own assignments.
+            # Two modules, two rows, because `from . import bindings as B` binds
+            # `B` and not `B`'s contents -- so this one asks about `cli` alone,
+            # and `bindings` is covered by the `(B, "PLAN_FILE")` row above.
+            # Between them no module in the package still binds the name.
             self.assertFalse(hasattr(cli, "PLAN_FILE"))
             self.assertEqual("print_plan_checks.json", cli.PRINT_PLAN_CHECKS_FILE)
             self.assertNotEqual(N.EXECUTION_PLAN, cli.PRINT_PLAN_CHECKS_FILE)
