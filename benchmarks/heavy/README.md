@@ -1,7 +1,7 @@
 # L0-heavy — the component fixtures that cost a child interpreter
 
 ```bash
-uv run pytest benchmarks/heavy -q     # ~15 min, 353 tests, before merge
+uv run pytest benchmarks/heavy -q     # ~20 min, 449 tests, before merge
 uv run pytest                         # the commit gate this half was cut out of
 ```
 
@@ -51,6 +51,19 @@ images, which is a different record from the `"none"` of a job that never asked,
 and the envelope binds either — so the case still refuses the stale answer for
 the reason it names. That was checked by mutation, not by watching it pass:
 leaving the second run's render flag unchanged makes the stale answer accepted.
+
+Two moved for a reason that is not about cost at all, and it is recorded here
+because the rule below does not describe them and a reader applying that rule
+would find two files contradicting it.
+[`test_work_directory_names_heavy.py`](test_work_directory_names_heavy.py) holds
+the fixtures for the artifact-name registry (#46). They start no child process
+and the two together cost a fraction of a second of call time, so by the seam
+above they belong in the gating tier. They are here because
+`L0_COLLECTED_CEILING` was full when that slice landed and **the user ruled that
+the fixtures move rather than that the ceiling rise**. The consequence is the one
+this tier always carries and is worth naming for a case that did not have to
+carry it: they no longer run on every commit, they run before merge, so the
+coverage is preserved and the moment it is observed is later.
 
 ## The rule a new test follows
 
