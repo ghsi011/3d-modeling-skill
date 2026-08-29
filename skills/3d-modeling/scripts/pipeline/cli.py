@@ -943,33 +943,14 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
     sessions doing nothing but re-authoring the file the run had just deleted,
     and the same defect reproduces here in one call.
 
-    Presence is the authority boundary, not authorship: `authored_by` is
-    optional, so a detector reading it would hand the file back to the generator
-    for the plans that happened not to carry it -- which is the same bug for a
-    smaller set of jobs.
-
-    **That boundary is `artifact_names` now, not a check kept here.** The name
-    is registered to `print-engineer`, and `default_path` is what refuses it
-    once their file exists -- one mechanism holding this plan, the designer's
-    `model.py` and the designer's manifest, rather than a bespoke guard here and
-    a rename apiece for the other two. The rule is unchanged; only the thing
-    enforcing it moved. What is left below is what this run *reports* about a
-    file the registry has already closed to it.
-
-    An existing plan that cannot be read, or does not validate, is **refused**
-    rather than repaired. A run that answers an unbuildable plan by substituting
-    one it wrote itself turns the engineer's error into the pipeline's silent
-    decision, and a half-written file is exactly what a crashed session leaves.
-
-    **A generated plan whose commission has moved is refused too, and that costs
-    something.** Regenerating on every run is what kept the generated plan
-    byte-stable; simply not writing left a 60 mm envelope gating a job that has
-    since declared 20 mm, silently. The plan carries the generator's own
-    `owner`, so this run can tell its own earlier output from an authored plan
-    and say so. It still does not overwrite it, because the run drops that
-    template at the engineer's deliverable path and *then* commissions them --
-    editing it in place is a workflow this program invites, and an overwrite
-    would be the same defect again aimed at the people it hurt before.
+    **The authority rule and its evidence are stated once, in `docs/defects.md`
+    D34.** In brief: presence of the file is the boundary and not the optional
+    `authored_by`; a plan that cannot be read or does not validate is refused
+    rather than repaired; a generated plan whose commission has moved is refused
+    rather than overwritten. `artifact_names` enforces all three now -- the name
+    is registered to `print-engineer` and `default_path` refuses it once their
+    file exists -- so what is left below only decides what this run *reports*
+    about a file the registry has already closed to it.
     """
     from designer_toolkit.plan import direct_template, validate_plan
 
@@ -984,16 +965,12 @@ def _print_plan(work_dir: Path, project: P.Project) -> tuple[dict[str, Any], lis
         consequence=project.consequence,
         orientation=project.orientation)
 
-    accepted_path = work_dir / PLAN_FILE
     try:
         target = N.default_path(work_dir, PLAN_FILE, owner=N.PIPELINE)
     except N.NameConflict:
-        # The registry closed the name: the print engineer holds it and their
-        # file is there. Everything below decides what this run *reports* about
-        # a file it may not touch -- the decision not to touch it was made by
-        # the registry, and this function no longer holds a copy of it.
         try:
-            accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+            accepted = json.loads(
+                (work_dir / PLAN_FILE).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             return {}, [f"{PLAN_FILE} is already written and cannot be read: "
                         f"{exc}. It is the print engineer's deliverable, so this "

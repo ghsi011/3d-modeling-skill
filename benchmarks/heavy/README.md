@@ -52,6 +52,24 @@ and the envelope binds either — so the case still refuses the stale answer for
 the reason it names. That was checked by mutation, not by watching it pass:
 leaving the second run's render flag unchanged makes the stale answer accepted.
 
+A second file is here for a reason that is not the seam either, and unlike the
+one above it is not a property of the test at all.
+[`test_role_artifact_owners_heavy.py`](test_role_artifact_owners_heavy.py)
+starts no child interpreter, needs no corpus, reads no B-rep and runs no job
+twice. By the rule below it belongs in the gate. What put it here is
+`conftest.py`'s `L0_COLLECTED_CEILING`: the gate stood at 1438 of 1440, and when
+the choice between raising the ceiling again and moving these two cases was put
+to the user, the user chose moving. That is a **structural** placement and not a
+behavioural one, recorded as such because a plausible-sounding behavioural
+justification for it would be false — and a false reason for a real decision is
+the failure this repository keeps finding. The consequence is that those two
+cases no longer run on every commit; they run here, before merge, so coverage is
+preserved and the commit gate is what lost them.
+
+It is also the only file here that is not one half of a file still under
+`testpaths` — the whole module moved, so the "reading a file here" note below
+does not apply to it.
+
 ## The rule a new test follows
 
 > Write the test beside the module it tests. Move it here when it starts a child

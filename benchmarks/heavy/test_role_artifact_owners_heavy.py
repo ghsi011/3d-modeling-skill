@@ -8,22 +8,38 @@ repairs that each removed one collision and left the condition that produced it,
 a shared directory whose names are string literals in whichever module happens
 to write them.
 
-The three names are registered here instead, so ownership is a property the
-registry enforces and the plan generator's bespoke guard is `default_path`'s
-refusal. Two rows, both dense on purpose: `conftest.py`'s
-`L0_COLLECTED_CEILING` had two slots left when this landed, and subtests cost
-nothing against it.
+The three names are registered in `pipeline/artifact_names.py` instead, so
+ownership is a property the registry enforces and the plan generator's bespoke
+guard is `default_path`'s refusal.
+
+**Why this file is in `benchmarks/heavy/`, stated plainly because the honest
+reason and the tier's stated rule are not the same reason.** These two cases
+start no child interpreter, need no corpus, read no B-rep and run no job twice.
+By `benchmarks/heavy/README.md`'s own admission rule they belong beside
+`pipeline/artifact_names.py` in the commit gate, and both reviewers and the #46
+sibling argued exactly that from review-workflow section 5, *tier by behavior,
+not by available headroom*. They were right on the merits. What put the file
+here is **structure**: `conftest.py`'s `L0_COLLECTED_CEILING` stands at 1440 by
+the user's explicit permission, the gate was at 1438, and when the choice was
+put to the user between raising the ceiling again and moving these two, the user
+chose moving. Declining to raise a ceiling is the same authority that set it.
+
+**The consequence, so nobody has to rediscover it.** These cases no longer run
+on every commit. They run in pre-merge with the rest of this tier, so coverage
+is preserved and nothing was weakened or deleted -- but the commit gate no
+longer carries them, and a local `uv run pytest` will not catch a registry
+regression that a `uv run pytest benchmarks/heavy` would.
 
 **This proves the pipeline cannot take a role's deliverable, because each row
 fails when that artifact's owner is removed from the registry.** `Y` is one
 `register(...)` call replaced by the bare string it returns -- the state every
-one of these files was in before the registry existed. All three were run that
-way; see `benchmarks/mutations/d47-role-artifact-owners.json`. D34 additionally
-fails `test_plan_authority.py`'s survival row under its own removal, because
-that is the one of the three whose defective write still exists in the tree to
-reproduce: the other two moved to names of their own, so what removal exposes
-there is the barrier and not the overwrite. Narrowed here rather than claimed
-whole.
+one of these filenames was in before the registry existed. All three were run
+that way; see `benchmarks/mutations/d47-role-artifact-owners.json`. D34
+additionally fails `pipeline/test_plan_authority.py`'s survival row under its
+own removal, because that is the one of the three whose defective write still
+exists in the tree to reproduce: the other two moved to names of their own, so
+what removal exposes there is the barrier and not the overwrite. Narrowed here
+rather than claimed whole.
 """
 from __future__ import annotations
 
@@ -31,7 +47,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from . import artifact_names as N
+from pipeline import artifact_names as N
 
 #: Every artifact a role authors that the pipeline shares a directory with, and
 #: the role that holds it. Read off the registry's own constants rather than

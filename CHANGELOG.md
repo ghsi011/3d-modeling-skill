@@ -21,11 +21,8 @@ Ownership is a property the registry enforces now, and the bespoke guard is gone
 whose role accepts a generated default while it has not authored one.
 `_EXPECTED_OWNERS["print_plan"]` already lets `builtin-direct-template` author that file, and
 `cli._print_plan` resolves its write through `default_path` rather than testing for the file
-itself. **The authority rule is carried over unchanged** - presence of the file is the boundary and
-not the optional `authored_by`; an unreadable or invalid plan is refused rather than repaired; a
-generated plan whose commission has moved is refused rather than overwritten. Only what enforces
-the rule moved. What is left in `_print_plan` decides what a run *reports* about a file the
-registry has already closed to it.
+itself. **The authority rule is carried over unchanged** - `docs/defects.md` D34 states it and is
+the one copy. Only what enforces the rule moved.
 
 Proven by removing each owner in turn, three separate runs, in
 `benchmarks/mutations/d47-role-artifact-owners.json`. Removing the print engineer's entry puts D34

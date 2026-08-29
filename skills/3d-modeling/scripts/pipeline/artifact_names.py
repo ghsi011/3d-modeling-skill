@@ -71,14 +71,10 @@ def default_path(work_dir: Path | str, name: str, *, owner: str) -> Path:
     default while it has not authored one -- the print engineer's plan, which
     `validators._EXPECTED_OWNERS` itself lets `builtin-direct-template` author.
 
-    **Presence of the file is the authority boundary**, not an authorship field.
-    `authored_by` is optional, so a registry reading it would hand the file back
-    to the generator for every plan that happened to omit it, which is the same
-    defect for a smaller set of jobs. Once the holder's file is there this
-    refuses, whatever the file contains -- so an unreadable or invalid one is
-    refused rather than repaired, and a superseded generated one is refused
-    rather than overwritten. What the caller then *reports* about the file it
-    was refused is the caller's business; this only ever says no.
+    Presence of the holder's file is the authority boundary, whatever the file
+    contains; `docs/defects.md` D34 states that rule and the evidence for it,
+    and is the one copy. This only ever says no -- what a refused caller then
+    *reports* is the caller's business.
 
     An unregistered name is nobody's and is allowed, because most of a work
     directory is the pipeline's own scratch.
