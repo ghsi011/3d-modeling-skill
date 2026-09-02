@@ -1,0 +1,181 @@
+{
+  "id": "e2e-prusa-mini-display-box-modify",
+  "revision": 1,
+  "class": "MODIFY",
+  "required_hosted": false,
+  "note": "F4 of docs/agents/qa-e2e-implementation.md, and Slice B. One targeted edit to a real production STEP, scored as two independent regions: the requested edit inside an authorized mask, and source equivalence everywhere outside it. A global bbox/volume/inertia score cannot substitute and is not used.",
+
+  "source": {
+    "root": {"env": "QA_E2E_REFERENCE_ROOT", "default": "C:/projects/3d"},
+    "path": "qa-f4-prusa-modify/source/MINI-display-box.stp",
+    "sha256": "0cbce7139089d4feb493b02a0f27a429514f3251af5969f166aed4c6ce705855",
+    "blob_sha1": "6762c97f04c70ef91f09a0e67bd57d81f58be5d5",
+    "bytes": 321781,
+    "upstream": "prusa3d/Original-Prusa-MINI",
+    "pin": "853bc30c4b10190f1d669ed6d0a567e333c28f21",
+    "upstream_path": "STEP/PRINTED PARTS/MINI-display-box.stp",
+    "licence": "GPL-3.0",
+    "redistribution": "EXTERNAL_ONLY",
+    "why_external": "GPL-3.0. Vendoring it would impose that licence on this repository, so it lives outside the tree and is bound by hash, exactly as F1 keeps its reference external.",
+    "verify_note": "`git hash-object` run inside this repository applies .gitattributes CRLF normalisation and returns 2452e59007f8d40452e2ac1eb883d2bd07413d31 for these identical bytes. Use --no-filters from outside the repo, or compare the sha256 above."
+  },
+
+  "source_geometry": {
+    "what_this_block_is": "measured from the pinned bytes, answer-side. None of it may be restated in a candidate-visible brief except where the request block says so.",
+    "solids": 1,
+    "watertight": true,
+    "faces": 183,
+    "planar_faces": 123,
+    "bbox_mm": {"x": [-34.930, 29.680], "y": [-47.830, 65.030], "z": [0.0, 30.0]},
+    "volume_mm3_brep": 24951.3057,
+    "volume_mm3_tessellated": 24945.0,
+    "tessellation": {"tolerance": 0.01, "angular_tolerance": 0.1}
+  },
+
+  "edit": {
+    "ruled_utc": "2026-08-17",
+    "face": "+X outer wall, plane x = +29.680 mm",
+    "slot_y_mm": 20.00,
+    "slot_z_mm": 4.00,
+    "corner_radius_mm": 1.00,
+    "centre_canonical": {"y": 0.00, "z": 10.50},
+    "centre_from_datums": "47.83 mm from the source bounding-box Y-min plane, and 10.50 mm above the Z-min base plane",
+    "why_datums": "A candidate cannot know what y = 0 signified to the part's author. The request states the centre as offsets from the source bounding box; the generator resolves them the same way and asserts they land on the canonical coordinates, so a source whose bbox moved stops the generator instead of cutting in the wrong place.",
+    "direction": "cut toward -X",
+    "depth": "through the complete wall. Topological, not a nominal depth.",
+    "cad_tolerance_mm": 0.20,
+    "cad_tolerance_applies_to": ["slot_y_mm", "slot_z_mm", "corner_radius_mm", "centre y", "centre z"]
+  },
+
+  "wall_at_edit": {
+    "thickness_mm": 2.4300,
+    "classification": "ANSWER_SIDE",
+    "may_appear_in_candidate_brief": false,
+    "use": "a sanity check on the pinned source and the generated target, and nothing else. No predicate scores a candidate on reproducing a nominal 2.4300 mm depth; throughness is topological.",
+    "how_measured": "ray cast at 45 points across the slot footprint: min = mean = max = 2.4300 mm, so the wall is uniform there.",
+    "why_not_2_25": "The first ingest survey marched inward on a 0.25 mm grid and took the first void sample as the far face, which quantises thickness DOWN by up to one step and read 2.25. Arithmetic caught it, not inspection: the cut removed 192.317 mm^3 where 2.25 predicts 178.07, and 192.317 / 79.1416 = 2.4300 exactly. Anyone re-marching at 0.25 mm will get 2.25 again."
+  },
+
+  "safe_window": {
+    "what_this_block_is": "where the +X wall is uniform with clear space behind it, so an edit there cannot collide with interior structure. Measured, and the reason this face was chosen over the two end walls.",
+    "face_x_mm": 29.680,
+    "y_mm": [-36.0, 50.0],
+    "z_mm": [5.0, 16.0],
+    "criterion": "wall ~2.43 mm AND at least 8 mm clear behind it",
+    "rejected_faces": {
+      "+Y end wall y=+65.03": "2.25-2.43 mm mid-span but 10.75-14.75 mm at the corners: thick corner structure, fails 'safe from ambiguous hidden interior conflicts'",
+      "-Y end wall y=-47.83": "same shape, 9.25-9.75 mm at the corners"
+    },
+    "note": "The brief's preferred edit is 'a slot on a broad non-mating planar wall'. Two of the three broad planar walls would have been the wrong choice, and only measurement separates them."
+  },
+
+  "mask": {
+    "what_this_block_is": "the authorized edit mask, constructed MECHANICALLY and frozen before any candidate run. Hand-picking a generous mask after seeing a candidate is forbidden.",
+    "construction": "nominal slot swept volume + permitted dimensional/position tolerance + calibrated comparison noise margin",
+    "arithmetic": "half-extent grows by tolerance/2 (the size band) and the centre may shift by the full tolerance, so half + tol/2 + tol on each of Y and Z; X spans from the outer face plus tolerance inward through the wall plus tolerance",
+    "box_mm": {"x": [27.0500, 29.8800], "y": [-10.3000, 10.3000], "z": [8.2000, 12.8000]},
+    "noise_margin_mm": 0.0,
+    "noise_margin_is_measured": true,
+    "margin_to_safe_window_mm": {"y_low": 25.70, "y_high": 39.70, "z_low": 3.20, "z_high": 3.20},
+    "preservation_region": "everything outside this box"
+  },
+
+  "calibration": {
+    "measured_utc": "2026-08-17",
+    "machine": "Windows-11-10.0.26200, python 3.12.6, build123d 0.11.1, trimesh 4.12.2",
+    "why": "the brief forbids choosing a comparison tolerance without calibrating it, and the mask's noise margin has to come from a measurement rather than a guess",
+    "regeneration_noise": {
+      "method": "three independent runs of tools/f4_target.py on the same pinned source; each pair compared with tools/e2e.py sampled_distances at 20000 samples, seed 7",
+      "verts": 8310, "tris": 16636, "watertight": true, "volume_mm3": 24752.6495,
+      "max_mm": 0.0, "p99_mm": 0.0, "mean_mm": 0.0,
+      "conclusion": "repeated generation differs in BYTES and not in geometry: the STEP header carries a build timestamp and the STL moves by 8 bytes of 831884, while the measured surface distance between regenerations is 0.000000 mm. So the honest claim is the ruled one -- the geometric operation is deterministic, serialization and tessellation bytes are not -- and the mask needs no margin for regeneration."
+    },
+    "three_mf": {
+      "what_this_calibrates": "the band tools/e2e.py:three_mf_rows uses for three_mf_matches_the_accepted_stl. Measured on the pairing actually compared -- this fixture's honest candidate STL against the 3MF written from that same STL -- for the same reason the preservation floor below had to be recalibrated: a band measured on a different pairing answers a different question from the claim resting on it.",
+      "control_export_reload": {
+        "method": "honest candidate STL exported to 3MF through skills/3d-modeling/scripts/make_3mf.py, read back through e2e.read_three_mf, compared with e2e.surface_distance at seed 7",
+        "verts": 8310, "tris": 16636, "unit_read_back": "millimeter", "printable_bodies": 1,
+        "samples_20000": {"max_mm": 0.000056, "p99_mm": 0.000033, "mean_mm": 0.000003},
+        "samples_40000": {"max_mm": 0.000060, "p99_mm": 0.000033, "mean_mm": 0.000003},
+        "volume_delta_mm3": -0.001612
+      },
+      "band_mm": 0.01,
+      "samples": 20000,
+      "why_this_band": "0.01 mm is about 170x the measured export/reload noise, so the row cannot fail for coordinate quantisation, and about 240x BELOW the 2.4300 mm a stale pre-edit archive differs by, so it cannot pass a substituted or earlier body. The separation is five orders of magnitude; nothing about this band is finely balanced."
+    },
+    "reference_comparison": {"seed": 7, "why": "the sampling seed for the 3MF comparison above, beside three_mf rather than inside it because tools/e2e.py reads both keys from this level"},
+    "preservation": {
+      "metric": "two-sided surface distance, source-to-candidate and candidate-to-source, sampled outside the mask",
+      "threshold_mm": 0.10,
+      "why_this_threshold": "Two independent justifications that agree. The measured cross-tessellation control is max 0.05974 mm and p99.9 0.03697 mm, so 0.10 is above the noise a no-edit comparison produces; and the pipeline's own declared preservation band for this class of job is 0.1 mm, so the fixture is not inventing a looser number than production uses.",
+      "control_cross_tessellation": {
+        "method": "the UNEDITED source tessellated twice, at tolerance 0.010 and 0.002 (16108 vs 45750 triangles), compared with this exact metric",
+        "probes": 79179, "max_mm": 0.05974, "p999_mm": 0.03697, "p99_mm": 0.00891, "mean_mm": 0.00031
+      },
+      "why_not_ray_length": "Ray length counts crossings, so a ray grazing a curved shell either catches it or slips through depending on the chord approximation, and when it slips the measured length jumps by the whole cavity. On the first live candidate that produced 5 failing rays at up to 18.8679 mm; the same control -- unedited source against a second tessellation of itself -- reproduced 5 rays at 18.8686 mm, so the entire signal was the instrument. Four of the five sat on the hood's R16.070 curved shoulder.",
+      "how_this_fixture_got_it_wrong_first": "The frozen noise floor was measured on REGENERATION -- one generator, one tolerance, 0.000000 mm -- while the comparison actually made is CROSS-TESSELLATION, our STL against whatever the pipeline exported. That is the failure this file warns about, committed inside this file: a calibration answering a different question from the claim resting on it. Corroborated independently by the run's own metrologist, unprompted: the B-rep-to-mesh volume deficit is -6.349 mm3 and pre-exists any edit, 'so a preservation audit must not read it as material lost by the modification'."
+    },
+    "no_registration": {
+      "decision": "F4 does not solve for pose.",
+      "why": "a MODIFY candidate is derived from the supplied source and is therefore already in the source frame. F1 must register because its reference comes from a third-party generator in an arbitrary pose; F4 asserts frame agreement instead, which removes the most expensive and most failure-prone step in the comparison and cannot silently mask a translation, because a translated candidate fails the preservation region immediately."
+    },
+    "what_this_band_cannot_catch": [
+      "a defect entirely inside the mask that still satisfies every edit predicate -- the edit rows, not the noise floor, are what constrain that",
+      "an error smaller than the tessellation tolerance of 0.01 mm",
+      "anything about print quality: this is geometry only"
+    ]
+  },
+
+  "hard_acceptance": {
+    "what_this_block_is": "two independent regions, per the fixture brief. Every row below must be independently failed by a mutation before this fixture is trusted.",
+    "edit_region": [
+      {"row": "slot_width_mm", "want": 20.00, "tolerance": 0.20},
+      {"row": "slot_height_mm", "want": 4.00, "tolerance": 0.20},
+      {"row": "corner_radius_mm", "want": 1.00, "tolerance": 0.20},
+      {"row": "centre_y_mm", "want": 0.00, "tolerance": 0.20},
+      {"row": "centre_z_mm", "want": 10.50, "tolerance": 0.20},
+      {"row": "on_the_plus_x_wall", "want": "the slot is in the x = +29.680 face, correctly oriented"},
+      {"row": "through_the_wall", "want": "topological: the slot connects the outer face to the interior void", "note": "NOT a depth measurement, and never scored against 2.4300"}
+    ],
+    "preservation_region": [
+      {"row": "source_equivalence_outside_the_mask", "want": "no geometry differs from the pinned source outside the mask box beyond the calibrated noise floor"}
+    ],
+    "manufacturing_gate": [
+      {"what_this_block_is": "the delivery gate, run through tools/e2e.py:three_mf_rows -- the same implementation F1 uses -- so two fixtures cannot disagree about what a valid 3MF is. The 3MF is a REQUIRED input: before this gate the scorer took only --source and --candidate, so a correct STL paired with a stale pre-edit archive passed every row while the artifact anybody would actually print was the unmodified part. The request already asks for the solid as both STL and 3MF, so this scores a deliverable the candidate was told to produce."},
+      {"row": "three_mf_present", "want": "the run produced a 3MF"},
+      {"row": "three_mf_readable", "want": "a readable OPC archive with 3D/3dmodel.model"},
+      {"row": "three_mf_unit_is_millimetre", "want": "millimeter", "note": "3MF's default unit is the MICRON, so an unstated or wrong unit is a thousandfold scale error that no geometry check would report as a unit problem. The scorer's own earlier gate did not ask this, which is why it was replaced by the common one."},
+      {"row": "three_mf_printable_body_count", "want": 1, "note": "counted through the build items and their components, so a second body welded into the placed assembly is a finding rather than extra triangles in one mesh"},
+      {"row": "three_mf_matches_the_accepted_stl", "want": "p99 surface distance within the calibrated band", "note": "catches a wholly substituted or grossly wrong body. It does NOT catch this fixture's stale pre-edit archive, and that is arithmetic rather than tuning -- see the row below."},
+      {"row": "three_mf_carries_the_requested_edit", "want": "the delivered 3MF satisfies the same edit predicates as the candidate mesh", "note": "F4's own row, and the one that owns the stale/pre-edit property. MEASURED: a pre-edit archive against the accepted candidate gives p95 0.000023 mm and p99 0.000042 mm -- inside the 0.010 mm band -- while max is 1.997931 mm, because the slot is 79.14 mm2 of a 19,656.7 mm2 surface, 0.403%, so 99% of samples land on geometry the two artifacts share. A 99th-percentile statistic is structurally blind to an edit that small; widening the band would not help because the band is not what is blind. On F1 the same row works, because its comparison is whole-part. This is not a second opinion about 3MF validity -- that stays delegated to tools/e2e.py -- it is a different question."}
+    ],
+    "explicitly_not_used": "global bbox, total volume, or inertia as a substitute for any of the three regions"
+  },
+
+  "candidate_sees": {
+    "source": "source.step -- byte-identical to the pinned source, under a neutral filename",
+    "request": "the target feature, its source datums, dimensions and tolerance; an instruction to preserve every other feature; print/manufacturing requirements; and that final STL and 3MF are required",
+    "never_sees": ["the edited target", "wall_at_edit.thickness_mm", "source_geometry", "mask", "calibration", "hard_acceptance"]
+  },
+
+  "target": {
+    "generator": "tools/f4_target.py",
+    "generated_once_and_pinned": true,
+    "why_pinned_not_reproduced": "the generator is not byte-deterministic, so the artifact that gets scored is a stored external file bound by hash. 'Rerunning the generator reproduces this SHA-256' is not claimed anywhere.",
+    "root": {"env": "QA_E2E_REFERENCE_ROOT", "default": "C:/projects/3d"},
+    "path": "qa-f4-prusa-modify/reference/target.stl",
+    "sha256": "46f12f62fa905ac4697d8fc6fe2146958bffdf78b0df9ae8941d97e243adbac6",
+    "bytes": 831884,
+    "scored_artifact": "target.stl -- this file's bytes are the pin. The scorer measures against it, never against a fresh generation.",
+    "also_stored": {
+      "path": "qa-f4-prusa-modify/reference/target.step",
+      "sha256": "81ddedcd5747755f039f8fe21bd1e8c432cbad18e3fb21b6c06771dcb07568a7",
+      "bytes": 871464,
+      "not_pinnable": "OCC stamps wall-clock time into the STEP header, so this digest changes on every generation and nothing may bind it. Recorded as provenance only. The same defect exists in the pipeline's own candidate.step, where artifact_manifest.json DOES bind it -- so a review answer expires on a rerun that changed nothing."
+    },
+    "regeneration_note": "This STL's digest happens to equal the first generation made hours earlier, and a third run in between differed by 8 bytes of 831884. That is the ruled claim exactly: the geometric operation is deterministic and the serialization is not, which is why the stored file is the pin rather than a reproduction recipe.",
+    "measured": {"volume_mm3_brep": 24758.9888, "removed_mm3": 192.3170, "removed_nominal_mm3": 192.3141}
+  },
+
+  "status": "FROZEN_EXCEPT_TARGET_HASH -- edit, mask and calibration are frozen; predicates and mutations are not yet implemented and no live candidate run has happened."
+}
